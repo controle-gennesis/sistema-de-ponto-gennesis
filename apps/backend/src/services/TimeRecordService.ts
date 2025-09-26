@@ -45,6 +45,27 @@ export class TimeRecordService {
     if (dow === 5) return 8; // sexta: 8h (7-16 com 1h almoço)
     return 0; // fim de semana
   }
+
+  private calculateOvertimeMultiplier(timestamp: Date, dayOfWeek: number): number {
+    const hour = timestamp.getHours();
+    const isSunday = dayOfWeek === 0;
+    const isSaturday = dayOfWeek === 6;
+    const isAfter22h = hour >= 22;
+    
+    if (isSunday) {
+      // Domingo: 100% adicional (1h extra = 2h)
+      return 2.0;
+    } else if (isSaturday) {
+      // Sábado: 50% adicional (1h extra = 1h30)
+      return 1.5;
+    } else if (isAfter22h) {
+      // Depois das 22h: 100% adicional (1h extra = 2h)
+      return 2.0;
+    } else {
+      // Segunda a sexta, após jornada normal: 50% adicional (1h extra = 1h30)
+      return 1.5;
+    }
+  }
   async calculateWorkHours(userId: string, date: Date): Promise<WorkHoursCalculation> {
     const startOfDay = moment(date).startOf('day').toDate();
     const endOfDay = moment(date).endOf('day').toDate();
@@ -212,7 +233,10 @@ export class TimeRecordService {
       const dayStr = currentDate.format('YYYY-MM-DD');
       const dayRecords = recordsByDay.get(dayStr) || [];
 
-      if (dayRecords.length > 0) {
+      // Verificar se há ausência justificada para este dia
+      const hasAbsenceJustified = dayRecords.some(r => r.type === TimeRecordType.ABSENCE_JUSTIFIED);
+      
+      if (dayRecords.length > 0 && !hasAbsenceJustified) {
         presentDays++;
         const dayWorkHours = await this.calculateWorkHours(userId, currentDate.toDate());
         totalHours += dayWorkHours.totalHours;
@@ -249,6 +273,14 @@ export class TimeRecordService {
           if (exitTime.isBefore(expectedExitTime)) {
             earlyDepartures++;
           }
+        }
+      } else if (hasAbsenceJustified) {
+        // Dia com ausência justificada - não conta como ausência nem presença
+        // Não incrementa presentDays nem absentDays
+        // Mas pode contar como horas regulares se configurado
+        const expectedHours = this.getExpectedWorkHoursByRule(currentDate.toDate());
+        if (expectedHours > 0) {
+          regularHours += expectedHours; // Considerar como horas regulares trabalhadas
         }
       } else {
         absentDays++;
@@ -299,9 +331,16 @@ export class TimeRecordService {
         });
 
         let effective = 0;
+        
+        // Verificar se há ausência justificada para este dia
+        const hasAbsenceJustified = dayRecords.some(r => r.type === TimeRecordType.ABSENCE_JUSTIFIED);
+        
         if (dayRecords.length === 0) {
           // Ausência completa
           totalOwedHours += expected;
+        } else if (hasAbsenceJustified) {
+          // Ausência justificada - considerar como horas trabalhadas
+          effective = expected;
         } else {
           const entry = dayRecords.find(r => r.type === TimeRecordType.ENTRY);
           const exit = [...dayRecords].reverse().find(r => r.type === TimeRecordType.EXIT);
@@ -323,8 +362,15 @@ export class TimeRecordService {
           }
 
           if (effective > 0) {
-            if (effective >= expected) totalOvertimeHours += (effective - expected);
-            else totalOwedHours += (expected - effective);
+            if (effective >= expected) {
+              const overtimeHours = effective - expected;
+              // Aplicar multiplicador apenas sobre as horas extras
+              const dayOfWeek = cursor.day();
+              const multiplier = entry ? this.calculateOvertimeMultiplier(entry.timestamp, dayOfWeek) : 1.5;
+              totalOvertimeHours += overtimeHours * multiplier;
+            } else {
+              totalOwedHours += (expected - effective);
+            }
           }
         }
       }
@@ -372,9 +418,17 @@ export class TimeRecordService {
           orderBy: { timestamp: 'asc' },
         });
 
+        // Verificar se há ausência justificada para este dia
+        const hasAbsenceJustified = dayRecords.some(r => r.type === TimeRecordType.ABSENCE_JUSTIFIED);
+        
         if (dayRecords.length === 0) {
           owed = expected;
           notes.push('Ausência no dia');
+        } else if (hasAbsenceJustified) {
+          // Ausência justificada - não trabalhou, mas não deve horas
+          worked = 0;
+          owed = 0; // Não deve horas
+          notes.push('Ausência Justificada');
         } else {
           const entry = dayRecords.find(r => r.type === TimeRecordType.ENTRY);
           const exit = [...dayRecords].reverse().find(r => r.type === TimeRecordType.EXIT);
@@ -393,7 +447,15 @@ export class TimeRecordService {
               notes.push('Almoço não registrado - assumindo 1h');
             }
             worked = Math.max(0, total - lunch);
-            if (worked >= expected) overtime = worked - expected; else owed = expected - worked;
+            if (worked >= expected) {
+              const rawOvertime = worked - expected;
+              // Aplicar multiplicador apenas sobre as horas extras
+              const dayOfWeek = cursor.day();
+              const multiplier = entry ? this.calculateOvertimeMultiplier(entry.timestamp, dayOfWeek) : 1.5;
+              overtime = rawOvertime * multiplier;
+            } else {
+              owed = expected - worked;
+            }
           } else {
             owed = expected;
           }

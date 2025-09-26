@@ -72,13 +72,16 @@ export default function PontoPage() {
   });
 
   // Banco de horas total (desde a admissão)
-  const { data: bankHoursData } = useQuery({
+  const { data: bankHoursData, error: bankHoursError, isLoading: bankHoursLoading, refetch: refetchBankHours } = useQuery({
     queryKey: ['bank-hours-total'],
     queryFn: async () => {
       const res = await api.get('/time-records/my-records/bank-hours');
       return res.data;
-    }
+    },
+    staleTime: 0, // Sempre considerar os dados como obsoletos
+    cacheTime: 0, // Não cachear os dados
   });
+
 
   // Painel "Ver mais" com filtros de data (dia/mês/ano)
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -172,7 +175,7 @@ export default function PontoPage() {
       userName={user.name} 
       onLogout={handleLogout}
     >
-      <div className="space-y-8">
+      <div className="space-y-6 w-full px-4">
       {/* Header */}
       <div className="text-center">
         <h1 className="text-3xl font-bold text-gray-900">Controle de Ponto</h1>
@@ -180,22 +183,24 @@ export default function PontoPage() {
       </div>
 
       {/* Cards principais */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
         {/* Card de bater ponto */}
-        <div>
+        <div className="h-full">
           <PunchCard />
         </div>
 
         {/* Card de registros do dia */}
-        <TimeRecordsList 
-          records={todayRecords?.data?.records || []} 
-          onViewMore={() => setIsPanelOpen(true)}
-        />
+        <div className="h-full">
+          <TimeRecordsList 
+            records={todayRecords?.data?.records || []} 
+            onViewMore={() => setIsPanelOpen(true)}
+          />
+        </div>
       </div>
 
       {/* Banco de horas */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card className="w-full max-w-2xl mx-auto">
+      <div className="w-full">
+        <Card className="w-full">
           <CardContent>
             <div className="space-y-6">
               <div className="text-center">
@@ -207,29 +212,35 @@ export default function PontoPage() {
                 <div className="p-3 sm:p-4 bg-blue-50 rounded">
                   <div className="text-xs sm:text-sm text-gray-600">Horas Extras</div>
                   <div className="text-lg sm:text-2xl font-bold text-blue-700 break-all">
-                    {formatHours(bankHoursData?.data?.totalOvertimeHours || 0)}
+                    {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOvertimeHours || 0)}
                   </div>
                 </div>
                 <div className="p-3 sm:p-4 bg-red-50 rounded">
                   <div className="text-xs sm:text-sm text-gray-600">Horas Devidas</div>
                   <div className="text-lg sm:text-2xl font-bold text-red-700 break-all">
-                    {formatHours(bankHoursData?.data?.totalOwedHours || 0)}
+                    {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOwedHours || 0)}
                   </div>
                 </div>
                 <div className="p-3 sm:p-4 bg-gray-50 rounded">
                   <div className="text-xs sm:text-sm text-gray-600">Saldo</div>
                   <div className="text-lg sm:text-2xl font-bold text-gray-900 break-all">
-                    {formatHours(bankHoursData?.data?.balanceHours || 0)}
+                    {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
                   </div>
                 </div>
               </div>
-              <div className="mt-4">
+              <div className="mt-4 space-y-2">
                 <button
                   onClick={() => setIsBankDetailsOpen(true)}
                   className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-blue-100 text-blue-700 rounded-lg shadow-sm hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <BarChart3 className="w-4 h-4" />
                   <span className="text-sm font-medium">Ver detalhamento</span>
+                </button>
+                <button
+                  onClick={() => refetchBankHours()}
+                  className="w-full h-10 flex items-center justify-center space-x-2 px-4 bg-gray-100 text-gray-700 rounded-lg shadow-sm hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                >
+                  <span className="text-xs font-medium">Atualizar dados</span>
                 </button>
               </div>
             </div>
@@ -387,7 +398,11 @@ export default function PontoPage() {
                       <tr key={idx} className="border-b">
                         <td className="py-2 pr-4">{formatDate(d.date)}</td>
                         <td className="py-2 pr-4">{getWeekday(d.date)}</td>
-                        <td className="py-2 pr-4">{formatHours(d.expectedHours || 0)}</td>
+                        <td className="py-2 pr-4">
+                          <span className={d.notes?.includes('Ausência Justificada') ? 'line-through text-gray-500' : ''}>
+                            {formatHours(d.expectedHours || 0)}
+                          </span>
+                        </td>
                         <td className="py-2 pr-4">{formatHours(d.workedHours || 0)}</td>
                         <td className="py-2 pr-4 text-blue-700">{formatHours(d.overtimeHours || 0)}</td>
                         <td className="py-2 pr-4 text-red-700">{formatHours(d.owedHours || 0)}</td>

@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Clock, Users, TrendingUp, Calendar, Filter, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 
@@ -23,12 +24,14 @@ interface BankHoursData {
   totalExpectedHours: number;
   bankHours: number;
   overtimeHours: number;
+  overtimeMultipliedHours: number;
   pendingHours: number;
   lastUpdate: string;
 }
 
 export default function BankHoursPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -45,19 +48,32 @@ export default function BankHoursPage() {
   });
   const [endDateFilter, setEndDateFilter] = useState(() => {
     const today = new Date();
-    today.setHours(23, 0, 0, 0);
     return today.toISOString().split('T')[0];
   });
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [costCenterFilter, setCostCenterFilter] = useState('all');
   const [clientFilter, setClientFilter] = useState('all');
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
     router.push('/auth/login');
   };
+
+  // Listener para abrir modal de alterar senha via sidebar
+  useEffect(() => {
+    const handleOpenChangePasswordModal = () => {
+      setIsChangePasswordOpen(true);
+    };
+
+    window.addEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
+    
+    return () => {
+      window.removeEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
+    };
+  }, []);
 
   // Verificar se o usuário tem permissão para acessar esta página
   if (userData?.data?.role === 'EMPLOYEE') {
@@ -129,6 +145,7 @@ export default function BankHoursPage() {
       'Horas Trabalhadas': formatTime(employee.totalWorkedHours),
       'Horas Esperadas': formatTime(employee.totalExpectedHours),
       'Banco de Horas': formatTime(employee.bankHours),
+      'Horas Extras (Multiplicadas)': formatTime(employee.overtimeMultipliedHours),
       'Status': getStatusText(employee.bankHours)
     }));
 
@@ -149,6 +166,7 @@ export default function BankHoursPage() {
       { wch: 15 }, // Horas Trabalhadas
       { wch: 15 }, // Horas Esperadas
       { wch: 15 }, // Banco de Horas
+      { wch: 20 }, // Horas Extras (Multiplicadas)
       { wch: 10 }  // Status
     ];
     ws['!cols'] = colWidths;
@@ -273,8 +291,8 @@ export default function BankHoursPage() {
       <div className="space-y-6">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Controle de Banco de Horas</h1>
-          <p className="mt-2 text-gray-600">Acompanhamento do banco de horas de todos os funcionários</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Controle de Banco de Horas</h1>
+          <p className="mt-2 text-sm sm:text-base text-gray-600">Acompanhamento do banco de horas de todos os funcionários</p>
         </div>
 
         {/* Filtros */}
@@ -285,8 +303,8 @@ export default function BankHoursPage() {
               <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <CardContent className="p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Data Inicial</label>
                 <input
@@ -370,7 +388,7 @@ export default function BankHoursPage() {
         </Card>
 
         {/* Resumo */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           <Card className="w-full">
             <CardContent className="p-4">
               <div className="flex items-center">
@@ -422,7 +440,7 @@ export default function BankHoursPage() {
         {/* Tabela de Banco de Horas */}
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center">
                 <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0">
                   <Clock className="w-6 h-6 text-blue-600" />
@@ -434,10 +452,11 @@ export default function BankHoursPage() {
               </div>
               <button 
                 onClick={exportToExcel}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm sm:text-base"
               >
                 <Download className="w-4 h-4" />
-                <span>Exportar</span>
+                <span className="hidden sm:inline">Exportar XLSX</span>
+                <span className="sm:hidden">Exportar</span>
               </button>
             </div>
           </CardHeader>
@@ -452,41 +471,50 @@ export default function BankHoursPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Funcionário</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700">Setor</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700">Centro de Custo</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700">Tomador</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700">Horas Trabalhadas</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700">Horas Esperadas</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700">Banco de Horas</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700">Status</th>
+                      <th className="text-left py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm">Funcionário</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden sm:table-cell">Setor</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden md:table-cell">Centro de Custo</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden lg:table-cell">Tomador</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden lg:table-cell">Horas Trabalhadas</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden lg:table-cell">Horas Esperadas</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm">Banco de Horas</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden xl:table-cell">Horas Extras</th>
+                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredData.map((employee: BankHoursData) => (
                       <tr key={employee.employeeId} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-2 sm:px-4">
                           <div>
-                            <p className="font-medium text-gray-900">{employee.employeeName}</p>
-                            <p className="text-sm text-gray-500">{employee.employeeCpf}</p>
+                            <p className="font-medium text-gray-900 text-sm sm:text-base">{employee.employeeName}</p>
+                            <p className="text-xs sm:text-sm text-gray-500">{employee.employeeCpf}</p>
+                            <div className="text-xs text-gray-400 sm:hidden mt-1">
+                              {employee.department && `${employee.department} • ${employee.costCenter || 'N/A'}`}
+                            </div>
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-center">
+                        <td className="py-3 px-2 sm:px-4 text-center hidden sm:table-cell">
                           <div>
-                            <p className="font-medium text-gray-900">{employee.department}</p>
-                            <p className="text-sm text-gray-500">{employee.position}</p>
+                            <p className="font-medium text-gray-900 text-sm">{employee.department}</p>
+                            <p className="text-xs text-gray-500">{employee.position}</p>
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-center text-gray-700">{employee.costCenter || '-'}</td>
-                        <td className="py-3 px-4 text-center text-gray-700">{employee.client || '-'}</td>
-                        <td className="py-3 px-4 text-center text-gray-700">{formatTime(employee.totalWorkedHours)}</td>
-                        <td className="py-3 px-4 text-center text-gray-700">{formatTime(employee.totalExpectedHours)}</td>
-                        <td className="py-3 px-4 text-center">
-                          <span className={`font-medium ${employee.bankHours >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden md:table-cell">{employee.costCenter || '-'}</td>
+                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden lg:table-cell">{employee.client || '-'}</td>
+                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden lg:table-cell">{formatTime(employee.totalWorkedHours)}</td>
+                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden lg:table-cell">{formatTime(employee.totalExpectedHours)}</td>
+                        <td className="py-3 px-2 sm:px-4 text-center">
+                          <span className={`font-medium text-sm ${employee.bankHours >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {formatTime(employee.bankHours)}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-center">
+                        <td className="py-3 px-2 sm:px-4 text-center hidden xl:table-cell">
+                          <span className="font-medium text-orange-600 text-sm">
+                            {formatTime(employee.overtimeMultipliedHours)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-2 sm:px-4 text-center">
                           <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(employee.bankHours)}`}>
                             {getStatusText(employee.bankHours)}
                           </span>
@@ -500,6 +528,17 @@ export default function BankHoursPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Modal de alterar senha */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        onSuccess={() => {
+          setIsChangePasswordOpen(false);
+          // Invalidar query para recarregar dados do usuário
+          queryClient.invalidateQueries({ queryKey: ['user'] });
+        }}
+      />
     </MainLayout>
   );
 }
