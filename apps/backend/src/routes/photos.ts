@@ -46,7 +46,9 @@ router.get('/:photoKey', async (req: AuthRequest, res, next) => {
     // Verificar permissões
     const canAccess = 
       userRole === 'ADMIN' || 
-      userRole === 'HR' || 
+      userRole === 'DEPARTAMENTO_PESSOAL' || 
+      userRole === 'GESTOR' || 
+      userRole === 'DIRETOR' ||
       timeRecord.userId === userId;
 
     if (!canAccess) {
@@ -84,7 +86,7 @@ router.get('/:photoKey', async (req: AuthRequest, res, next) => {
  * GET /api/photos/user/:userId
  * Lista fotos de um usuário específico (apenas ADMIN/HR)
  */
-router.get('/user/:userId', authorize('ADMIN', 'HR'), async (req: AuthRequest, res, next) => {
+router.get('/user/:userId', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), async (req: AuthRequest, res, next) => {
   try {
     const { userId } = req.params;
     const { limit = 50 } = req.query;
@@ -130,7 +132,9 @@ router.get('/record/:recordId', async (req: AuthRequest, res, next) => {
     // Verificar permissões
     const canAccess = 
       userRole === 'ADMIN' || 
-      userRole === 'HR' || 
+      userRole === 'DEPARTAMENTO_PESSOAL' || 
+      userRole === 'GESTOR' || 
+      userRole === 'DIRETOR' ||
       timeRecord.userId === userId;
 
     if (!canAccess) {

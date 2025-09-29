@@ -50,7 +50,7 @@ interface MedicalCertificate {
 }
 
 interface MedicalCertificateListProps {
-  userRole: 'EMPLOYEE' | 'HR' | 'ADMIN';
+  userRole: 'EMPLOYEE' | 'DEPARTAMENTO_PESSOAL' | 'GESTOR' | 'DIRETOR' | 'ADMIN';
   showActions?: boolean;
 }
 

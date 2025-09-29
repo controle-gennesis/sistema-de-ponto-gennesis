@@ -9,15 +9,15 @@ const reportController = new ReportController();
 router.use(authenticate);
 
 // Rotas para administradores e RH
-router.get('/', authorize('ADMIN', 'HR'), reportController.getAllReports);
-router.get('/:id', authorize('ADMIN', 'HR'), reportController.getReportById);
-router.post('/generate', authorize('ADMIN', 'HR'), reportController.generateReport);
-router.get('/:id/download', authorize('ADMIN', 'HR'), reportController.downloadReport);
+router.get('/', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.getAllReports);
+router.get('/:id', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.getReportById);
+router.post('/generate', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.generateReport);
+router.get('/:id/download', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.downloadReport);
 
 // Relatórios específicos
-router.get('/attendance/summary', authorize('ADMIN', 'HR'), reportController.getAttendanceSummary);
-router.get('/productivity/analysis', authorize('ADMIN', 'HR'), reportController.getProductivityAnalysis);
-router.get('/overtime/summary', authorize('ADMIN', 'HR'), reportController.getOvertimeSummary);
-router.get('/vacation/summary', authorize('ADMIN', 'HR'), reportController.getVacationSummary);
+router.get('/attendance/summary', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.getAttendanceSummary);
+router.get('/productivity/analysis', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.getProductivityAnalysis);
+router.get('/overtime/summary', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.getOvertimeSummary);
+router.get('/vacation/summary', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), reportController.getVacationSummary);
 
 export default router;

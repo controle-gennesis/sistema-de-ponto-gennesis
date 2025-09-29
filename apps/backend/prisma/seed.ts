@@ -49,22 +49,22 @@ async function main() {
 
   console.log('✅ Usuário administrador criado: admin@engenharia.com.br / admin123');
 
-  // Criar usuário RH
-  const hrPassword = await bcrypt.hash('rh123', 12);
+  // Criar usuário Departamento Pessoal
+  const dpPassword = await bcrypt.hash('dp123', 12);
   await prisma.user.upsert({
-    where: { email: 'rh@engenharia.com.br' },
+    where: { email: 'dp@engenharia.com.br' },
     update: {},
     create: {
-      email: 'rh@engenharia.com.br',
-      password: hrPassword,
-      name: 'Recursos Humanos',
+      email: 'dp@engenharia.com.br',
+      password: dpPassword,
+      name: 'Departamento Pessoal',
       cpf: '11111111111',
-      role: UserRole.HR,
+      role: UserRole.DEPARTAMENTO_PESSOAL,
       isActive: true
     }
   });
 
-  console.log('✅ Usuário RH criado: rh@engenharia.com.br / rh123');
+  console.log('✅ Usuário Departamento Pessoal criado: dp@engenharia.com.br / dp123');
 
   // Criar funcionário de exemplo
   const employeePassword = await bcrypt.hash('func123', 12);
@@ -88,7 +88,7 @@ async function main() {
     create: {
       userId: employee.id,
       employeeId: 'EMP001',
-      department: 'Engenharia Civil',
+      department: 'Engenharia',
       position: 'Engenheiro Civil',
       hireDate: new Date('2025-09-01 07:00:00'),
       birthDate: new Date('1995-09-24'), // Aniversário em 24/09
@@ -123,7 +123,7 @@ async function main() {
       name: 'João Silva',
       cpf: '12345678901',
       employeeId: 'EMP002',
-      department: 'Engenharia Elétrica',
+      department: 'Engenharia',
       position: 'Engenheiro Elétrico',
       birthDate: new Date('1990-09-15'), // 15/09
       hireDate: new Date('2024-01-15'),
@@ -144,7 +144,7 @@ async function main() {
       name: 'Maria Santos',
       cpf: '12345678902',
       employeeId: 'EMP003',
-      department: 'Recursos Humanos',
+      department: 'Departamento Pessoal',
       position: 'Analista de RH',
       birthDate: new Date('1988-09-30'), // 30/09
       hireDate: new Date('2023-06-01'),
@@ -165,7 +165,7 @@ async function main() {
       name: 'Pedro Oliveira',
       cpf: '12345678903',
       employeeId: 'EMP004',
-      department: 'Engenharia Civil',
+      department: 'Engenharia',
       position: 'Arquiteto',
       birthDate: new Date('1992-10-05'), // 05/10 (outro mês)
       hireDate: new Date('2024-03-10'),

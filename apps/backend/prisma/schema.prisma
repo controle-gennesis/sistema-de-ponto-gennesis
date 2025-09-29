@@ -55,9 +55,8 @@ model Employee {
   dailyFoodVoucher  Float?    @default(33.40) // Vale Alimentação diário (padrão R$ 33,40)
   dailyTransportVoucher Float? @default(11.00) // Vale Transporte diário (padrão R$ 11,00)
   
-  // Novos campos - Dados da Empresa e Contrato
+  // Novos campos - Dados da Empresa
   company           String?   // EMPRESA
-  currentContract   String?   // CONTRATO ATUAL
   
   // Novos campos - Dados Bancários
   bank              String?   // BANCO
@@ -110,6 +109,7 @@ model TimeRecord {
   approvedAt  DateTime?
   foodVoucherAmount Float?  @default(0) // Valor do VA no dia
   transportVoucherAmount Float? @default(0) // Valor do VT no dia
+  costCenter  String?       // Centro de custo do funcionário no momento do ponto
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -247,9 +247,10 @@ model AuditLog {
 // Enums
 enum UserRole {
   ADMIN
-  HR
-  MANAGER
   EMPLOYEE
+  DEPARTAMENTO_PESSOAL
+  GESTOR
+  DIRETOR
 }
 
 enum TimeRecordType {
@@ -402,6 +403,7 @@ model SalaryAdjustment {
   type        AdjustmentType
   description String
   amount      Decimal          @db.Decimal(10, 2)
+  isFixed     Boolean          @default(false)  // Se true, será aplicado automaticamente todo mês
   createdBy   String
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt

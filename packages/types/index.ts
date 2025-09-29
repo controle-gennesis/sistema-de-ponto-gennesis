@@ -173,9 +173,10 @@ export interface AuditLog {
 // Enums
 export enum UserRole {
   ADMIN = 'ADMIN',
-  HR = 'HR',
-  MANAGER = 'MANAGER',
-  EMPLOYEE = 'EMPLOYEE'
+  EMPLOYEE = 'EMPLOYEE',
+  DEPARTAMENTO_PESSOAL = 'DEPARTAMENTO_PESSOAL',
+  GESTOR = 'GESTOR',
+  DIRETOR = 'DIRETOR'
 }
 
 export enum TimeRecordType {

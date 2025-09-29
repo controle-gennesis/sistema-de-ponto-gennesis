@@ -20,7 +20,8 @@ export function AdjustmentForm({ employeeId, adjustment, onSave, onCancel }: Adj
   const [formData, setFormData] = useState({
     type: 'BONUS' as AdjustmentType,
     description: '',
-    amount: ''
+    amount: '',
+    isFixed: false
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -30,7 +31,8 @@ export function AdjustmentForm({ employeeId, adjustment, onSave, onCancel }: Adj
       setFormData({
         type: adjustment.type,
         description: adjustment.description,
-        amount: adjustment.amount.toString()
+        amount: adjustment.amount.toString(),
+        isFixed: adjustment.isFixed || false
       });
     }
   }, [adjustment]);
@@ -71,7 +73,8 @@ export function AdjustmentForm({ employeeId, adjustment, onSave, onCancel }: Adj
       const updateData: UpdateAdjustmentData = {
         type: formData.type,
         description: formData.description.trim(),
-        amount: amount
+        amount: amount,
+        isFixed: formData.isFixed
       };
       onSave(updateData);
     } else {
@@ -80,13 +83,14 @@ export function AdjustmentForm({ employeeId, adjustment, onSave, onCancel }: Adj
         employeeId,
         type: formData.type,
         description: formData.description.trim(),
-        amount: amount
+        amount: amount,
+        isFixed: formData.isFixed
       };
       onSave(createData);
     }
   };
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: string, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     
     // Limpar erro do campo quando usuário começar a digitar
@@ -163,6 +167,23 @@ export function AdjustmentForm({ employeeId, adjustment, onSave, onCancel }: Adj
           {errors.amount && (
             <p className="mt-1 text-sm text-red-600">{errors.amount}</p>
           )}
+        </div>
+
+        <div>
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={formData.isFixed}
+              onChange={(e) => handleInputChange('isFixed', e.target.checked)}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">
+              Acréscimo Fixo
+            </span>
+          </label>
+          <p className="mt-1 text-xs text-gray-500">
+            Se marcado, este acréscimo será aplicado automaticamente na folha de pagamento de todos os meses
+          </p>
         </div>
         
         <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">

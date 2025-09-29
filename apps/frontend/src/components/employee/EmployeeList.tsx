@@ -9,6 +9,7 @@ import { AdjustmentsList } from './AdjustmentsList';
 import { AdjustmentForm } from './AdjustmentForm';
 import { DiscountsList } from './DiscountsList';
 import { DiscountForm } from './DiscountForm';
+import { EditEmployeeForm } from './EditEmployeeForm';
 import api from '@/lib/api';
 import { SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData, SalaryDiscount, CreateDiscountData, UpdateDiscountData } from '@/types';
 
@@ -25,10 +26,15 @@ interface Employee {
     department: string;
     position: string;
     hireDate: string;
+    birthDate?: string;
+    salary: number;
+    isRemote: boolean;
+    workSchedule: any;
     costCenter?: string;
     client?: string;
+    dailyFoodVoucher?: number;
+    dailyTransportVoucher?: number;
     company?: string;
-    currentContract?: string;
     bank?: string;
     accountType?: string;
     agency?: string;
@@ -85,34 +91,24 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     reason: '',
     observation: ''
   });
+  
+  // Estados para edição de funcionário
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [showEditForm, setShowEditForm] = useState(false);
 
   const queryClient = useQueryClient();
 
   // Listas de opções para filtros
   const departments = [
     'Todos',
-    'Engenharia Civil',
-    'Engenharia Elétrica',
-    'Engenharia Mecânica',
-    'Engenharia de Software',
-    'Recursos Humanos',
-    'Financeiro',
-    'Comercial',
-    'Marketing',
-    'Operações',
-    'Qualidade',
-    'Segurança do Trabalho',
-    'Administrativo',
-    'Tecnologia da Informação',
     'Projetos',
-    'Manutenção',
-    'Produção',
-    'Vendas',
-    'Atendimento ao Cliente',
+    'Contratos e Licitações',
+    'Suprimentos',
     'Jurídico',
-    'Contabilidade',
-    'Compras',
-    'Almoxarifado'
+    'Departamento Pessoal',
+    'Engenharia',
+    'Administrativo',
+    'Financeiro'
   ];
 
   const positions = [
@@ -391,7 +387,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       });
       return res.data;
     },
-    enabled: userRole === 'ADMIN' || userRole === 'HR',
+    enabled: userRole === 'ADMIN' || userRole === 'DEPARTAMENTO_PESSOAL' || userRole === 'GESTOR' || userRole === 'DIRETOR',
   });
 
 
@@ -557,6 +553,17 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     deleteEmployeeMutation.mutate(employeeId);
   };
 
+  // Funções para edição de funcionário
+  const handleEditEmployee = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setShowEditForm(true);
+  };
+
+  const handleCloseEditForm = () => {
+    setEditingEmployee(null);
+    setShowEditForm(false);
+  };
+
   const handleEditRecord = (record: any) => {
     setEditingRecord(record.id);
     
@@ -688,6 +695,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       (emp.employee?.client && emp.employee.client.toLowerCase().includes(clientFilter.toLowerCase()));
     
     return isEmployee && matchesDepartment && matchesPosition && matchesCostCenter && matchesClient;
+  }).sort((a: Employee, b: Employee) => {
+    // Ordenação alfabética por nome
+    return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
   });
 
   // Calcular informações de paginação
@@ -701,7 +711,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     setCurrentPage(1);
   };
 
-  if (userRole !== 'ADMIN' && userRole !== 'HR') {
+  if (userRole !== 'ADMIN' && userRole !== 'DEPARTAMENTO_PESSOAL' && userRole !== 'GESTOR' && userRole !== 'DIRETOR') {
     return null;
   }
 
@@ -882,61 +892,100 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               </span>
             </div>
 
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {filteredEmployees.map((employee: Employee) => (
               <div
                 key={employee.id}
                 onClick={() => setSelectedEmployee(employee)}
-                className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors gap-4"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center space-x-4">
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900 text-sm sm:text-base">{employee.name}</h4>
-                      <p className="text-xs sm:text-sm text-gray-600">{employee.email}</p>
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-1">
-                        <span className="text-xs text-gray-500">CPF: {employee.cpf}</span>
+                  className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-lg hover:border-gray-200 cursor-pointer transition-all duration-300 transform hover:-translate-y-1"
+                >
+                  {/* Avatar com iniciais - Centralizado */}
+                  <div className="flex flex-col items-center text-center mb-6 relative">
+                    <div className="w-16 h-16 bg-white border-2 border-blue-500 rounded-full flex items-center justify-center mb-3 shadow-sm">
+                      <span className="text-blue-600 font-bold text-lg">
+                        {employee.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </span>
+                    </div>
+                    {/* Status indicator no canto superior direito */}
+                    <div className={`absolute top-0 right-0 w-4 h-4 rounded-full border-2 border-white ${
+                      employee.isActive ? 'bg-green-500' : 'bg-red-500'
+                    }`} title={employee.isActive ? 'Ativo' : 'Inativo'} />
+                    <span className="text-base font-semibold text-gray-900 mb-2">{employee.name}</span>
                         {employee.employee && (
                           <>
-                            <span className="text-xs text-gray-500">
-                              Matrícula: {employee.employee.employeeId}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {employee.employee.department} - {employee.employee.position}
-                            </span>
-                            {employee.employee.costCenter && (
-                              <span className="text-xs text-gray-500">
-                                Centro: {employee.employee.costCenter}
-                              </span>
-                            )}
-                            {employee.employee.client && (
-                              <span className="text-xs text-gray-500">
-                                Tomador: {employee.employee.client}
-                              </span>
-                            )}
-                            <span className="text-xs text-gray-500">
-                              Admitido em: {formatDate(employee.employee.hireDate)}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
+                        <p className="text-sm font-medium text-gray-800 mb-1">{employee.employee.position}</p>
+                        <p className="text-xs text-gray-500 bg-gray-50 px-3 py-1 rounded-full">{employee.employee.department}</p>
+                      </>
+                    )}
                   </div>
-                </div>
+
+                  {/* Informações do funcionário */}
+                  {employee.employee && (
+                    <>
+
+                      {/* Informações organizadas */}
+                      <div className="space-y-3 text-xs bg-gray-50 rounded-xl p-4 mb-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 font-medium">Matrícula:</span>
+                          <span className="text-gray-800 font-semibold">{employee.employee.employeeId}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 font-medium">CPF:</span>
+                          <span className="text-gray-800 font-semibold">{employee.cpf}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 font-medium">Empresa:</span>
+                          <span className="text-gray-800 font-semibold">{employee.employee.company}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 font-medium">Modalidade:</span>
+                          <span className="text-gray-800 font-semibold">{employee.employee.modality}</span>
+                        </div>
+                            {employee.employee.costCenter && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 font-medium">Centro de Custo:</span>
+                            <span className="text-gray-800 font-semibold">{employee.employee.costCenter}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 font-medium">Tomador:</span>
+                          <span className="text-gray-800 font-semibold">{employee.employee.client}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 font-medium">Admissão:</span>
+                          <span className="text-gray-800 font-semibold">{formatDate(employee.employee.hireDate)}</span>
+                        </div>
+                      </div>
                 
-                {showDeleteButton && (
-                  <div className="flex items-center justify-end sm:justify-start space-x-2">
+                      {/* Botões de ação */}
+                <div className="flex justify-center space-x-2">
+                  {/* Botão de editar */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditEmployee(employee);
+                    }}
+                    className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-all duration-200 hover:scale-105"
+                    title="Editar funcionário"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  
+                  {/* Botão de deletar */}
+                  {showDeleteButton && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteConfirm(employee.id);
                       }}
-                      className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
-                      title="Excluir funcionário"
+                      className="p-2.5 text-red-600 hover:bg-red-50 rounded-xl transition-all duration-200 hover:scale-105"
+                      title="Desligar funcionário"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                  </div>
+                  )}
+                </div>
+                    </>
                 )}
               </div>
             ))}
@@ -1002,7 +1051,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 </div>
                 
                 <p className="text-gray-700 mb-6">
-                  Tem certeza que deseja excluir este funcionário? O funcionário será desativado e não poderá mais acessar o sistema.
+                  Tem certeza que deseja desligar este funcionário? O funcionário será desativado e não poderá mais acessar o sistema.
                 </p>
                 
                 <div className="flex justify-end space-x-3">
@@ -1025,7 +1074,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     ) : (
                       <>
                         <Trash2 className="w-4 h-4" />
-                        <span>Excluir</span>
+                        <span>Desligar</span>
                       </>
                     )}
                   </button>
@@ -1143,14 +1192,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           <span className="text-sm text-gray-600">Empresa:</span>
                           <span className="text-sm font-medium">
                             {selectedEmployee.employee.company}
-                          </span>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.currentContract && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Contrato Atual:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.currentContract}
                           </span>
                         </div>
                       )}
@@ -1687,6 +1728,14 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
           </div>
         )}
       </CardContent>
+      
+      {/* Modal de edição de funcionário */}
+      {showEditForm && editingEmployee && (
+        <EditEmployeeForm
+          employee={editingEmployee}
+          onClose={handleCloseEditForm}
+        />
+      )}
     </Card>
   );
 }

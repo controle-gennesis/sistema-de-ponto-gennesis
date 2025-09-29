@@ -62,11 +62,14 @@ export class UserController {
                 department: true,
                 position: true,
                 hireDate: true,
+                birthDate: true,
+                salary: true,
+                isRemote: true,
+                workSchedule: true,
                 costCenter: true,
                 client: true,
                 // Novos campos
                 company: true,
-                currentContract: true,
                 bank: true,
                 accountType: true,
                 agency: true,
@@ -77,6 +80,10 @@ export class UserController {
                 pixKey: true,
                 dailyFoodVoucher: true,
                 dailyTransportVoucher: true,
+                modality: true,
+                familySalary: true,
+                dangerPay: true,
+                unhealthyPay: true,
               }
             }
           },
@@ -205,7 +212,6 @@ export class UserController {
               dailyTransportVoucher: employeeData.dailyTransportVoucher || 11.00,
               // Novos campos
               company: employeeData.company || null,
-              currentContract: employeeData.currentContract || null,
               bank: employeeData.bank || null,
               accountType: employeeData.accountType || null,
               agency: employeeData.agency || null,

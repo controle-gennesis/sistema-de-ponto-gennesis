@@ -132,7 +132,7 @@ export default function AdminAtestadosPage() {
         </div>
 
         {/* Lista de Atestados */}
-        <MedicalCertificateList userRole="HR" showActions={true} />
+        <MedicalCertificateList userRole="DEPARTAMENTO_PESSOAL" showActions={true} />
       </div>
     </MainLayout>
   );

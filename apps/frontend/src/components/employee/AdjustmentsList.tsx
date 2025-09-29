@@ -62,6 +62,11 @@ export function AdjustmentsList({ adjustments, onEdit, onDelete }: AdjustmentsLi
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTypeColor(adjustment.type)}`}>
                   {getTypeLabel(adjustment.type)}
                 </span>
+                {adjustment.isFixed && (
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                    Fixo
+                  </span>
+                )}
                 <span className="text-lg font-semibold text-green-600">
                   +R$ {adjustment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>

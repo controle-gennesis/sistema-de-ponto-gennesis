@@ -183,28 +183,14 @@ export default function BankHoursPage() {
 
   const departments = [
     'Todos',
-    'Engenharia Civil',
-    'Engenharia Elétrica',
-    'Engenharia Mecânica',
-    'Engenharia de Software',
-    'Recursos Humanos',
-    'Financeiro',
-    'Comercial',
-    'Marketing',
-    'Operações',
-    'Qualidade',
-    'Segurança do Trabalho',
-    'Administrativo',
-    'Tecnologia da Informação',
     'Projetos',
-    'Manutenção',
-    'Produção',
-    'Vendas',
-    'Atendimento ao Cliente',
+    'Contratos e Licitações',
+    'Suprimentos',
     'Jurídico',
-    'Contabilidade',
-    'Compras',
-    'Almoxarifado'
+    'Departamento Pessoal',
+    'Engenharia',
+    'Administrativo',
+    'Financeiro'
   ];
 
   const costCenters = [

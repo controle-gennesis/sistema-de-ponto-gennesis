@@ -451,6 +451,7 @@ export interface SalaryAdjustment {
   type: AdjustmentType;
   description: string;
   amount: number;
+  isFixed: boolean;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -474,12 +475,14 @@ export interface CreateAdjustmentData {
   type: AdjustmentType;
   description: string;
   amount: number;
+  isFixed?: boolean;
 }
 
 export interface UpdateAdjustmentData {
   type?: AdjustmentType;
   description?: string;
   amount?: number;
+  isFixed?: boolean;
 }
 
 export interface AdjustmentTypeOption {

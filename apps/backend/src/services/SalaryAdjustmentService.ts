@@ -7,6 +7,7 @@ export interface CreateAdjustmentData {
   type: AdjustmentType;
   description: string;
   amount: number;
+  isFixed?: boolean;
   createdBy: string;
 }
 
@@ -14,6 +15,7 @@ export interface UpdateAdjustmentData {
   type?: AdjustmentType;
   description?: string;
   amount?: number;
+  isFixed?: boolean;
 }
 
 export interface SalaryAdjustment {
@@ -22,6 +24,7 @@ export interface SalaryAdjustment {
   type: AdjustmentType;
   description: string;
   amount: number;
+  isFixed: boolean;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -70,6 +73,7 @@ export class SalaryAdjustmentService {
         type: data.type,
         description: data.description,
         amount: data.amount,
+        isFixed: data.isFixed || false,
         createdBy: data.createdBy
       },
       include: {
@@ -215,6 +219,47 @@ export class SalaryAdjustmentService {
     const result = await prisma.salaryAdjustment.aggregate({
       where: {
         employeeId
+      },
+      _sum: {
+        amount: true
+      }
+    });
+
+    return Number(result._sum.amount) || 0;
+  }
+
+  /**
+   * Calcular total de acréscimos fixos por funcionário
+   */
+  async getTotalFixedAdjustments(employeeId: string): Promise<number> {
+    const result = await prisma.salaryAdjustment.aggregate({
+      where: {
+        employeeId,
+        isFixed: true
+      },
+      _sum: {
+        amount: true
+      }
+    });
+
+    return Number(result._sum.amount) || 0;
+  }
+
+  /**
+   * Calcular total de acréscimos não fixos por funcionário em um período específico
+   */
+  async getTotalNonFixedAdjustments(employeeId: string, month: number, year: number): Promise<number> {
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+    
+    const result = await prisma.salaryAdjustment.aggregate({
+      where: {
+        employeeId,
+        isFixed: false,
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
       },
       _sum: {
         amount: true

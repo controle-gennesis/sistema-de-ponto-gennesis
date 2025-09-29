@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 
 interface SidebarProps {
-  userRole: 'EMPLOYEE' | 'HR' | 'ADMIN';
+  userRole: 'EMPLOYEE' | 'DEPARTAMENTO_PESSOAL' | 'GESTOR' | 'DIRETOR' | 'ADMIN';
   userName: string;
   onLogout: () => void;
   onMenuToggle?: (collapsed: boolean) => void;
@@ -38,7 +38,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [isCollapsed, setIsCollapsed] = useState(false);
   const pathname = usePathname();
 
-  const isAdminOrHR = userRole === 'ADMIN' || userRole === 'HR';
+  const isAdminOrDP = userRole === 'ADMIN' || userRole === 'DEPARTAMENTO_PESSOAL' || userRole === 'GESTOR' || userRole === 'DIRETOR';
   const isEmployee = userRole === 'EMPLOYEE';
   const isAdmin = userRole === 'ADMIN';
 
@@ -67,7 +67,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       ];
     }
 
-    if (isAdminOrHR) {
+    if (isAdminOrDP) {
       return [
         {
           name: 'Início',
@@ -208,7 +208,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 </p>
                 <p className="text-xs text-gray-500 capitalize">
                   {userRole === 'EMPLOYEE' ? 'Funcionário' : 
-                   userRole === 'HR' ? 'Recursos Humanos' : 'Administrador'}
+                   userRole === 'DEPARTAMENTO_PESSOAL' ? 'Departamento Pessoal' :
+                   userRole === 'GESTOR' ? 'Gestor' :
+                   userRole === 'DIRETOR' ? 'Diretor' : 'Administrador'}
                 </p>
               </div>
             )}

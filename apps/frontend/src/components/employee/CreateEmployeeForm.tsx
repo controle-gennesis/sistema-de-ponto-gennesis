@@ -13,7 +13,7 @@ interface EmployeeFormData {
   email: string;
   cpf: string;
   password: string;
-  role: 'EMPLOYEE' | 'HR' | 'ADMIN';
+  role: 'EMPLOYEE' | 'DEPARTAMENTO_PESSOAL' | 'GESTOR' | 'DIRETOR' | 'ADMIN';
   
   // Dados do funcionário
   employeeId: string;
@@ -34,9 +34,8 @@ interface EmployeeFormData {
   dailyFoodVoucher: string;
   dailyTransportVoucher: string;
   
-  // Novos campos - Dados da Empresa e Contrato
+  // Novos campos - Dados da Empresa
   company: string;
-  currentContract: string;
   
   // Novos campos - Dados Bancários
   bank: string;
@@ -64,28 +63,14 @@ interface CreateEmployeeFormProps {
 export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   // Lista de setores disponíveis
   const sectors = [
-    'Engenharia Civil',
-    'Engenharia Elétrica',
-    'Engenharia Mecânica',
-    'Engenharia de Software',
-    'Recursos Humanos',
-    'Financeiro',
-    'Comercial',
-    'Marketing',
-    'Operações',
-    'Qualidade',
-    'Segurança do Trabalho',
-    'Administrativo',
-    'Tecnologia da Informação',
     'Projetos',
-    'Manutenção',
-    'Produção',
-    'Vendas',
-    'Atendimento ao Cliente',
+    'Contratos e Licitações',
+    'Suprimentos',
     'Jurídico',
-    'Contabilidade',
-    'Compras',
-    'Almoxarifado'
+    'Departamento Pessoal',
+    'Engenharia',
+    'Administrativo',
+    'Financeiro'
   ];
 
   // Lista de cargos disponíveis
@@ -159,18 +144,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     'E-MAIL'
   ];
 
-  // Lista de contratos (baseado nos centros de custo)
-  const contracts = [
-    'SEDES',
-    'DF - ADM LOCAL',
-    'ITAMARATY - SERVIÇOS EVENTUAIS',
-    'ITAMARATY - MÃO DE OBRA',
-    'SES GDF - LOTE 14',
-    'SES GDF - LOTE 10',
-    'ADM CENTRAL ENGPAC',
-    'DIRETOR'
-  ];
-
   // Função para gerar matrícula aleatória
   const generateEmployeeId = () => {
     // Gera um número de 6 dígitos com prefixo baseado no ano atual
@@ -204,7 +177,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     dailyTransportVoucher: '11.00',
     // Novos campos
     company: '',
-    currentContract: '',
     bank: '',
     accountType: '',
     agency: '',
@@ -279,8 +251,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         dailyTransportVoucher: parseFloat(data.dailyTransportVoucher),
         allowedLocations: [],
         // Novos campos
-        company: data.company,
-        currentContract: data.currentContract,
+          company: data.company,
         bank: data.bank,
         accountType: data.accountType,
         agency: data.agency,
@@ -406,6 +377,38 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     if (!formData.dangerPay.trim()) newErrors.dangerPay = 'Periculosidade é obrigatória';
     
     if (!formData.unhealthyPay.trim()) newErrors.unhealthyPay = 'Insalubridade é obrigatória';
+    
+    // Validações adicionais para campos obrigatórios
+    if (!formData.birthDate.trim()) newErrors.birthDate = 'Data de nascimento é obrigatória';
+    else if (isNaN(new Date(formData.birthDate).getTime())) {
+      newErrors.birthDate = 'Data de nascimento inválida';
+    }
+    
+    if (!formData.costCenter.trim()) newErrors.costCenter = 'Centro de custo é obrigatório';
+    if (!formData.client.trim()) newErrors.client = 'Tomador é obrigatório';
+    if (!formData.company.trim()) newErrors.company = 'Empresa é obrigatória';
+    
+    // Validações dos dados bancários
+    if (!formData.bank.trim()) newErrors.bank = 'Banco é obrigatório';
+    if (!formData.accountType.trim()) newErrors.accountType = 'Tipo de conta é obrigatório';
+    if (!formData.agency.trim()) newErrors.agency = 'Agência é obrigatória';
+    if (!formData.operation.trim()) newErrors.operation = 'Operação é obrigatória';
+    if (!formData.account.trim()) newErrors.account = 'Conta é obrigatória';
+    if (!formData.digit.trim()) newErrors.digit = 'Dígito é obrigatório';
+    
+    // Validações dos dados PIX
+    if (!formData.pixKeyType.trim()) newErrors.pixKeyType = 'Tipo de chave PIX é obrigatório';
+    if (!formData.pixKey.trim()) newErrors.pixKey = 'Chave PIX é obrigatória';
+    
+    // Validações dos horários de trabalho
+    if (!formData.workStartTime.trim()) newErrors.workStartTime = 'Horário de início é obrigatório';
+    if (!formData.workEndTime.trim()) newErrors.workEndTime = 'Horário de fim é obrigatório';
+    if (!formData.lunchStartTime.trim()) newErrors.lunchStartTime = 'Horário de início do almoço é obrigatório';
+    if (!formData.lunchEndTime.trim()) newErrors.lunchEndTime = 'Horário de fim do almoço é obrigatório';
+    if (!formData.toleranceMinutes.trim()) newErrors.toleranceMinutes = 'Tolerância é obrigatória';
+    else if (isNaN(parseInt(formData.toleranceMinutes)) || parseInt(formData.toleranceMinutes) < 0) {
+      newErrors.toleranceMinutes = 'Tolerância deve ser um número válido';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -577,7 +580,9 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
                 >
                   <option value="EMPLOYEE">Funcionário</option>
-                  <option value="HR">Recursos Humanos</option>
+                  <option value="DEPARTAMENTO_PESSOAL">Departamento Pessoal</option>
+                  <option value="GESTOR">Gestor</option>
+                  <option value="DIRETOR">Diretor</option>
                   <option value="ADMIN">Administrador</option>
                   </select>
                 </div>
@@ -590,7 +595,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Vale Alimentação Diário (R$)
+                    Vale Alimentação Diário (R$) *
                   </label>
                   <input
                     type="number"
@@ -613,7 +618,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Vale Transporte Diário (R$)
+                    Vale Transporte Diário (R$) *
                   </label>
                   <input
                     type="number"
@@ -642,7 +647,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Matrícula (Gerada Automaticamente)
+                  Matrícula *
                 </label>
                 <input
                   type="text"
@@ -651,9 +656,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-md bg-gray-50 text-gray-700 cursor-not-allowed"
                   placeholder="Número da matrícula"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Matrícula gerada automaticamente (formato: AANNNN).
-                </p>
               </div>
 
               <div>
@@ -717,7 +719,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Data de Nascimento
+                  Data de Nascimento *
                 </label>
                 <input
                   type="date"
@@ -726,9 +728,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   max={new Date().toISOString().split('T')[0]} // Não permitir data futura
                 />
-                <p className="text-gray-500 text-xs mt-1">
-                  Opcional - usado para aniversários
-                </p>
               </div>
 
               <div>
@@ -750,7 +749,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Centro de Custo
+                  Centro de Custo *
                 </label>
                 <select
                   value={formData.costCenter}
@@ -771,7 +770,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tomador
+                  Tomador *
                 </label>
                 <select
                   value={formData.client}
@@ -830,7 +829,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 />
                 <label htmlFor="isRemote" className="text-sm font-medium text-gray-700">
-                  Trabalho Remoto
+                  Trabalho Remoto *
                 </label>
               </div>
               </div>
@@ -866,7 +865,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Salário Família (R$)
+                    Salário Família (R$) *
                   </label>
                   <input
                     type="number"
@@ -975,7 +974,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
             {/* Dados da Empresa e Contrato */}
           <div className="space-y-4">
-            <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados da Empresa e Contrato</h4>
+            <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados da Empresa</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -996,27 +995,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   ))}
                 </select>
                 {errors.company && <p className="text-red-500 text-xs mt-1">{errors.company}</p>}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Contrato Atual *
-                </label>
-                <select
-                  value={formData.currentContract}
-                  onChange={(e) => handleInputChange('currentContract', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.currentContract ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                >
-                  <option value="">Selecione um contrato</option>
-                  {contracts.map((contract) => (
-                    <option key={contract} value={contract}>
-                      {contract}
-                    </option>
-                  ))}
-                </select>
-                {errors.currentContract && <p className="text-red-500 text-xs mt-1">{errors.currentContract}</p>}
               </div>
             </div>
           </div>
@@ -1086,7 +1064,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    OP. *
+                    Operação *
                   </label>
                   <input
                     type="text"
@@ -1185,7 +1163,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Início
+                  Início *
                 </label>
                 <input
                   type="time"
@@ -1197,7 +1175,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fim
+                  Fim *
                 </label>
                 <input
                   type="time"
@@ -1209,7 +1187,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Início Almoço
+                  Início Almoço *
                 </label>
                 <input
                   type="time"
@@ -1221,7 +1199,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fim Almoço
+                  Fim Almoço *
                 </label>
                 <input
                   type="time"
@@ -1234,7 +1212,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
             <div className="max-w-xs">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tolerância (minutos)
+                Tolerância (minutos) *
               </label>
               <input
                 type="number"

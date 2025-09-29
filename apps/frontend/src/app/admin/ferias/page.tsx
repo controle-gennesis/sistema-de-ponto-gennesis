@@ -177,7 +177,7 @@ export default function AdminVacationsPage() {
     role: 'ADMIN'
   };
 
-  if (user.role !== 'ADMIN' && user.role !== 'HR') {
+  if (user.role !== 'ADMIN' && user.role !== 'DEPARTAMENTO_PESSOAL' && user.role !== 'GESTOR' && user.role !== 'DIRETOR') {
     router.push('/dashboard');
     return null;
   }

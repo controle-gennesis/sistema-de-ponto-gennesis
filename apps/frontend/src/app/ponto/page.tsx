@@ -34,7 +34,7 @@ export default function PontoPage() {
   // Verificar se o usuário é realmente um funcionário
   useEffect(() => {
     if (userData?.data?.role && userData.data.role !== 'EMPLOYEE') {
-      if (userData.data.role === 'ADMIN' || userData.data.role === 'HR') {
+      if (userData.data.role === 'ADMIN' || userData.data.role === 'DEPARTAMENTO_PESSOAL' || userData.data.role === 'GESTOR' || userData.data.role === 'DIRETOR') {
         router.push('/admin');
       }
     }
@@ -79,7 +79,7 @@ export default function PontoPage() {
       return res.data;
     },
     staleTime: 0, // Sempre considerar os dados como obsoletos
-    cacheTime: 0, // Não cachear os dados
+    gcTime: 0, // Não cachear os dados
   });
 
 

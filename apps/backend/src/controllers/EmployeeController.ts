@@ -108,7 +108,6 @@ export const createEmployee = async (req: Request, res: Response) => {
       role = 'EMPLOYEE',
       // Novos campos
       company,
-      currentContract,
       bank,
       accountType,
       agency,
@@ -179,7 +178,6 @@ export const createEmployee = async (req: Request, res: Response) => {
           isRemote,
           // Novos campos
           company,
-          currentContract,
           bank,
           accountType,
           agency,
@@ -230,7 +228,6 @@ export const updateEmployee = async (req: Request, res: Response) => {
       isActive,
       // Novos campos
       company,
-      currentContract,
       bank,
       accountType,
       agency,
@@ -307,7 +304,6 @@ export const updateEmployee = async (req: Request, res: Response) => {
           ...(isRemote !== undefined && { isRemote }),
           // Novos campos
           ...(company !== undefined && { company }),
-          ...(currentContract !== undefined && { currentContract }),
           ...(bank !== undefined && { bank }),
           ...(accountType !== undefined && { accountType }),
           ...(agency !== undefined && { agency }),

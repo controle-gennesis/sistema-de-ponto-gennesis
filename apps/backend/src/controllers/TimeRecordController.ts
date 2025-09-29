@@ -189,7 +189,8 @@ export class TimeRecordController {
           reason: locationReason, // Sempre incluir informações da localização
           observation: observation && observation.trim() ? observation.trim() : null, // Observação do funcionário
           foodVoucherAmount,
-          transportVoucherAmount
+          transportVoucherAmount,
+          costCenter: employee.costCenter // Incluir centro de custo automaticamente
         },
         include: {
           user: {

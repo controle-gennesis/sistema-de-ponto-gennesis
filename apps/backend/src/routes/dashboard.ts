@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 router.use(authenticate);
 
 // Endpoint para métricas administrativas - apenas RH e Admin
-router.get('/admin', authorize('HR', 'ADMIN'), async (req: AuthRequest, res, next) => {
+router.get('/admin', authorize('DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR', 'ADMIN'), async (req: AuthRequest, res, next) => {
   try {
     const { department, position, costCenter, client } = req.query;
     const dayStart = new Date();

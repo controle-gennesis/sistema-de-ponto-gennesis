@@ -56,7 +56,7 @@ export default function DashboardPage() {
     console.log('Redirecting to /ponto');
     router.push('/ponto');
     return null;
-  } else if (user.role === 'ADMIN' || user.role === 'HR') {
+  } else if (user.role === 'ADMIN' || user.role === 'DEPARTAMENTO_PESSOAL' || user.role === 'GESTOR' || user.role === 'DIRETOR') {
     console.log('Redirecting to /admin');
     router.push('/admin');
     return null;

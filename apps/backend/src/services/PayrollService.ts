@@ -10,7 +10,6 @@ export interface PayrollEmployee {
   department: string;
   employeeId: string;
   company: string | null;
-  currentContract: string | null;
   costCenter: string | null;
   client: string | null;
   cpf: string;
@@ -145,22 +144,38 @@ export class PayrollService {
    * Calcula o total de acréscimos salariais para um funcionário no período
    */
   private async calculateMonthlyAdjustments(employeeId: string, month: number, year: number): Promise<number> {
+    // Acréscimos fixos (sempre aplicados)
+    const fixedAdjustments = await prisma.salaryAdjustment.findMany({
+      where: {
+        employeeId,
+        isFixed: true
+      }
+    });
+
+    // Acréscimos não fixos (apenas do mês específico)
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);
     
-    const adjustments = await prisma.salaryAdjustment.findMany({
+    const nonFixedAdjustments = await prisma.salaryAdjustment.findMany({
       where: {
         employeeId,
+        isFixed: false,
         createdAt: {
           gte: startDate,
           lte: endDate
         }
       }
     });
-    
-    return adjustments.reduce((sum, adjustment) => 
+
+    const totalFixed = fixedAdjustments.reduce((sum, adjustment) => 
       sum + Number(adjustment.amount), 0
     );
+
+    const totalNonFixed = nonFixedAdjustments.reduce((sum, adjustment) => 
+      sum + Number(adjustment.amount), 0
+    );
+    
+    return totalFixed + totalNonFixed;
   }
 
   /**
@@ -282,7 +297,6 @@ export class PayrollService {
           department: employee.department,
           employeeId: employee.employeeId,
           company: employee.company,
-          currentContract: employee.currentContract,
           costCenter: employee.costCenter,
           client: employee.client,
           cpf: employee.user.cpf,
@@ -386,7 +400,6 @@ export class PayrollService {
       department: employee.department,
       employeeId: employee.employeeId,
       company: employee.company,
-      currentContract: employee.currentContract,
       costCenter: employee.costCenter,
       client: employee.client,
       cpf: employee.user.cpf,

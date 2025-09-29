@@ -12,7 +12,7 @@ export class SalaryAdjustmentController {
   async createAdjustment(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { employeeId, type, description, amount } = req.body;
+      const { employeeId, type, description, amount, isFixed } = req.body;
 
       // Validar parâmetros obrigatórios
       if (!employeeId || !type || !description || !amount) {
@@ -33,6 +33,7 @@ export class SalaryAdjustmentController {
         type,
         description: description.trim(),
         amount: parseFloat(amount),
+        isFixed: isFixed === true || isFixed === 'true',
         createdBy: userId
       };
 

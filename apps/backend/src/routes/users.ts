@@ -10,20 +10,20 @@ const userController = new UserController();
 router.use(authenticate);
 
 // Rota para aniversariantes (DEVE vir antes de /:id)
-router.get('/birthdays', authorize('ADMIN', 'HR'), getBirthdayEmployees);
+router.get('/birthdays', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), getBirthdayEmployees);
 
 // Rotas para administradores e RH
-router.get('/', authorize('ADMIN', 'HR'), userController.getAllUsers);
+router.get('/', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.getAllUsers);
 router.get('/me/employee', userController.getMyEmployeeData);
 router.put('/me/employee', userController.updateMyEmployeeData);
-router.post('/', authorize('ADMIN', 'HR'), userController.createUser);
+router.post('/', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.createUser);
 
 // Rotas para gestores
-router.get('/department/:department', authorize('ADMIN', 'HR', 'MANAGER'), userController.getUsersByDepartment);
+router.get('/department/:department', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.getUsersByDepartment);
 
 // Rotas com parâmetros (DEVEM vir por último)
-router.get('/:id', authorize('ADMIN', 'HR'), userController.getUserById);
-router.put('/:id', authorize('ADMIN', 'HR'), userController.updateUser);
+router.get('/:id', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.getUserById);
+router.put('/:id', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.updateUser);
 router.delete('/:id', authorize('ADMIN'), userController.deleteUser);
 
 export default router;

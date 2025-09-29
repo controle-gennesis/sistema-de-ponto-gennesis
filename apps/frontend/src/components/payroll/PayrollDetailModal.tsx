@@ -27,9 +27,13 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
   const salarioFamilia = employee.familySalary || 0;
   const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
   const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / 30) * faltas;
-  const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + employee.totalAdjustments;
+  const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0);
   const totalDescontos = employee.totalDiscounts + descontoPorFaltas;
   const liquidoReceber = totalProventos - totalDescontos;
+  
+  // Cálculo com acréscimos
+  const totalProventosComAcrescimos = salarioBase + periculosidade + insalubridade + salarioFamilia + employee.totalAdjustments + (employee.totalTransportVoucher || 0);
+  const liquidoComAcrescimos = totalProventosComAcrescimos - totalDescontos;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -330,19 +334,38 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                     </td>
                   </tr>
 
-                  {/* VA/VT */}
+                  {/* Vale Alimentação */}
                   <tr className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
                       008
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
-                      BENEFÍCIOS
+                      VALE ALIMENTAÇÃO
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
                       {employee.daysWorked} dias
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 border-r border-gray-200">
-                      R$ {(employee.totalFoodVoucher + employee.totalTransportVoucher).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400">
+                      -
+                    </td>
+                  </tr>
+
+                  {/* Vale Transporte */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      009
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      VALE TRANSPORTE
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.daysWorked} dias
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 border-r border-gray-200">
+                      R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400">
                       -
@@ -358,7 +381,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                 Resumo Financeiro
               </h4>
               <div className="rounded-2xl">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                   {/* Total dos Vencimentos */}
                   <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                     <div className="flex items-center justify-between mb-3">
@@ -398,6 +421,38 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                     </div>
                     <div className="text-sm text-blue-100">
                       Valor a Receber
+                    </div>
+                  </div>
+
+                </div>
+                
+                {/* Segunda linha com acréscimos e líquido total */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Total dos Acréscimos */}
+                  <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+                      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Acréscimos</span>
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900 mb-1">
+                      R$ {(employee.totalAdjustments || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      Total dos Acréscimos
+                    </div>
+                  </div>
+
+                  {/* Líquido com Acréscimos */}
+                  <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-6 text-white shadow-lg">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-3 h-3 bg-white rounded-full"></div>
+                      <span className="text-xs font-medium text-purple-100 uppercase tracking-wide">Líquido Total</span>
+                    </div>
+                    <div className="text-2xl font-bold text-white mb-1">
+                      R$ {liquidoComAcrescimos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-sm text-purple-100">
+                      Com Acréscimos
                     </div>
                   </div>
                 </div>
