@@ -63,12 +63,15 @@ if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.e
 }
 
 // Health check
+// Health check simples
 app.get('/health', (req, res) => {
+  console.log('🔍 Health check chamado');
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV,
+    port: PORT,
   });
 });
 
@@ -94,10 +97,16 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Iniciar servidor
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📊 Ambiente: ${process.env.NODE_ENV}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
+  console.log(`🌐 Servidor iniciado com sucesso!`);
+  console.log(`📋 Variáveis de ambiente:`);
+  console.log(`   - NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`   - PORT: ${process.env.PORT}`);
+  console.log(`   - DATABASE_URL: ${process.env.DATABASE_URL ? 'Configurada' : 'NÃO CONFIGURADA'}`);
+  console.log(`   - JWT_SECRET: ${process.env.JWT_SECRET ? 'Configurada' : 'NÃO CONFIGURADA'}`);
 });
 
 export default app;
