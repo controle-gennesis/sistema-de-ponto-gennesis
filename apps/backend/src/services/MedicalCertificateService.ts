@@ -1,4 +1,4 @@
-import { PrismaClient, MedicalCertificateType, MedicalCertificateStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
 
 const prisma = new PrismaClient();
@@ -14,7 +14,7 @@ export class MedicalCertificateService {
     const where: any = {
       userId,
       status: {
-        in: [MedicalCertificateStatus.PENDING, MedicalCertificateStatus.APPROVED]
+        in: ['PENDING', 'APPROVED']
       },
       OR: [
         {
@@ -62,16 +62,16 @@ export class MedicalCertificateService {
     ] = await Promise.all([
       prisma.medicalCertificate.count({ where }),
       prisma.medicalCertificate.count({ 
-        where: { ...where, status: MedicalCertificateStatus.PENDING } 
+        where: { ...where, status: 'PENDING' } 
       }),
       prisma.medicalCertificate.count({ 
-        where: { ...where, status: MedicalCertificateStatus.APPROVED } 
+        where: { ...where, status: 'APPROVED' } 
       }),
       prisma.medicalCertificate.count({ 
-        where: { ...where, status: MedicalCertificateStatus.REJECTED } 
+        where: { ...where, status: 'REJECTED' } 
       }),
       prisma.medicalCertificate.count({ 
-        where: { ...where, status: MedicalCertificateStatus.CANCELLED } 
+        where: { ...where, status: 'CANCELLED' } 
       })
     ]);
 
@@ -126,19 +126,19 @@ export class MedicalCertificateService {
     const certificates = await this.getCertificatesByPeriod(startDate, endDate);
 
     // Agrupar por tipo
-    const byType = certificates.reduce((acc, cert) => {
+    const byType = certificates.reduce((acc: any, cert: any) => {
       acc[cert.type] = (acc[cert.type] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
     // Agrupar por status
-    const byStatus = certificates.reduce((acc, cert) => {
+    const byStatus = certificates.reduce((acc: any, cert: any) => {
       acc[cert.status] = (acc[cert.status] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
     // Agrupar por funcionário
-    const byEmployee = certificates.reduce((acc, cert) => {
+    const byEmployee = certificates.reduce((acc: any, cert: any) => {
       const employeeName = cert.user.name;
       if (!acc[employeeName]) {
         acc[employeeName] = {
@@ -156,7 +156,7 @@ export class MedicalCertificateService {
     }, {} as Record<string, any>);
 
     // Calcular totais
-    const totalDays = certificates.reduce((sum, cert) => sum + cert.days, 0);
+    const totalDays = certificates.reduce((sum: any, cert: any) => sum + cert.days, 0);
     const averageDays = certificates.length > 0 ? Math.round(totalDays / certificates.length * 100) / 100 : 0;
 
     return {
@@ -183,7 +183,7 @@ export class MedicalCertificateService {
         userId,
         startDate: { lte: date },
         endDate: { gte: date },
-        status: MedicalCertificateStatus.APPROVED
+        status: 'APPROVED'
       }
     });
 
@@ -200,7 +200,7 @@ export class MedicalCertificateService {
           lte: futureDate,
           gte: new Date()
         },
-        status: MedicalCertificateStatus.APPROVED
+        status: 'APPROVED'
       },
       include: {
         user: {
@@ -219,7 +219,7 @@ export class MedicalCertificateService {
 
     return await prisma.medicalCertificate.findMany({
       where: {
-        status: MedicalCertificateStatus.PENDING,
+        status: 'PENDING',
         submittedAt: {
           lte: oldDate
         }
@@ -263,7 +263,7 @@ export class MedicalCertificateService {
   async getAverageApprovalTime() {
     const approvedCertificates = await prisma.medicalCertificate.findMany({
       where: {
-        status: MedicalCertificateStatus.APPROVED,
+        status: 'APPROVED',
         approvedAt: { not: null }
       },
       select: {
@@ -276,7 +276,7 @@ export class MedicalCertificateService {
       return 0;
     }
 
-    const totalHours = approvedCertificates.reduce((sum, cert) => {
+    const totalHours = approvedCertificates.reduce((sum: any, cert: any) => {
       const submitted = moment(cert.submittedAt);
       const approved = moment(cert.approvedAt!);
       return sum + approved.diff(submitted, 'hours', true);

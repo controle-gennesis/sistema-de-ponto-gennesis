@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient, OvertimeType, OvertimeStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { OvertimeService } from '../services/OvertimeService';
@@ -29,7 +29,7 @@ export class OvertimeController {
         where: {
           userId,
           date: overtimeDate,
-          status: { in: [OvertimeStatus.PENDING, OvertimeStatus.APPROVED] }
+          status: { in: ['PENDING', 'APPROVED'] }
         }
       });
 
@@ -53,9 +53,9 @@ export class OvertimeController {
           employeeId: employee.id,
           date: overtimeDate,
           hours,
-          type: type || OvertimeType.REGULAR,
+          type: type || 'REGULAR',
           description: description || null,
-          status: OvertimeStatus.PENDING
+          status: 'PENDING'
         },
         include: {
           user: {
@@ -226,7 +226,7 @@ export class OvertimeController {
       const skip = (Number(page) - 1) * Number(limit);
 
       const where: any = {
-        status: OvertimeStatus.PENDING
+        status: 'PENDING'
       };
 
       if (department) {
@@ -281,14 +281,14 @@ export class OvertimeController {
         throw createError('Solicitação de horas extras não encontrada', 404);
       }
 
-      if (overtime.status !== OvertimeStatus.PENDING) {
+      if (overtime.status !== 'PENDING') {
         throw createError('Apenas solicitações pendentes podem ser aprovadas', 400);
       }
 
       const updatedOvertime = await prisma.overtime.update({
         where: { id },
         data: {
-          status: OvertimeStatus.APPROVED,
+          status: 'APPROVED',
           approvedBy: approverId,
           approvedAt: new Date()
         },
@@ -330,14 +330,14 @@ export class OvertimeController {
         throw createError('Solicitação de horas extras não encontrada', 404);
       }
 
-      if (overtime.status !== OvertimeStatus.PENDING) {
+      if (overtime.status !== 'PENDING') {
         throw createError('Apenas solicitações pendentes podem ser rejeitadas', 400);
       }
 
       const updatedOvertime = await prisma.overtime.update({
         where: { id },
         data: {
-          status: OvertimeStatus.REJECTED,
+          status: 'REJECTED',
           description: reason,
           approvedBy: approverId,
           approvedAt: new Date()

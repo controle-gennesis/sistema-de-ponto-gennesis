@@ -108,7 +108,7 @@ export class SalaryDiscountService {
       },
     });
 
-    return discounts.map(discount => ({
+    return discounts.map((discount: any) => ({
       ...discount,
       amount: Number(discount.amount)
     })) as SalaryDiscount[];

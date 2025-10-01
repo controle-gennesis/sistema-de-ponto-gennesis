@@ -45,7 +45,7 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
         },
         select: { id: true }
       });
-      userIds = usersInFilter.map(u => u.id);
+      userIds = usersInFilter.map((u: any) => u.id);
     }
 
     const [totalEmployees, presentUsers, allTodayRecords] = await Promise.all([
@@ -98,7 +98,7 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
 
     // Calcular funcionários pendentes (que não bateram os 4 pontos)
     const recordsByUser = new Map<string, Set<string>>();
-    allTodayRecords.forEach(record => {
+    allTodayRecords.forEach((record: any) => {
       if (!recordsByUser.has(record.userId)) {
         recordsByUser.set(record.userId, new Set());
       }
@@ -175,7 +175,7 @@ router.get('/', async (req: AuthRequest, res, next) => {
         },
         select: { id: true }
       });
-      userIds = usersInFilter.map(u => u.id);
+      userIds = usersInFilter.map((u: any) => u.id);
     }
 
     const [totalEmployees, presentUsers, allTodayRecords] = await Promise.all([
@@ -228,7 +228,7 @@ router.get('/', async (req: AuthRequest, res, next) => {
 
     // Calcular funcionários pendentes (que não bateram os 4 pontos)
     const recordsByUser = new Map<string, Set<string>>();
-    allTodayRecords.forEach(record => {
+    allTodayRecords.forEach((record: any) => {
       if (!recordsByUser.has(record.userId)) {
         recordsByUser.set(record.userId, new Set());
       }

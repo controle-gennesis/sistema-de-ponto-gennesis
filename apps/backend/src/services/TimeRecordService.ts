@@ -1,4 +1,4 @@
-import { PrismaClient, TimeRecordType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
 
 const prisma = new PrismaClient();
@@ -90,10 +90,10 @@ export class TimeRecordService {
     let breakHours = 0;
 
     // Verificar se tem entrada e saída
-    const entryRecord = records.find(r => r.type === TimeRecordType.ENTRY);
-    const exitRecord = records.find(r => r.type === TimeRecordType.EXIT);
-    const lunchStartRecord = records.find(r => r.type === TimeRecordType.LUNCH_START);
-    const lunchEndRecord = records.find(r => r.type === TimeRecordType.LUNCH_END);
+    const entryRecord = records.find((r: any) => r.type === 'ENTRY');
+    const exitRecord = records.find((r: any) => r.type === 'EXIT');
+    const lunchStartRecord = records.find((r: any) => r.type === 'LUNCH_START');
+    const lunchEndRecord = records.find((r: any) => r.type === 'LUNCH_END');
 
     if (!entryRecord) {
       issues.push('Entrada não registrada');
@@ -172,8 +172,8 @@ export class TimeRecordService {
     });
 
     const workHours = await this.calculateWorkHours(userId, date);
-    const isComplete = records.some(r => r.type === TimeRecordType.ENTRY) && 
-                      records.some(r => r.type === TimeRecordType.EXIT);
+    const isComplete = records.some((r: any) => r.type === 'ENTRY') && 
+                      records.some((r: any) => r.type === 'EXIT');
 
     return {
       date,
@@ -203,7 +203,7 @@ export class TimeRecordService {
 
     // Agrupar registros por dia
     const recordsByDay = new Map<string, any[]>();
-    records.forEach(record => {
+    records.forEach((record: any) => {
       const day = moment(record.timestamp).format('YYYY-MM-DD');
       if (!recordsByDay.has(day)) {
         recordsByDay.set(day, []);
@@ -234,7 +234,7 @@ export class TimeRecordService {
       const dayRecords = recordsByDay.get(dayStr) || [];
 
       // Verificar se há ausência justificada para este dia
-      const hasAbsenceJustified = dayRecords.some(r => r.type === TimeRecordType.ABSENCE_JUSTIFIED);
+      const hasAbsenceJustified = dayRecords.some((r: any) => r.type === 'ABSENCE_JUSTIFIED');
       
       if (dayRecords.length > 0 && !hasAbsenceJustified) {
         presentDays++;
@@ -244,7 +244,7 @@ export class TimeRecordService {
         overtimeHours += dayWorkHours.overtimeHours;
 
         // Verificar atrasos
-        const entryRecord = dayRecords.find(r => r.type === TimeRecordType.ENTRY);
+        const entryRecord = dayRecords.find((r: any) => r.type === 'ENTRY');
         if (entryRecord) {
           const entryTime = moment(entryRecord.timestamp);
           
@@ -260,7 +260,7 @@ export class TimeRecordService {
         }
 
         // Verificar saídas antecipadas
-        const exitRecord = dayRecords.find(r => r.type === TimeRecordType.EXIT);
+        const exitRecord = dayRecords.find((r: any) => r.type === 'EXIT');
         if (exitRecord) {
           const exitTime = moment(exitRecord.timestamp);
           
@@ -333,7 +333,7 @@ export class TimeRecordService {
         let effective = 0;
         
         // Verificar se há ausência justificada para este dia
-        const hasAbsenceJustified = dayRecords.some(r => r.type === TimeRecordType.ABSENCE_JUSTIFIED);
+        const hasAbsenceJustified = dayRecords.some((r: any) => r.type === 'ABSENCE_JUSTIFIED');
         
         if (dayRecords.length === 0) {
           // Ausência completa
@@ -342,12 +342,12 @@ export class TimeRecordService {
           // Ausência justificada - considerar como horas trabalhadas
           effective = expected;
         } else {
-          const entry = dayRecords.find(r => r.type === TimeRecordType.ENTRY);
-          const exit = [...dayRecords].reverse().find(r => r.type === TimeRecordType.EXIT);
+          const entry = dayRecords.find((r: any) => r.type === 'ENTRY');
+          const exit = [...dayRecords].reverse().find((r: any) => r.type === 'EXIT');
           if (entry && exit) {
             const total = moment(exit.timestamp).diff(moment(entry.timestamp), 'hours', true);
-            const lunchStart = dayRecords.find(r => r.type === TimeRecordType.LUNCH_START);
-            const lunchEnd = dayRecords.find(r => r.type === TimeRecordType.LUNCH_END);
+            const lunchStart = dayRecords.find((r: any) => r.type === 'LUNCH_START');
+            const lunchEnd = dayRecords.find((r: any) => r.type === 'LUNCH_END');
             let lunch = 0;
             if (lunchStart && lunchEnd) {
               lunch = moment(lunchEnd.timestamp).diff(moment(lunchStart.timestamp), 'hours', true);
@@ -419,7 +419,7 @@ export class TimeRecordService {
         });
 
         // Verificar se há ausência justificada para este dia
-        const hasAbsenceJustified = dayRecords.some(r => r.type === TimeRecordType.ABSENCE_JUSTIFIED);
+        const hasAbsenceJustified = dayRecords.some((r: any) => r.type === 'ABSENCE_JUSTIFIED');
         
         if (dayRecords.length === 0) {
           owed = expected;
@@ -430,10 +430,10 @@ export class TimeRecordService {
           owed = 0; // Não deve horas
           notes.push('Ausência Justificada');
         } else {
-          const entry = dayRecords.find(r => r.type === TimeRecordType.ENTRY);
-          const exit = [...dayRecords].reverse().find(r => r.type === TimeRecordType.EXIT);
-          const lunchStart = dayRecords.find(r => r.type === TimeRecordType.LUNCH_START);
-          const lunchEnd = dayRecords.find(r => r.type === TimeRecordType.LUNCH_END);
+          const entry = dayRecords.find((r: any) => r.type === 'ENTRY');
+          const exit = [...dayRecords].reverse().find((r: any) => r.type === 'EXIT');
+          const lunchStart = dayRecords.find((r: any) => r.type === 'LUNCH_START');
+          const lunchEnd = dayRecords.find((r: any) => r.type === 'LUNCH_END');
 
           if (!entry) notes.push('Entrada não registrada');
           if (!exit) notes.push('Saída não registrada');
@@ -529,7 +529,7 @@ export class TimeRecordService {
     // Agrupar por funcionário
     const employeeMap = new Map<string, any>();
     
-    records.forEach(record => {
+    records.forEach((record: any) => {
       const empId = record.employeeId;
       if (!employeeMap.has(empId)) {
         employeeMap.set(empId, {
@@ -582,7 +582,7 @@ export class TimeRecordService {
     const { startDate, endDate, department } = params;
 
     const where: any = {
-      type: TimeRecordType.ENTRY,
+      type: 'ENTRY',
       timestamp: {
         gte: startDate,
         lte: endDate
@@ -616,13 +616,13 @@ export class TimeRecordService {
     const [startHour, startMinute] = workStartTime.split(':').map(Number);
     
     // Filtrar apenas atrasos (após horário + tolerância)
-    const lateArrivals = entryRecords.filter(record => {
+    const lateArrivals = entryRecords.filter((record: any) => {
       const entryTime = moment(record.timestamp);
       const expectedTime = moment(entryTime).hour(startHour).minute(startMinute + toleranceMinutes).second(0);
       return entryTime.isAfter(expectedTime);
     });
 
-    const report = lateArrivals.map(record => {
+    const report = lateArrivals.map((record: any) => {
       const entryTime = moment(record.timestamp);
       const expectedTime = moment(entryTime).hour(startHour).minute(startMinute).second(0);
       const delayMinutes = entryTime.diff(expectedTime, 'minutes');

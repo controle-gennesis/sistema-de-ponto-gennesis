@@ -28,7 +28,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
 
     // Buscar a última foto de cada funcionário
     const employeesWithPhotos = await Promise.all(
-      employees.map(async (employee) => {
+      employees.map(async (employee: any) => {
         const lastTimeRecord = await prisma.timeRecord.findFirst({
           where: {
             userId: employee.userId,
@@ -149,7 +149,7 @@ export const createEmployee = async (req: Request, res: Response) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Criar usuário e funcionário em uma transação
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: any) => {
       const user = await tx.user.create({
         data: {
           name,
@@ -281,7 +281,7 @@ export const updateEmployee = async (req: Request, res: Response) => {
     }
 
     // Atualizar em uma transação
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: any) => {
       await tx.user.update({
         where: { id: employee.userId },
         data: {
@@ -351,7 +351,7 @@ export const deleteEmployee = async (req: Request, res: Response) => {
     }
 
     // Deletar em uma transação (cascade delete)
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       await tx.employee.delete({
         where: { id }
       });
@@ -422,7 +422,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
     });
     
     // Filtrar apenas os que fazem aniversário no mês/ano especificado
-    const birthdayEmployees = employees.filter(employee => {
+    const birthdayEmployees = employees.filter((employee: any) => {
       if (!employee.birthDate) return false;
       
       const birthDate = new Date(employee.birthDate);
@@ -447,7 +447,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
       
       // Para meses futuros, passados ou quando showAll=true, mostrar todos os aniversários do mês
       return true;
-    }).map(employee => {
+    }).map((employee: any) => {
       const birthDate = new Date(employee.birthDate!);
       const birthDay = birthDate.getDate();
       
@@ -481,7 +481,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
         daysUntilBirthday,
         isTodayBirthday: daysUntilBirthday === 0
       };
-    }).sort((a, b) => a.birthDay - b.birthDay); // Ordenar por dia do mês
+    }).sort((a: any, b: any) => a.birthDay - b.birthDay); // Ordenar por dia do mês
     
     // Estatísticas
     const stats = {
@@ -491,7 +491,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
     };
     
     // Contar por departamento
-    birthdayEmployees.forEach(employee => {
+    birthdayEmployees.forEach((employee: any) => {
       stats.byDepartment[employee.department] = (stats.byDepartment[employee.department] || 0) + 1;
     });
     

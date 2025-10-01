@@ -1,4 +1,4 @@
-import { PrismaClient, VacationStatus, VacationType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
 
 const prisma = new PrismaClient();
@@ -18,7 +18,7 @@ export interface VacationBalance {
 export interface VacationRequest {
   startDate: Date;
   endDate: Date;
-  type: VacationType;
+  type: string;
   reason?: string;
   fraction?: number;
 }
@@ -96,19 +96,19 @@ export class VacationService {
     const usedVacations = await prisma.vacation.findMany({
       where: {
         userId,
-        status: VacationStatus.APPROVED,
-        type: VacationType.ANNUAL
+        status: 'APPROVED',
+        type: 'ANNUAL'
       }
     });
 
-    const usedDays = usedVacations.reduce((total, vacation) => total + vacation.days, 0);
+    const usedDays = usedVacations.reduce((total: any, vacation: any) => total + vacation.days, 0);
 
     // Buscar férias pendentes
     const pendingVacations = await prisma.vacation.findMany({
       where: {
         userId,
-        status: VacationStatus.PENDING,
-        type: VacationType.ANNUAL
+        status: 'PENDING',
+        type: 'ANNUAL'
       }
     });
 
@@ -273,16 +273,16 @@ export class VacationService {
 
     // Calcular estatísticas
     const totalVacations = vacations.length;
-    const approvedVacations = vacations.filter(v => v.status === VacationStatus.APPROVED).length;
-    const pendingVacations = vacations.filter(v => v.status === VacationStatus.PENDING).length;
-    const rejectedVacations = vacations.filter(v => v.status === VacationStatus.REJECTED).length;
+    const approvedVacations = vacations.filter((v: any) => v.status === 'APPROVED').length;
+    const pendingVacations = vacations.filter((v: any) => v.status === 'PENDING').length;
+    const rejectedVacations = vacations.filter((v: any) => v.status === 'REJECTED').length;
 
     const totalDaysUsed = vacations
-      .filter(v => v.status === VacationStatus.APPROVED)
+      .filter((v: any) => v.status === 'APPROVED')
       .reduce((total, v) => total + v.days, 0);
 
     const totalDaysPending = vacations
-      .filter(v => v.status === VacationStatus.PENDING)
+      .filter((v: any) => v.status === 'PENDING')
       .reduce((total, v) => total + v.days, 0);
 
     const averageDaysPerEmployee = totalEmployees > 0 ? totalDaysUsed / totalEmployees : 0;
@@ -295,7 +295,7 @@ export class VacationService {
       totalDays: number;
     }>();
 
-    vacations.forEach(vacation => {
+    vacations.forEach((vacation: any) => {
       const dept = vacation.employee.department;
       if (!byDepartment.has(dept)) {
         byDepartment.set(dept, {
@@ -318,7 +318,7 @@ export class VacationService {
       _count: { department: true }
     });
 
-    employeesByDept.forEach(emp => {
+    employeesByDept.forEach((emp: any) => {
       if (byDepartment.has(emp.department)) {
         byDepartment.get(emp.department)!.totalEmployees = emp._count.department;
       }
@@ -331,7 +331,7 @@ export class VacationService {
       totalDays: number;
     }>();
 
-    vacations.forEach(vacation => {
+    vacations.forEach((vacation: any) => {
       const month = moment(vacation.startDate).format('YYYY-MM');
       if (!byMonth.has(month)) {
         byMonth.set(month, {
@@ -498,10 +498,10 @@ export class VacationService {
       where: {
         userId,
         type: {
-          in: [VacationType.FRACTIONED_1, VacationType.FRACTIONED_2, VacationType.FRACTIONED_3]
+          in: ['FRACTIONED_1', 'FRACTIONED_2', 'FRACTIONED_3']
         },
         status: {
-          in: [VacationStatus.PENDING, VacationStatus.APPROVED, VacationStatus.IN_PROGRESS]
+          in: ['PENDING', 'APPROVED', 'IN_PROGRESS']
         }
       }
     });
@@ -539,11 +539,11 @@ export class VacationService {
   /**
    * Obtém o número do fracionamento baseado no tipo
    */
-  private getFractionType(type: VacationType): number | null {
+  private getFractionType(type: string): number | null {
     switch (type) {
-      case VacationType.FRACTIONED_1: return 1;
-      case VacationType.FRACTIONED_2: return 2;
-      case VacationType.FRACTIONED_3: return 3;
+      case 'FRACTIONED_1': return 1;
+      case 'FRACTIONED_2': return 2;
+      case 'FRACTIONED_3': return 3;
       default: return null;
     }
   }
@@ -560,14 +560,14 @@ export class VacationService {
       throw new Error('Solicitação de férias não encontrada');
     }
 
-    if (vacation.status !== VacationStatus.APPROVED) {
+    if (vacation.status !== 'APPROVED') {
       throw new Error('Apenas férias aprovadas podem ter aviso enviado');
     }
 
     await prisma.vacation.update({
       where: { id: vacationId },
       data: {
-        status: VacationStatus.NOTICE_SENT,
+        status: 'NOTICE_SENT',
         noticeSentAt: new Date()
       }
     });
@@ -585,14 +585,14 @@ export class VacationService {
       throw new Error('Solicitação de férias não encontrada');
     }
 
-    if (vacation.status !== VacationStatus.NOTICE_SENT) {
+    if (vacation.status !== 'NOTICE_SENT') {
       throw new Error('Aviso deve ter sido enviado primeiro');
     }
 
     await prisma.vacation.update({
       where: { id: vacationId },
       data: {
-        status: VacationStatus.NOTICE_CONFIRMED,
+        status: 'NOTICE_CONFIRMED',
         noticeReceivedAt: new Date()
       }
     });
@@ -606,7 +606,7 @@ export class VacationService {
     const expiredVacations = await this.getExpiringVacations(0); // Já vencidas
     const upcomingExpirations = (await this.getExpiringVacations(30)).length;
     const pendingApprovals = await prisma.vacation.count({
-      where: { status: VacationStatus.PENDING }
+      where: { status: 'PENDING' }
     });
 
     const complianceRate = totalEmployees > 0 ? 

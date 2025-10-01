@@ -85,11 +85,11 @@ export class PayrollService {
       }
     });
     
-    const totalVA = timeRecords.reduce((sum, record) => 
+    const totalVA = timeRecords.reduce((sum: any, record: any) => 
       sum + (record.foodVoucherAmount || 0), 0
     );
     
-    const totalVT = timeRecords.reduce((sum, record) => 
+    const totalVT = timeRecords.reduce((sum: any, record: any) => 
       sum + (record.transportVoucherAmount || 0), 0
     );
     
@@ -173,11 +173,11 @@ export class PayrollService {
       }
     });
 
-    const totalFixed = fixedAdjustments.reduce((sum, adjustment) => 
+    const totalFixed = fixedAdjustments.reduce((sum: any, adjustment: any) => 
       sum + Number(adjustment.amount), 0
     );
 
-    const totalNonFixed = nonFixedAdjustments.reduce((sum, adjustment) => 
+    const totalNonFixed = nonFixedAdjustments.reduce((sum: any, adjustment: any) => 
       sum + Number(adjustment.amount), 0
     );
     
@@ -201,7 +201,7 @@ export class PayrollService {
       }
     });
     
-    return discounts.reduce((sum, discount) => 
+    return discounts.reduce((sum: any, discount: any) => 
       sum + Number(discount.amount), 0
     );
   }
@@ -321,7 +321,7 @@ export class PayrollService {
 
     // Calcular totais para cada funcionário e filtrar apenas os ativos no período
     const employeesWithTotals = await Promise.all(
-      employees.map(async (employee) => {
+      employees.map(async (employee: any) => {
         // Verificar se o funcionário estava ativo no período
         const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
         

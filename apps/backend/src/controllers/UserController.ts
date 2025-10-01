@@ -3,7 +3,6 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { UserRole } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -162,14 +161,14 @@ export class UserController {
       const hashedPassword = await bcrypt.hash(password, 12);
 
       // Criar usuário e funcionário em transação
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx: any) => {
         const user = await tx.user.create({
           data: {
             email,
             password: hashedPassword,
             name,
             cpf,
-            role: role || UserRole.EMPLOYEE,
+            role: role || 'EMPLOYEE',
           }
         });
 
@@ -285,7 +284,7 @@ export class UserController {
         }
       }
 
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx: any) => {
         // Atualizar usuário
         const user = await tx.user.update({
           where: { id },

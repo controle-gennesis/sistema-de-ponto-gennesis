@@ -1,4 +1,4 @@
-import { PrismaClient, OvertimeStatus, OvertimeType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
 
 const prisma = new PrismaClient();
@@ -33,7 +33,7 @@ export interface OvertimeSummary {
     totalHours: number;
   }>;
   byType: Array<{
-    type: OvertimeType;
+    type: string;
     count: number;
     totalHours: number;
   }>;
@@ -52,17 +52,17 @@ export class OvertimeService {
     const approvedOvertime = await prisma.overtime.findMany({
       where: {
         userId,
-        status: OvertimeStatus.APPROVED
+        status: 'APPROVED'
       }
     });
 
-    const totalHours = approvedOvertime.reduce((total, overtime) => total + Number(overtime.hours), 0);
+    const totalHours = approvedOvertime.reduce((total: any, overtime: any) => total + Number(overtime.hours), 0);
 
     // Buscar horas extras pendentes
     const pendingOvertime = await prisma.overtime.findMany({
       where: {
         userId,
-        status: OvertimeStatus.PENDING
+        status: 'PENDING'
       }
     });
 
@@ -97,7 +97,7 @@ export class OvertimeService {
    */
   calculateOvertimeValue(
     hours: number,
-    type: OvertimeType,
+    type: string,
     baseSalary: number,
     workDaysPerMonth: number = 22
   ): number {
@@ -105,16 +105,16 @@ export class OvertimeService {
 
     let multiplier = 1;
     switch (type) {
-      case OvertimeType.REGULAR:
+      case 'REGULAR':
         multiplier = 1.5; // 50% adicional
         break;
-      case OvertimeType.WEEKEND:
+      case 'WEEKEND':
         multiplier = 2.0; // 100% adicional
         break;
-      case OvertimeType.HOLIDAY:
+      case 'HOLIDAY':
         multiplier = 2.0; // 100% adicional
         break;
-      case OvertimeType.NIGHT:
+      case 'NIGHT':
         multiplier = 1.5; // 50% adicional + adicional noturno
         break;
     }
@@ -135,7 +135,7 @@ export class OvertimeService {
       where: {
         userId,
         date,
-        status: { in: [OvertimeStatus.PENDING, OvertimeStatus.APPROVED] }
+        status: { in: ['PENDING', 'APPROVED'] }
       }
     });
 
@@ -223,17 +223,17 @@ export class OvertimeService {
 
     // Calcular estatísticas
     const totalOvertime = overtime.length;
-    const approvedOvertime = overtime.filter(o => o.status === OvertimeStatus.APPROVED).length;
-    const pendingOvertime = overtime.filter(o => o.status === OvertimeStatus.PENDING).length;
-    const rejectedOvertime = overtime.filter(o => o.status === OvertimeStatus.REJECTED).length;
+    const approvedOvertime = overtime.filter((o: any) => o.status === 'APPROVED').length;
+    const pendingOvertime = overtime.filter((o: any) => o.status === 'PENDING').length;
+    const rejectedOvertime = overtime.filter((o: any) => o.status === 'REJECTED').length;
 
     const totalHours = overtime
-      .filter(o => o.status === OvertimeStatus.APPROVED)
-      .reduce((total, o) => total + Number(o.hours), 0);
+      .filter((o: any) => o.status === 'APPROVED')
+      .reduce((total: any, o: any) => total + Number(o.hours), 0);
 
     const totalHoursPending = overtime
-      .filter(o => o.status === OvertimeStatus.PENDING)
-      .reduce((total, o) => total + Number(o.hours), 0);
+      .filter((o: any) => o.status === 'PENDING')
+      .reduce((total: any, o: any) => total + Number(o.hours), 0);
 
     const averageHoursPerEmployee = totalEmployees > 0 ? totalHours / totalEmployees : 0;
 
@@ -245,7 +245,7 @@ export class OvertimeService {
       totalHours: number;
     }>();
 
-    overtime.forEach(ot => {
+    overtime.forEach((ot: any) => {
       const dept = ot.employee.department;
       if (!byDepartment.has(dept)) {
         byDepartment.set(dept, {
@@ -281,7 +281,7 @@ export class OvertimeService {
       totalHours: number;
     }>();
 
-    overtime.forEach(ot => {
+    overtime.forEach((ot: any) => {
       const month = moment(ot.date).format('YYYY-MM');
       if (!byMonth.has(month)) {
         byMonth.set(month, {
@@ -297,13 +297,13 @@ export class OvertimeService {
     });
 
     // Agrupar por tipo
-    const byType = new Map<OvertimeType, {
-      type: OvertimeType;
+    const byType = new Map<string, {
+      type: string;
       count: number;
       totalHours: number;
     }>();
 
-    overtime.forEach(ot => {
+    overtime.forEach((ot: any) => {
       if (!byType.has(ot.type)) {
         byType.set(ot.type, {
           type: ot.type,
@@ -354,7 +354,7 @@ export class OvertimeService {
           gte: startDate,
           lte: endDate
         },
-        status: OvertimeStatus.APPROVED
+        status: 'APPROVED'
       }
     });
 
@@ -364,21 +364,21 @@ export class OvertimeService {
     let holidayHours = 0;
     let nightHours = 0;
 
-    overtime.forEach(ot => {
+    overtime.forEach((ot: any) => {
       const hours = Number(ot.hours);
       totalHours += hours;
 
       switch (ot.type) {
-        case OvertimeType.REGULAR:
+        case 'REGULAR':
           regularHours += hours;
           break;
-        case OvertimeType.WEEKEND:
+        case 'WEEKEND':
           weekendHours += hours;
           break;
-        case OvertimeType.HOLIDAY:
+        case 'HOLIDAY':
           holidayHours += hours;
           break;
-        case OvertimeType.NIGHT:
+        case 'NIGHT':
           nightHours += hours;
           break;
       }
@@ -413,7 +413,7 @@ export class OvertimeService {
 
     const overtime = await prisma.overtime.findMany({
       where: {
-        status: OvertimeStatus.APPROVED,
+        status: 'APPROVED',
         date: {
           gte: sixMonthsAgo,
           lte: expirationDate
@@ -429,7 +429,7 @@ export class OvertimeService {
       }
     });
 
-    return overtime.map(ot => ({
+    return overtime.map((ot: any) => ({
       userId: ot.userId,
       employeeName: ot.user.name,
       department: ot.employee.department,

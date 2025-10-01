@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient, VacationType, VacationStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { VacationService, VacationRequest } from '../services/VacationService';
@@ -17,7 +17,7 @@ export class VacationController {
       const vacationRequest: VacationRequest = {
         startDate: new Date(startDate),
         endDate: new Date(endDate),
-        type: type || VacationType.ANNUAL,
+        type: type || 'ANNUAL',
         reason,
         fraction
       };
@@ -53,9 +53,9 @@ export class VacationController {
       let vacationType = vacationRequest.type;
       if (fraction) {
         switch (fraction) {
-          case 1: vacationType = VacationType.FRACTIONED_1; break;
-          case 2: vacationType = VacationType.FRACTIONED_2; break;
-          case 3: vacationType = VacationType.FRACTIONED_3; break;
+          case 1: vacationType = 'FRACTIONED_1'; break;
+          case 2: vacationType = 'FRACTIONED_2'; break;
+          case 3: vacationType = 'FRACTIONED_3'; break;
         }
       }
 
@@ -67,8 +67,8 @@ export class VacationController {
           startDate: vacationRequest.startDate,
           endDate: vacationRequest.endDate,
           days,
-          type: vacationType,
-          status: VacationStatus.PENDING,
+          type: vacationType as any,
+          status: 'PENDING',
           fraction: fraction || null,
           aquisitiveStart: balance.aquisitiveStart || new Date(),
           aquisitiveEnd: balance.aquisitiveEnd || new Date(),
@@ -178,7 +178,7 @@ export class VacationController {
         throw createError('Solicitação de férias não encontrada', 404);
       }
 
-      if (vacation.status !== VacationStatus.PENDING) {
+      if (vacation.status !== 'PENDING') {
         throw createError('Apenas solicitações pendentes podem ser canceladas', 400);
       }
 
@@ -189,7 +189,7 @@ export class VacationController {
       const updatedVacation = await prisma.vacation.update({
         where: { id },
         data: {
-          status: VacationStatus.CANCELLED
+          status: 'CANCELLED'
         },
         include: {
           user: {
@@ -276,7 +276,7 @@ export class VacationController {
       const skip = (Number(page) - 1) * Number(limit);
 
       const where: any = {
-        status: VacationStatus.PENDING
+        status: 'PENDING'
       };
 
       if (department) {
@@ -331,14 +331,14 @@ export class VacationController {
         throw createError('Solicitação de férias não encontrada', 404);
       }
 
-      if (vacation.status !== VacationStatus.PENDING) {
+      if (vacation.status !== 'PENDING') {
         throw createError('Apenas solicitações pendentes podem ser aprovadas', 400);
       }
 
       const updatedVacation = await prisma.vacation.update({
         where: { id },
         data: {
-          status: VacationStatus.APPROVED,
+          status: 'APPROVED',
           approvedBy: approverId,
           approvedAt: new Date()
         },
@@ -380,14 +380,14 @@ export class VacationController {
         throw createError('Solicitação de férias não encontrada', 404);
       }
 
-      if (vacation.status !== VacationStatus.PENDING) {
+      if (vacation.status !== 'PENDING') {
         throw createError('Apenas solicitações pendentes podem ser rejeitadas', 400);
       }
 
       const updatedVacation = await prisma.vacation.update({
         where: { id },
         data: {
-          status: VacationStatus.REJECTED,
+          status: 'REJECTED',
           reason: reason,
           approvedBy: approverId,
           approvedAt: new Date()
@@ -509,7 +509,7 @@ export class VacationController {
       const vacationRequest: VacationRequest = {
         startDate: new Date(startDate),
         endDate: new Date(endDate),
-        type: type || VacationType.ANNUAL,
+        type: type || 'ANNUAL',
         fraction
       };
 

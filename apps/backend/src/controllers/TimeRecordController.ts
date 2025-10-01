@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient, TimeRecordType, MedicalCertificateStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { TimeRecordService } from '../services/TimeRecordService';
@@ -55,7 +55,7 @@ export class TimeRecordController {
       }
 
       // Validar tipo de registro
-      if (!Object.values(TimeRecordType).includes(type)) {
+      if (!Object.values(['ENTRY', 'EXIT', 'LUNCH_START', 'LUNCH_END', 'BREAK_START', 'BREAK_END', 'ABSENCE_JUSTIFIED']).includes(type)) {
         throw createError('Tipo de registro inválido', 400);
       }
 
@@ -120,10 +120,10 @@ export class TimeRecordController {
       });
 
       // Verificar sequência obrigatória
-      const hasEntry = todayRecords.some(r => r.type === TimeRecordType.ENTRY);
-      const hasLunchStart = todayRecords.some(r => r.type === TimeRecordType.LUNCH_START);
-      const hasLunchEnd = todayRecords.some(r => r.type === TimeRecordType.LUNCH_END);
-      const hasExit = todayRecords.some(r => r.type === TimeRecordType.EXIT);
+      const hasEntry = todayRecords.some((r: any) => r.type === 'ENTRY');
+      const hasLunchStart = todayRecords.some((r: any) => r.type === 'LUNCH_START');
+      const hasLunchEnd = todayRecords.some((r: any) => r.type === 'LUNCH_END');
+      const hasExit = todayRecords.some((r: any) => r.type === 'EXIT');
 
       // Verificar se todos os 4 pontos já foram batidos
       const allPointsCompleted = hasEntry && hasLunchStart && hasLunchEnd && hasExit;
@@ -133,15 +133,15 @@ export class TimeRecordController {
       }
 
       // Validações de sequência
-      if (type === TimeRecordType.LUNCH_START && !hasEntry) {
+      if (type === 'LUNCH_START' && !hasEntry) {
         throw createError('Você precisa bater o ponto de entrada antes de bater o ponto do almoço', 400);
       }
       
-      if (type === TimeRecordType.LUNCH_END && !hasLunchStart) {
+      if (type === 'LUNCH_END' && !hasLunchStart) {
         throw createError('Você precisa bater o ponto do almoço antes de bater o ponto do retorno', 400);
       }
       
-      if (type === TimeRecordType.EXIT && !hasLunchEnd) {
+      if (type === 'EXIT' && !hasLunchEnd) {
         throw createError('Você precisa bater o ponto do retorno antes de bater o ponto de saída', 400);
       }
 
@@ -155,12 +155,12 @@ export class TimeRecordController {
       let foodVoucherAmount = 0;
       let transportVoucherAmount = 0;
       
-      if (type === TimeRecordType.ENTRY) {
+      if (type === 'ENTRY') {
         // Verificar se já existe registro de ENTRY hoje
         const existingEntry = await prisma.timeRecord.findFirst({
           where: {
             userId,
-            type: TimeRecordType.ENTRY,
+            type: 'ENTRY',
             timestamp: {
               gte: today,
               lt: tomorrow
@@ -210,7 +210,7 @@ export class TimeRecordController {
 
       // Calcular horas trabalhadas se for saída
       let workHours = null;
-      if (type === TimeRecordType.EXIT) {
+      if (type === 'EXIT') {
         workHours = await timeRecordService.calculateWorkHours(userId, new Date());
       }
 
@@ -297,14 +297,14 @@ export class TimeRecordController {
       });
 
       // Buscar detalhes do atestado médico para registros de ausência justificada
-      const recordsWithDetails = await Promise.all(records.map(async (record) => {
-        if (record.type === TimeRecordType.ABSENCE_JUSTIFIED) {
+      const recordsWithDetails = await Promise.all(records.map(async (record: any) => {
+        if (record.type === 'ABSENCE_JUSTIFIED') {
           const recordDate = moment(record.timestamp).startOf('day').toDate();
 
           const medicalCertificate = await prisma.medicalCertificate.findFirst({
             where: {
               userId: record.userId,
-              status: MedicalCertificateStatus.APPROVED,
+              status: 'APPROVED',
               startDate: {
                 lte: recordDate,
               },
@@ -374,14 +374,14 @@ export class TimeRecordController {
       });
 
       // Buscar detalhes do atestado médico para registros de ausência justificada
-      const recordsWithDetails = await Promise.all(records.map(async (record) => {
-        if (record.type === TimeRecordType.ABSENCE_JUSTIFIED) {
+      const recordsWithDetails = await Promise.all(records.map(async (record: any) => {
+        if (record.type === 'ABSENCE_JUSTIFIED') {
           const recordDate = moment(record.timestamp).startOf('day').toDate();
 
           const medicalCertificate = await prisma.medicalCertificate.findFirst({
             where: {
               userId: record.userId,
-              status: MedicalCertificateStatus.APPROVED,
+              status: 'APPROVED',
               startDate: {
                 lte: recordDate,
               },
@@ -489,14 +489,14 @@ export class TimeRecordController {
       ]);
 
       // Buscar detalhes do atestado médico para registros de ausência justificada
-      const recordsWithDetails = await Promise.all(records.map(async (record) => {
-        if (record.type === TimeRecordType.ABSENCE_JUSTIFIED) {
+      const recordsWithDetails = await Promise.all(records.map(async (record: any) => {
+        if (record.type === 'ABSENCE_JUSTIFIED') {
           const recordDate = moment(record.timestamp).startOf('day').toDate();
 
           const medicalCertificate = await prisma.medicalCertificate.findFirst({
             where: {
               userId: record.userId,
-              status: MedicalCertificateStatus.APPROVED,
+              status: 'APPROVED',
               startDate: {
                 lte: recordDate,
               },
@@ -592,7 +592,7 @@ export class TimeRecordController {
       }
 
       // Validar tipo se fornecido
-      if (type && !Object.values(TimeRecordType).includes(type)) {
+      if (type && !Object.values(['ENTRY', 'EXIT', 'LUNCH_START', 'LUNCH_END', 'BREAK_START', 'BREAK_END', 'ABSENCE_JUSTIFIED']).includes(type)) {
         throw createError('Tipo de registro inválido', 400);
       }
 

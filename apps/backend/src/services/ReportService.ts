@@ -53,7 +53,7 @@ export class ReportService {
     // Agrupar por funcionário
     const employeeMap = new Map<string, any>();
 
-    records.forEach(record => {
+    records.forEach((record: any) => {
       const empId = record.employeeId;
       if (!employeeMap.has(empId)) {
         employeeMap.set(empId, {
@@ -151,7 +151,7 @@ export class ReportService {
     // Agrupar por funcionário
     const employeeMap = new Map<string, any>();
 
-    overtime.forEach(ot => {
+    overtime.forEach((ot: any) => {
       const empId = ot.employeeId;
       if (!employeeMap.has(empId)) {
         employeeMap.set(empId, {
@@ -245,7 +245,7 @@ export class ReportService {
     // Agrupar por funcionário
     const employeeMap = new Map<string, any>();
 
-    vacations.forEach(vacation => {
+    vacations.forEach((vacation: any) => {
       const empId = vacation.employeeId;
       if (!employeeMap.has(empId)) {
         employeeMap.set(empId, {
@@ -439,7 +439,7 @@ export class ReportService {
 
   private calculatePresentDays(records: any[]): number {
     const days = new Set();
-    records.forEach(record => {
+    records.forEach((record: any) => {
       const day = moment(record.timestamp).format('YYYY-MM-DD');
       days.add(day);
     });
@@ -453,7 +453,7 @@ export class ReportService {
     const toleranceMinutes = companySettings?.toleranceMinutes || 10;
     const [startHour, startMinute] = workStartTime.split(':').map(Number);
     
-    return records.filter(record => {
+    return records.filter((record: any) => {
       if (record.type !== 'ENTRY') return false;
       const entryTime = moment(record.timestamp);
       const expectedTime = moment(entryTime).hour(startHour).minute(startMinute + toleranceMinutes).second(0);
@@ -462,7 +462,7 @@ export class ReportService {
   }
 
   private calculateEarlyDepartures(records: any[]): number {
-    return records.filter(record => {
+    return records.filter((record: any) => {
       if (record.type !== 'EXIT') return false;
       const exitTime = moment(record.timestamp);
       const expectedTime = moment(exitTime).hour(17).minute(0).second(0);

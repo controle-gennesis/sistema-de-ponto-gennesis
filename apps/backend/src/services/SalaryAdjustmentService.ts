@@ -1,10 +1,10 @@
-import { PrismaClient, AdjustmentType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 export interface CreateAdjustmentData {
   employeeId: string;
-  type: AdjustmentType;
+  type: string;
   description: string;
   amount: number;
   isFixed?: boolean;
@@ -12,7 +12,7 @@ export interface CreateAdjustmentData {
 }
 
 export interface UpdateAdjustmentData {
-  type?: AdjustmentType;
+  type?: string;
   description?: string;
   amount?: number;
   isFixed?: boolean;
@@ -21,7 +21,7 @@ export interface UpdateAdjustmentData {
 export interface SalaryAdjustment {
   id: string;
   employeeId: string;
-  type: AdjustmentType;
+  type: string;
   description: string;
   amount: number;
   isFixed: boolean;
@@ -70,7 +70,7 @@ export class SalaryAdjustmentService {
     const adjustment = await prisma.salaryAdjustment.create({
       data: {
         employeeId: data.employeeId,
-        type: data.type,
+        type: data.type as any,
         description: data.description,
         amount: data.amount,
         isFixed: data.isFixed || false,
@@ -139,7 +139,7 @@ export class SalaryAdjustmentService {
       }
     });
 
-    return adjustments.map(adjustment => ({
+    return adjustments.map((adjustment: any) => ({
       ...adjustment,
       amount: Number(adjustment.amount)
     })) as SalaryAdjustment[];
@@ -163,6 +163,7 @@ export class SalaryAdjustmentService {
       where: { id },
       data: {
         ...data,
+        type: data.type as any,
         updatedAt: new Date()
       },
       include: {

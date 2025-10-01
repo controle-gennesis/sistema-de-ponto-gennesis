@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient, ReportType, ReportStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { ReportService } from '../services/ReportService';
@@ -92,16 +92,16 @@ export class ReportController {
       // Gerar relatório baseado no tipo
       let reportData;
       switch (type) {
-        case ReportType.ATTENDANCE:
+        case 'ATTENDANCE':
           reportData = await reportService.generateAttendanceReport(period, filters);
           break;
-        case ReportType.OVERTIME:
+        case 'OVERTIME':
           reportData = await reportService.generateOvertimeReport(period, filters);
           break;
-        case ReportType.VACATION:
+        case 'VACATION':
           reportData = await reportService.generateVacationReport(period, filters);
           break;
-        case ReportType.PRODUCTIVITY:
+        case 'PRODUCTIVITY':
           reportData = await reportService.generateProductivityReport(period, filters);
           break;
         default:
@@ -117,7 +117,7 @@ export class ReportController {
           description: description || null,
           data: JSON.parse(JSON.stringify(reportData)),
           period,
-          status: ReportStatus.GENERATED
+          status: 'GENERATED'
         },
         include: {
           user: {

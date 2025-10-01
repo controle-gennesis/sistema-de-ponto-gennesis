@@ -101,7 +101,7 @@ export class BankHoursController {
 
       // Calcular banco de horas para cada funcionário
       const bankHoursData = await Promise.all(
-        employees.map(async (employee) => {
+        employees.map(async (employee: any) => {
           // Determinar data de início: data de admissão ou data inicial do filtro (o que for maior)
           const hireDate = new Date(employee.hireDate);
           let actualStartDate = hireDate > startDateFilter ? hireDate : startDateFilter;

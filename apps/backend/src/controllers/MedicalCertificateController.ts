@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient, MedicalCertificateType, MedicalCertificateStatus, TimeRecordType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { MedicalCertificateService } from '../services/MedicalCertificateService';
@@ -22,7 +22,7 @@ export class MedicalCertificateController {
       }
 
       // Validar tipo de atestado
-      if (!Object.values(MedicalCertificateType).includes(type)) {
+      if (!Object.values(['MEDICAL', 'DENTAL', 'PREVENTIVE', 'ACCIDENT', 'COVID', 'MATERNITY', 'PATERNITY', 'OTHER']).includes(type)) {
         throw createError('Tipo de atestado inválido', 400);
       }
 
@@ -77,7 +77,7 @@ export class MedicalCertificateController {
           fileName,
           fileUrl,
           fileKey,
-          status: MedicalCertificateStatus.PENDING,
+          status: 'PENDING',
           submittedAt: new Date()
         },
         include: {
@@ -108,7 +108,7 @@ export class MedicalCertificateController {
 
       const where: any = { userId };
 
-      if (status && Object.values(MedicalCertificateStatus).includes(status as MedicalCertificateStatus)) {
+      if (status && Object.values(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).includes(status as any)) {
         where.status = status;
       }
 
@@ -158,7 +158,7 @@ export class MedicalCertificateController {
 
       const where: any = {};
 
-      if (status && Object.values(MedicalCertificateStatus).includes(status as MedicalCertificateStatus)) {
+      if (status && Object.values(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).includes(status as any)) {
         where.status = status;
       }
 
@@ -166,7 +166,7 @@ export class MedicalCertificateController {
         where.userId = userId;
       }
 
-      if (type && Object.values(MedicalCertificateType).includes(type as MedicalCertificateType)) {
+      if (type && Object.values(['MEDICAL', 'DENTAL', 'PREVENTIVE', 'ACCIDENT', 'COVID', 'MATERNITY', 'PATERNITY', 'OTHER']).includes(type as any)) {
         where.type = type;
       }
 
@@ -284,7 +284,7 @@ export class MedicalCertificateController {
         throw createError('Atestado não encontrado', 404);
       }
 
-      if (certificate.status !== MedicalCertificateStatus.PENDING) {
+      if (certificate.status !== 'PENDING') {
         throw createError('Este atestado já foi processado', 400);
       }
 
@@ -294,7 +294,7 @@ export class MedicalCertificateController {
         const updatedCert = await tx.medicalCertificate.update({
           where: { id },
           data: {
-            status: MedicalCertificateStatus.APPROVED,
+            status: 'APPROVED',
             approvedBy,
             approvedAt: new Date()
           }
@@ -314,7 +314,7 @@ export class MedicalCertificateController {
             where: {
               userId: certificate.userId,
               employeeId: certificate.employeeId,
-              type: TimeRecordType.ABSENCE_JUSTIFIED,
+              type: 'ABSENCE_JUSTIFIED',
               timestamp: {
                 gte: dayStart,
                 lte: dayEnd
@@ -328,7 +328,7 @@ export class MedicalCertificateController {
               data: {
                 userId: certificate.userId,
                 employeeId: certificate.employeeId,
-                type: TimeRecordType.ABSENCE_JUSTIFIED,
+                type: 'ABSENCE_JUSTIFIED',
                 timestamp: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 8, 0, 0), // 8h da manhã
                 isValid: true,
                 reason: `Ausência justificada por atestado médico - ${certificate.type.toLowerCase()}`,
@@ -387,14 +387,14 @@ export class MedicalCertificateController {
         throw createError('Atestado não encontrado', 404);
       }
 
-      if (certificate.status !== MedicalCertificateStatus.PENDING) {
+      if (certificate.status !== 'PENDING') {
         throw createError('Este atestado já foi processado', 400);
       }
 
       const updatedCertificate = await prisma.medicalCertificate.update({
         where: { id },
         data: {
-          status: MedicalCertificateStatus.REJECTED,
+          status: 'REJECTED',
           reason,
           approvedBy,
           approvedAt: new Date()
@@ -440,14 +440,14 @@ export class MedicalCertificateController {
         throw createError('Acesso negado', 403);
       }
 
-      if (certificate.status !== MedicalCertificateStatus.PENDING) {
+      if (certificate.status !== 'PENDING') {
         throw createError('Apenas atestados pendentes podem ser cancelados', 400);
       }
 
       const updatedCertificate = await prisma.medicalCertificate.update({
         where: { id },
         data: {
-          status: MedicalCertificateStatus.CANCELLED
+          status: 'CANCELLED'
         },
         include: {
           user: {
