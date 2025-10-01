@@ -16,7 +16,7 @@ async function main() {
       cnpj: '38.294.339/0001-10',
       address: '24, St. de Habitações Individuais Sul QI 11 - Lago Sul, Brasília - DF, 70297-400',
       phone: '(61) 99517-6932',
-      email: 'contato@engenharia.com.br',
+      email: 'contato@gennesis.com.br',
       workStartTime: '07:00',
       workEndTime: '17:00',
       lunchStartTime: '12:00',
@@ -32,67 +32,34 @@ async function main() {
 
   console.log('✅ Configurações da empresa criadas');
 
-  // Criar usuário administrador
-  const adminPassword = await bcrypt.hash('admin123', 12);
-  await prisma.user.upsert({
-    where: { email: 'admin@engenharia.com.br' },
+  // Criar funcionário diretor
+  const directorPassword = await bcrypt.hash('diretor123', 12);
+  const director = await prisma.user.upsert({
+    where: { email: 'diretor@gennesis.com.br' },
     update: {},
     create: {
-      email: 'admin@engenharia.com.br',
-      password: adminPassword,
-      name: 'Administrador do Sistema',
-      cpf: '00000000000',
-      role: UserRole.ADMIN,
-      isActive: true
-    }
-  });
-
-  console.log('✅ Usuário administrador criado: admin@engenharia.com.br / admin123');
-
-  // Criar usuário Departamento Pessoal
-  const dpPassword = await bcrypt.hash('dp123', 12);
-  await prisma.user.upsert({
-    where: { email: 'dp@engenharia.com.br' },
-    update: {},
-    create: {
-      email: 'dp@engenharia.com.br',
-      password: dpPassword,
-      name: 'Departamento Pessoal',
-      cpf: '11111111111',
-      role: UserRole.DEPARTAMENTO_PESSOAL,
-      isActive: true
-    }
-  });
-
-  console.log('✅ Usuário Departamento Pessoal criado: dp@engenharia.com.br / dp123');
-
-  // Criar funcionário de exemplo
-  const employeePassword = await bcrypt.hash('func123', 12);
-  const employee = await prisma.user.upsert({
-    where: { email: 'teste@engenharia.com.br' },
-    update: {},
-    create: {
-      email: 'teste@engenharia.com.br',
-      password: employeePassword,
-      name: 'Teste',
-      cpf: '12345678900',
+      email: 'diretor@gennesis.com.br',
+      password: directorPassword,
+      name: 'Carlos Eduardo Silva',
+      cpf: '12345678901',
       role: UserRole.EMPLOYEE,
-      isActive: true
+      isActive: true,
+      isFirstLogin: false
     }
   });
 
-  // Criar dados do funcionário
+  // Criar dados do funcionário diretor
   await prisma.employee.upsert({
-    where: { userId: employee.id },
+    where: { userId: director.id },
     update: {},
     create: {
-      userId: employee.id,
-      employeeId: 'EMP001',
-      department: 'Engenharia',
-      position: 'Engenheiro',
-      hireDate: new Date('2025-09-01 07:00:00'),
-      birthDate: new Date('1995-09-24'), // Aniversário em 24/09
-      salary: 10000.00,
+      userId: director.id,
+      employeeId: 'DIR001',
+      department: 'Projetos',
+      position: 'Diretor',
+      hireDate: new Date('2025-10-01'),
+      birthDate: new Date('2002-10-24'),
+      salary: 25000.00,
       workSchedule: {
         startTime: '07:00',
         endTime: '17:00',
@@ -108,141 +75,36 @@ async function main() {
           name: 'Escritório Principal',
           latitude: -15.835840,
           longitude: -47.873407,
-          radius: 100
+          radius: 200
         }
-      ]
-    }
-  });
-
-  console.log('✅ Funcionário de exemplo criado: teste@engenharia.com.br / func123');
-
-  // Criar mais funcionários de teste com aniversários
-  const employees = [
-    {
-      email: 'joao@engenharia.com.br',
-      name: 'João Silva',
-      cpf: '12345678901',
-      employeeId: 'EMP002',
-      department: 'Engenharia',
-      position: 'Engenheiro',
-      birthDate: new Date('1990-09-15'), // 15/09
-      hireDate: new Date('2024-01-15'),
-      // Novos campos de exemplo
+      ],
+      costCenter: 'SEDES',
+      client: '004 - ADMINISTRATIVO DF',
+      dailyFoodVoucher: 50.00,
+      dailyTransportVoucher: 15.00,
+      // Dados da empresa
       company: 'GÊNNESIS',
-      currentContract: 'PROJETO ELÉTRICO A',
+      // Dados bancários
       bank: 'BANCO DO BRASIL',
       accountType: 'CONTA CORRENTE',
       agency: '1234',
       operation: '01',
-      account: '12345',
-      digit: '6',
+      account: '12345678',
+      digit: '9',
+      // Dados PIX
       pixKeyType: 'CPF',
-      pixKey: '12345678901'
-    },
-    {
-      email: 'maria@engenharia.com.br',
-      name: 'Maria Santos',
-      cpf: '12345678902',
-      employeeId: 'EMP003',
-      department: 'Departamento Pessoal',
-      position: 'Analista',
-      birthDate: new Date('1988-09-30'), // 30/09
-      hireDate: new Date('2023-06-01'),
-      // Novos campos de exemplo
-      company: 'GÊNNESIS',
-      currentContract: 'ADMINISTRATIVO',
-      bank: 'ITAÚ',
-      accountType: 'CONTA SALÁRIO',
-      agency: '5678',
-      operation: '05',
-      account: '67890',
-      digit: '7',
-      pixKeyType: 'CELULAR',
-      pixKey: '(61) 99999-9999'
-    },
-    {
-      email: 'pedro@engenharia.com.br',
-      name: 'Pedro Oliveira',
-      cpf: '12345678903',
-      employeeId: 'EMP004',
-      department: 'Engenharia',
-      position: 'Técnico',
-      birthDate: new Date('1992-10-05'), // 05/10 (outro mês)
-      hireDate: new Date('2024-03-10'),
-      // Novos campos de exemplo
-      company: 'MÉTRICA',
-      currentContract: 'PROJETO CIVIL B',
-      bank: 'BRADESCO',
-      accountType: 'POUPANÇA',
-      agency: '9012',
-      operation: '13',
-      account: '11111',
-      digit: '8',
-      pixKeyType: 'E-MAIL',
-      pixKey: 'pedro@engenharia.com.br'
+      pixKey: '12345678901',
+      // Modalidade e adicionais
+      modality: 'CLT',
+      familySalary: 0.00,
+      dangerPay: 0.00,
+      unhealthyPay: 0.00
     }
-  ];
+  });
 
-  for (const empData of employees) {
-    const empPassword = await bcrypt.hash('func123', 12);
-    const emp = await prisma.user.upsert({
-      where: { email: empData.email },
-      update: {},
-      create: {
-        email: empData.email,
-        password: empPassword,
-        name: empData.name,
-        cpf: empData.cpf,
-        role: UserRole.EMPLOYEE,
-        isActive: true
-      }
-    });
-
-    await prisma.employee.upsert({
-      where: { userId: emp.id },
-      update: {},
-      create: {
-        userId: emp.id,
-        employeeId: empData.employeeId,
-        department: empData.department,
-        position: empData.position,
-        hireDate: empData.hireDate,
-        birthDate: empData.birthDate,
-        salary: 8000.00,
-        workSchedule: {
-          startTime: '07:00',
-          endTime: '17:00',
-          lunchStartTime: '12:00',
-          lunchEndTime: '13:00',
-          workDays: [1, 2, 3, 4, 5],
-          toleranceMinutes: 10
-        },
-        isRemote: false,
-        allowedLocations: [
-          {
-            id: 'loc_1',
-            name: 'Escritório Principal',
-            latitude: -15.835840,
-            longitude: -47.873407,
-            radius: 100
-          }
-        ],
-        // Novos campos
-        company: empData.company,
-        currentContract: empData.currentContract,
-        bank: empData.bank,
-        accountType: empData.accountType,
-        agency: empData.agency,
-        operation: empData.operation,
-        account: empData.account,
-        digit: empData.digit,
-        pixKeyType: empData.pixKeyType,
-        pixKey: empData.pixKey
-      }
-    });
-
-    console.log(`✅ Funcionário criado: ${empData.email} / func123`);
-  }
+  console.log('✅ Funcionário diretor criado: diretor@gennesis.com.br / diretor123');
+  console.log('📋 Credenciais de acesso:');
+  console.log('   Diretor: diretor@gennesis.com.br / diretor123');
 }
 
 main()
