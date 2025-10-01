@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 export class BankHoursController {
   async getBankHoursByEmployee(req: Request, res: Response) {
     try {
-      const { startDate, endDate, department, status, costCenter, client } = req.query;
+      const { search, startDate, endDate, department, position, costCenter, client, status } = req.query;
       
       // Usar as datas fornecidas ou calcular período padrão (mês atual)
       let startDateFilter: Date;
@@ -38,21 +38,42 @@ export class BankHoursController {
         }
       };
 
-      if (department && department !== 'all') {
+      // Filtro de busca por texto
+      if (search) {
+        whereClause.OR = [
+          { user: { name: { contains: search as string, mode: 'insensitive' } } },
+          { user: { cpf: { contains: search as string, mode: 'insensitive' } } },
+          { employeeId: { contains: search as string, mode: 'insensitive' } },
+          { department: { contains: search as string, mode: 'insensitive' } },
+          { position: { contains: search as string, mode: 'insensitive' } },
+          { costCenter: { contains: search as string, mode: 'insensitive' } },
+          { client: { contains: search as string, mode: 'insensitive' } }
+        ];
+      }
+
+      // Filtros específicos
+      if (department) {
         whereClause.department = {
           contains: department as string,
           mode: 'insensitive'
         };
       }
 
-      if (costCenter && costCenter !== 'all') {
+      if (position) {
+        whereClause.position = {
+          contains: position as string,
+          mode: 'insensitive'
+        };
+      }
+
+      if (costCenter) {
         whereClause.costCenter = {
           contains: costCenter as string,
           mode: 'insensitive'
         };
       }
 
-      if (client && client !== 'all') {
+      if (client) {
         whereClause.client = {
           contains: client as string,
           mode: 'insensitive'
@@ -276,7 +297,7 @@ export class BankHoursController {
 
       // Aplicar filtro de status se especificado
       let filteredData = bankHoursData;
-      if (status && status !== 'all') {
+      if (status) {
         if (status === 'positive') {
           filteredData = bankHoursData.filter(emp => emp.bankHours > 0);
         } else if (status === 'negative') {

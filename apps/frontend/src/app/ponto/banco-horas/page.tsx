@@ -3,11 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Clock, Users, TrendingUp, Calendar, Filter, Download } from 'lucide-react';
+import { Clock, Users, TrendingUp, Calendar, Filter, Download, Search, Building2, User, CreditCard, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { TOMADORES_LIST } from '@/constants/tomadores';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
+import { DEPARTMENTS_LIST, COST_CENTERS_LIST, CLIENTS_LIST } from '@/constants/payrollFilters';
+import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 
@@ -30,6 +31,17 @@ interface BankHoursData {
   lastUpdate: string;
 }
 
+interface BankHoursFilters {
+  search?: string;
+  department?: string;
+  position?: string;
+  costCenter?: string;
+  client?: string;
+  status?: string;
+  startDate: string;
+  endDate: string;
+}
+
 export default function BankHoursPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -42,25 +54,88 @@ export default function BankHoursPage() {
     }
   });
 
-  const [startDateFilter, setStartDateFilter] = useState(() => {
+  const [filters, setFilters] = useState<BankHoursFilters>(() => {
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 1, 0, 0);
-    return firstDay.toISOString().split('T')[0];
-  });
-  const [endDateFilter, setEndDateFilter] = useState(() => {
     const today = new Date();
-    return today.toISOString().split('T')[0];
+    return {
+      search: '',
+      department: '',
+      position: '',
+      costCenter: '',
+      client: '',
+      status: '',
+      startDate: firstDay.toISOString().split('T')[0],
+      endDate: today.toISOString().split('T')[0]
+    };
   });
-  const [departmentFilter, setDepartmentFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [costCenterFilter, setCostCenterFilter] = useState('all');
-  const [clientFilter, setClientFilter] = useState('all');
+
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
     router.push('/auth/login');
+  };
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilters(prev => ({ ...prev, search: e.target.value }));
+  };
+
+  const handleDepartmentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, department: e.target.value }));
+  };
+
+  const handlePositionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, position: e.target.value }));
+  };
+
+  const handleCostCenterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, costCenter: e.target.value }));
+  };
+
+  const handleClientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, client: e.target.value }));
+  };
+
+  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, status: e.target.value }));
+  };
+
+  const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilters(prev => ({ ...prev, startDate: e.target.value }));
+  };
+
+  const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilters(prev => ({ ...prev, endDate: e.target.value }));
+  };
+
+  const clearFilters = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 1, 0, 0);
+    const today = new Date();
+    setFilters({
+      search: '',
+      department: '',
+      position: '',
+      costCenter: '',
+      client: '',
+      status: '',
+      startDate: firstDay.toISOString().split('T')[0],
+      endDate: today.toISOString().split('T')[0]
+    });
+  };
+
+  const clearAdvancedFilters = () => {
+    setFilters(prev => ({
+      ...prev,
+      department: '',
+      position: '',
+      costCenter: '',
+      client: '',
+      status: ''
+    }));
   };
 
   // Listener para abrir modal de alterar senha via sidebar
@@ -77,16 +152,18 @@ export default function BankHoursPage() {
   }, []);
 
   const { data: bankHoursData, isLoading: loadingBankHours } = useQuery({
-    queryKey: ['bank-hours', startDateFilter, endDateFilter, departmentFilter, statusFilter, costCenterFilter, clientFilter],
+    queryKey: ['bank-hours', filters],
     queryFn: async () => {
       const res = await api.get('/bank-hours/employees', {
         params: { 
-          startDate: startDateFilter, 
-          endDate: endDateFilter, 
-          department: departmentFilter, 
-          status: statusFilter,
-          costCenter: costCenterFilter,
-          client: clientFilter
+          search: filters.search,
+          department: filters.department,
+          position: filters.position,
+          costCenter: filters.costCenter,
+          client: filters.client,
+          status: filters.status,
+          startDate: filters.startDate, 
+          endDate: filters.endDate
         }
       });
       return res.data;
@@ -128,8 +205,8 @@ export default function BankHoursPage() {
 
     // Preparar dados para exportação
     const exportData = filteredData.map((employee: BankHoursData) => ({
-      'Data Inicial': startDateFilter,
-      'Data Final': endDateFilter,
+      'Data Inicial': filters.startDate,
+      'Data Final': filters.endDate,
       'Funcionário': employee.employeeName,
       'CPF': employee.employeeCpf,
       'Setor': employee.department,
@@ -175,31 +252,6 @@ export default function BankHoursPage() {
     XLSX.writeFile(wb, fileName);
   };
 
-  const departments = [
-    'Todos',
-    'Projetos',
-    'Contratos e Licitações',
-    'Suprimentos',
-    'Jurídico',
-    'Departamento Pessoal',
-    'Engenharia',
-    'Administrativo',
-    'Financeiro'
-  ];
-
-  const costCenters = [
-    'Todos',
-    'SEDES',
-    'DF - ADM LOCAL',
-    'ITAMARATY - SERVIÇOS EVENTUAIS',
-    'ITAMARATY - MÃO DE OBRA',
-    'SES GDF - LOTE 14',
-    'SES GDF - LOTE 10',
-    'ADM CENTRAL ENGPAC',
-    'DIRETOR'
-  ];
-
-  const clients = ['Todos', ...TOMADORES_LIST];
 
 
   if (loadingUser || !userData) {
@@ -237,88 +289,214 @@ export default function BankHoursPage() {
         {/* Filtros */}
         <Card>
           <CardHeader>
-            <div className="flex items-center space-x-2">
-              <Filter className="w-5 h-5 text-gray-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Filter className="w-5 h-5 text-gray-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+              </div>
+              <div className="flex items-center space-x-8">
+                <button
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  className="flex items-center space-x-1 text-sm text-gray-700 hover:text-gray-900 transition-colors"
+                >
+                  <span>Filtros Avançados</span>
+                  {showAdvancedFilters ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center space-x-1 text-sm text-red-600 hover:text-red-800 transition-colors"
+                >
+                  <span>Limpar</span>
+                </button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-4 sm:p-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <div className="space-y-4">
+              {/* Campo de Busca Principal */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Data Inicial</label>
-                <input
-                  type="date"
-                  value={startDateFilter}
-                  onChange={(e) => setStartDateFilter(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Buscar Funcionário
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <input
+                    type="text"
+                    value={filters.search}
+                    onChange={handleSearchChange}
+                    placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Data Final</label>
-                <input
-                  type="date"
-                  value={endDateFilter}
-                  onChange={(e) => setEndDateFilter(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                />
+              {/* Filtros de Período - Sempre Visíveis */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Data Inicial
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                      type="date"
+                      value={filters.startDate}
+                      onChange={handleStartDateChange}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Data Final
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                      type="date"
+                      value={filters.endDate}
+                      onChange={handleEndDateChange}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Setor</label>
-                <select
-                  value={departmentFilter}
-                  onChange={(e) => setDepartmentFilter(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="all">Todos</option>
-                  {departments.filter(d => d !== 'Todos').map((dept) => (
-                    <option key={dept} value={dept}>{dept}</option>
-                  ))}
-                </select>
-              </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Centro de Custo</label>
-                <select
-                  value={costCenterFilter}
-                  onChange={(e) => setCostCenterFilter(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="all">Todos</option>
-                  {costCenters.filter(cc => cc !== 'Todos').map((center) => (
-                    <option key={center} value={center}>{center}</option>
-                  ))}
-                </select>
-              </div>
+              {/* Filtros Avançados - Condicionais */}
+              {showAdvancedFilters && (
+                <div className="border-t pt-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium text-gray-700">Filtros Específicos</h4>
+                    <button
+                      onClick={clearAdvancedFilters}
+                      className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+                    >
+                      Limpar Filtros Avançados
+                    </button>
+                  </div>
+                  
+                  {/* Grupo 1: Informações Básicas */}
+                  <div className="space-y-3">
+                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Básicas</h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Setor
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.department}
+                            onChange={handleDepartmentChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os setores</option>
+                            {DEPARTMENTS_LIST.map(dept => (
+                              <option key={dept} value={dept}>
+                                {dept}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tomador</label>
-                <select
-                  value={clientFilter}
-                  onChange={(e) => setClientFilter(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="all">Todos</option>
-                  {clients.filter(c => c !== 'Todos').map((tomador) => (
-                    <option key={tomador} value={tomador}>{tomador}</option>
-                  ))}
-                </select>
-              </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Cargo
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.position}
+                            onChange={handlePositionChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os cargos</option>
+                            {CARGOS_LIST.map(cargo => (
+                              <option key={cargo} value={cargo}>
+                                {cargo}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full px-3 pr-8 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
-                >
-                  <option value="all">Todos</option>
-                  <option value="positive">Positivo</option>
-                  <option value="negative">Negativo</option>
-                  <option value="neutral">Neutro</option>
-                </select>
-              </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Status do Banco
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.status}
+                            onChange={handleStatusChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os status</option>
+                            <option value="positive">Positivo</option>
+                            <option value="negative">Negativo</option>
+                            <option value="neutral">Neutro</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Grupo 2: Informações Financeiras */}
+                  <div className="space-y-3">
+                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Financeiras</h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Centro de Custo
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.costCenter}
+                            onChange={handleCostCenterChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os centros de custo</option>
+                            {COST_CENTERS_LIST.map(center => (
+                              <option key={center} value={center}>
+                                {center}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tomador
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.client}
+                            onChange={handleClientChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os tomadores</option>
+                            {CLIENTS_LIST.map(client => (
+                              <option key={client} value={client}>
+                                {client}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -423,6 +423,12 @@ export interface PayrollFilters {
   search?: string;
   company?: string;
   department?: string;
+  position?: string;
+  costCenter?: string;
+  client?: string;
+  modality?: string;
+  bank?: string;
+  accountType?: string;
   month: number;
   year: number;
 }

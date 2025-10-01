@@ -3,13 +3,23 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText } from 'lucide-react';
+import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PayrollDetailModal } from '@/components/payroll/PayrollDetailModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import { PayrollEmployee, PayrollFilters, MonthlyPayrollData } from '@/types';
+import { 
+  DEPARTMENTS_LIST, 
+  COMPANIES_LIST, 
+  MODALITIES_LIST, 
+  BANKS_LIST, 
+  ACCOUNT_TYPES_LIST,
+  COST_CENTERS_LIST,
+  CLIENTS_LIST
+} from '@/constants/payrollFilters';
+import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 
 export default function FolhaPagamentoPage() {
@@ -25,11 +35,18 @@ export default function FolhaPagamentoPage() {
     search: '',
     department: '',
     company: '',
+    position: '',
+    costCenter: '',
+    client: '',
+    modality: '',
+    bank: '',
+    accountType: '',
     month: currentMonth,
     year: currentYear
   });
   const [selectedEmployee, setSelectedEmployee] = useState<PayrollEmployee | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -46,6 +63,12 @@ export default function FolhaPagamentoPage() {
       if (filters.search) params.append('search', filters.search);
       if (filters.department) params.append('department', filters.department);
       if (filters.company) params.append('company', filters.company);
+      if (filters.position) params.append('position', filters.position);
+      if (filters.costCenter) params.append('costCenter', filters.costCenter);
+      if (filters.client) params.append('client', filters.client);
+      if (filters.modality) params.append('modality', filters.modality);
+      if (filters.bank) params.append('bank', filters.bank);
+      if (filters.accountType) params.append('accountType', filters.accountType);
       params.append('month', filters.month.toString());
       params.append('year', filters.year.toString());
       
@@ -72,6 +95,30 @@ export default function FolhaPagamentoPage() {
     setFilters(prev => ({ ...prev, company: e.target.value }));
   };
 
+  const handlePositionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, position: e.target.value }));
+  };
+
+  const handleCostCenterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, costCenter: e.target.value }));
+  };
+
+  const handleClientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, client: e.target.value }));
+  };
+
+  const handleModalityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, modality: e.target.value }));
+  };
+
+  const handleBankChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, bank: e.target.value }));
+  };
+
+  const handleAccountTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, accountType: e.target.value }));
+  };
+
   const handleViewDetails = (employee: PayrollEmployee) => {
     setSelectedEmployee(employee);
     setIsModalOpen(true);
@@ -95,9 +142,29 @@ export default function FolhaPagamentoPage() {
       search: '',
       department: '',
       company: '',
+      position: '',
+      costCenter: '',
+      client: '',
+      modality: '',
+      bank: '',
+      accountType: '',
       month: currentMonth,
       year: currentYear
     });
+  };
+
+  const clearAdvancedFilters = () => {
+    setFilters(prev => ({
+      ...prev,
+      department: '',
+      company: '',
+      position: '',
+      costCenter: '',
+      client: '',
+      modality: '',
+      bank: '',
+      accountType: ''
+    }));
   };
 
   const exportToExcel = () => {
@@ -212,17 +279,37 @@ export default function FolhaPagamentoPage() {
         {/* Filtros */}
         <Card>
           <CardHeader>
-            <div className="flex items-center space-x-2">
-              <Filter className="w-5 h-5 text-gray-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Filter className="w-5 h-5 text-gray-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+              </div>
+              <div className="flex items-center space-x-8">
+                <button
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  className="flex items-center space-x-1 text-sm text-gray-700 hover:text-gray-900 transition-colors"
+                >
+                  <span>Filtros Avançados</span>
+                  {showAdvancedFilters ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center space-x-1 text-sm text-red-600 hover:text-red-800 transition-colors"
+                >
+                  <span>Limpar</span>
+                </button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-4 sm:p-6">
             <div className="space-y-4">
-              {/* Primeira linha - Busca e filtros básicos */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="sm:col-span-2 lg:col-span-1">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+              {/* Filtro Principal - Busca Geral */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
                   Buscar Funcionário
                 </label>
                 <div className="relative">
@@ -231,35 +318,21 @@ export default function FolhaPagamentoPage() {
                     type="text"
                     value={filters.search}
                     onChange={handleSearchChange}
-                    placeholder="Digite o nome do funcionário..."
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   />
                 </div>
               </div>
+
+              {/* Filtros de Período - Sempre Visíveis */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Empresa
+                    Mês
                   </label>
                   <div className="relative">
-                    <select
-                      value={filters.company}
-                      onChange={handleCompanyChange}
-                      className="w-full pl-4 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
-                    >
-                      <option value="">Todas</option>
-                      <option value="GÊNNESIS">GÊNNESIS</option>
-                      <option value="MÉTRICA">MÉTRICA</option>
-                      <option value="ABRASIL">ABRASIL</option>
-                    </select>
-                  </div>
-                </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Mês
-                </label>
-                <div className="relative">
                     <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <select
+                    <select
                       value={filters.month}
                       onChange={handleMonthChange}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
@@ -267,19 +340,19 @@ export default function FolhaPagamentoPage() {
                       {monthOptions.map(month => (
                         <option key={month.value} value={month.value}>
                           {month.label}
-                      </option>
-                    ))}
-                  </select>
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              </div>
 
                 <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Ano
-                </label>
-                <div className="relative">
+                  </label>
+                  <div className="relative">
                     <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <select
+                    <select
                       value={filters.year}
                       onChange={handleYearChange}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
@@ -290,9 +363,210 @@ export default function FolhaPagamentoPage() {
                         </option>
                       ))}
                     </select>
+                  </div>
                 </div>
               </div>
-            </div>
+
+              {/* Filtros Avançados - Condicionais */}
+              {showAdvancedFilters && (
+                <div className="border-t pt-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium text-gray-700">Filtros Específicos</h4>
+                    <button
+                      onClick={clearAdvancedFilters}
+                      className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+                    >
+                      Limpar Filtros Avançados
+                    </button>
+                  </div>
+                  
+                  {/* Grupo 1: Informações Básicas */}
+                  <div className="space-y-3">
+                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Básicas</h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Setor
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.department}
+                            onChange={handleDepartmentChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os setores</option>
+                            {DEPARTMENTS_LIST.map(dept => (
+                              <option key={dept} value={dept}>
+                                {dept}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Cargo
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.position}
+                            onChange={handlePositionChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os cargos</option>
+                            {CARGOS_LIST.map(cargo => (
+                              <option key={cargo} value={cargo}>
+                                {cargo}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Empresa
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.company}
+                            onChange={handleCompanyChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todas as empresas</option>
+                            {COMPANIES_LIST.map(company => (
+                              <option key={company} value={company}>
+                                {company}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Grupo 2: Informações Financeiras */}
+                  <div className="space-y-3">
+                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Financeiras</h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Centro de Custo
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.costCenter}
+                            onChange={handleCostCenterChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os centros</option>
+                            {COST_CENTERS_LIST.map(center => (
+                              <option key={center} value={center}>
+                                {center}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tomador
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.client}
+                            onChange={handleClientChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os tomadores</option>
+                            {CLIENTS_LIST.map(client => (
+                              <option key={client} value={client}>
+                                {client}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Modalidade
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.modality}
+                            onChange={handleModalityChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todas as modalidades</option>
+                            {MODALITIES_LIST.map(modality => (
+                              <option key={modality} value={modality}>
+                                {modality}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Grupo 3: Informações Bancárias */}
+                  <div className="space-y-3">
+                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Bancárias</h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Banco
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.bank}
+                            onChange={handleBankChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os bancos</option>
+                            {BANKS_LIST.map(bank => (
+                              <option key={bank} value={bank}>
+                                {bank}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tipo de Conta
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.accountType}
+                            onChange={handleAccountTypeChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os tipos</option>
+                            {ACCOUNT_TYPES_LIST.map(type => (
+                              <option key={type} value={type}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

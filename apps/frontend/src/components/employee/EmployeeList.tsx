@@ -641,7 +641,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   };
 
   // Verificar se o usuário tem permissões administrativas baseadas no cargo
-  const { isAdmin } = usePermissions();
+  const { canManageEmployees } = usePermissions();
 
   return (
     <Card className="w-full">
@@ -653,10 +653,10 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900">
-                {isAdmin ? 'Gerenciar Funcionários' : 'Lista de Funcionários'}
+                {canManageEmployees ? 'Gerenciar Funcionários' : 'Lista de Funcionários'}
               </h3>
               <p className="text-sm text-gray-600">
-                {isAdmin 
+                {canManageEmployees 
                   ? 'Visualizar e gerenciar funcionários cadastrados' 
                   : 'Visualizar funcionários cadastrados'
                 }
@@ -854,7 +854,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
                 
                       {/* Botões de ação - apenas para administradores */}
-                      {isAdmin && (
+                      {canManageEmployees && (
                         <div className="flex justify-center space-x-2">
                           {/* Botão de editar */}
                           <button
@@ -1434,7 +1434,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                        record.type === 'BREAK_END' ? 'Fim Pausa' :
                                        record.type === 'ABSENCE_JUSTIFIED' ? 'Ausência Justificada' : record.type}
                                     </span>
-                                    {isAdmin && (
+                                    {canManageEmployees && (
                                       <>
                                         {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && (
                                           <button

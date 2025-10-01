@@ -125,7 +125,6 @@ export function usePermissions() {
     canViewBirthdays: permissions.canViewBirthdays,
     canRegisterTime: permissions.canRegisterTime,
     canViewDashboard: permissions.canViewDashboard,
-    isAdmin: permissions.canManageEmployees || permissions.canAccessPayroll,
   };
 }
 
@@ -138,14 +137,6 @@ export function useRoutePermission(route: string) {
   }
 
   const routePermissions: Record<string, boolean> = {
-    '/admin': permissions.canManageEmployees || permissions.canAccessPayroll,
-    '/admin/folha-pagamento': permissions.canAccessPayroll,
-    '/admin/gerenciar-funcionarios': permissions.canManageEmployees,
-    '/admin/relatorios': permissions.canViewReports,
-    '/admin/ferias': permissions.canManageVacations,
-    '/admin/atestados': permissions.canManageAbsences,
-    '/admin/banco-horas': permissions.canManageBankHours,
-    '/admin/aniversariantes': permissions.canViewBirthdays,
     '/ponto': permissions.canRegisterTime,
     '/ponto/folha-pagamento': permissions.canAccessPayroll,
     '/ponto/ferias': permissions.canManageVacations,

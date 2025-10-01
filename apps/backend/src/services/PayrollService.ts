@@ -56,6 +56,12 @@ export interface PayrollFilters {
   search?: string;
   company?: string;
   department?: string;
+  position?: string;
+  costCenter?: string;
+  client?: string;
+  modality?: string;
+  bank?: string;
+  accountType?: string;
   month: number;
   year: number;
 }
@@ -222,7 +228,7 @@ export class PayrollService {
    * Gera folha de pagamento mensal
    */
   async generateMonthlyPayroll(filters: PayrollFilters): Promise<MonthlyPayrollData> {
-    const { search, company, department, month, year } = filters;
+    const { search, company, department, position, costCenter, client, modality, bank, accountType, month, year } = filters;
 
     // Validar período
     const currentDate = new Date();
@@ -240,13 +246,26 @@ export class PayrollService {
     };
 
     if (search) {
-      where.user = {
-        ...where.user,
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { cpf: { contains: search, mode: 'insensitive' } }
-        ]
-      };
+      where.OR = [
+        // Busca nos dados do usuário
+        { user: { name: { contains: search, mode: 'insensitive' } } },
+        { user: { cpf: { contains: search, mode: 'insensitive' } } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        // Busca nos dados do funcionário
+        { employeeId: { contains: search, mode: 'insensitive' } },
+        { department: { contains: search, mode: 'insensitive' } },
+        { position: { contains: search, mode: 'insensitive' } },
+        { company: { contains: search, mode: 'insensitive' } },
+        { costCenter: { contains: search, mode: 'insensitive' } },
+        { client: { contains: search, mode: 'insensitive' } },
+        { modality: { contains: search, mode: 'insensitive' } },
+        { bank: { contains: search, mode: 'insensitive' } },
+        { accountType: { contains: search, mode: 'insensitive' } },
+        { agency: { contains: search, mode: 'insensitive' } },
+        { account: { contains: search, mode: 'insensitive' } },
+        { pixKeyType: { contains: search, mode: 'insensitive' } },
+        { pixKey: { contains: search, mode: 'insensitive' } }
+      ];
     }
 
     if (company) {
@@ -255,6 +274,30 @@ export class PayrollService {
 
     if (department) {
       where.department = { contains: department, mode: 'insensitive' };
+    }
+
+    if (position) {
+      where.position = { contains: position, mode: 'insensitive' };
+    }
+
+    if (costCenter) {
+      where.costCenter = { contains: costCenter, mode: 'insensitive' };
+    }
+
+    if (client) {
+      where.client = { contains: client, mode: 'insensitive' };
+    }
+
+    if (modality) {
+      where.modality = { contains: modality, mode: 'insensitive' };
+    }
+
+    if (bank) {
+      where.bank = { contains: bank, mode: 'insensitive' };
+    }
+
+    if (accountType) {
+      where.accountType = { contains: accountType, mode: 'insensitive' };
     }
 
     // Buscar funcionários
