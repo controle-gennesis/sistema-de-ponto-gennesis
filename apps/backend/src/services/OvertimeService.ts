@@ -66,14 +66,14 @@ export class OvertimeService {
       }
     });
 
-    const pendingHours = pendingOvertime.reduce((total, overtime) => total + Number(overtime.hours), 0);
+    const pendingHours = pendingOvertime.reduce((total: any, overtime: any) => total + Number(overtime.hours), 0);
 
     // Calcular horas disponíveis para compensação
     const availableHours = Math.max(0, totalHours - pendingHours);
 
     // Verificar se pode compensar (dentro do prazo de 6 meses)
     const sixMonthsAgo = moment().subtract(6, 'months').toDate();
-    const recentOvertime = approvedOvertime.filter(overtime => 
+    const recentOvertime = approvedOvertime.filter((overtime: any) => 
       new Date(overtime.date) >= sixMonthsAgo
     );
 
@@ -268,7 +268,7 @@ export class OvertimeService {
       _count: { department: true }
     });
 
-    employeesByDept.forEach(emp => {
+    employeesByDept.forEach((emp: any) => {
       if (byDepartment.has(emp.department)) {
         byDepartment.get(emp.department)!.totalEmployees = emp._count.department;
       }
@@ -436,6 +436,6 @@ export class OvertimeService {
       hours: Number(ot.hours),
       date: ot.date,
       expiresAt: moment(ot.date).add(6, 'months').toDate()
-    })).sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
+    })).sort((a: any, b: any) => a.expiresAt.getTime() - b.expiresAt.getTime());
   }
 }

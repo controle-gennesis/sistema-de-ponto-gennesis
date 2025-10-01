@@ -112,7 +112,7 @@ export class VacationService {
       }
     });
 
-    const pendingDays = pendingVacations.reduce((total, vacation) => total + vacation.days, 0);
+    const pendingDays = pendingVacations.reduce((total: any, vacation: any) => total + vacation.days, 0);
 
     // Calcular próximo período de férias
     const nextVacationDate = this.calculateNextVacationDate(hireDate, currentDate);
@@ -279,11 +279,11 @@ export class VacationService {
 
     const totalDaysUsed = vacations
       .filter((v: any) => v.status === 'APPROVED')
-      .reduce((total, v) => total + v.days, 0);
+      .reduce((total: any, v: any) => total + v.days, 0);
 
     const totalDaysPending = vacations
       .filter((v: any) => v.status === 'PENDING')
-      .reduce((total, v) => total + v.days, 0);
+      .reduce((total: any, v: any) => total + v.days, 0);
 
     const averageDaysPerEmployee = totalEmployees > 0 ? totalDaysUsed / totalEmployees : 0;
 
@@ -507,7 +507,7 @@ export class VacationService {
     });
 
     // Verificar se já existe o mesmo fracionamento
-    const existingFraction = existingFractions.find(f => {
+    const existingFraction = existingFractions.find((f: any) => {
       const fractionType = this.getFractionType(f.type);
       return fractionType === request.fraction;
     });

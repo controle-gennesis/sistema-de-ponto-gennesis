@@ -253,7 +253,7 @@ export class MedicalCertificateService {
       take: limit
     });
 
-    return result.map(item => ({
+    return result.map((item: any) => ({
       type: item.type,
       count: item._count.type
     }));

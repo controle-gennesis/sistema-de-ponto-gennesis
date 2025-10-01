@@ -486,7 +486,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
     // Estatísticas
     const stats = {
       total: birthdayEmployees.length,
-      todayBirthdays: birthdayEmployees.filter(emp => emp.isTodayBirthday).length,
+      todayBirthdays: birthdayEmployees.filter((emp: any) => emp.isTodayBirthday).length,
       byDepartment: {} as Record<string, number>
     };
     

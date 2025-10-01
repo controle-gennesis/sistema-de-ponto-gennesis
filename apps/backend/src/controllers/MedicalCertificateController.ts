@@ -289,7 +289,7 @@ export class MedicalCertificateController {
       }
 
       // Aprovar atestado e criar registros de ausência justificada em transação
-      const updatedCertificate = await prisma.$transaction(async (tx) => {
+      const updatedCertificate = await prisma.$transaction(async (tx: any) => {
         // Atualizar status do atestado
         const updatedCert = await tx.medicalCertificate.update({
           where: { id },
