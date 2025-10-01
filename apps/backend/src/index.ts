@@ -27,7 +27,7 @@ import salaryDiscountRoutes from './routes/salaryDiscounts';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = parseInt(process.env.PORT || '5000', 10);
 
 // Middleware de segurança
 app.use(helmet());
