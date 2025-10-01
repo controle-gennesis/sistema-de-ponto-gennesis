@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserPlus, X, Save, AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { TOMADORES_LIST } from '@/constants/tomadores';
+import { CARGOS_LIST } from '@/constants/cargos';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -13,7 +15,6 @@ interface EmployeeFormData {
   email: string;
   cpf: string;
   password: string;
-  role: 'EMPLOYEE' | 'DEPARTAMENTO_PESSOAL' | 'GESTOR' | 'DIRETOR' | 'ADMIN';
   
   // Dados do funcionário
   employeeId: string;
@@ -74,44 +75,25 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   ];
 
   // Lista de cargos disponíveis
-  const positions = [
-    'Analista',
-    'Assistente',
-    'Coordenador',
-    'Diretor',
-    'Engenheiro',
-    'Especialista',
-    'Estagiário',
-    'Gerente',
-    'Líder Técnico',
-    'Operador',
-    'Supervisor',
-    'Técnico',
-    'Consultor',
-    'Desenvolvedor',
-    'Designer',
-    'Arquiteto',
-    'Projetista',
-    'Inspetor',
-    'Auditor',
-    'Contador',
-    'Advogado',
-    'Vendedor',
-    'Atendente',
-    'Auxiliar',
-    'Secretário',
-    'Recepcionista',
-    'Motorista',
-    'Segurança',
-    'Limpeza',
-    'Manutenção'
-  ];
+  const positions = CARGOS_LIST;
 
   // Lista de empresas
   const companies = [
     'ABRASIL',
     'GÊNNESIS',
     'MÉTRICA'
+  ];
+
+  // Lista de centros de custo
+  const costCenters = [
+    'SEDES',
+    'DF - ADM LOCAL',
+    'ITAMARATY - SERVIÇOS EVENTUAIS',
+    'ITAMARATY - MÃO DE OBRA',
+    'SES GDF - LOTE 14',
+    'SES GDF - LOTE 10',
+    'ADM CENTRAL ENGPAC',
+    'DIRETOR'
   ];
 
   // Lista de bancos
@@ -157,7 +139,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     email: '',
     cpf: '',
     password: '',
-    role: 'EMPLOYEE',
     employeeId: generateEmployeeId(),
     sector: '',
     position: '',
@@ -196,8 +177,100 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string>('');
+  const [tomadorSearch, setTomadorSearch] = useState('');
+  const [showTomadorDropdown, setShowTomadorDropdown] = useState(false);
+  
+  // Estados para busca de outros campos
+  const [costCenterSearch, setCostCenterSearch] = useState('');
+  const [showCostCenterDropdown, setShowCostCenterDropdown] = useState(false);
+  
+  const [positionSearch, setPositionSearch] = useState('');
+  const [showPositionDropdown, setShowPositionDropdown] = useState(false);
+  
+  const [sectorSearch, setSectorSearch] = useState('');
+  const [showSectorDropdown, setShowSectorDropdown] = useState(false);
+  
+  // Estados para busca de campos restantes
+  const [companySearch, setCompanySearch] = useState('');
+  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
+  
+  const [bankSearch, setBankSearch] = useState('');
+  const [showBankDropdown, setShowBankDropdown] = useState(false);
 
   const queryClient = useQueryClient();
+
+  // Filtrar tomadores baseado na busca
+  const filteredTomadores = TOMADORES_LIST.filter(tomador =>
+    tomador.toLowerCase().includes(tomadorSearch.toLowerCase())
+  );
+
+  // Filtrar centros de custo baseado na busca
+  const filteredCostCenters = costCenters.filter(costCenter =>
+    costCenter.toLowerCase().includes(costCenterSearch.toLowerCase())
+  );
+
+  // Filtrar cargos baseado na busca
+  const filteredPositions = positions.filter(position =>
+    position.toLowerCase().includes(positionSearch.toLowerCase())
+  );
+
+  // Filtrar setores baseado na busca
+  const filteredSectors = sectors.filter(sector =>
+    sector.toLowerCase().includes(sectorSearch.toLowerCase())
+  );
+
+  // Filtrar empresas baseado na busca
+  const filteredCompanies = companies.filter(company =>
+    company.toLowerCase().includes(companySearch.toLowerCase())
+  );
+
+  // Filtrar bancos baseado na busca
+  const filteredBanks = banks.filter(bank =>
+    bank.toLowerCase().includes(bankSearch.toLowerCase())
+  );
+
+
+  // Função para selecionar tomador
+  const selectTomador = (tomador: string) => {
+    setFormData(prev => ({ ...prev, client: tomador }));
+    setTomadorSearch(tomador);
+    setShowTomadorDropdown(false);
+  };
+
+  // Função para selecionar centro de custo
+  const selectCostCenter = (costCenter: string) => {
+    setFormData(prev => ({ ...prev, costCenter }));
+    setCostCenterSearch(costCenter);
+    setShowCostCenterDropdown(false);
+  };
+
+  // Função para selecionar cargo
+  const selectPosition = (position: string) => {
+    setFormData(prev => ({ ...prev, position }));
+    setPositionSearch(position);
+    setShowPositionDropdown(false);
+  };
+
+  // Função para selecionar setor
+  const selectSector = (sector: string) => {
+    setFormData(prev => ({ ...prev, sector }));
+    setSectorSearch(sector);
+    setShowSectorDropdown(false);
+  };
+
+  // Função para selecionar empresa
+  const selectCompany = (company: string) => {
+    setFormData(prev => ({ ...prev, company }));
+    setCompanySearch(company);
+    setShowCompanyDropdown(false);
+  };
+
+  // Função para selecionar banco
+  const selectBank = (bank: string) => {
+    setFormData(prev => ({ ...prev, bank }));
+    setBankSearch(bank);
+    setShowBankDropdown(false);
+  };
 
   // Função para validar CPF
   const isValidCPF = (cpf: string): boolean => {
@@ -272,7 +345,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         email: data.email,
         cpf: data.cpf,
         password: data.password,
-        role: data.role,
+        role: 'EMPLOYEE', // Sempre criar como funcionário
         employeeData
       });
 
@@ -344,8 +417,21 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     else if (formData.password.length < 6) newErrors.password = 'Senha deve ter pelo menos 6 caracteres';
     
     // Matrícula é gerada automaticamente, não precisa validar
-    if (!formData.sector.trim()) newErrors.sector = 'Setor é obrigatório';
-    if (!formData.position.trim()) newErrors.position = 'Cargo é obrigatório';
+    
+    // Validação do setor - verifica se está vazio ou se o texto digitado não corresponde a nenhum setor
+    if (!formData.sector.trim()) {
+      newErrors.sector = 'Setor é obrigatório';
+    } else if (sectorSearch.trim() && !sectors.includes(sectorSearch)) {
+      newErrors.sector = 'Selecione um setor válido da lista';
+    }
+    
+    // Validação do cargo - verifica se está vazio ou se o texto digitado não corresponde a nenhum cargo
+    if (!formData.position.trim()) {
+      newErrors.position = 'Cargo é obrigatório';
+    } else if (positionSearch.trim() && !positions.includes(positionSearch)) {
+      newErrors.position = 'Selecione um cargo válido da lista';
+    }
+    
     if (!formData.hireDate.trim()) newErrors.hireDate = 'Data de contratação é obrigatória';
     else if (isNaN(new Date(formData.hireDate).getTime())) {
       newErrors.hireDate = 'Data de contratação inválida';
@@ -384,12 +470,34 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       newErrors.birthDate = 'Data de nascimento inválida';
     }
     
-    if (!formData.costCenter.trim()) newErrors.costCenter = 'Centro de custo é obrigatório';
-    if (!formData.client.trim()) newErrors.client = 'Tomador é obrigatório';
-    if (!formData.company.trim()) newErrors.company = 'Empresa é obrigatória';
+    // Validação do centro de custo - verifica se está vazio ou se o texto digitado não corresponde a nenhum centro
+    if (!formData.costCenter.trim()) {
+      newErrors.costCenter = 'Centro de custo é obrigatório';
+    } else if (costCenterSearch.trim() && !costCenters.includes(costCenterSearch)) {
+      newErrors.costCenter = 'Selecione um centro de custo válido da lista';
+    }
     
-    // Validações dos dados bancários
-    if (!formData.bank.trim()) newErrors.bank = 'Banco é obrigatório';
+    // Validação do tomador - verifica se está vazio ou se o texto digitado não corresponde a nenhum tomador
+    if (!formData.client.trim()) {
+      newErrors.client = 'Tomador é obrigatório';
+    } else if (tomadorSearch.trim() && !TOMADORES_LIST.includes(tomadorSearch)) {
+      newErrors.client = 'Selecione um tomador válido da lista';
+    }
+    
+    // Validação da empresa - verifica se está vazio ou se o texto digitado não corresponde a nenhuma empresa
+    if (!formData.company.trim()) {
+      newErrors.company = 'Empresa é obrigatória';
+    } else if (companySearch.trim() && !companies.includes(companySearch)) {
+      newErrors.company = 'Selecione uma empresa válida da lista';
+    }
+    
+    // Validação do banco - verifica se está vazio ou se o texto digitado não corresponde a nenhum banco
+    if (!formData.bank.trim()) {
+      newErrors.bank = 'Banco é obrigatório';
+    } else if (bankSearch.trim() && !banks.includes(bankSearch)) {
+      newErrors.bank = 'Selecione um banco válido da lista';
+    }
+    
     if (!formData.accountType.trim()) newErrors.accountType = 'Tipo de conta é obrigatório';
     if (!formData.agency.trim()) newErrors.agency = 'Agência é obrigatória';
     if (!formData.operation.trim()) newErrors.operation = 'Operação é obrigatória';
@@ -570,22 +678,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Perfil *
-                </label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => handleInputChange('role', e.target.value as any)}
-                  className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
-                >
-                  <option value="EMPLOYEE">Funcionário</option>
-                  <option value="DEPARTAMENTO_PESSOAL">Departamento Pessoal</option>
-                  <option value="GESTOR">Gestor</option>
-                  <option value="DIRETOR">Diretor</option>
-                  <option value="ADMIN">Administrador</option>
-                  </select>
-                </div>
               </div>
             </div>
 
@@ -662,42 +754,100 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Setor *
                 </label>
-                <select
-                  value={formData.sector}
-                  onChange={(e) => handleInputChange('sector', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.sector ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                >
-                  <option value="">Selecione um setor</option>
-                  {sectors.map((sector) => (
-                    <option key={sector} value={sector}>
-                      {sector}
-                    </option>
-                  ))}
-                </select>
-                {errors.sector && <p className="text-red-500 text-xs mt-1">{errors.sector}</p>}
+                
+                {/* Campo de busca com dropdown */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={sectorSearch}
+                    onChange={(e) => {
+                      setSectorSearch(e.target.value);
+                      setShowSectorDropdown(true);
+                      if (e.target.value === '') {
+                        setFormData(prev => ({ ...prev, sector: '' }));
+                      }
+                    }}
+                    onFocus={() => setShowSectorDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowSectorDropdown(false), 200)}
+                    placeholder="Digite para buscar o setor..."
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  
+                  {/* Dropdown com resultados */}
+                  {showSectorDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {filteredSectors.length > 0 ? (
+                        filteredSectors.map((sector) => (
+                          <div
+                            key={sector}
+                            onClick={() => selectSector(sector)}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                          >
+                            {sector}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-gray-500 text-sm">
+                          Nenhum setor encontrado
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {errors.sector && (
+                  <p className="text-red-500 text-xs mt-1">{errors.sector}</p>
+                )}
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Cargo *
                 </label>
-                <select
-                  value={formData.position}
-                  onChange={(e) => handleInputChange('position', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.position ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                >
-                  <option value="">Selecione um cargo</option>
-                  {positions.map((position) => (
-                    <option key={position} value={position}>
-                      {position}
-                    </option>
-                  ))}
-                </select>
-                {errors.position && <p className="text-red-500 text-xs mt-1">{errors.position}</p>}
+                
+                {/* Campo de busca com dropdown */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={positionSearch}
+                    onChange={(e) => {
+                      setPositionSearch(e.target.value);
+                      setShowPositionDropdown(true);
+                      if (e.target.value === '') {
+                        setFormData(prev => ({ ...prev, position: '' }));
+                      }
+                    }}
+                    onFocus={() => setShowPositionDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowPositionDropdown(false), 200)}
+                    placeholder="Digite para buscar o cargo..."
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  
+                  {/* Dropdown com resultados */}
+                  {showPositionDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {filteredPositions.length > 0 ? (
+                        filteredPositions.map((position) => (
+                          <div
+                            key={position}
+                            onClick={() => selectPosition(position)}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                          >
+                            {position}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-gray-500 text-sm">
+                          Nenhum cargo encontrado
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {errors.position && (
+                  <p className="text-red-500 text-xs mt-1">{errors.position}</p>
+                )}
               </div>
 
               <div>
@@ -751,73 +901,104 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Centro de Custo *
                 </label>
-                <select
-                  value={formData.costCenter}
-                  onChange={(e) => handleInputChange('costCenter', e.target.value)}
-                  className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
-                >
-                  <option value="">Selecione um centro de custo</option>
-                  <option value="SEDES">SEDES</option>
-                  <option value="DF - ADM LOCAL">DF - ADM LOCAL</option>
-                  <option value="ITAMARATY - SERVIÇOS EVENTUAIS">ITAMARATY - SERVIÇOS EVENTUAIS</option>
-                  <option value="ITAMARATY - MÃO DE OBRA">ITAMARATY - MÃO DE OBRA</option>
-                  <option value="SES GDF - LOTE 14">SES GDF - LOTE 14</option>
-                  <option value="SES GDF - LOTE 10">SES GDF - LOTE 10</option>
-                  <option value="ADM CENTRAL ENGPAC">ADM CENTRAL ENGPAC</option>
-                  <option value="DIRETOR">DIRETOR</option>
-                </select>
+                
+                {/* Campo de busca com dropdown */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={costCenterSearch}
+                    onChange={(e) => {
+                      setCostCenterSearch(e.target.value);
+                      setShowCostCenterDropdown(true);
+                      if (e.target.value === '') {
+                        setFormData(prev => ({ ...prev, costCenter: '' }));
+                      }
+                    }}
+                    onFocus={() => setShowCostCenterDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowCostCenterDropdown(false), 200)}
+                    placeholder="Digite para buscar o centro de custo..."
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  
+                  {/* Dropdown com resultados */}
+                  {showCostCenterDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {filteredCostCenters.length > 0 ? (
+                        filteredCostCenters.map((costCenter) => (
+                          <div
+                            key={costCenter}
+                            onClick={() => selectCostCenter(costCenter)}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                          >
+                            {costCenter}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-gray-500 text-sm">
+                          Nenhum centro de custo encontrado
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {errors.costCenter && (
+                  <p className="text-red-500 text-xs mt-1">{errors.costCenter}</p>
+                )}
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Tomador *
                 </label>
-                <select
-                  value={formData.client}
-                  onChange={(e) => handleInputChange('client', e.target.value)}
-                  className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
-                >
-                  <option value="">Selecione um tomador</option>
-                  <option value="004 - ADMINISTRATIVO DF">004 - ADMINISTRATIVO DF</option>
-                  <option value="017 - CODEVASF">017 - CODEVASF</option>
-                  <option value="022 - UFRN 2">022 - UFRN 2</option>
-                  <option value="056 - SUPERINTENDENCIA REGIONAL DA RFB NA 4A R">056 - SUPERINTENDENCIA REGIONAL DA RFB NA 4A R</option>
-                  <option value="058 - INCRA NATAL">058 - INCRA NATAL</option>
-                  <option value="064 - UFRN PINTURA">064 - UFRN PINTURA</option>
-                  <option value="068 - PARQUE 3 RUAS - JOÃO PESSOA">068 - PARQUE 3 RUAS- JOÃO PESSOA</option>
-                  <option value="069 - SUBSECAO JUDICIARIA ANAPOLIS-GO">069 - SUBSECAO JUDICIARIA ANAPOLIS -GO</option>
-                  <option value="070 - SUBSECAO JUDICIARIA RIO VERDE-GO">070 - SUBSECAO JUDICIARIA RIO VERDE -GO</option>
-                  <option value="071 - SUBSECAO JUDICIARIA ITUMBIARA-GO">071 - SUBSECAO JUDICIARIA ITUMBIARA -GO</option>
-                  <option value="072 - SUBSECAO JUDICIARIA LUZIANIA-GO">072 - SUBSECAO JUDICIARIA LUZIANIA -GO</option>
-                  <option value="073 - SUBSECAO JUDICIARIA URUACU-GO">073 - SUBSECAO JUDICIARIA URUACU-GO</option>
-                  <option value="074 - SUBSECAO JUDICIARIA FORMOSA-GO">074 - SUBSECAO JUDICIARIA FORMOSA-GO</option>
-                  <option value="075 - SUBSECAO JUDICIARIA JATAI-GO">075 - SUBSECAO JUDICIARIA JATAI-GO</option>
-                  <option value="076 - MIN DAS RELAÇÕES EXTERIORES -ITAMARATY">076 - MIN DAS RELAÇÕES EXTERIORES -ITAMARATY</option>
-                  <option value="077 - SEDES - SEC EST DESENVOLVIMENTO SOCIAL DF">077 - SEDES -SEC EST DESENVOLVIMENTO SOCIAL DF</option>
-                  <option value="078 - SES - SEC ESTADO DE SAUDE -TAGUATINGA">078 - SES - SEC ESTADO DE SAUDE -TAGUATINGA</option>
-                  <option value="079 - SES - SEC ESTADO DE SAUDE -CEILANDIA">079 - SES - SEC ESTADO DE SAUDE -CEILANDIA</option>
-                  <option value="080 - SES - SEC ESTADO DE SAUDE -SAMAMBAIA/REC">080 - SES - SEC ESTADO DE SAUDE -SAMAMBAIA/REC</option>
-                  <option value="085 - ADMINISTRATIVO RS">085 - ADMINISTRATIVO RS</option>
-                  <option value="086 - CORREIOS E TELEGRAFOS 824 SE/RS">086 - CORREIOS E TELEGRAFOS 824 SE/RS</option>
-                  <option value="087 - TRE RIO GRANDE DO SUL">087 - TRE RIO GRANDE DO SUL</option>
-                  <option value="088 - BANRISUL">088 - BANRISUL</option>
-                  <option value="090 - INMETRO RS">090 - INMETRO RS</option>
-                  <option value="092 - TJGO RETROFIT ITAJA">092 - TJGO RETROFIT ITAJA</option>
-                  <option value="093 - TJGO RETROFIT CAÇU">093 - TJGO RETROFIT CAÇU</option>
-                  <option value="094 - TJGO RETROFIT PARANAIGUARA">094 - TJGO RETROFIT PARANAIGUARA</option>
-                  <option value="096 - BANCO DO BRASIL GOIAS">096 - BANCO DO BRASIL GOIAS</option>
-                  <option value="097 - SEINFRA PAVIMENTACAO PB">097 - SEINFRA PAVIMENTACAO PB</option>
-                  <option value="098 - UFPE IMPERMEABILIZAÇÃO">098 - UFPE IMPERMEABILIZAÇÃO</option>
-                  <option value="099 - TRIBUNAL DE JUSTICA DE GOIAS - RIO VERDE">099 - TRIBUNAL DE JUSTICA DE GOIAS - RIO VERDE</option>
-                  <option value="100 - TRIBUNAL DE JUSTICA DE GOIAS - CALDAS NOVAS">100 - TRIBUNAL DE JUSTICA DE GOIAS - CALDAS NOVAS</option>
-                  <option value="102 - TJ GO RETROFIT LOTE 05">102 - TJ GO RETROFIT LOTE 05</option>
-                  <option value="103 - TJ GO RETROFIT LOTE 04">103 - TJ GO RETROFIT LOTE 04</option>
-                  <option value="106 - SMED RS 17/2023 LOTE 01 - REGIAO NORTE">106 - SMED RS 17/2023 LOTE 01 -REGIAO NORTE</option>
-                  <option value="107 - BANCO DO BRASIL JARDIM AMERICA">107 - BANCO DO BRASIL JARDIM AMERICA</option>
-                  <option value="108 - BANCO DO BRASIL FORMOSA">108 - BANCO DO BRASIL FORMOSA</option>
-                  <option value="109 - CORREIOS DA SE/RS">109 - CORREIOS DA SE/RS</option>
-                  <option value="110 - NOVO PROGRESSO">110 - NOVO PROGRESSO</option>
-                </select>
+                
+                {/* Campo de busca com dropdown */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={tomadorSearch}
+                    onChange={(e) => {
+                      setTomadorSearch(e.target.value);
+                      setShowTomadorDropdown(true);
+                      // Se o campo estiver vazio, limpar a seleção
+                      if (e.target.value === '') {
+                        setFormData(prev => ({ ...prev, client: '' }));
+                      }
+                    }}
+                    onFocus={() => setShowTomadorDropdown(true)}
+                    onBlur={() => {
+                      // Delay para permitir clique no dropdown
+                      setTimeout(() => setShowTomadorDropdown(false), 200);
+                    }}
+                    placeholder="Digite para buscar o tomador..."
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  
+                  {/* Dropdown com resultados */}
+                  {showTomadorDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {filteredTomadores.length > 0 ? (
+                        filteredTomadores.map((tomador) => (
+                          <div
+                            key={tomador}
+                            onClick={() => selectTomador(tomador)}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                          >
+                            {tomador}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-gray-500 text-sm">
+                          Nenhum tomador encontrado
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {errors.client && (
+                  <p className="text-red-500 text-xs mt-1">{errors.client}</p>
+                )}
               </div>
 
               <div className="flex items-center space-x-2">
@@ -980,21 +1161,50 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Empresa *
                 </label>
-                <select
-                  value={formData.company}
-                  onChange={(e) => handleInputChange('company', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.company ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                >
-                  <option value="">Selecione uma empresa</option>
-                  {companies.map((company) => (
-                    <option key={company} value={company}>
-                      {company}
-                    </option>
-                  ))}
-                </select>
-                {errors.company && <p className="text-red-500 text-xs mt-1">{errors.company}</p>}
+                
+                {/* Campo de busca com dropdown */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={companySearch}
+                    onChange={(e) => {
+                      setCompanySearch(e.target.value);
+                      setShowCompanyDropdown(true);
+                      if (e.target.value === '') {
+                        setFormData(prev => ({ ...prev, company: '' }));
+                      }
+                    }}
+                    onFocus={() => setShowCompanyDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowCompanyDropdown(false), 200)}
+                    placeholder="Digite para buscar a empresa..."
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  
+                  {/* Dropdown com resultados */}
+                  {showCompanyDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {filteredCompanies.length > 0 ? (
+                        filteredCompanies.map((company) => (
+                          <div
+                            key={company}
+                            onClick={() => selectCompany(company)}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                          >
+                            {company}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-gray-500 text-sm">
+                          Nenhuma empresa encontrada
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {errors.company && (
+                  <p className="text-red-500 text-xs mt-1">{errors.company}</p>
+                )}
               </div>
             </div>
           </div>
@@ -1007,21 +1217,50 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Banco *
                 </label>
-                <select
-                  value={formData.bank}
-                  onChange={(e) => handleInputChange('bank', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.bank ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                >
-                  <option value="">Selecione um banco</option>
-                  {banks.map((bank) => (
-                    <option key={bank} value={bank}>
-                      {bank}
-                    </option>
-                  ))}
-                </select>
-                {errors.bank && <p className="text-red-500 text-xs mt-1">{errors.bank}</p>}
+                
+                {/* Campo de busca com dropdown */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={bankSearch}
+                    onChange={(e) => {
+                      setBankSearch(e.target.value);
+                      setShowBankDropdown(true);
+                      if (e.target.value === '') {
+                        setFormData(prev => ({ ...prev, bank: '' }));
+                      }
+                    }}
+                    onFocus={() => setShowBankDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowBankDropdown(false), 200)}
+                    placeholder="Digite para buscar o banco..."
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  
+                  {/* Dropdown com resultados */}
+                  {showBankDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {filteredBanks.length > 0 ? (
+                        filteredBanks.map((bank) => (
+                          <div
+                            key={bank}
+                            onClick={() => selectBank(bank)}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                          >
+                            {bank}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-gray-500 text-sm">
+                          Nenhum banco encontrado
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {errors.bank && (
+                  <p className="text-red-500 text-xs mt-1">{errors.bank}</p>
+                )}
               </div>
 
               <div>

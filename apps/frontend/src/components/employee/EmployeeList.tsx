@@ -2,14 +2,17 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, ChevronDown, ChevronUp, Filter, Camera, FileCheck, Eye, Plus } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { TOMADORES_LIST } from '@/constants/tomadores';
+import { CARGOS_LIST } from '@/constants/cargos';
 import { AdjustmentsList } from './AdjustmentsList';
 import { AdjustmentForm } from './AdjustmentForm';
 import { DiscountsList } from './DiscountsList';
 import { DiscountForm } from './DiscountForm';
 import { EditEmployeeForm } from './EditEmployeeForm';
+import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData, SalaryDiscount, CreateDiscountData, UpdateDiscountData } from '@/types';
 
@@ -70,7 +73,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
-  const [isFilterExpanded, setIsFilterExpanded] = useState(true);
   const [viewingCertificate, setViewingCertificate] = useState<string | null>(null);
   const [showAddAdjustmentForm, setShowAddAdjustmentForm] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState<SalaryAdjustment | null>(null);
@@ -111,39 +113,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     'Financeiro'
   ];
 
-  const positions = [
-    'Todos',
-    'Analista',
-    'Assistente',
-    'Coordenador',
-    'Diretor',
-    'Engenheiro',
-    'Especialista',
-    'Estagiário',
-    'Gerente',
-    'Líder Técnico',
-    'Operador',
-    'Supervisor',
-    'Técnico',
-    'Consultor',
-    'Desenvolvedor',
-    'Designer',
-    'Arquiteto',
-    'Projetista',
-    'Inspetor',
-    'Auditor',
-    'Contador',
-    'Advogado',
-    'Vendedor',
-    'Atendente',
-    'Auxiliar',
-    'Secretário',
-    'Recepcionista',
-    'Motorista',
-    'Segurança',
-    'Limpeza',
-    'Manutenção'
-  ];
+  const positions = ['Todos', ...CARGOS_LIST];
 
   const costCenters = [
     'Todos',
@@ -157,48 +127,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     'DIRETOR'
   ];
 
-  const clients = [
-    'Todos',
-    '004 - ADMINISTRATIVO DF',
-    '017 - CODEVASF',
-    '022 - UFRN 2',
-    '056 - SUPERINTENDENCIA REGIONAL DA RFB NA 4A R',
-    '058 - INCRA NATAL',
-    '064 - UFRN PINTURA',
-    '068 - PARQUE 3 RUAS - JOÃO PESSOA',
-    '069 - SUBSECAO JUDICIARIA ANAPOLIS-GO',
-    '070 - SUBSECAO JUDICIARIA RIO VERDE-GO',
-    '071 - SUBSECAO JUDICIARIA ITUMBIARA-GO',
-    '072 - SUBSECAO JUDICIARIA LUZIANIA-GO',
-    '073 - SUBSECAO JUDICIARIA URUACU-GO',
-    '074 - SUBSECAO JUDICIARIA FORMOSA-GO',
-    '075 - SUBSECAO JUDICIARIA JATAI-GO',
-    '076 - MIN DAS RELAÇÕES EXTERIORES -ITAMARATY',
-    '077 - SEDES - SEC EST DESENVOLVIMENTO SOCIAL DF',
-    '078 - SES - SEC ESTADO DE SAUDE -TAGUATINGA',
-    '079 - SES - SEC ESTADO DE SAUDE -CEILANDIA',
-    '080 - SES - SEC ESTADO DE SAUDE -SAMAMBAIA/REC',
-    '085 - ADMINISTRATIVO RS',
-    '086 - CORREIOS E TELEGRAFOS 824 SE/RS',
-    '087 - TRE RIO GRANDE DO SUL',
-    '088 - BANRISUL',
-    '090 - INMETRO RS',
-    '092 - TJGO RETROFIT ITAJA',
-    '093 - TJGO RETROFIT CAÇU',
-    '094 - TJGO RETROFIT PARANAIGUARA',
-    '096 - BANCO DO BRASIL GOIAS',
-    '097 - SEINFRA PAVIMENTACAO PB',
-    '098 - UFPE IMPERMEABILIZAÇÃO',
-    '099 - TRIBUNAL DE JUSTICA DE GOIAS - RIO VERDE',
-    '100 - TRIBUNAL DE JUSTICA DE GOIAS - CALDAS NOVAS',
-    '102 - TJ GO RETROFIT LOTE 05',
-    '103 - TJ GO RETROFIT LOTE 04',
-    '106 - SMED RS 17/2023 LOTE 01 - REGIAO NORTE',
-    '107 - BANCO DO BRASIL JARDIM AMERICA',
-    '108 - BANCO DO BRASIL FORMOSA',
-    '109 - CORREIOS DA SE/RS',
-    '110 - NOVO PROGRESSO'
-  ];
+  const clients = ['Todos', ...TOMADORES_LIST];
 
   // Função para agrupar registros por dia
   const groupRecordsByDay = (records: any[]) => {
@@ -387,7 +316,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       });
       return res.data;
     },
-    enabled: userRole === 'ADMIN' || userRole === 'DEPARTAMENTO_PESSOAL' || userRole === 'GESTOR' || userRole === 'DIRETOR',
+    enabled: true, // Permitir que todos os usuários vejam a lista
   });
 
 
@@ -711,9 +640,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     setCurrentPage(1);
   };
 
-  if (userRole !== 'ADMIN' && userRole !== 'DEPARTAMENTO_PESSOAL' && userRole !== 'GESTOR' && userRole !== 'DIRETOR') {
-    return null;
-  }
+  // Verificar se o usuário tem permissões administrativas baseadas no cargo
+  const { isAdmin } = usePermissions();
 
   return (
     <Card className="w-full">
@@ -725,10 +653,10 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900">
-                {userRole === 'ADMIN' ? 'Gerenciar Funcionários' : 'Lista de Funcionários'}
+                {isAdmin ? 'Gerenciar Funcionários' : 'Lista de Funcionários'}
               </h3>
               <p className="text-sm text-gray-600">
-                {userRole === 'ADMIN' 
+                {isAdmin 
                   ? 'Visualizar e gerenciar funcionários cadastrados' 
                   : 'Visualizar funcionários cadastrados'
                 }
@@ -741,31 +669,16 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {/* Busca e Filtros */}
         <div className="mb-6 border border-gray-200 rounded-lg">
           {/* Cabeçalho dos Filtros */}
-          <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
-              </div>
-              <button
-                onClick={() => setIsFilterExpanded(!isFilterExpanded)}
-                className="flex items-center space-x-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-md transition-colors"
-              >
-                <span>{isFilterExpanded ? 'Minimizar' : 'Expandir'}</span>
-                {isFilterExpanded ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-              </button>
+          <div className="px-4 py-3 border-b border-gray-200
+          ">
+            <div className="flex items-center space-x-2">
+              <Filter className="w-5 h-5 text-gray-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
             </div>
           </div>
           
           {/* Conteúdo dos Filtros */}
-          <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
-            isFilterExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
-          }`}>
-            <div className="p-4">
+          <div className="p-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -798,15 +711,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   <select
                     value={departmentFilter}
                     onChange={(e) => setDepartmentFilter(e.target.value)}
-                    className="w-full px-3 pr-8 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {departments.map((dept) => (
-                      <option 
-                        key={dept} 
-                        value={dept === 'Todos' ? 'all' : dept}
-                      >
-                        {dept}
-                      </option>
+                    <option value="all">Todos</option>
+                    {departments.filter(d => d !== 'Todos').map((dept) => (
+                      <option key={dept} value={dept}>{dept}</option>
                     ))}
                   </select>
                 </div>
@@ -816,15 +725,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   <select
                     value={positionFilter}
                     onChange={(e) => setPositionFilter(e.target.value)}
-                    className="w-full px-3 pr-8 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {positions.map((pos) => (
-                      <option 
-                        key={pos} 
-                        value={pos === 'Todos' ? 'all' : pos}
-                      >
-                        {pos}
-                      </option>
+                    <option value="all">Todos</option>
+                    {positions.filter(p => p !== 'Todos').map((pos) => (
+                      <option key={pos} value={pos}>{pos}</option>
                     ))}
                   </select>
                 </div>
@@ -834,15 +739,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   <select
                     value={costCenterFilter}
                     onChange={(e) => setCostCenterFilter(e.target.value)}
-                    className="w-full px-3 pr-8 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {costCenters.map((cc) => (
-                      <option 
-                        key={cc} 
-                        value={cc === 'Todos' ? 'all' : cc}
-                      >
-                        {cc}
-                      </option>
+                    <option value="all">Todos</option>
+                    {costCenters.filter(cc => cc !== 'Todos').map((center) => (
+                      <option key={center} value={center}>{center}</option>
                     ))}
                   </select>
                 </div>
@@ -852,21 +753,16 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   <select
                     value={clientFilter}
                     onChange={(e) => setClientFilter(e.target.value)}
-                    className="w-full px-3 pr-8 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {clients.map((client) => (
-                      <option 
-                        key={client} 
-                        value={client === 'Todos' ? 'all' : client}
-                      >
-                        {client}
-                      </option>
+                    <option value="all">Todos</option>
+                    {clients.filter(c => c !== 'Todos').map((tomador) => (
+                      <option key={tomador} value={tomador}>{tomador}</option>
                     ))}
                   </select>
                 </div>
               </div>
             </div>
-          </div>
         </div>
 
         {/* Lista de funcionários */}
@@ -957,34 +853,36 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         </div>
                       </div>
                 
-                      {/* Botões de ação */}
-                <div className="flex justify-center space-x-2">
-                  {/* Botão de editar */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditEmployee(employee);
-                    }}
-                    className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-all duration-200 hover:scale-105"
-                    title="Editar funcionário"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
-                  
-                  {/* Botão de deletar */}
-                  {showDeleteButton && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteConfirm(employee.id);
-                      }}
-                      className="p-2.5 text-red-600 hover:bg-red-50 rounded-xl transition-all duration-200 hover:scale-105"
-                      title="Desligar funcionário"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
+                      {/* Botões de ação - apenas para administradores */}
+                      {isAdmin && (
+                        <div className="flex justify-center space-x-2">
+                          {/* Botão de editar */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditEmployee(employee);
+                            }}
+                            className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-all duration-200 hover:scale-105"
+                            title="Editar funcionário"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          
+                          {/* Botão de deletar */}
+                          {showDeleteButton && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteConfirm(employee.id);
+                              }}
+                              className="p-2.5 text-red-600 hover:bg-red-50 rounded-xl transition-all duration-200 hover:scale-105"
+                              title="Desligar funcionário"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </>
                 )}
               </div>
@@ -1536,7 +1434,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                        record.type === 'BREAK_END' ? 'Fim Pausa' :
                                        record.type === 'ABSENCE_JUSTIFIED' ? 'Ausência Justificada' : record.type}
                                     </span>
-                                    {userRole === 'ADMIN' && (
+                                    {isAdmin && (
                                       <>
                                         {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && (
                                           <button

@@ -8,7 +8,7 @@ import { FileText, Users, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import api from '@/lib/api';
 
-export default function AdminAtestadosPage() {
+export default function AtestadosPage() {
   // Buscar dados do usuário
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -56,7 +56,7 @@ export default function AdminAtestadosPage() {
 
   const user = userData?.data || {
     name: 'Usuário',
-    role: 'ADMIN'
+    role: 'EMPLOYEE'
   };
 
   return (

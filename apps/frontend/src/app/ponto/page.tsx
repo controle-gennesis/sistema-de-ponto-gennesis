@@ -31,14 +31,7 @@ export default function PontoPage() {
     router.push('/auth/login');
   };
 
-  // Verificar se o usuário é realmente um funcionário
-  useEffect(() => {
-    if (userData?.data?.role && userData.data.role !== 'EMPLOYEE') {
-      if (userData.data.role === 'ADMIN' || userData.data.role === 'DEPARTAMENTO_PESSOAL' || userData.data.role === 'GESTOR' || userData.data.role === 'DIRETOR') {
-        router.push('/admin');
-      }
-    }
-  }, [userData, router]);
+  // Removido: verificação de role - agora usamos apenas cargos
 
   // Verificar se é o primeiro login
   const isFirstLogin = userData?.data?.isFirstLogin || false;

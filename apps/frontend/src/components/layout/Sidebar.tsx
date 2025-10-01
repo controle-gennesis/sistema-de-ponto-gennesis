@@ -25,9 +25,10 @@ import {
   Cake,
   FileSpreadsheet
 } from 'lucide-react';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface SidebarProps {
-  userRole: 'EMPLOYEE' | 'DEPARTAMENTO_PESSOAL' | 'GESTOR' | 'DIRETOR' | 'ADMIN';
+  userRole: 'EMPLOYEE';
   userName: string;
   onLogout: () => void;
   onMenuToggle?: (collapsed: boolean) => void;
@@ -37,84 +38,87 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const pathname = usePathname();
+  const { permissions, isLoading, userPosition, user } = usePermissions();
 
-  const isAdminOrDP = userRole === 'ADMIN' || userRole === 'DEPARTAMENTO_PESSOAL' || userRole === 'GESTOR' || userRole === 'DIRETOR';
   const isEmployee = userRole === 'EMPLOYEE';
-  const isAdmin = userRole === 'ADMIN';
 
-  // Menu items baseados no papel do usuário
+  // Menu items baseados no cargo do funcionário
   const getMenuItems = () => {
-    if (isEmployee) {
-      return [
-        {
-          name: 'Registrar Ponto',
-          href: '/ponto',
-          icon: Clock,
-          description: 'Bater ponto e consultar registros'
-        },
-        {
-          name: 'Registrar Ausência',
-          href: '/ponto/atestados',
-          icon: Stethoscope,
-          description: 'Enviar e acompanhar ausências'
-        },
-        {
-          name: 'Férias',
-          href: '/ponto/ferias',
-          icon: Calendar,
-          description: 'Solicitar e acompanhar férias'
-        }
-      ];
-    }
+    const allMenuItems = [
+      {
+        name: 'Dashboard',
+        href: '/ponto/dashboard',
+        icon: Home,
+        description: 'Visão geral do sistema',
+        permission: permissions.canViewDashboard
+      },
+      {
+        name: 'Registrar Ponto',
+        href: '/ponto',
+        icon: Clock,
+        description: 'Bater ponto e consultar registros',
+        permission: permissions.canRegisterTime
+      },
+      {
+        name: 'Funcionários',
+        href: '/ponto/funcionarios',
+        icon: Users,
+        description: 'Gerenciar funcionários',
+        permission: permissions.canManageEmployees
+      },
+      {
+        name: 'Registrar Ausência',
+        href: '/ponto/atestados',
+        icon: Stethoscope,
+        description: 'Enviar e acompanhar ausências',
+        permission: true // Todos podem registrar suas próprias ausências
+      },
+      {
+        name: 'Gerenciar Ausências',
+        href: '/ponto/gerenciar-atestados',
+        icon: Stethoscope,
+        description: 'Gerenciar todas as ausências',
+        permission: permissions.canManageAbsences
+      },
+      {
+        name: 'Aniversariantes',
+        href: '/ponto/aniversariantes',
+        icon: Cake,
+        description: 'Ver aniversariantes do mês',
+        permission: permissions.canViewBirthdays
+      },
+      {
+        name: 'Banco de Horas',
+        href: '/ponto/banco-horas',
+        icon: Timer,
+        description: 'Controle de banco de horas',
+        permission: permissions.canManageBankHours
+      },
+      {
+        name: 'Folha de Pagamento',
+        href: '/ponto/folha-pagamento',
+        icon: FileSpreadsheet,
+        description: 'Gestão de folha de pagamento',
+        permission: permissions.canAccessPayroll
+      },
+      {
+        name: 'Férias',
+        href: '/ponto/ferias',
+        icon: Calendar,
+        description: 'Solicitar e acompanhar férias',
+        permission: true // Todos podem solicitar suas próprias férias
+      },
+      {
+        name: 'Gerenciar Férias',
+        href: '/ponto/gerenciar-ferias',
+        icon: Calendar,
+        description: 'Gerenciar férias dos funcionários',
+        permission: permissions.canManageVacations
+      }
+    ];
 
-    if (isAdminOrDP) {
-      return [
-        {
-          name: 'Início',
-          href: '/admin',
-          icon: Home,
-          description: 'Estatísticas e frequência'
-        },
-        {
-          name: 'Funcionários',
-          href: '/admin/employees',
-          icon: Users,
-          description: 'Gerenciar funcionários'
-        },
-        {
-          name: 'Ausências',
-          href: '/admin/atestados',
-          icon: Stethoscope,
-          description: 'Gerenciar ausências'
-        },
-        {
-          name: 'Aniversariantes',
-          href: '/admin/aniversariantes',
-          icon: Cake,
-          description: 'Ver aniversariantes do mês'
-        },
-        {
-          name: 'Banco de Horas',
-          href: '/admin/banco-horas',
-          icon: Timer,
-          description: 'Controle de banco de horas'
-        },
-        {
-          name: 'Folha de Pagamento',
-          href: '/admin/folha-pagamento',
-          icon: FileSpreadsheet,
-          description: 'Gestão de folha de pagamento'
-        },
-        {
-          name: 'Férias',
-          href: '/admin/ferias',
-          icon: Calendar,
-          description: 'Gerenciar férias dos funcionários'
-        }
-      ];
-    }
-
-    return [];
+    // Filtrar apenas os itens que o usuário tem permissão para acessar
+    return allMenuItems.filter(item => item.permission);
   };
 
   const menuItems = getMenuItems();
@@ -154,7 +158,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0 lg:fixed lg:shadow-lg ${
           isCollapsed ? 'w-20' : 'w-72'
-        } flex flex-col`}
+        } flex flex-col overflow-y-auto`}
       >
         {/* Header */}
         <div className={`border-b border-gray-200 ${isCollapsed ? 'p-4' : 'p-6'}`}>
@@ -207,18 +211,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   {userName}
                 </p>
                 <p className="text-xs text-gray-500 capitalize">
-                  {userRole === 'EMPLOYEE' ? 'Funcionário' : 
-                   userRole === 'DEPARTAMENTO_PESSOAL' ? 'Departamento Pessoal' :
-                   userRole === 'GESTOR' ? 'Gestor' :
-                   userRole === 'DIRETOR' ? 'Diretor' : 'Administrador'}
+                  {userPosition || 'Funcionário'}
                 </p>
+                {user?.employee?.department && (
+                  <p className="text-xs text-gray-400 capitalize">
+                    {user.employee.department}
+                  </p>
+                )}
               </div>
             )}
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-2 ${isCollapsed ? 'p-2' : 'p-4'}`}>
+        <nav className={`flex-1 space-y-2 ${isCollapsed ? 'p-2' : 'p-4'} overflow-y-auto`}>
           {menuItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -257,39 +263,42 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           })}
         </nav>
 
-        {/* Alterar Senha */}
-        <div className={`border-t border-gray-200 ${isCollapsed ? 'p-2' : 'p-4'}`}>
-          <button
-            onClick={() => {
-              // Emitir evento customizado para abrir modal de alterar senha
-              window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
-            }}
-            className={`flex items-center text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors duration-200 ${
-              isCollapsed 
-                ? 'justify-center w-12 h-12 mx-auto' 
-                : 'w-full space-x-3 px-3 py-2'
-            }`}
-            title={isCollapsed ? 'Alterar Senha' : undefined}
-          >
-            <Lock className="w-5 h-5 flex-shrink-0 text-blue-700" />
-            {!isCollapsed && <span className="text-sm font-medium text-blue-700">Alterar Senha</span>}
-          </button>
-        </div>
+        {/* Botões de ação - sempre visíveis na parte inferior */}
+        <div className="flex-shrink-0">
+          {/* Alterar Senha */}
+          <div className={`border-t border-gray-200 ${isCollapsed ? 'p-2' : 'p-4'}`}>
+            <button
+              onClick={() => {
+                // Emitir evento customizado para abrir modal de alterar senha
+                window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
+              }}
+              className={`flex items-center text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors duration-200 ${
+                isCollapsed 
+                  ? 'justify-center w-12 h-12 mx-auto' 
+                  : 'w-full space-x-3 px-3 py-2'
+              }`}
+              title={isCollapsed ? 'Alterar Senha' : undefined}
+            >
+              <Lock className="w-5 h-5 flex-shrink-0 text-blue-700" />
+              {!isCollapsed && <span className="text-sm font-medium text-blue-700">Alterar Senha</span>}
+            </button>
+          </div>
 
-        {/* Logout */}
-        <div className={`border-t border-gray-200 ${isCollapsed ? 'p-2' : 'p-4'}`}>
-          <button
-            onClick={onLogout}
-            className={`flex items-center text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition-colors duration-200 ${
-              isCollapsed 
-                ? 'justify-center w-12 h-12 mx-auto' 
-                : 'w-full space-x-3 px-3 py-2'
-            }`}
-            title={isCollapsed ? 'Sair' : undefined}
-          >
-            <LogOut className="w-5 h-5 flex-shrink-0 text-red-700" />
-            {!isCollapsed && <span className="text-sm font-medium text-red-700">Sair</span>}
-          </button>
+          {/* Logout */}
+          <div className={`border-t border-gray-200 ${isCollapsed ? 'p-2' : 'p-4'}`}>
+            <button
+              onClick={onLogout}
+              className={`flex items-center text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition-colors duration-200 ${
+                isCollapsed 
+                  ? 'justify-center w-12 h-12 mx-auto' 
+                  : 'w-full space-x-3 px-3 py-2'
+              }`}
+              title={isCollapsed ? 'Sair' : undefined}
+            >
+              <LogOut className="w-5 h-5 flex-shrink-0 text-red-700" />
+              {!isCollapsed && <span className="text-sm font-medium text-red-700">Sair</span>}
+            </button>
+          </div>
         </div>
       </div>
     </>

@@ -17,9 +17,9 @@ router.get('/:id', medicalCertificateController.getCertificateById);
 router.delete('/:id', medicalCertificateController.cancelCertificate);
 router.get('/:id/download', medicalCertificateController.downloadFile);
 
-// Rotas para RH/Admin
-router.get('/', requireRole(['ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR']), medicalCertificateController.getAllCertificates);
-router.put('/:id/approve', requireRole(['ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR']), medicalCertificateController.approveCertificate);
-router.put('/:id/reject', requireRole(['ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR']), medicalCertificateController.rejectCertificate);
+// Rotas para funcionários (todas as funcionalidades)
+router.get('/', medicalCertificateController.getAllCertificates);
+router.put('/:id/approve', medicalCertificateController.approveCertificate);
+router.put('/:id/reject', medicalCertificateController.rejectCertificate);
 
 export default router;

@@ -6,9 +6,8 @@ import { requireRole } from '../middleware/roleAuth';
 const router = Router();
 const salaryAdjustmentController = new SalaryAdjustmentController();
 
-// Todas as rotas de acréscimos salariais requerem autenticação e permissão de admin
+// Todas as rotas de acréscimos salariais requerem apenas autenticação
 router.use(authenticate);
-router.use(requireRole(['ADMIN']));
 
 // Criar acréscimo salarial
 router.post('/', (req, res, next) => 

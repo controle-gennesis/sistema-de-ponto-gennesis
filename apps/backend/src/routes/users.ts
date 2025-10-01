@@ -10,20 +10,20 @@ const userController = new UserController();
 router.use(authenticate);
 
 // Rota para aniversariantes (DEVE vir antes de /:id)
-router.get('/birthdays', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), getBirthdayEmployees);
+router.get('/birthdays', authorize('EMPLOYEE'), getBirthdayEmployees);
 
-// Rotas para administradores e RH
-router.get('/', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.getAllUsers);
+// Rotas para funcionários - agora todos têm acesso
+router.get('/', authorize('EMPLOYEE'), userController.getAllUsers);
 router.get('/me/employee', userController.getMyEmployeeData);
 router.put('/me/employee', userController.updateMyEmployeeData);
-router.post('/', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.createUser);
+router.post('/', authorize('EMPLOYEE'), userController.createUser);
 
-// Rotas para gestores
-router.get('/department/:department', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.getUsersByDepartment);
+// Rotas para funcionários
+router.get('/department/:department', authorize('EMPLOYEE'), userController.getUsersByDepartment);
 
 // Rotas com parâmetros (DEVEM vir por último)
-router.get('/:id', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.getUserById);
-router.put('/:id', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), userController.updateUser);
-router.delete('/:id', authorize('ADMIN'), userController.deleteUser);
+router.get('/:id', authorize('EMPLOYEE'), userController.getUserById);
+router.put('/:id', authorize('EMPLOYEE'), userController.updateUser);
+router.delete('/:id', authorize('EMPLOYEE'), userController.deleteUser);
 
 export default router;

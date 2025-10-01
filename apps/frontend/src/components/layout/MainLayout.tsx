@@ -5,7 +5,7 @@ import { Sidebar } from './Sidebar';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  userRole: 'EMPLOYEE' | 'DEPARTAMENTO_PESSOAL' | 'GESTOR' | 'DIRETOR' | 'ADMIN';
+  userRole: 'EMPLOYEE';
   userName: string;
   onLogout: () => void;
 }

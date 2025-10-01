@@ -31,7 +31,7 @@ async function createTestEmployee() {
         userId: user.id,
         employeeId: 'EMP002',
         department: 'Desenvolvimento',
-        position: 'Desenvolvedor Senior',
+        position: 'Técnico',
         hireDate: hireDate,
         salary: 5000,
         workSchedule: {

@@ -89,7 +89,7 @@ async function main() {
       userId: employee.id,
       employeeId: 'EMP001',
       department: 'Engenharia',
-      position: 'Engenheiro Civil',
+      position: 'Engenheiro',
       hireDate: new Date('2025-09-01 07:00:00'),
       birthDate: new Date('1995-09-24'), // Aniversário em 24/09
       salary: 10000.00,
@@ -124,7 +124,7 @@ async function main() {
       cpf: '12345678901',
       employeeId: 'EMP002',
       department: 'Engenharia',
-      position: 'Engenheiro Elétrico',
+      position: 'Engenheiro',
       birthDate: new Date('1990-09-15'), // 15/09
       hireDate: new Date('2024-01-15'),
       // Novos campos de exemplo
@@ -145,7 +145,7 @@ async function main() {
       cpf: '12345678902',
       employeeId: 'EMP003',
       department: 'Departamento Pessoal',
-      position: 'Analista de RH',
+      position: 'Analista',
       birthDate: new Date('1988-09-30'), // 30/09
       hireDate: new Date('2023-06-01'),
       // Novos campos de exemplo
@@ -166,7 +166,7 @@ async function main() {
       cpf: '12345678903',
       employeeId: 'EMP004',
       department: 'Engenharia',
-      position: 'Arquiteto',
+      position: 'Técnico',
       birthDate: new Date('1992-10-05'), // 05/10 (outro mês)
       hireDate: new Date('2024-03-10'),
       // Novos campos de exemplo

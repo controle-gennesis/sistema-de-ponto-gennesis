@@ -8,7 +8,7 @@ const bankHoursController = new BankHoursController();
 // Todas as rotas precisam de autenticação
 router.use(authenticate);
 
-// Rota para buscar banco de horas por funcionário (apenas ADMIN, DEPARTAMENTO_PESSOAL, GESTOR e DIRETOR)
-router.get('/employees', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), bankHoursController.getBankHoursByEmployee);
+// Rota para buscar banco de horas por funcionário (todos os funcionários)
+router.get('/employees', bankHoursController.getBankHoursByEmployee);
 
 export default router;

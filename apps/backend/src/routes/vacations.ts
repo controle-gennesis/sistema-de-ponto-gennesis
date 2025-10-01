@@ -16,17 +16,17 @@ router.get('/my-vacations/balance', vacationController.getVacationBalance);
 router.put('/:id/cancel', vacationController.cancelVacation);
 router.put('/:id/confirm-notice', vacationController.confirmVacationNotice);
 
-// Rotas para administradores e RH
-router.get('/', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.getAllVacations);
-router.get('/pending', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.getPendingVacations);
-router.put('/:id/approve', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.approveVacation);
-router.put('/:id/reject', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.rejectVacation);
-router.post('/:id/send-notice', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.sendVacationNotice);
+// Rotas para funcionários - agora todos têm acesso
+router.get('/', authorize('EMPLOYEE'), vacationController.getAllVacations);
+router.get('/pending', authorize('EMPLOYEE'), vacationController.getPendingVacations);
+router.put('/:id/approve', authorize('EMPLOYEE'), vacationController.approveVacation);
+router.put('/:id/reject', authorize('EMPLOYEE'), vacationController.rejectVacation);
+router.post('/:id/send-notice', authorize('EMPLOYEE'), vacationController.sendVacationNotice);
 
 // Relatórios e conformidade
-router.get('/reports/summary', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.getVacationSummary);
-router.get('/reports/compliance', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.getComplianceReport);
-router.get('/expiring', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.getExpiringVacations);
-router.get('/:id/payment', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), vacationController.calculateVacationPayment);
+router.get('/reports/summary', authorize('EMPLOYEE'), vacationController.getVacationSummary);
+router.get('/reports/compliance', authorize('EMPLOYEE'), vacationController.getComplianceReport);
+router.get('/expiring', authorize('EMPLOYEE'), vacationController.getExpiringVacations);
+router.get('/:id/payment', authorize('EMPLOYEE'), vacationController.calculateVacationPayment);
 
 export default router;

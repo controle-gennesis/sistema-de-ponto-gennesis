@@ -92,7 +92,7 @@ export default function AtestadosPage() {
           {activeTab === 'send' ? (
             <MedicalCertificateCard onSuccess={handleSuccess} />
           ) : (
-            <MedicalCertificateList userRole="EMPLOYEE" />
+            <MedicalCertificateList />
           )}
         </div>
       </div>

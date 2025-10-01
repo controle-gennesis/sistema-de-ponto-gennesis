@@ -6,9 +6,9 @@ import { requireRole } from '../middleware/roleAuth';
 const router = Router();
 const payrollController = new PayrollController();
 
-// Todas as rotas de folha de pagamento requerem autenticação e permissão de admin
+// Todas as rotas de folha de pagamento requerem autenticação e permissão de funcionário
 router.use(authenticate);
-router.use(requireRole(['ADMIN']));
+router.use(requireRole(['EMPLOYEE']));
 
 // Gerar folha de pagamento mensal
 router.get('/monthly', (req, res, next) => 

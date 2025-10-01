@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -50,7 +51,6 @@ interface MedicalCertificate {
 }
 
 interface MedicalCertificateListProps {
-  userRole: 'EMPLOYEE' | 'DEPARTAMENTO_PESSOAL' | 'GESTOR' | 'DIRETOR' | 'ADMIN';
   showActions?: boolean;
 }
 
@@ -73,7 +73,6 @@ const statusLabels: Record<string, string> = {
 };
 
 export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({ 
-  userRole, 
   showActions = false 
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -83,12 +82,13 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
   const [rejectReason, setRejectReason] = useState('');
 
   const queryClient = useQueryClient();
+  const { permissions, isLoading: permissionsLoading } = usePermissions();
 
   // Buscar atestados
   const { data: certificatesData, isLoading } = useQuery({
-    queryKey: ['medical-certificates', userRole],
+    queryKey: ['medical-certificates'],
     queryFn: async () => {
-      const endpoint = userRole === 'EMPLOYEE' ? '/medical-certificates/my' : '/medical-certificates';
+      const endpoint = permissions.canManageAbsences ? '/medical-certificates' : '/medical-certificates/my';
       const response = await api.get(endpoint);
       return response.data;
     }
@@ -134,7 +134,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
 
   // Filtrar atestados
   const filteredCertificates = certificates.filter(cert => {
-    const matchesSearch = userRole === 'EMPLOYEE' || 
+    const matchesSearch = !permissions.canManageAbsences || 
       cert.user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       cert.user.email.toLowerCase().includes(searchTerm.toLowerCase());
     
@@ -234,7 +234,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
   return (
     <div className="space-y-4">
       {/* Filtros */}
-      {userRole !== 'EMPLOYEE' && (
+      {permissions.canManageAbsences && (
         <Card>
           <CardContent className="p-0 pt-0">
             {/* Cabeçalho dos Filtros */}
@@ -290,7 +290,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                 Nenhum registro de ausência encontrado
               </h3>
               <p className="text-gray-500">
-                {userRole === 'EMPLOYEE' 
+                {!permissions.canManageAbsences 
                   ? 'Você ainda não enviou nenhum registro de ausência.'
                   : 'Não há registros de ausência que correspondam aos filtros selecionados.'
                 }
@@ -309,7 +309,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                         <h3 className="font-medium text-gray-900 text-sm sm:text-base">
                           {certificateTypeLabels[certificate.type]}
                         </h3>
-                        {userRole !== 'EMPLOYEE' && (
+                        {permissions.canManageAbsences && (
                           <p className="text-xs sm:text-sm text-gray-600">
                             <User className="w-3 h-3 inline mr-1" />
                             {certificate.user.name} ({certificate.employee.department})
@@ -371,7 +371,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                         </Button>
                       )}
                       
-                      {userRole === 'EMPLOYEE' && certificate.status === 'PENDING' && (
+                      {!permissions.canManageAbsences && certificate.status === 'PENDING' && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -456,7 +456,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
             )}
 
             {/* Ações para RH/Admin */}
-            {userRole !== 'EMPLOYEE' && selectedCertificate.status === 'PENDING' && (
+            {permissions.canManageAbsences && selectedCertificate.status === 'PENDING' && (
               <div className="border-t pt-4 space-y-3">
                 <Button
                   onClick={handleApprove}

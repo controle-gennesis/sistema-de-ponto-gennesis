@@ -76,9 +76,6 @@ export default function BankHoursPage() {
     };
   }, []);
 
-  // Removido: verificação de role - agora usamos apenas cargos
-
-
   const { data: bankHoursData, isLoading: loadingBankHours } = useQuery({
     queryKey: ['bank-hours', startDateFilter, endDateFilter, departmentFilter, statusFilter, costCenterFilter, clientFilter],
     queryFn: async () => {
@@ -219,7 +216,7 @@ export default function BankHoursPage() {
   const user = userData?.data || {
     name: 'Usuário',
     cpf: '000.000.000-00',
-    role: 'ADMIN'
+    role: 'EMPLOYEE'
   };
 
   const filteredData = bankHoursData?.data || [];

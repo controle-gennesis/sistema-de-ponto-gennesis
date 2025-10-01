@@ -9,7 +9,7 @@ import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import api from '@/lib/api';
 
-export default function AdminPage() {
+export default function DashboardPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   
@@ -28,8 +28,6 @@ export default function AdminPage() {
     // Redireciona para a tela de login
     router.push('/auth/login');
   };
-
-  // Removido: verificação de role - agora usamos apenas cargos
 
   const { data: dashboardData, isLoading: loadingDashboard } = useQuery({
     queryKey: ['dashboard'],
@@ -60,18 +58,17 @@ export default function AdminPage() {
     };
 
     window.addEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    
     return () => {
       window.removeEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
     };
   }, []);
 
-  if (loadingDashboard || loadingUser || !userData) {
+  if (loadingUser || !userData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando dashboard...</p>
+          <p className="text-gray-600">Carregando...</p>
         </div>
       </div>
     );
@@ -80,18 +77,17 @@ export default function AdminPage() {
   const user = userData?.data || {
     name: 'Usuário',
     cpf: '000.000.000-00',
-    role: 'ADMIN'
+    role: 'EMPLOYEE'
   };
-
-  const isAdmin = user.role === 'ADMIN';
 
   const stats = dashboardData?.data || {
     totalEmployees: 0,
     presentToday: 0,
     absentToday: 0,
-    lateToday: 0,
+    pendingToday: 0,
     pendingVacations: 0,
     pendingOvertime: 0,
+    averageAttendance: 0,
     attendanceRate: 0,
   };
 
@@ -106,7 +102,7 @@ export default function AdminPage() {
       <div className="space-y-8">
       {/* Header */}
       <div className="text-center">
-        <h1 className="text-3xl font-bold text-gray-900">Painel Administrativo</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Painel de Funcionários</h1>
         <p className="mt-2 text-gray-600">Visão geral do sistema de controle de ponto</p>
       </div>
 
@@ -161,7 +157,7 @@ export default function AdminPage() {
                 <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
               </div>
               <div className="ml-3 sm:ml-4 min-w-0">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Pendência Hoje</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Pendentes</p>
                 <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.pendingToday}</p>
               </div>
             </div>
@@ -169,44 +165,40 @@ export default function AdminPage() {
         </Card>
       </div>
 
-      {/* Taxa de Frequência */}
+      {/* Gráfico de frequência */}
       <Card>
-        <CardHeader className="pb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Taxa de Frequência</h3>
+        <CardHeader>
+          <h2 className="text-lg font-semibold text-gray-900">Taxa de Frequência</h2>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center space-x-6">
-            <div className="flex-1">
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div 
-                  className="bg-blue-600 h-3 rounded-full transition-all duration-500 ease-out" 
-                  style={{ width: `${widthPercent}%` }} 
-                />
-              </div>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-600">Frequência Geral</span>
+              <span className="text-sm font-bold text-gray-900">{stats.attendanceRate}%</span>
             </div>
-            <div className="text-2xl font-bold text-gray-900 min-w-[60px] text-right">
-              {widthPercent}%
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${widthPercent}%` }}
+              />
             </div>
-          </div>
-          <div className="mt-3 text-sm text-gray-500">
-            {stats.presentToday} de {stats.totalEmployees} funcionários presentes hoje
+            <div className="text-xs text-gray-500">
+              {stats.presentToday} de {stats.totalEmployees} funcionários presentes hoje
+            </div>
           </div>
         </CardContent>
       </Card>
+      </div>
 
-
-
-      {/* Modal de troca de senha */}
+      {/* Modal de alterar senha */}
       <ChangePasswordModal
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}
         onSuccess={() => {
           setIsChangePasswordOpen(false);
-          // Invalidar query para recarregar dados do usuário
           queryClient.invalidateQueries({ queryKey: ['user'] });
         }}
       />
-      </div>
     </MainLayout>
   );
 }

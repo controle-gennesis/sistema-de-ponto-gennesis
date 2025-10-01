@@ -13,13 +13,13 @@ router.post('/request', overtimeController.requestOvertime);
 router.get('/my-overtime', overtimeController.getMyOvertime);
 router.get('/my-overtime/balance', overtimeController.getOvertimeBalance);
 
-// Rotas para administradores e RH
-router.get('/', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), overtimeController.getAllOvertime);
-router.get('/pending', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), overtimeController.getPendingOvertime);
-router.put('/:id/approve', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), overtimeController.approveOvertime);
-router.put('/:id/reject', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), overtimeController.rejectOvertime);
+// Rotas para funcionários (todas as funcionalidades)
+router.get('/', overtimeController.getAllOvertime);
+router.get('/pending', overtimeController.getPendingOvertime);
+router.put('/:id/approve', overtimeController.approveOvertime);
+router.put('/:id/reject', overtimeController.rejectOvertime);
 
 // Relatórios
-router.get('/reports/summary', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), overtimeController.getOvertimeSummary);
+router.get('/reports/summary', overtimeController.getOvertimeSummary);
 
 export default router;

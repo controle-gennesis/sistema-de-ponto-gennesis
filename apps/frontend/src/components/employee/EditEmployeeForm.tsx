@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Edit, X, Save, AlertCircle, CheckCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { TOMADORES_LIST } from '@/constants/tomadores';
+import { CARGOS_LIST } from '@/constants/cargos';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -110,38 +112,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
   ];
 
   // Lista de cargos disponíveis
-  const positions = [
-    'Analista',
-    'Assistente',
-    'Coordenador',
-    'Diretor',
-    'Engenheiro',
-    'Especialista',
-    'Estagiário',
-    'Gerente',
-    'Líder Técnico',
-    'Operador',
-    'Supervisor',
-    'Técnico',
-    'Consultor',
-    'Desenvolvedor',
-    'Designer',
-    'Arquiteto',
-    'Projetista',
-    'Inspetor',
-    'Auditor',
-    'Contador',
-    'Advogado',
-    'Vendedor',
-    'Atendente',
-    'Auxiliar',
-    'Secretário',
-    'Recepcionista',
-    'Motorista',
-    'Segurança',
-    'Limpeza',
-    'Manutenção'
-  ];
+  const positions = CARGOS_LIST;
 
   // Lista de empresas
   const companies = [
@@ -701,26 +672,11 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                       className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
                     >
                       <option value="">Selecione um tomador</option>
-                      <option value="004 - ADMINISTRATIVO DF">004 - ADMINISTRATIVO DF</option>
-                      <option value="017 - CODEVASF">017 - CODEVASF</option>
-                      <option value="022 - UFRN 2">022 - UFRN 2</option>
-                      <option value="056 - SUPERINTENDENCIA REGIONAL DA RFB NA 4A R">056 - SUPERINTENDENCIA REGIONAL DA RFB NA 4A R</option>
-                      <option value="058 - INCRA NATAL">058 - INCRA NATAL</option>
-                      <option value="064 - UFRN PINTURA">064 - UFRN PINTURA</option>
-                      <option value="068 - PARQUE 3 RUAS - JOÃO PESSOA">068 - PARQUE 3 RUAS- JOÃO PESSOA</option>
-                      <option value="069 - SUBSECAO JUDICIARIA ANAPOLIS-GO">069 - SUBSECAO JUDICIARIA ANAPOLIS -GO</option>
-                      <option value="070 - SUBSECAO JUDICIARIA RIO VERDE-GO">070 - SUBSECAO JUDICIARIA RIO VERDE -GO</option>
-                      <option value="071 - SUBSECAO JUDICIARIA ITUMBIARA-GO">071 - SUBSECAO JUDICIARIA ITUMBIARA -GO</option>
-                      <option value="072 - SUBSECAO JUDICIARIA LUZIANIA-GO">072 - SUBSECAO JUDICIARIA LUZIANIA -GO</option>
-                      <option value="073 - SUBSECAO JUDICIARIA URUACU-GO">073 - SUBSECAO JUDICIARIA URUACU-GO</option>
-                      <option value="074 - SUBSECAO JUDICIARIA FORMOSA-GO">074 - SUBSECAO JUDICIARIA FORMOSA-GO</option>
-                      <option value="075 - SUBSECAO JUDICIARIA JATAI-GO">075 - SUBSECAO JUDICIARIA JATAI-GO</option>
-                      <option value="076 - MIN DAS RELAÇÕES EXTERIORES -ITAMARATY">076 - MIN DAS RELAÇÕES EXTERIORES -ITAMARATY</option>
-                      <option value="077 - SEDES - SEC EST DESENVOLVIMENTO SOCIAL DF">077 - SEDES -SEC EST DESENVOLVIMENTO SOCIAL DF</option>
-                      <option value="078 - SES - SEC ESTADO DE SAUDE -TAGUATINGA">078 - SES - SEC ESTADO DE SAUDE -TAGUATINGA</option>
-                      <option value="079 - SES - SEC ESTADO DE SAUDE -CEILANDIA">079 - SES - SEC ESTADO DE SAUDE -CEILANDIA</option>
-                      <option value="080 - SES - SEC ESTADO DE SAUDE -SAMAMBAIA/REC">080 - SES - SEC ESTADO DE SAUDE -SAMAMBAIA/REC</option>
-                      <option value="085 - ADMINISTRATIVO RS">085 - ADMINISTRATIVO RS</option>
+                      {TOMADORES_LIST.map((tomador) => (
+                        <option key={tomador} value={tomador}>
+                          {tomador}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>

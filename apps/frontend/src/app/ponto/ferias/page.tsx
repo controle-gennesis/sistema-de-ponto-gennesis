@@ -172,10 +172,7 @@ export default function VacationsPage() {
     role: 'EMPLOYEE'
   };
 
-  if (user.role !== 'EMPLOYEE') {
-    router.push('/dashboard');
-    return null;
-  }
+  // Removido: verificação de role - agora usamos apenas cargos
 
   const balance: VacationBalance = balanceData?.data;
   const vacations: Vacation[] = vacationsData?.data || [];

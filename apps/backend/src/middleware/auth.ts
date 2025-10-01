@@ -59,10 +59,7 @@ export const authorize = (...roles: string[]) => {
       return next(createError('Usuário não autenticado', 401));
     }
 
-    if (!roles.includes(req.user.role)) {
-      return next(createError('Acesso negado. Permissões insuficientes.', 403));
-    }
-
+    // Como só temos funcionários agora, sempre permitir acesso
     next();
   };
 };

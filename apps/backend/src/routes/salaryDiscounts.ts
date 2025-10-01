@@ -6,9 +6,8 @@ import { requireRole } from '../middleware/roleAuth';
 const router = Router();
 const salaryDiscountController = new SalaryDiscountController();
 
-// Aplicar middleware de autenticação e autorização para todas as rotas
+// Aplicar middleware de autenticação para todas as rotas
 router.use(authenticate);
-router.use(requireRole(['ADMIN']));
 
 // Rotas para descontos salariais
 router.post('/', salaryDiscountController.createDiscount);

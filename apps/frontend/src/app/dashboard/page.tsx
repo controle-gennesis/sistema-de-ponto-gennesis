@@ -51,16 +51,10 @@ export default function DashboardPage() {
   console.log('User object:', user);
   console.log('User role:', user.role);
 
-  // Redirecionar baseado no papel do usuário
-  if (user.role === 'EMPLOYEE') {
-    console.log('Redirecting to /ponto');
-    router.push('/ponto');
-    return null;
-  } else if (user.role === 'ADMIN' || user.role === 'DEPARTAMENTO_PESSOAL' || user.role === 'GESTOR' || user.role === 'DIRETOR') {
-    console.log('Redirecting to /admin');
-    router.push('/admin');
-    return null;
-  }
+  // Redirecionar para o dashboard de funcionários
+  console.log('Redirecting to /ponto/dashboard');
+  router.push('/ponto/dashboard');
+  return null;
 
   return (
     <MainLayout 

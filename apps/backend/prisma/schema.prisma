@@ -246,11 +246,7 @@ model AuditLog {
 
 // Enums
 enum UserRole {
-  ADMIN
   EMPLOYEE
-  DEPARTAMENTO_PESSOAL
-  GESTOR
-  DIRETOR
 }
 
 enum TimeRecordType {

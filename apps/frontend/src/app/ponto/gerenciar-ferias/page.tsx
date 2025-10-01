@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { Vacation, ComplianceReport } from '@/types';
 
-export default function AdminVacationsPage() {
+export default function FeriasPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [selectedTab, setSelectedTab] = useState<'pending' | 'all' | 'compliance'>('pending');
@@ -174,10 +174,8 @@ export default function AdminVacationsPage() {
 
   const user = userData?.data || {
     name: 'Usuário',
-    role: 'ADMIN'
+    role: 'EMPLOYEE'
   };
-
-  // Removido: verificação de role - agora usamos apenas cargos
 
   const pendingVacationsList: Vacation[] = pendingVacations?.data || [];
   const allVacationsList: Vacation[] = allVacations?.data || [];

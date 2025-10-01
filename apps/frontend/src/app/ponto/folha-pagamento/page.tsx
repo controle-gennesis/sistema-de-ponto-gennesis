@@ -7,11 +7,10 @@ import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, Badg
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PayrollDetailModal } from '@/components/payroll/PayrollDetailModal';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import { PayrollEmployee, PayrollFilters, MonthlyPayrollData } from '@/types';
 import * as XLSX from 'xlsx';
-
-// Remover interfaces duplicadas - já importadas do types
 
 export default function FolhaPagamentoPage() {
   const router = useRouter();
@@ -167,10 +166,8 @@ export default function FolhaPagamentoPage() {
   const user = userData?.data || {
     name: 'Usuário',
     cpf: '000.000.000-00',
-    role: 'ADMIN'
+    role: 'EMPLOYEE'
   };
-
-  // Removido: verificação de role - agora usamos apenas cargos
 
   const payrollData: MonthlyPayrollData | null = payrollResponse?.data || null;
   const employees: PayrollEmployee[] = payrollData?.employees || [];
@@ -197,11 +194,12 @@ export default function FolhaPagamentoPage() {
   const yearOptions = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 
   return (
-    <MainLayout 
-      userRole={user.role} 
-      userName={user.name} 
-      onLogout={handleLogout}
-    >
+    <ProtectedRoute route="/ponto/folha-pagamento">
+      <MainLayout 
+        userRole={user.role} 
+        userName={user.name} 
+        onLogout={handleLogout}
+      >
       <div className="space-y-6">
         {/* Header */}
         <div className="text-center">
@@ -243,7 +241,6 @@ export default function FolhaPagamentoPage() {
                     Empresa
                   </label>
                   <div className="relative">
-                    {/* <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" /> */}
                     <select
                       value={filters.company}
                       onChange={handleCompanyChange}
@@ -497,6 +494,7 @@ export default function FolhaPagamentoPage() {
           onClose={handleCloseModal}
         />
       )}
-    </MainLayout>
+      </MainLayout>
+    </ProtectedRoute>
   );
 }

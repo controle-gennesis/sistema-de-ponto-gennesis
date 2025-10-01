@@ -43,13 +43,8 @@ router.get('/:photoKey', async (req: AuthRequest, res, next) => {
       throw createError('Foto não encontrada', 404);
     }
 
-    // Verificar permissões
-    const canAccess = 
-      userRole === 'ADMIN' || 
-      userRole === 'DEPARTAMENTO_PESSOAL' || 
-      userRole === 'GESTOR' || 
-      userRole === 'DIRETOR' ||
-      timeRecord.userId === userId;
+    // Verificar permissões - todos os funcionários podem acessar suas próprias fotos
+    const canAccess = timeRecord.userId === userId;
 
     if (!canAccess) {
       throw createError('Acesso negado a esta foto', 403);
@@ -84,9 +79,9 @@ router.get('/:photoKey', async (req: AuthRequest, res, next) => {
 
 /**
  * GET /api/photos/user/:userId
- * Lista fotos de um usuário específico (apenas ADMIN/HR)
+ * Lista fotos de um usuário específico (todos os funcionários)
  */
-router.get('/user/:userId', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), async (req: AuthRequest, res, next) => {
+router.get('/user/:userId', async (req: AuthRequest, res, next) => {
   try {
     const { userId } = req.params;
     const { limit = 50 } = req.query;
@@ -129,13 +124,8 @@ router.get('/record/:recordId', async (req: AuthRequest, res, next) => {
       throw createError('Registro não encontrado', 404);
     }
 
-    // Verificar permissões
-    const canAccess = 
-      userRole === 'ADMIN' || 
-      userRole === 'DEPARTAMENTO_PESSOAL' || 
-      userRole === 'GESTOR' || 
-      userRole === 'DIRETOR' ||
-      timeRecord.userId === userId;
+    // Verificar permissões - todos os funcionários podem acessar suas próprias fotos
+    const canAccess = timeRecord.userId === userId;
 
     if (!canAccess) {
       throw createError('Acesso negado a este registro', 403);
@@ -163,9 +153,9 @@ router.get('/record/:recordId', async (req: AuthRequest, res, next) => {
 
 /**
  * DELETE /api/photos/:photoKey
- * Remove uma foto (apenas ADMIN)
+ * Remove uma foto (todos os funcionários)
  */
-router.delete('/:photoKey', authorize('ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:photoKey', async (req: AuthRequest, res, next) => {
   try {
     const { photoKey } = req.params;
 
