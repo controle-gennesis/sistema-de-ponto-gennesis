@@ -331,6 +331,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['user'] });
       toast.success('Funcionário atualizado com sucesso!');
       onClose();
     },

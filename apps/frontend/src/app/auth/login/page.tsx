@@ -32,7 +32,7 @@ export default function LoginPage() {
       // Limpar cache do React Query
       queryClient.clear();
       toast.success('Login realizado com sucesso!');
-      router.push('/dashboard');
+      router.push('/ponto');
     } catch (error: any) {
       // Verificar se é erro de credenciais inválidas
       if (error.message?.includes('Credenciais inválidas') || 

@@ -51,9 +51,9 @@ export default function DashboardPage() {
   console.log('User object:', user);
   console.log('User role:', user.role);
 
-  // Redirecionar para o dashboard de funcionários
-  console.log('Redirecting to /ponto/dashboard');
-  router.push('/ponto/dashboard');
+  // Redirecionar para a tela de registrar ponto
+  console.log('Redirecting to /ponto');
+  router.push('/ponto');
   return null;
 
   return (

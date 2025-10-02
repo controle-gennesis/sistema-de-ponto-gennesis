@@ -303,13 +303,29 @@ export class UserController {
             data: {
               ...(employeeData.department && { department: employeeData.department }),
               ...(employeeData.position && { position: employeeData.position }),
+              ...(employeeData.hireDate && { hireDate: new Date(employeeData.hireDate + 'T04:00:00') }),
               ...(employeeData.salary && { salary: employeeData.salary }),
               ...(employeeData.workSchedule && { workSchedule: employeeData.workSchedule }),
               ...(employeeData.isRemote !== undefined && { isRemote: employeeData.isRemote }),
               ...(employeeData.allowedLocations && { allowedLocations: employeeData.allowedLocations }),
               ...(employeeData.costCenter !== undefined && { costCenter: employeeData.costCenter }),
               ...(employeeData.client !== undefined && { client: employeeData.client }),
-              ...(employeeData.birthDate && { birthDate: new Date(employeeData.birthDate + 'T04:00:00') })
+              ...(employeeData.birthDate && { birthDate: new Date(employeeData.birthDate + 'T04:00:00') }),
+              ...(employeeData.company !== undefined && { company: employeeData.company }),
+              ...(employeeData.bank !== undefined && { bank: employeeData.bank }),
+              ...(employeeData.accountType !== undefined && { accountType: employeeData.accountType }),
+              ...(employeeData.agency !== undefined && { agency: employeeData.agency }),
+              ...(employeeData.operation !== undefined && { operation: employeeData.operation }),
+              ...(employeeData.account !== undefined && { account: employeeData.account }),
+              ...(employeeData.digit !== undefined && { digit: employeeData.digit }),
+              ...(employeeData.pixKeyType !== undefined && { pixKeyType: employeeData.pixKeyType }),
+              ...(employeeData.pixKey !== undefined && { pixKey: employeeData.pixKey }),
+              ...(employeeData.modality !== undefined && { modality: employeeData.modality }),
+              ...(employeeData.familySalary !== undefined && { familySalary: employeeData.familySalary }),
+              ...(employeeData.dangerPay !== undefined && { dangerPay: employeeData.dangerPay }),
+              ...(employeeData.unhealthyPay !== undefined && { unhealthyPay: employeeData.unhealthyPay }),
+              ...(employeeData.dailyFoodVoucher !== undefined && { dailyFoodVoucher: employeeData.dailyFoodVoucher }),
+              ...(employeeData.dailyTransportVoucher !== undefined && { dailyTransportVoucher: employeeData.dailyTransportVoucher })
             }
           });
         }
