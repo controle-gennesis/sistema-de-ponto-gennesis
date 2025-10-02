@@ -26,6 +26,13 @@ import salaryDiscountRoutes from './routes/salaryDiscounts';
 // Carregar variáveis de ambiente
 dotenv.config();
 
+console.log('🚀 Iniciando aplicação...');
+console.log('📋 Variáveis de ambiente carregadas:');
+console.log('   - NODE_ENV:', process.env.NODE_ENV);
+console.log('   - PORT:', process.env.PORT);
+console.log('   - DATABASE_URL:', process.env.DATABASE_URL ? 'Configurada' : 'NÃO CONFIGURADA');
+console.log('   - JWT_SECRET:', process.env.JWT_SECRET ? 'Configurada' : 'NÃO CONFIGURADA');
+
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
@@ -97,16 +104,21 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Iniciar servidor
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📊 Ambiente: ${process.env.NODE_ENV}`);
-  console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
-  console.log(`🌐 Servidor iniciado com sucesso!`);
-  console.log(`📋 Variáveis de ambiente:`);
-  console.log(`   - NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`   - PORT: ${process.env.PORT}`);
-  console.log(`   - DATABASE_URL: ${process.env.DATABASE_URL ? 'Configurada' : 'NÃO CONFIGURADA'}`);
-  console.log(`   - JWT_SECRET: ${process.env.JWT_SECRET ? 'Configurada' : 'NÃO CONFIGURADA'}`);
-});
+try {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    console.log(`📊 Ambiente: ${process.env.NODE_ENV}`);
+    console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
+    console.log(`🌐 Servidor iniciado com sucesso!`);
+    console.log(`📋 Variáveis de ambiente:`);
+    console.log(`   - NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`   - PORT: ${process.env.PORT}`);
+    console.log(`   - DATABASE_URL: ${process.env.DATABASE_URL ? 'Configurada' : 'NÃO CONFIGURADA'}`);
+    console.log(`   - JWT_SECRET: ${process.env.JWT_SECRET ? 'Configurada' : 'NÃO CONFIGURADA'}`);
+  });
+} catch (error) {
+  console.error('❌ Erro ao iniciar servidor:', error);
+  process.exit(1);
+}
 
 export default app;
