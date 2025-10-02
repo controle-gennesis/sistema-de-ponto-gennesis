@@ -51,7 +51,10 @@ app.use(limiter);
 // CORS
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://seudominio.com'] 
+    ? [
+      'https://sistema-pontofrontend-production.up.railway.app', // SEU FRONTEND
+      'https://sistema-pontobackend-production.up.railway.app'   // SEU BACKEND
+      ]
     : ['http://localhost:3000', 'http://localhost:19006'],
   credentials: true,
 }));
