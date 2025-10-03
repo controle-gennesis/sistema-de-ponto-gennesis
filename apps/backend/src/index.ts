@@ -106,6 +106,9 @@ app.use(notFound);
 // Middleware de tratamento de erros
 app.use(errorHandler);
 
+// Configurar timezone
+process.env.TZ = 'America/Sao_Paulo';
+
 // Iniciar servidor
 try {
   app.listen(PORT, '0.0.0.0', () => {
@@ -113,6 +116,7 @@ try {
     console.log(`📊 Ambiente: ${process.env.NODE_ENV}`);
     console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
     console.log(`🌐 Servidor iniciado com sucesso!`);
+    console.log(`🌍 Timezone: ${process.env.TZ}`);
     console.log(`📋 Variáveis de ambiente:`);
     console.log(`   - NODE_ENV: ${process.env.NODE_ENV}`);
     console.log(`   - PORT: ${process.env.PORT}`);
