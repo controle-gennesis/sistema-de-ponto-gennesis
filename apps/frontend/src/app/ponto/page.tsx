@@ -528,11 +528,11 @@ export default function PontoPage() {
         }}
       />
 
-      {/* Modal de Registrar Ponto (Mobile) */}
+      {/* Modal de Registrar Ponto (Mobile/Tablet) */}
       {isMobilePunchModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start py-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobilePunchModalOpen(false)} />
-          <div className="relative w-full max-w-lg mx-4 my-auto">
+          <div className="relative w-full max-w-md sm:max-w-lg md:max-w-2xl lg:max-w-3xl">
             <PunchCard 
               showCloseButton={true} 
               onClose={() => setIsMobilePunchModalOpen(false)}

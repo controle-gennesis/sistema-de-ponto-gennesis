@@ -215,9 +215,9 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   const locationStatus = getLocationStatus();
 
   return (
-    <Card className="w-full max-h-[90vh] flex flex-col">
-      <CardContent className="flex-1 flex flex-col overflow-y-auto max-h-[90vh]">
-        <div className="space-y-6 flex-1 flex flex-col">
+    <Card className="w-full flex flex-col">
+      <CardContent className="flex-1 flex flex-col p-3 sm:p-4">
+        <div className="space-y-4 flex-1 flex flex-col">
           {/* Header - sempre visível */}
           <div className="relative text-center">
             {showCloseButton && onClose && (
@@ -229,11 +229,11 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 <X className="w-5 h-5" />
               </button>
             )}
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-gray-900 mb-1">
               Bater Ponto
             </h2>
-            <div className="space-y-2">
-              <div className="text-lg font-medium text-gray-600">
+            <div className="space-y-1">
+              <div className="text-sm font-medium text-gray-600">
                 {currentTime.toLocaleDateString('pt-BR', {
                   weekday: 'long',
                   month: 'long',
@@ -241,7 +241,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                   year: 'numeric'
                 }).replace(/^\w/, c => c.toUpperCase())}
               </div>
-              <div className="text-2xl font-semibold text-gray-800 tracking-wide">
+              <div className="text-lg font-semibold text-gray-800 tracking-wide">
                 {currentTime.toLocaleTimeString('pt-BR', {
                   hour: '2-digit',
                   minute: '2-digit',
@@ -319,15 +319,15 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
             {/* Tipo de Ponto */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Próximo Registro
               </label>
               <div className="p-4 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 text-center">
                 <div className="flex flex-col items-center space-y-2">
-                  <div className="text-blue-600">
+                  <div className="text-blue-600 text-xl">
                     {punchTypes.find(p => p.type === selectedType)?.icon}
                   </div>
-                  <span className="font-medium text-blue-900">
+                  <span className="font-semibold text-blue-900">
                     {punchTypes.find(p => p.type === selectedType)?.label}
                   </span>
                 </div>
@@ -336,7 +336,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
             {/* Status da Localização */}
             <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-              <MapPin className="w-5 h-5 text-gray-500" />
+              <MapPin className="w-4 h-4 text-gray-500" />
               <div className="flex-1">
                 <p className="text-sm font-medium text-gray-700">Localização</p>
                 {!location && (
@@ -354,7 +354,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
             {/* Seção de Foto */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Foto do Funcionário *
               </label>
               
@@ -379,7 +379,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                       autoPlay
                       playsInline
                       muted
-                      className="w-full h-64 object-cover"
+                      className="w-full h-48 object-cover"
                     />
                     <canvas ref={canvasRef} className="hidden" />
                     
@@ -428,7 +428,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                     <img
                       src={capturedPhoto}
                       alt="Foto capturada"
-                      className="w-full h-48 object-cover rounded-lg border mx-auto max-w-xs"
+                      className="w-full h-56 object-cover rounded-lg border mx-auto max-w-sm"
                     />
                     <Badge variant="success" className="absolute top-2 right-2">
                       Foto Capturada
@@ -450,7 +450,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
             {/* Campo de Observação */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Observação (Opcional)
               </label>
               <textarea
@@ -458,7 +458,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 onChange={(e) => setObservation(e.target.value)}
                 placeholder="Digite uma observação sobre este registro de ponto..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                rows={3}
+                rows={2}
                 maxLength={500}
               />
               <div className="text-right text-xs text-gray-500 mt-1">
@@ -467,16 +467,18 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
             </div>
 
             {/* Botão de Confirmar */}
-            <div className="pt-4">
+            <div className="pt-3">
               <Button
                 onClick={handlePunch}
                 loading={punchLoading}
                 disabled={!location || !!locationError}
-                className="w-full"
+                className="w-full h-12"
                 size="lg"
               >
                 <Clock className="w-4 h-4 mr-2" />
-                Bater Ponto - {punchTypes.find(p => p.type === selectedType)?.label}
+                <span className="font-semibold">
+                  Bater Ponto - {punchTypes.find(p => p.type === selectedType)?.label}
+                </span>
               </Button>
 
 

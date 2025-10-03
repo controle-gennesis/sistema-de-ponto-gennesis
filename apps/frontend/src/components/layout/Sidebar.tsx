@@ -7,23 +7,20 @@ import {
   Home, 
   Users, 
   Clock, 
-  BarChart3, 
-  Settings, 
   LogOut, 
   Menu, 
   X,
   User,
-  Calendar,
-  FileText,
-  UserPlus,
-  Shield,
   ChevronLeft,
   ChevronRight,
   Lock,
-  Timer,
-  Stethoscope,
-  Cake,
-  FileSpreadsheet
+  FolderClock,
+  ImagePlus,
+  CalendarDays,
+  FileSpreadsheet,
+  BookText,
+  BookPlus,
+  BookImage
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -69,28 +66,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         name: 'Registrar Ausência',
         href: '/ponto/atestados',
-        icon: Stethoscope,
+        icon: BookPlus,
         description: 'Enviar e acompanhar ausências',
         permission: true // Todos podem registrar suas próprias ausências
       },
       {
         name: 'Gerenciar Ausências',
         href: '/ponto/gerenciar-atestados',
-        icon: Stethoscope,
+        icon: BookText,
         description: 'Gerenciar todas as ausências',
         permission: permissions.canManageAbsences
       },
       {
         name: 'Aniversariantes',
         href: '/ponto/aniversariantes',
-        icon: Cake,
+        icon: CalendarDays,
         description: 'Ver aniversariantes do mês',
         permission: permissions.canViewBirthdays
       },
       {
         name: 'Banco de Horas',
         href: '/ponto/banco-horas',
-        icon: Timer,
+        icon: FolderClock,
         description: 'Controle de banco de horas',
         permission: permissions.canManageBankHours
       },
@@ -104,14 +101,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         name: 'Férias',
         href: '/ponto/ferias',
-        icon: Calendar,
+        icon: ImagePlus,
         description: 'Solicitar e acompanhar férias',
         permission: true // Todos podem solicitar suas próprias férias
       },
       {
         name: 'Gerenciar Férias',
         href: '/ponto/gerenciar-ferias',
-        icon: Calendar,
+        icon: BookImage,
         description: 'Gerenciar férias dos funcionários',
         permission: permissions.canManageVacations
       }

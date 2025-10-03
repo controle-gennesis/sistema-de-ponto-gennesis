@@ -32,7 +32,7 @@ const generatePositionPermissions = () => {
         canManageBankHours: true,
         canViewBirthdays: true,
         canRegisterTime: true,
-        canViewDashboard: true,
+        canViewDashboard: false,
       };
     } else if (cargo === 'Encarregado' || cargo === 'Mestre de obras') {
       // SUPERVISÃO OPERACIONAL
@@ -45,7 +45,7 @@ const generatePositionPermissions = () => {
         canManageBankHours: true,
         canViewBirthdays: true,
         canRegisterTime: true,
-        canViewDashboard: true,
+        canViewDashboard: false,
       };
     } else if (cargo === 'Engenheiro' || cargo === 'Orçamentista') {
       // TÉCNICO ESPECIALIZADO COM RELATÓRIOS
@@ -58,7 +58,7 @@ const generatePositionPermissions = () => {
         canManageBankHours: false,
         canViewBirthdays: true,
         canRegisterTime: true,
-        canViewDashboard: true,
+        canViewDashboard: false,
       };
     } else {
       // TODOS OS OUTROS CARGOS - Acesso básico
@@ -71,7 +71,7 @@ const generatePositionPermissions = () => {
         canManageBankHours: false,
         canViewBirthdays: true,
         canRegisterTime: true,
-        canViewDashboard: true,
+        canViewDashboard: false,
       };
     }
   });
