@@ -179,7 +179,7 @@ export default function FolhaPagamentoPage() {
       'Função/Setor': `${employee.position || 'N/A'} • ${employee.department || 'N/A'}`,
       'ID Funcionário': employee.employeeId,
       'Empresa': employee.company || 'Não informado',
-      'Centro/Contrato': `${employee.costCenter || 'N/A'} • ${employee.currentContract || 'N/A'}`,
+      'Centro de Custo': employee.costCenter || 'N/A',
       'Cliente': employee.client || 'Não informado',
       'Dados Bancários': `${employee.bank || 'N/A'} • ${employee.accountType || 'N/A'} • Ag: ${employee.agency || 'N/A'} • OP: ${employee.operation || 'N/A'} • Conta: ${employee.account || 'N/A'}-${employee.digit || 'N/A'}`,
       'PIX': `${employee.pixKeyType || 'N/A'} - ${employee.pixKey || 'N/A'}`,
@@ -613,7 +613,7 @@ export default function FolhaPagamentoPage() {
                       Empresa
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                      Contrato
+                      Centro de Custo
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                       Tomador
@@ -683,14 +683,9 @@ export default function FolhaPagamentoPage() {
                           </span>
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {employee.costCenter || 'N/A'}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {employee.currentContract || 'N/A'}
-                            </div>
-                          </div>
+                          <span className="text-sm text-gray-900">
+                            {employee.costCenter || 'N/A'}
+                          </span>
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
                           <span className="text-sm text-gray-900">

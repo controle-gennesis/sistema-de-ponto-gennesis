@@ -13,9 +13,11 @@ import api from '@/lib/api';
 
 interface PunchCardProps {
   onSuccess?: () => void;
+  showCloseButton?: boolean;
+  onClose?: () => void;
 }
 
-export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess }) => {
+export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton = false, onClose }) => {
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [lastRecord, setLastRecord] = useState<TimeRecordType | null>(null);
@@ -213,11 +215,20 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess }) => {
   const locationStatus = getLocationStatus();
 
   return (
-    <Card className="w-full h-full flex flex-col">
-      <CardContent className="flex-1 flex flex-col">
+    <Card className="w-full max-h-[90vh] flex flex-col">
+      <CardContent className="flex-1 flex flex-col overflow-y-auto max-h-[90vh]">
         <div className="space-y-6 flex-1 flex flex-col">
           {/* Header - sempre visível */}
-          <div className="text-center">
+          <div className="relative text-center">
+            {showCloseButton && onClose && (
+              <button
+                onClick={onClose}
+                className="absolute top-0 right-0 p-2 hover:bg-gray-100 text-gray-600 rounded-full"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
             <h2 className="text-2xl font-bold text-gray-900 mb-2">
               Bater Ponto
             </h2>
@@ -328,9 +339,11 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess }) => {
               <MapPin className="w-5 h-5 text-gray-500" />
               <div className="flex-1">
                 <p className="text-sm font-medium text-gray-700">Localização</p>
-                <Badge variant={locationStatus.variant} size="sm">
-                  {locationStatus.text}
-                </Badge>
+                {!location && (
+                  <Badge variant={locationStatus.variant} size="sm">
+                    {locationStatus.text}
+                  </Badge>
+                )}
               </div>
               {location && (
                 <div className="text-xs text-gray-500">
@@ -342,7 +355,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess }) => {
             {/* Seção de Foto */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-3">
-                Foto do Funcionário
+                Foto do Funcionário *
               </label>
               
               {!capturedPhoto && !showCamera && (
@@ -415,7 +428,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess }) => {
                     <img
                       src={capturedPhoto}
                       alt="Foto capturada"
-                      className="w-full max-w-sm mx-auto rounded-lg border"
+                      className="w-full h-48 object-cover rounded-lg border mx-auto max-w-xs"
                     />
                     <Badge variant="success" className="absolute top-2 right-2">
                       Foto Capturada
@@ -458,7 +471,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess }) => {
               <Button
                 onClick={handlePunch}
                 loading={punchLoading}
-                disabled={!location || !!locationError || !capturedPhoto}
+                disabled={!location || !!locationError}
                 className="w-full"
                 size="lg"
               >
@@ -466,14 +479,6 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess }) => {
                 Bater Ponto - {punchTypes.find(p => p.type === selectedType)?.label}
               </Button>
 
-              {!capturedPhoto && (
-                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <div className="flex items-center space-x-2 text-yellow-600">
-                    <AlertCircle className="w-4 h-4" />
-                    <span className="text-sm">Tire uma foto antes de bater o ponto</span>
-                  </div>
-                </div>
-              )}
 
               {punchError && (
                 <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">

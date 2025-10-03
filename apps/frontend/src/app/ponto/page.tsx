@@ -56,6 +56,20 @@ export default function PontoPage() {
     };
   }, []);
 
+  // Detectar dispositivo móvel
+  useEffect(() => {
+    const checkIsMobile = () => {
+      setIsMobile(window.innerWidth < 1024); // lg breakpoint
+    };
+
+    checkIsMobile();
+    window.addEventListener('resize', checkIsMobile);
+    
+    return () => {
+      window.removeEventListener('resize', checkIsMobile);
+    };
+  }, []);
+
   const { data: todayRecords, isLoading: loadingToday } = useQuery({
     queryKey: ['today-records'],
     queryFn: async () => {
@@ -103,6 +117,57 @@ export default function PontoPage() {
   
   // Modal de alterar senha
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+
+  // Estados para responsividade
+  const [isMobilePunchModalOpen, setIsMobilePunchModalOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Função para determinar o próximo tipo de ponto para o botão móvel
+  const getNextPunchTypeLabel = () => {
+    if (!todayRecords?.data?.records || todayRecords.data.records.length === 0) {
+      return 'Registrar Entrada';
+    }
+
+    const records = todayRecords.data.records;
+    
+    // Verificar se todos os pontos foram batidos
+    const hasEntry = records.some((r: any) => r.type === 'ENTRY');
+    const hasLunchStart = records.some((r: any) => r.type === 'LUNCH_START');
+    const hasLunchEnd = records.some((r: any) => r.type === 'LUNCH_END');
+    const hasExit = records.some((r: any) => r.type === 'EXIT');
+    
+    if (hasEntry && hasLunchStart && hasLunchEnd && hasExit) {
+      return 'Ponto Completo Hoje';
+    }
+
+    const lastRecord = records[records.length - 1];
+    
+    switch (lastRecord.type) {
+      case 'ENTRY':
+        return 'Registrar Almoço';
+      case 'LUNCH_START':
+        return 'Registrar Retorno';
+      case 'LUNCH_END':
+        return 'Registrar Saída';
+      case 'EXIT':
+        return 'Registrar Entrada';
+      default:
+        return 'Registrar Ponto';
+    }
+  };
+
+  // Função para verificar se todos os pontos foram batidos
+  const areAllPointsCompleted = () => {
+    if (!todayRecords?.data?.records) return false;
+    
+    const records = todayRecords.data.records;
+    const hasEntry = records.some((r: any) => r.type === 'ENTRY');
+    const hasLunchStart = records.some((r: any) => r.type === 'LUNCH_START');
+    const hasLunchEnd = records.some((r: any) => r.type === 'LUNCH_END');
+    const hasExit = records.some((r: any) => r.type === 'EXIT');
+
+    return hasEntry && hasLunchStart && hasLunchEnd && hasExit;
+  };
 
   const { data: bankHoursDetailed } = useQuery({
     queryKey: ['bank-hours-detailed', selectedBankYear, selectedBankMonth, isBankDetailsOpen],
@@ -176,20 +241,47 @@ export default function PontoPage() {
       </div>
 
       {/* Cards principais */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
-        {/* Card de bater ponto */}
-        <div className="h-full">
-          <PunchCard />
-        </div>
+      {isMobile ? (
+        // Layout móvel - botão + modal
+        <div className="space-y-6">
+          {/* Botão de registrar ponto */}
+          <button
+            onClick={() => setIsMobilePunchModalOpen(true)}
+            disabled={areAllPointsCompleted()}
+            className={`w-full h-16 rounded-lg shadow-lg flex items-center justify-center transition-colors ${
+              areAllPointsCompleted() 
+                ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                : 'bg-blue-600 hover:bg-blue-500 text-white'
+            }`}
+          >
+            <span className="text-lg font-semibold">{getNextPunchTypeLabel()}</span>
+          </button>
 
-        {/* Card de registros do dia */}
-        <div className="h-full">
-          <TimeRecordsList 
-            records={todayRecords?.data?.records || []} 
-            onViewMore={() => setIsPanelOpen(true)}
-          />
+          {/* Card de registros do dia */}
+          <div className="h-full">
+            <TimeRecordsList 
+              records={todayRecords?.data?.records || []} 
+              onViewMore={() => setIsPanelOpen(true)}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        // Layout desktop - cards lado a lado
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
+          {/* Card de bater ponto */}
+          <div className="h-full">
+            <PunchCard showCloseButton={false} />
+          </div>
+
+          {/* Card de registros do dia */}
+          <div className="h-full">
+            <TimeRecordsList 
+              records={todayRecords?.data?.records || []} 
+              onViewMore={() => setIsPanelOpen(true)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Banco de horas */}
       <div className="w-full">
@@ -201,26 +293,47 @@ export default function PontoPage() {
                   Banco de Horas
                 </h2>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                <div className="p-3 sm:p-4 bg-blue-50 rounded">
-                  <div className="text-xs sm:text-sm text-gray-600">Horas Extras</div>
-                  <div className="text-lg sm:text-2xl font-bold text-blue-700 break-all">
-                    {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOvertimeHours || 0)}
+              {isMobile ? (
+                /* Layout móvel - apenas saldo */
+                <div className="flex justify-center">
+                  <div className="text-center">
+                    <div className="text-xs text-gray-700 mb-1">Saldo</div>
+                    <div className={`text-xl font-bold ${
+                      (bankHoursData?.data?.balanceHours || 0) >= 0 
+                        ? 'text-green-700' 
+                        : 'text-red-700'
+                    }`}>
+                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
+                    </div>
                   </div>
                 </div>
-                <div className="p-3 sm:p-4 bg-red-50 rounded">
-                  <div className="text-xs sm:text-sm text-gray-600">Horas Devidas</div>
-                  <div className="text-lg sm:text-2xl font-bold text-red-700 break-all">
-                    {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOwedHours || 0)}
+              ) : (
+                /* Layout desktop - todas as informações */
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                  <div className="p-3 sm:p-4 bg-green-50 rounded">
+                    <div className="text-xs sm:text-sm text-gray-600">Horas Extras</div>
+                    <div className="text-lg sm:text-2xl font-bold text-green-700 break-all">
+                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOvertimeHours || 0)}
+                    </div>
+                  </div>
+                  <div className="p-3 sm:p-4 bg-red-50 rounded">
+                    <div className="text-xs sm:text-sm text-gray-600 mb-1">Horas Devidas</div>
+                    <div className="text-lg sm:text-2xl font-bold text-red-700 break-all">
+                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOwedHours || 0)}
+                    </div>
+                  </div>
+                  <div className="p-3 sm:p-4 bg-gray-50 rounded">
+                    <div className="text-xs sm:text-sm text-gray-600">Saldo</div>
+                    <div className={`text-lg sm:text-2xl font-bold break-all ${
+                      (bankHoursData?.data?.balanceHours || 0) >= 0 
+                        ? 'text-green-700' 
+                        : 'text-red-700'
+                    }`}>
+                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
+                    </div>
                   </div>
                 </div>
-                <div className="p-3 sm:p-4 bg-gray-50 rounded">
-                  <div className="text-xs sm:text-sm text-gray-600">Saldo</div>
-                  <div className="text-lg sm:text-2xl font-bold text-gray-900 break-all">
-                    {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
-                  </div>
-                </div>
-              </div>
+              )}
               <div className="mt-4 space-y-2">
                 <button
                   onClick={() => setIsBankDetailsOpen(true)}
@@ -228,12 +341,6 @@ export default function PontoPage() {
                 >
                   <BarChart3 className="w-4 h-4" />
                   <span className="text-sm font-medium">Ver detalhamento</span>
-                </button>
-                <button
-                  onClick={() => refetchBankHours()}
-                  className="w-full h-10 flex items-center justify-center space-x-2 px-4 bg-gray-100 text-gray-700 rounded-lg shadow-sm hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
-                >
-                  <span className="text-xs font-medium">Atualizar dados</span>
                 </button>
               </div>
             </div>
@@ -420,6 +527,19 @@ export default function PontoPage() {
           queryClient.invalidateQueries({ queryKey: ['user'] });
         }}
       />
+
+      {/* Modal de Registrar Ponto (Mobile) */}
+      {isMobilePunchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-start py-4 overflow-y-auto">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobilePunchModalOpen(false)} />
+          <div className="relative w-full max-w-lg mx-4 my-auto">
+            <PunchCard 
+              showCloseButton={true} 
+              onClose={() => setIsMobilePunchModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
       </div>
     </MainLayout>
   );
