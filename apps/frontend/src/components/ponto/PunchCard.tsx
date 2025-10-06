@@ -52,24 +52,27 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
     { type: TimeRecordType.EXIT, label: 'Saída', icon: <DoorClosed className="w-5 h-5" /> },
   ];
 
-  // Função para determinar o próximo tipo de ponto baseado no último registro
+  // Função para determinar o próximo tipo de ponto baseado nos registros do dia
   const getNextPunchType = (): TimeRecordType => {
-    if (!lastRecord) {
-      return TimeRecordType.ENTRY; // Se não há registro, é entrada
+    // Se não há registros hoje, começar com entrada
+    if (!todayRecords || todayRecords.length === 0) {
+      return TimeRecordType.ENTRY;
     }
 
-    switch (lastRecord) {
-      case TimeRecordType.ENTRY:
-        return TimeRecordType.LUNCH_START; // Após entrada, é almoço
-      case TimeRecordType.LUNCH_START:
-        return TimeRecordType.LUNCH_END; // Após almoço, é retorno
-      case TimeRecordType.LUNCH_END:
-        return TimeRecordType.EXIT; // Após retorno, é saída
-      case TimeRecordType.EXIT:
-        return TimeRecordType.ENTRY; // Após saída, volta para entrada (novo dia)
-      default:
-        return TimeRecordType.ENTRY;
-    }
+    // Verificar quais tipos já foram registrados hoje
+    const hasEntry = todayRecords.some(r => r.type === TimeRecordType.ENTRY);
+    const hasLunchStart = todayRecords.some(r => r.type === TimeRecordType.LUNCH_START);
+    const hasLunchEnd = todayRecords.some(r => r.type === TimeRecordType.LUNCH_END);
+    const hasExit = todayRecords.some(r => r.type === TimeRecordType.EXIT);
+
+    // Determinar o próximo ponto baseado no que falta
+    if (!hasEntry) return TimeRecordType.ENTRY;
+    if (!hasLunchStart) return TimeRecordType.LUNCH_START;
+    if (!hasLunchEnd) return TimeRecordType.LUNCH_END;
+    if (!hasExit) return TimeRecordType.EXIT;
+
+    // Se todos foram registrados, retornar entrada (próximo dia)
+    return TimeRecordType.ENTRY;
   };
 
   const selectedType = getNextPunchType();
@@ -199,7 +202,13 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
       const completed = checkAllPointsCompleted(updatedRecords);
       setAllPointsCompleted(completed);
       
+      // Chamar callbacks de sucesso
       onSuccess?.();
+      
+      // Fechar a modal após bater o ponto
+      if (onClose) {
+        onClose();
+      }
     } catch (error) {
       console.error('Erro ao bater ponto:', error);
     }
@@ -215,41 +224,41 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   const locationStatus = getLocationStatus();
 
   return (
-    <Card className="w-full flex flex-col">
-      <CardContent className="flex-1 flex flex-col p-3 sm:p-4">
-        <div className="space-y-4 flex-1 flex flex-col">
-          {/* Header - sempre visível */}
-          <div className="relative text-center">
-            {showCloseButton && onClose && (
-              <button
-                onClick={onClose}
-                className="absolute top-0 right-0 p-2 hover:bg-gray-100 text-gray-600 rounded-full"
-                aria-label="Fechar"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
-              Bater Ponto
+    <div className="w-full max-w-sm mx-auto bg-white rounded-xl shadow-lg border border-gray-100">
+      <div className="p-5 space-y-5">
+        {/* Header minimalista */}
+        <div className="relative text-center">
+          {showCloseButton && onClose && (
+            <button
+              onClick={onClose}
+              className="absolute top-0 right-0 p-1.5 hover:bg-gray-50 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
+              aria-label="Fechar"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+          
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold text-gray-800">
+              {punchTypes.find(p => p.type === selectedType)?.label}
             </h2>
-            <div className="space-y-1">
-              <div className="text-sm font-medium text-gray-600">
-                {currentTime.toLocaleDateString('pt-BR', {
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric'
-                }).replace(/^\w/, c => c.toUpperCase())}
-              </div>
-              <div className="text-lg font-semibold text-gray-800 tracking-wide">
-                {currentTime.toLocaleTimeString('pt-BR', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit'
-                })}
-              </div>
+            <div className="text-xs text-gray-500">
+              {currentTime.toLocaleDateString('pt-BR', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric'
+              }).replace(/^\w/, c => c.toUpperCase())}
+            </div>
+            <div className="text-lg font-semibold text-gray-800 tracking-wide">
+              {currentTime.toLocaleTimeString('pt-BR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+              })}
             </div>
           </div>
+        </div>
 
           {allPointsCompleted ? (
             // Verificar se é ausência justificada ou todos os pontos batidos
@@ -317,28 +326,12 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
             // Mostrar o formulário normal quando ainda há pontos para bater
             <>
 
-            {/* Tipo de Ponto */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Próximo Registro
-              </label>
-              <div className="p-4 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 text-center">
-                <div className="flex flex-col items-center space-y-2">
-                  <div className="text-blue-600 text-xl">
-                    {punchTypes.find(p => p.type === selectedType)?.icon}
-                  </div>
-                  <span className="font-semibold text-blue-900">
-                    {punchTypes.find(p => p.type === selectedType)?.label}
-                  </span>
-                </div>
-              </div>
-            </div>
 
             {/* Status da Localização */}
-            <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center space-x-2 p-3 bg-gray-50 rounded-lg">
               <MapPin className="w-4 h-4 text-gray-500" />
               <div className="flex-1">
-                <p className="text-sm font-medium text-gray-700">Localização</p>
+                <p className="text-xs font-medium text-gray-600">Localização</p>
                 {!location && (
                   <Badge variant={locationStatus.variant} size="sm">
                     {locationStatus.text}
@@ -346,29 +339,28 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 )}
               </div>
               {location && (
-                <div className="text-xs text-gray-500">
-                  {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+                <div className="text-xs text-gray-400 font-mono">
+                  {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
                 </div>
               )}
             </div>
 
             {/* Seção de Foto */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-gray-600">
                 Foto do Funcionário *
               </label>
               
               {!capturedPhoto && !showCamera && (
-                <div className="flex justify-center">
-                  <Button
-                    onClick={handleOpenCamera}
-                    variant="outline"
-                    className="w-full max-w-xs"
-                  >
-                    <Camera className="w-4 h-4 mr-2" />
-                    Tirar Foto
-                  </Button>
-                </div>
+                <button
+                  onClick={handleOpenCamera}
+                  className="w-full p-3 border border-dashed border-gray-300 rounded-lg hover:border-gray-400 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center justify-center space-x-2">
+                    <Camera className="w-4 h-4 text-gray-500" />
+                    <span className="text-sm text-gray-600">Tirar Foto</span>
+                  </div>
+                </button>
               )}
 
               {showCamera && (
@@ -449,52 +441,50 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
             </div>
 
             {/* Campo de Observação */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-gray-600">
                 Observação (Opcional)
               </label>
               <textarea
                 value={observation}
                 onChange={(e) => setObservation(e.target.value)}
-                placeholder="Digite uma observação sobre este registro de ponto..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                placeholder="Digite uma observação..."
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
                 rows={2}
                 maxLength={500}
               />
-              <div className="text-right text-xs text-gray-500 mt-1">
-                {observation.length}/500 caracteres
+              <div className="text-right text-xs text-gray-400">
+                {observation.length}/500
               </div>
             </div>
 
             {/* Botão de Confirmar */}
-            <div className="pt-3">
-              <Button
-                onClick={handlePunch}
-                loading={punchLoading}
-                disabled={!location || !!locationError}
-                className="w-full h-12"
-                size="lg"
-              >
-                <Clock className="w-4 h-4 mr-2" />
-                <span className="font-semibold">
-                  Bater Ponto - {punchTypes.find(p => p.type === selectedType)?.label}
-                </span>
-              </Button>
+            <button
+              onClick={handlePunch}
+              disabled={punchLoading || !location || !!locationError}
+              className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 ${
+                punchLoading || !location || !!locationError
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>
+                {punchLoading ? 'Registrando...' : `Confirmar ${punchTypes.find(p => p.type === selectedType)?.label}`}
+              </span>
+            </button>
 
-
-              {punchError && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <div className="flex items-center space-x-2 text-red-600">
-                    <AlertCircle className="w-4 h-4" />
-                    <span className="text-sm">{punchError}</span>
-                  </div>
+            {punchError && (
+              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center space-x-2 text-red-600">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="text-xs">{punchError}</span>
                 </div>
-              )}
-            </div>
-            </>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   );
 };

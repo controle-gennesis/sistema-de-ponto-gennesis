@@ -12,6 +12,17 @@ interface TimeRecordsListProps {
 export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onViewMore }) => {
   const [isMobile, setIsMobile] = useState(false);
 
+  // Obter data atual formatada
+  const getCurrentDate = () => {
+    const today = new Date();
+    return today.toLocaleDateString('pt-BR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    }).replace(/^\w/, c => c.toUpperCase());
+  };
+
   useEffect(() => {
     const checkIsMobile = () => {
       setIsMobile(window.innerWidth < 1024); // lg breakpoint
@@ -66,152 +77,99 @@ export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onVie
     return `${day}/${month}/${year}`;
   };
 
+  // Definir os tipos de registro esperados para o dia
+  const expectedRecords = [
+    { type: 'ENTRY', label: 'Entrada', icon: <DoorOpen className="w-5 h-5" /> },
+    { type: 'LUNCH_START', label: 'Almoço', icon: <Utensils className="w-5 h-5" /> },
+    { type: 'LUNCH_END', label: 'Retorno', icon: <UtensilsCrossed className="w-5 h-5" /> },
+    { type: 'EXIT', label: 'Saída', icon: <DoorClosed className="w-5 h-5" /> },
+  ];
+
+  // Se não há registros, mostrar os tipos esperados com --:--
   if (records.length === 0) {
     return (
-      <Card>
-        <CardContent className="p-6">
-          <div className="text-center text-gray-500">
-            <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-            <p>Nenhum registro encontrado para hoje</p>
+      <Card className="h-full flex flex-col">
+        <CardHeader className="pb-4 border-b-0 pt-4">
+          <h2 className="text-xl font-semibold text-gray-900 text-center">Registros</h2>
+          <p className="text-sm text-gray-600 text-center mt-1">{getCurrentDate()}</p>
+        </CardHeader>
+        <CardContent className="flex-1 flex flex-col">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {expectedRecords.map((record) => (
+              <div key={record.type} className="flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg text-center">
+                <div className="text-gray-400 mb-1 sm:mb-2 text-sm sm:text-base">{record.icon}</div>
+                <div className="text-sm sm:text-lg font-semibold text-gray-400">--:--</div>
+              </div>
+            ))}
           </div>
         </CardContent>
+        
+        {onViewMore && (
+          <div className="pt-4 px-6 pb-6">
+            <button
+              onClick={onViewMore}
+              className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-blue-100 text-blue-700 rounded-lg shadow-sm hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              <span className="text-sm font-medium">Ver mais</span>
+            </button>
+          </div>
+        )}
       </Card>
     );
   }
 
+  // Criar lista completa com registros existentes e faltantes
+  const completeRecordsList = expectedRecords.map(expectedRecord => {
+    const existingRecord = records.find(record => record.type === expectedRecord.type);
+    
+    if (existingRecord) {
+      return {
+        ...expectedRecord,
+        timestamp: existingRecord.timestamp,
+        hasRecord: true
+      };
+    } else {
+      return {
+        ...expectedRecord,
+        timestamp: null,
+        hasRecord: false
+      };
+    }
+  });
+
   return (
     <Card className="h-full flex flex-col">
       <CardHeader className="pb-4 border-b-0 pt-4">
-        <h2 className="text-2xl font-bold text-gray-900 text-center">Registros</h2>
+        <h2 className="text-xl font-semibold text-gray-900 text-center">Registros</h2>
+        <p className="text-sm text-gray-600 text-center mt-1">{getCurrentDate()}</p>
       </CardHeader>
-      <CardContent className="flex-1 flex flex-col">
-        <div className="w-full flex-1 flex flex-col">
-          <label className="block text-sm font-medium text-gray-700 mb-3">Últimos Registros</label>
-          <div className="divide-y divide-gray-200 flex-1">
-          {records.map((record) => (
-            <div key={record.id} className="p-3 sm:p-4 hover:bg-gray-50 transition-colors">
-              {isMobile ? (
-                /* Layout simplificado para mobile */
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3 flex-1">
-                    <div className="text-gray-600 flex-shrink-0">
-                      {getTypeIcon(record.type)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900">
-                        {getTypeLabel(record.type)}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        {formatTime(record.timestamp)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500 flex-shrink-0">
-                    {formatDate(record.timestamp)}
-                  </div>
+        <CardContent className="flex-1 flex flex-col">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {completeRecordsList.map((record) => (
+              <div key={record.type} className="flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg text-center">
+                <div className={`mb-1 sm:mb-2 text-sm sm:text-base ${record.hasRecord ? 'text-blue-600' : 'text-gray-400'}`}>
+                  {record.icon}
                 </div>
-              ) : (
-                /* Layout completo para desktop */
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
-                  <div className="flex items-center space-x-3">
-                    <div className="flex items-center justify-center h-16 sm:h-12">
-                      <div className='text-gray-600 flex-shrink-0'>
-                        {getTypeIcon(record.type)}
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-medium text-gray-900">
-                          {getTypeLabel(record.type)}
-                        </span>
-                      </div>
-                      
-                      {/* Para ausência justificada, mostrar detalhes do atestado */}
-                      {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails ? (
-                        <div className="mt-2 space-y-1 text-sm text-gray-600">
-                          <div className="flex items-center space-x-2">
-                            <Calendar className="w-3 h-3 text-600" />
-                            <span>
-                              {new Date(record.medicalCertificateDetails.startDate).toLocaleDateString('pt-BR')} - {new Date(record.medicalCertificateDetails.endDate).toLocaleDateString('pt-BR')}
-                            </span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Clock className="w-3 h-3 text-600" />
-                            <span>{record.medicalCertificateDetails.days} dias</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <User className="w-3 h-3 text-600" />
-                            <span>Enviado em {new Date(record.medicalCertificateDetails.submittedAt).toLocaleDateString('pt-BR')}</span>
-                          </div>
-                          {record.medicalCertificateDetails.description && (
-                            <div className="text-gray-500 text-xs mt-1">
-                              <strong>Obs:</strong> {record.medicalCertificateDetails.description}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        /* Para outros tipos de registro, mostrar horário, localização e VA/VT */
-                        <div className="space-y-2">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 text-sm text-gray-500">
-                            <span className="flex items-center">
-                              <Clock className="w-3 h-3 mr-1 flex-shrink-0" />
-                              {formatTime(record.timestamp)}
-                            </span>
-                            {record.latitude && record.longitude && (
-                              <span className="flex items-center">
-                                <MapPin className="w-3 h-3 mr-1 flex-shrink-0" />
-                                <span className="truncate">
-                                  {record.latitude.toFixed(6)}, {record.longitude.toFixed(6)}
-                                </span>
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {(record as any).observation && (
-                        <div className="mt-2 text-sm text-gray-600">
-                          <strong>Observação:</strong> {(record as any).observation}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Câmera e data - lado direito */}
-                  <div className="flex items-center justify-between sm:justify-end space-x-3">
-                    {/* Câmera */}
-                    {record.photoUrl && (
-                      <button
-                        onClick={() => window.open(record.photoUrl, '_blank')}
-                        className="p-2 text-gray-400 hover:text-yellow-600 transition-colors rounded-lg hover:bg-yellow-50 flex items-center justify-center flex-shrink-0"
-                        title="Ver foto"
-                      >
-                        <Camera className="w-4 h-4 text-yellow-600" />
-                      </button>
-                    )}
-                    
-                    {/* Data */}
-                    <div className="text-sm font-medium text-gray-900 flex-shrink-0">
-                      {formatDate(record.timestamp)}
-                    </div>
-                  </div>
+                <div className={`text-sm sm:text-lg font-semibold ${record.hasRecord ? 'text-gray-900' : 'text-gray-400'}`}>
+                  {record.hasRecord ? formatTime(record.timestamp) : '--:--'}
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
           </div>
-          {onViewMore && (
-            <div className="pt-4 mt-auto">
-              <button
-                onClick={onViewMore}
-                className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-blue-100 text-blue-700 rounded-lg shadow-sm hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              >
-                <Eye className="w-4 h-4" />
-                <span className="text-sm font-medium">Ver mais</span>
-              </button>
-            </div>
-          )}
-        </div>
-      </CardContent>
+        </CardContent>
+        
+        {onViewMore && (
+          <div className="pt-4 px-6 pb-6">
+            <button
+              onClick={onViewMore}
+              className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-blue-100 text-blue-700 rounded-lg shadow-sm hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              <span className="text-sm font-medium">Ver mais</span>
+            </button>
+          </div>
+        )}
     </Card>
   );
 };

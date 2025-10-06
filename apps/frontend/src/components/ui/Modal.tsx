@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { X } from 'lucide-react';
 
@@ -30,12 +31,12 @@ export const Modal: React.FC<ModalProps> = ({
 
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);
-      document.body.style.overflow = 'hidden';
+      document.body.classList.add('modal-open');
     }
 
     return () => {
       document.removeEventListener('keydown', handleEscape);
-      document.body.style.overflow = 'unset';
+      document.body.classList.remove('modal-open');
     };
   }, [isOpen, onClose]);
 
@@ -49,9 +50,9 @@ export const Modal: React.FC<ModalProps> = ({
     full: 'max-w-full mx-4',
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4">
+  const modalContent = (
+    <div className="fixed inset-0 z-50">
+      <div className="flex min-h-screen items-center justify-center">
         {/* Overlay */}
         <div
           className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
@@ -61,7 +62,7 @@ export const Modal: React.FC<ModalProps> = ({
         {/* Modal */}
         <div
           className={clsx(
-            'relative bg-white rounded-lg shadow-xl w-full',
+            'relative bg-white rounded-lg shadow-xl w-full mx-4',
             sizeClasses[size]
           )}
         >
@@ -91,4 +92,6 @@ export const Modal: React.FC<ModalProps> = ({
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 };

@@ -270,8 +270,13 @@ export class BankHoursController {
             currentDate.setDate(currentDate.getDate() + 1);
           }
           const bankHours = totalWorkedHours - totalExpectedHours;
+          
+          // Horas extras só existem quando o banco de horas é positivo
           const regularOvertimeHours = Math.max(0, bankHours);
           const pendingHours = Math.max(0, -bankHours);
+          
+          // Se o banco de horas é negativo, não deve haver horas extras multiplicadas
+          const finalOvertimeHours = bankHours >= 0 ? totalOvertimeHours : 0;
 
 
           return {
@@ -288,7 +293,7 @@ export class BankHoursController {
             totalExpectedHours: Math.round(totalExpectedHours * 100) / 100,
             bankHours: Math.round(bankHours * 100) / 100,
             overtimeHours: Math.round(regularOvertimeHours * 100) / 100,
-            overtimeMultipliedHours: Math.round(totalOvertimeHours * 100) / 100,
+            overtimeMultipliedHours: Math.round(finalOvertimeHours * 100) / 100,
             pendingHours: Math.round(pendingHours * 100) / 100,
             lastUpdate: new Date().toISOString().split('T')[0]
           };

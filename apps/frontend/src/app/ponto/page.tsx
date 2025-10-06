@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { BarChart3, Clock, Calendar, X } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { PunchCard } from '@/components/ponto/PunchCard';
 import { TimeRecordsList } from '@/components/ponto/TimeRecordsList';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -240,112 +240,80 @@ export default function PontoPage() {
         <p className="mt-2 text-gray-600">Gerencie seus registros de ponto e banco de horas</p>
       </div>
 
-      {/* Cards principais */}
-      {isMobile ? (
-        // Layout móvel - botão + modal
-        <div className="space-y-6">
-          {/* Botão de registrar ponto */}
+      {/* Botão de registrar ponto - só aparece quando há pontos para bater */}
+      {!areAllPointsCompleted() && (
+        <div className="mb-6">
           <button
             onClick={() => setIsMobilePunchModalOpen(true)}
-            disabled={areAllPointsCompleted()}
-            className={`w-full h-16 rounded-lg shadow-lg flex items-center justify-center transition-colors ${
-              areAllPointsCompleted() 
-                ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
-                : 'bg-blue-600 hover:bg-blue-500 text-white'
-            }`}
+            className="w-full h-16 rounded-lg shadow-lg flex items-center justify-center transition-colors bg-blue-600 hover:bg-blue-500 text-white"
           >
             <span className="text-lg font-semibold">{getNextPunchTypeLabel()}</span>
           </button>
-
-          {/* Card de registros do dia */}
-          <div className="h-full">
-            <TimeRecordsList 
-              records={todayRecords?.data?.records || []} 
-              onViewMore={() => setIsPanelOpen(true)}
-            />
-          </div>
-        </div>
-      ) : (
-        // Layout desktop - cards lado a lado
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
-          {/* Card de bater ponto */}
-          <div className="h-full">
-            <PunchCard showCloseButton={false} />
-          </div>
-
-          {/* Card de registros do dia */}
-          <div className="h-full">
-            <TimeRecordsList 
-              records={todayRecords?.data?.records || []} 
-              onViewMore={() => setIsPanelOpen(true)}
-            />
-          </div>
         </div>
       )}
 
-      {/* Banco de horas */}
-      <div className="w-full">
-        <Card className="w-full">
-          <CardContent>
-            <div className="space-y-6">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                  Banco de Horas
-                </h2>
-              </div>
-              {isMobile ? (
-                /* Layout móvel - apenas saldo */
-                <div className="flex justify-center">
-                  <div className="text-center">
-                    <div className="text-xs text-gray-700 mb-1">Saldo</div>
-                    <div className={`text-xl font-bold ${
-                      (bankHoursData?.data?.balanceHours || 0) >= 0 
-                        ? 'text-green-700' 
-                        : 'text-red-700'
-                    }`}>
-                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                /* Layout desktop - todas as informações */
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                  <div className="p-3 sm:p-4 bg-green-50 rounded">
-                    <div className="text-xs sm:text-sm text-gray-600">Horas Extras</div>
-                    <div className="text-lg sm:text-2xl font-bold text-green-700 break-all">
-                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOvertimeHours || 0)}
-                    </div>
-                  </div>
-                  <div className="p-3 sm:p-4 bg-red-50 rounded">
-                    <div className="text-xs sm:text-sm text-gray-600 mb-1">Horas Devidas</div>
-                    <div className="text-lg sm:text-2xl font-bold text-red-700 break-all">
-                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.totalOwedHours || 0)}
-                    </div>
-                  </div>
-                  <div className="p-3 sm:p-4 bg-gray-50 rounded">
-                    <div className="text-xs sm:text-sm text-gray-600">Saldo</div>
-                    <div className={`text-lg sm:text-2xl font-bold break-all ${
-                      (bankHoursData?.data?.balanceHours || 0) >= 0 
-                        ? 'text-green-700' 
-                        : 'text-red-700'
-                    }`}>
-                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="mt-4 space-y-2">
-                <button
-                  onClick={() => setIsBankDetailsOpen(true)}
-                  className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-blue-100 text-blue-700 rounded-lg shadow-sm hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <BarChart3 className="w-4 h-4" />
-                  <span className="text-sm font-medium">Ver detalhamento</span>
-                </button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Cards lado a lado */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Card de registros do dia */}
+        <div className="h-full">
+          <TimeRecordsList 
+            records={todayRecords?.data?.records || []} 
+            onViewMore={() => setIsPanelOpen(true)}
+          />
+        </div>
+
+        {/* Banco de horas - apenas saldo */}
+        <div className="h-full">
+           <Card className={`h-full flex flex-col ${
+             (bankHoursData?.data?.balanceHours || 0) < 0 
+               ? 'bg-red-50 border-red-200' 
+               : (bankHoursData?.data?.balanceHours || 0) > 0 
+                 ? 'bg-green-50 border-green-200' 
+                 : 'bg-gray-50 border-gray-200'
+           }`}>
+             <CardHeader className="pb-4 border-b-0 pt-4">
+               <h2 className={`text-xl font-semibold text-center ${
+                 (bankHoursData?.data?.balanceHours || 0) < 0 
+                   ? 'text-red-800' 
+                   : (bankHoursData?.data?.balanceHours || 0) > 0 
+                     ? 'text-green-800' 
+                     : 'text-gray-900'
+               }`}>Banco de Horas</h2>
+               <p className={`text-sm text-center mt-1 ${
+                 (bankHoursData?.data?.balanceHours || 0) < 0 
+                   ? 'text-red-600' 
+                   : (bankHoursData?.data?.balanceHours || 0) > 0 
+                     ? 'text-green-600' 
+                     : 'text-gray-600'
+               }`}>Saldo atual</p>
+             </CardHeader>
+             <CardContent className="flex-1 flex flex-col justify-center text-center p-6 pt-0">
+               <div className={`text-3xl font-bold ${
+                 (bankHoursData?.data?.balanceHours || 0) >= 0 
+                   ? 'text-green-700' 
+                   : 'text-red-700'
+               }`}>
+                 {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
+               </div>
+             </CardContent>
+             
+             <div className="mt-auto pt-4 px-6 pb-6">
+               <button
+                 onClick={() => setIsBankDetailsOpen(true)}
+                 className={`w-full h-12 flex items-center justify-center space-x-2 px-4 rounded-lg shadow-sm hover:opacity-80 focus:outline-none focus:ring-2 transition-colors ${
+                   (bankHoursData?.data?.balanceHours || 0) < 0 
+                     ? 'bg-red-100 text-red-700 hover:bg-red-200 focus:ring-red-500' 
+                     : (bankHoursData?.data?.balanceHours || 0) > 0 
+                       ? 'bg-green-100 text-green-700 hover:bg-green-200 focus:ring-green-500' 
+                       : 'bg-blue-100 text-blue-700 hover:bg-blue-200 focus:ring-blue-500'
+                 }`}
+               >
+                 <BarChart3 className="w-4 h-4" />
+                 <span className="text-sm font-medium">Ver detalhamento</span>
+               </button>
+             </div>
+           </Card>
+        </div>
       </div>
 
       {/* Modal de registros detalhados */}
@@ -528,7 +496,7 @@ export default function PontoPage() {
         }}
       />
 
-      {/* Modal de Registrar Ponto (Mobile/Tablet) */}
+      {/* Modal de Registrar Ponto */}
       {isMobilePunchModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobilePunchModalOpen(false)} />
