@@ -13,6 +13,8 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Lock,
   FolderClock,
   ImagePlus,
@@ -20,7 +22,9 @@ import {
   FileSpreadsheet,
   BookText,
   BookPlus,
-  BookImage
+  BookImage,
+  Settings,
+  BarChart3
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -33,15 +37,28 @@ interface SidebarProps {
 
 export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    // Carregar estado do localStorage no carregamento inicial
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('sidebar-collapsed');
+      return saved ? JSON.parse(saved) : false;
+    }
+    return false;
+  });
+  const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
   const pathname = usePathname();
   const { permissions, isLoading, userPosition, user } = usePermissions();
 
   const isEmployee = userRole === 'EMPLOYEE';
 
-  // Menu items baseados no cargo do funcionário
+  // Menu items agrupados por categoria
   const getMenuItems = () => {
-    const allMenuItems = [
+    const menuCategories = [
+      {
+        id: 'main',
+        name: 'Principal',
+        icon: Home,
+        items: [
       {
         name: 'Dashboard',
         href: '/ponto/dashboard',
@@ -55,7 +72,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Clock,
         description: 'Bater ponto e consultar registros',
         permission: permissions.canRegisterTime
+          }
+        ]
       },
+      {
+        id: 'employees',
+        name: 'Funcionários',
+        icon: Users,
+        items: [
       {
         name: 'Funcionários',
         href: '/ponto/funcionarios',
@@ -63,6 +87,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         description: 'Gerenciar funcionários',
         permission: permissions.canManageEmployees
       },
+          {
+            name: 'Aniversariantes',
+            href: '/ponto/aniversariantes',
+            icon: CalendarDays,
+            description: 'Ver aniversariantes do mês',
+            permission: permissions.canViewBirthdays
+          }
+        ]
+      },
+      {
+        id: 'attendance',
+        name: 'Ausências',
+        icon: BookText,
+        items: [
       {
         name: 'Registrar Ausência',
         href: '/ponto/atestados',
@@ -76,14 +114,35 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: BookText,
         description: 'Gerenciar todas as ausências',
         permission: permissions.canManageAbsences
+          }
+        ]
       },
       {
-        name: 'Aniversariantes',
-        href: '/ponto/aniversariantes',
-        icon: CalendarDays,
-        description: 'Ver aniversariantes do mês',
-        permission: permissions.canViewBirthdays
+        id: 'vacations',
+        name: 'Férias',
+        icon: ImagePlus,
+        items: [
+          {
+            name: 'Solicitar Férias',
+            href: '/ponto/ferias',
+            icon: ImagePlus,
+            description: 'Solicitar e acompanhar férias',
+            permission: true // Todos podem solicitar suas próprias férias
+          },
+          {
+            name: 'Gerenciar Férias',
+            href: '/ponto/gerenciar-ferias',
+            icon: BookImage,
+            description: 'Gerenciar férias dos funcionários',
+            permission: permissions.canManageVacations
+          }
+        ]
       },
+      {
+        id: 'reports',
+        name: 'Relatórios',
+        icon: BarChart3,
+        items: [
       {
         name: 'Banco de Horas',
         href: '/ponto/banco-horas',
@@ -97,25 +156,15 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: FileSpreadsheet,
         description: 'Gestão de folha de pagamento',
         permission: permissions.canAccessPayroll
-      },
-      {
-        name: 'Férias',
-        href: '/ponto/ferias',
-        icon: ImagePlus,
-        description: 'Solicitar e acompanhar férias',
-        permission: true // Todos podem solicitar suas próprias férias
-      },
-      {
-        name: 'Gerenciar Férias',
-        href: '/ponto/gerenciar-ferias',
-        icon: BookImage,
-        description: 'Gerenciar férias dos funcionários',
-        permission: permissions.canManageVacations
+          }
+        ]
       }
     ];
 
-    // Filtrar apenas os itens que o usuário tem permissão para acessar
-    return allMenuItems.filter(item => item.permission);
+    // Filtrar categorias que têm pelo menos um item com permissão
+    return menuCategories.filter(category => 
+      category.items.some(item => item.permission)
+    );
   };
 
   const menuItems = getMenuItems();
@@ -123,6 +172,44 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const isActive = (href: string) => {
     return pathname === href;
   };
+
+  const toggleMenu = (menuId: string) => {
+    setExpandedMenus(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(menuId)) {
+        newSet.delete(menuId);
+      } else {
+        newSet.add(menuId);
+      }
+      return newSet;
+    });
+  };
+
+  const isMenuExpanded = (menuId: string) => {
+    return expandedMenus.has(menuId);
+  };
+
+  // Expandir automaticamente grupos com páginas ativas na inicialização
+  React.useEffect(() => {
+    const activeCategories = menuItems.filter(category => 
+      category.items.some(item => isActive(item.href))
+    );
+    
+    if (activeCategories.length > 0) {
+      const newExpandedMenus = new Set(expandedMenus);
+      activeCategories.forEach(category => {
+        newExpandedMenus.add(category.id);
+      });
+      setExpandedMenus(newExpandedMenus);
+    }
+  }, [pathname]); // Executa quando a rota muda
+
+  // Salvar estado no localStorage sempre que mudar
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sidebar-collapsed', JSON.stringify(isCollapsed));
+    }
+  }, [isCollapsed]);
 
   // Notificar o MainLayout sobre mudanças no estado do menu
   React.useEffect(() => {
@@ -166,7 +253,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <img src="../logo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
                 <div>
-                  <h1 className="text-xl font-semibold text-gray-900">Gennesis</h1>
+                  <h1 className="text-xl font-semibold text-gray-900">Gênnesis</h1>
                   <p className="text-sm text-gray-600">Engenharia</p>
                 </div>
               </div>
@@ -221,41 +308,115 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         </div>
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-2 ${isCollapsed ? 'p-2' : 'p-4'} overflow-y-auto`}>
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const active = isActive(item.href);
+        <nav className={`flex-1 space-y-4 p-4 overflow-y-auto`}>
+          {menuItems.map((category, index) => {
+            const CategoryIcon = category.icon;
+            const hasActiveItem = category.items.some(item => isActive(item.href));
+            const isExpanded = isMenuExpanded(category.id);
             
             return (
+              <div key={category.id}>
+                {/* Separador entre grupos */}
+                {index > 0 && (
+                  <div className={`${isCollapsed ? 'my-4' : 'my-3'}`}>
+                    <div className="border-t border-gray-200"></div>
+                  </div>
+                )}
+                
+                <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
+                {/* Categoria Header */}
+                {isCollapsed ? (
+                  <div className="flex justify-center">
+                    <button
+                      onClick={() => toggleMenu(category.id)}
+                        className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                          hasActiveItem
+                            ? 'text-blue-600'
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      title={category.name}
+                    >
+                      <CategoryIcon className="w-5 h-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => toggleMenu(category.id)}
+                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-xl transition-all duration-200 ${
+                      hasActiveItem
+                        ? 'text-blue-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    <div className="rounded-xl transition-all duration-200 p-3">
+                      <CategoryIcon className={`w-5 h-5 flex-shrink-0 ${
+                        hasActiveItem ? 'text-blue-600' : 'text-gray-600'
+                      }`} />
+                    </div>
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="text-sm font-medium">{category.name}</p>
+                    </div>
+                    {category.items.length > 1 && (
+                      <div className="flex-shrink-0">
+                        {isExpanded ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    )}
+                  </button>
+                )}
+
+                {/* Submenu Items */}
+                {isExpanded && (
+                  <div className={`space-y-2 ${isCollapsed ? '' : 'ml-4'}`}>
+                    {category.items
+                      .filter(item => item.permission)
+                      .map((item) => {
+                        const ItemIcon = item.icon;
+            const active = isActive(item.href);
+            
+                        return isCollapsed ? (
+                          <div key={item.href} className="flex justify-center">
+                            <Link
+                              href={item.href}
+                              onClick={() => setIsOpen(false)}
+                              className={`w-8 h-8 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                                active 
+                                  ? 'text-blue-600' 
+                                  : 'hover:bg-gray-100 text-gray-600'
+                              }`}
+                              title={item.name}
+                            >
+                              <ItemIcon className="w-4 h-4" />
+                            </Link>
+                          </div>
+                        ) : (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={() => setIsOpen(false)}
-                className={`flex items-center rounded-lg transition-colors duration-200 ${
-                  isCollapsed 
-                    ? 'justify-center w-12 h-12 mx-auto' 
-                    : 'space-x-3 px-3 py-2'
-                } ${
-                  active
-                    ? 'text-blue-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                title={isCollapsed ? item.name : undefined}
-              >
-                <div className={`rounded-lg p-3 ${
-                  active ? 'bg-blue-100' : ''
-                }`}>
-                  <Icon className={`w-5 h-5 flex-shrink-0 ${
-                    active ? 'text-blue-600' : 'text-gray-600'
+                            className={`flex items-center space-x-3 px-3 py-2 rounded-xl transition-all duration-200 ${
+                              active
+                                ? 'text-blue-700'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                          >
+                            <ItemIcon className={`w-4 h-4 flex-shrink-0 ${
+                              active ? 'text-blue-600' : 'text-gray-500'
                   }`} />
-                </div>
-                {!isCollapsed && (
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium">{item.name}</p>
-                    <p className="text-xs text-gray-500">{item.description}</p>
+                              <p className={`text-xs truncate ${active ? 'text-blue-500' : 'text-gray-500'}`}>{item.description}</p>
+                  </div>
+              </Link>
+                        );
+                      })}
                   </div>
                 )}
-              </Link>
+                </div>
+              </div>
             );
           })}
         </nav>

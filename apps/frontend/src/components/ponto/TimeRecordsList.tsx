@@ -98,7 +98,7 @@ export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onVie
             {expectedRecords.map((record) => (
               <div key={record.type} className="flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg text-center">
                 <div className="text-gray-400 mb-1 sm:mb-2 text-sm sm:text-base">{record.icon}</div>
-                <div className="text-sm sm:text-lg font-semibold text-gray-400">--:--</div>
+                <div className="text-sm sm:text-lg font-semibold text-gray-400">--:--:--</div>
               </div>
             ))}
           </div>
