@@ -152,7 +152,7 @@ export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onVie
                   {record.icon}
                 </div>
                 <div className={`text-sm sm:text-lg font-semibold ${record.hasRecord ? 'text-gray-900' : 'text-gray-400'}`}>
-                  {record.hasRecord && record.timestamp ? formatTime(record.timestamp) : '--:--'}
+                  {record.hasRecord && record.timestamp ? formatTime(record.timestamp) : '--:--:--'}
                 </div>
               </div>
             ))}
