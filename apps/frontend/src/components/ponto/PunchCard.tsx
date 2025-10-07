@@ -339,7 +339,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 )}
               </div>
               {location && (
-                <div className="text-xs text-gray-400 font-mono">
+                <div className="text-xs text-gray-400">
                   {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
                 </div>
               )}

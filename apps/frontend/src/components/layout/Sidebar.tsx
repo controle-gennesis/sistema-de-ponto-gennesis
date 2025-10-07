@@ -67,10 +67,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         permission: permissions.canViewDashboard
       },
       {
-        name: 'Registrar Ponto',
+        name: 'Controle de Ponto',
         href: '/ponto',
         icon: Clock,
-        description: 'Bater ponto e consultar registros',
+        description: 'Gerencie seus registros',
         permission: permissions.canRegisterTime
           }
         ]

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { BarChart3, Clock, Calendar, X } from 'lucide-react';
+import { BarChart3, Clock, Calendar, X, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { PunchCard } from '@/components/ponto/PunchCard';
 import { TimeRecordsList } from '@/components/ponto/TimeRecordsList';
@@ -235,32 +235,33 @@ export default function PontoPage() {
     >
       <div className="space-y-6 w-full px-4">
       {/* Header */}
-      <div className="text-center">
+      <div className="text-center mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Controle de Ponto</h1>
-        <p className="mt-2 text-gray-600">Gerencie seus registros de ponto e banco de horas</p>
+        <p className="mt-1 text-gray-600">Gerencie seus registros de ponto e banco de horas</p>
+        
+        {/* Botão de registrar ponto - só aparece quando há pontos para bater */}
+        {!areAllPointsCompleted() && (
+          <div className="mt-4 flex justify-center">
+            <button
+              onClick={() => setIsMobilePunchModalOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{getNextPunchTypeLabel()}</span>
+            </button>
+          </div>
+        )}
       </div>
-
-      {/* Botão de registrar ponto - só aparece quando há pontos para bater */}
-      {!areAllPointsCompleted() && (
-        <div className="mb-6">
-          <button
-            onClick={() => setIsMobilePunchModalOpen(true)}
-            className="w-full h-16 rounded-lg shadow-lg flex items-center justify-center transition-colors bg-blue-600 hover:bg-blue-500 text-white"
-          >
-            <span className="text-lg font-semibold">{getNextPunchTypeLabel()}</span>
-          </button>
-        </div>
-      )}
 
       {/* Cards lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Card de registros do dia */}
-        <div className="h-full">
-          <TimeRecordsList 
-            records={todayRecords?.data?.records || []} 
-            onViewMore={() => setIsPanelOpen(true)}
-          />
-        </div>
+          {/* Card de registros do dia */}
+          <div className="h-full">
+            <TimeRecordsList 
+              records={todayRecords?.data?.records || []} 
+              onViewMore={() => setIsPanelOpen(true)}
+            />
+          </div>
 
         {/* Banco de horas - apenas saldo */}
         <div className="h-full">
@@ -289,17 +290,17 @@ export default function PontoPage() {
              </CardHeader>
              <CardContent className="flex-1 flex flex-col justify-center text-center p-6 pt-0">
                <div className={`text-3xl font-bold ${
-                 (bankHoursData?.data?.balanceHours || 0) >= 0 
-                   ? 'text-green-700' 
-                   : 'text-red-700'
-               }`}>
-                 {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
-               </div>
+                      (bankHoursData?.data?.balanceHours || 0) >= 0 
+                        ? 'text-green-700' 
+                        : 'text-red-700'
+                    }`}>
+                      {bankHoursLoading ? 'Carregando...' : bankHoursError ? 'Erro' : formatHours(bankHoursData?.data?.balanceHours || 0)}
+                    </div>
              </CardContent>
              
              <div className="mt-auto pt-4 px-6 pb-6">
-               <button
-                 onClick={() => setIsBankDetailsOpen(true)}
+                <button
+                  onClick={() => setIsBankDetailsOpen(true)}
                  className={`w-full h-12 flex items-center justify-center space-x-2 px-4 rounded-lg shadow-sm hover:opacity-80 focus:outline-none focus:ring-2 transition-colors ${
                    (bankHoursData?.data?.balanceHours || 0) < 0 
                      ? 'bg-red-100 text-red-700 hover:bg-red-200 focus:ring-red-500' 
@@ -307,13 +308,13 @@ export default function PontoPage() {
                        ? 'bg-green-100 text-green-700 hover:bg-green-200 focus:ring-green-500' 
                        : 'bg-blue-100 text-blue-700 hover:bg-blue-200 focus:ring-blue-500'
                  }`}
-               >
-                 <BarChart3 className="w-4 h-4" />
-                 <span className="text-sm font-medium">Ver detalhamento</span>
-               </button>
-             </div>
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span className="text-sm font-medium">Ver detalhamento</span>
+                </button>
+              </div>
            </Card>
-        </div>
+            </div>
       </div>
 
       {/* Modal de registros detalhados */}
