@@ -700,10 +700,21 @@ export default function FolhaPagamentoPage() {
                               const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
                               const salarioFamilia = employee.familySalary || 0;
                               const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
-                              const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / 30) * faltas;
-                              const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + employee.totalAdjustments;
-                              const totalDescontos = employee.totalDiscounts + descontoPorFaltas;
+                              
+                              // Calcular número de dias do mês
+                              const diasDoMes = new Date(filters.year, filters.month, 0).getDate();
+                              
+                              const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
+                              const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
+                              
+                              // Cálculos de %VA e %VT baseados no polo
+                              const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
+                              const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
+                              
+                              const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0);
+                              const totalDescontos = employee.totalDiscounts + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT;
                               const liquidoReceber = totalProventos - totalDescontos;
+                              
                               return liquidoReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                             })()}
                           </span>

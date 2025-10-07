@@ -115,7 +115,9 @@ export const createEmployee = async (req: Request, res: Response) => {
       account,
       digit,
       pixKeyType,
-      pixKey
+      pixKey,
+      polo,
+      categoriaFinanceira
     } = req.body;
 
     // Verificar se email já existe
@@ -185,7 +187,9 @@ export const createEmployee = async (req: Request, res: Response) => {
           account,
           digit,
           pixKeyType,
-          pixKey
+          pixKey,
+          polo,
+          categoriaFinanceira
         },
         include: {
           user: {
@@ -235,7 +239,9 @@ export const updateEmployee = async (req: Request, res: Response) => {
       account,
       digit,
       pixKeyType,
-      pixKey
+      pixKey,
+      polo,
+      categoriaFinanceira
     } = req.body;
 
     const employee = await prisma.employee.findUnique({
@@ -311,7 +317,9 @@ export const updateEmployee = async (req: Request, res: Response) => {
           ...(account !== undefined && { account }),
           ...(digit !== undefined && { digit }),
           ...(pixKeyType !== undefined && { pixKeyType }),
-          ...(pixKey !== undefined && { pixKey })
+          ...(pixKey !== undefined && { pixKey }),
+          ...(polo !== undefined && { polo }),
+          ...(categoriaFinanceira !== undefined && { categoriaFinanceira })
         },
         include: {
           user: {

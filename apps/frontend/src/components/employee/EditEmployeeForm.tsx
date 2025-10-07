@@ -54,6 +54,10 @@ interface EmployeeFormData {
   familySalary: string;
   dangerPay: string; // Porcentagem de periculosidade (0-100)
   unhealthyPay: string; // Porcentagem de insalubridade (0-100)
+  
+  // Novos campos - Polo e Categoria Financeira
+  polo: 'BRASÍLIA' | 'GOIÁS' | '';
+  categoriaFinanceira: 'GASTO' | 'DESPESA' | '';
 }
 
 interface Employee {
@@ -90,6 +94,9 @@ interface Employee {
     familySalary?: number;
     dangerPay?: number;
     unhealthyPay?: number;
+    // Novos campos - Polo e Categoria Financeira
+    polo?: string;
+    categoriaFinanceira?: string;
   };
 }
 
@@ -185,7 +192,11 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     modality: (employee.employee?.modality as any) || '',
     familySalary: employee.employee?.familySalary !== undefined && employee.employee?.familySalary !== null ? employee.employee.familySalary.toString() : '0.00',
     dangerPay: employee.employee?.dangerPay !== undefined && employee.employee?.dangerPay !== null ? employee.employee.dangerPay.toString() : '0',
-    unhealthyPay: employee.employee?.unhealthyPay !== undefined && employee.employee?.unhealthyPay !== null ? employee.employee.unhealthyPay.toString() : '0'
+    unhealthyPay: employee.employee?.unhealthyPay !== undefined && employee.employee?.unhealthyPay !== null ? employee.employee.unhealthyPay.toString() : '0',
+    
+    // Novos campos - Polo e Categoria Financeira
+    polo: (employee.employee?.polo as any) || '',
+    categoriaFinanceira: (employee.employee?.categoriaFinanceira as any) || ''
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -221,6 +232,23 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     return true;
   };
 
+  // Função para formatar CPF
+  const formatCPF = (value: string): string => {
+    // Remove tudo que não é dígito
+    const numbers = value.replace(/\D/g, '');
+    
+    // Aplica a máscara
+    if (numbers.length <= 3) {
+      return numbers;
+    } else if (numbers.length <= 6) {
+      return numbers.replace(/(\d{3})(\d+)/, '$1.$2');
+    } else if (numbers.length <= 9) {
+      return numbers.replace(/(\d{3})(\d{3})(\d+)/, '$1.$2.$3');
+    } else {
+      return numbers.replace(/(\d{3})(\d{3})(\d{3})(\d+)/, '$1.$2.$3-$4');
+    }
+  };
+
   // Função para validar email
   const isValidEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -243,7 +271,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
 
     if (!formData.cpf.trim()) {
       newErrors.cpf = 'CPF é obrigatório';
-    } else if (!isValidCPF(formData.cpf)) {
+    } else if (!isValidCPF(formData.cpf.replace(/\D/g, ''))) {
       newErrors.cpf = 'CPF inválido';
     }
 
@@ -264,6 +292,10 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     } else if (isNaN(parseFloat(formData.salary)) || parseFloat(formData.salary) <= 0) {
       newErrors.salary = 'Salário deve ser um valor válido';
     }
+
+    // Validação dos novos campos
+    if (!formData.polo.trim()) newErrors.polo = 'Polo é obrigatório';
+    if (!formData.categoriaFinanceira.trim()) newErrors.categoriaFinanceira = 'Categoria Financeira é obrigatória';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -324,7 +356,11 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
           modality: data.modality,
           familySalary: parseFloat(data.familySalary),
           dangerPay: parseFloat(data.dangerPay),
-          unhealthyPay: parseFloat(data.unhealthyPay)
+          unhealthyPay: parseFloat(data.unhealthyPay),
+          
+          // Novos campos - Polo e Categoria Financeira
+          polo: data.polo,
+          categoriaFinanceira: data.categoriaFinanceira
         }
       });
       return response.data;
@@ -435,12 +471,16 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                     </label>
                     <input
                       type="text"
-                      value={formData.cpf}
-                      onChange={(e) => handleInputChange('cpf', e.target.value)}
+                      value={formatCPF(formData.cpf)}
+                      onChange={(e) => {
+                        const formattedValue = formatCPF(e.target.value);
+                        handleInputChange('cpf', formattedValue);
+                      }}
                       className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                         errors.cpf ? 'border-red-500' : 'border-gray-300'
                       }`}
                       placeholder="000.000.000-00"
+                      maxLength={14}
                     />
                     {errors.cpf && (
                       <p className="text-red-500 text-sm mt-1 flex items-center">
@@ -679,6 +719,58 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                         </option>
                       ))}
                     </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Polo e Categoria Financeira */}
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Polo e Categoria Financeira</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Polo *
+                    </label>
+                    <select
+                      value={formData.polo}
+                      onChange={(e) => handleInputChange('polo', e.target.value)}
+                      className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
+                        errors.polo ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="">Selecione o polo</option>
+                      <option value="BRASÍLIA">BRASÍLIA</option>
+                      <option value="GOIÁS">GOIÁS</option>
+                    </select>
+                    {errors.polo && (
+                      <p className="text-red-500 text-xs mt-1 flex items-center">
+                        <AlertCircle className="w-3 h-3 mr-1" />
+                        {errors.polo}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Categoria Financeira *
+                    </label>
+                    <select
+                      value={formData.categoriaFinanceira}
+                      onChange={(e) => handleInputChange('categoriaFinanceira', e.target.value)}
+                      className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
+                        errors.categoriaFinanceira ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="">Selecione a categoria</option>
+                      <option value="GASTO">GASTO</option>
+                      <option value="DESPESA">DESPESA</option>
+                    </select>
+                    {errors.categoriaFinanceira && (
+                      <p className="text-red-500 text-xs mt-1 flex items-center">
+                        <AlertCircle className="w-3 h-3 mr-1" />
+                        {errors.categoriaFinanceira}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

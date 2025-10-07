@@ -376,9 +376,12 @@ export interface PayrollEmployee {
   department: string;
   employeeId: string;
   company: string | null;
+  polo: string | null;
+  categoriaFinanceira: string | null;
   currentContract: string | null;
   costCenter: string | null;
   client: string | null;
+  alocacaoFinal: string | null; // Centro de custo mais frequente nos pontos
   cpf: string;
   bank: string | null;
   accountType: string | null;

@@ -83,6 +83,9 @@ export class UserController {
                 familySalary: true,
                 dangerPay: true,
                 unhealthyPay: true,
+                // Novos campos - Polo e Categoria Financeira
+                polo: true,
+                categoriaFinanceira: true,
               }
             }
           },
@@ -223,7 +226,10 @@ export class UserController {
               modality: employeeData.modality || null,
               familySalary: employeeData.familySalary !== undefined ? employeeData.familySalary : null,
               dangerPay: employeeData.dangerPay !== undefined ? employeeData.dangerPay : null,
-              unhealthyPay: employeeData.unhealthyPay !== undefined ? employeeData.unhealthyPay : null
+              unhealthyPay: employeeData.unhealthyPay !== undefined ? employeeData.unhealthyPay : null,
+              // Novos campos - Polo e Categoria Financeira
+              polo: employeeData.polo || null,
+              categoriaFinanceira: employeeData.categoriaFinanceira || null
             }
           });
         }
@@ -258,7 +264,7 @@ export class UserController {
   async updateUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { name, email, role, isActive, employeeData } = req.body;
+      const { name, email, cpf, role, isActive, employeeData } = req.body;
 
       // Verificar se usuário existe
       const existingUser = await prisma.user.findUnique({
@@ -284,6 +290,20 @@ export class UserController {
         }
       }
 
+      // Verificar se CPF já existe em outro usuário
+      if (cpf && cpf !== existingUser.cpf) {
+        const cpfExists = await prisma.user.findFirst({
+          where: {
+            cpf,
+            id: { not: id }
+          }
+        });
+
+        if (cpfExists) {
+          throw createError('CPF já está em uso', 400);
+        }
+      }
+
       const result = await prisma.$transaction(async (tx: any) => {
         // Atualizar usuário
         const user = await tx.user.update({
@@ -291,6 +311,7 @@ export class UserController {
           data: {
             ...(name && { name }),
             ...(email && { email }),
+            ...(cpf && { cpf }),
             ...(role && { role }),
             ...(isActive !== undefined && { isActive })
           }
@@ -325,7 +346,10 @@ export class UserController {
               ...(employeeData.dangerPay !== undefined && { dangerPay: employeeData.dangerPay }),
               ...(employeeData.unhealthyPay !== undefined && { unhealthyPay: employeeData.unhealthyPay }),
               ...(employeeData.dailyFoodVoucher !== undefined && { dailyFoodVoucher: employeeData.dailyFoodVoucher }),
-              ...(employeeData.dailyTransportVoucher !== undefined && { dailyTransportVoucher: employeeData.dailyTransportVoucher })
+              ...(employeeData.dailyTransportVoucher !== undefined && { dailyTransportVoucher: employeeData.dailyTransportVoucher }),
+              // Novos campos - Polo e Categoria Financeira
+              ...(employeeData.polo !== undefined && { polo: employeeData.polo }),
+              ...(employeeData.categoriaFinanceira !== undefined && { categoriaFinanceira: employeeData.categoriaFinanceira })
             }
           });
         }

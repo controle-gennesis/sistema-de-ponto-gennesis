@@ -26,9 +26,21 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
   const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
   const salarioFamilia = employee.familySalary || 0;
   const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
-  const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / 30) * faltas;
+  
+  // Calcular número de dias do mês
+  const diasDoMes = new Date(year, month, 0).getDate(); // Último dia do mês
+  
+  const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
+  
+  // Cálculo específico do DSR por Falta
+  const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
+  
+  // Cálculos de %VA e %VT baseados no polo
+  const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
+  const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
+  
   const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0);
-  const totalDescontos = employee.totalDiscounts + descontoPorFaltas;
+  const totalDescontos = employee.totalDiscounts + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT;
   const liquidoReceber = totalProventos - totalDescontos;
   
   // Cálculo com acréscimos
@@ -105,6 +117,14 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                   <span className="text-sm font-medium">{employee.company || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Polo:</span>
+                  <span className="text-sm font-medium">{employee.polo || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Categoria Financeira:</span>
+                  <span className="text-sm font-medium">{employee.categoriaFinanceira || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Modalidade:</span>
                   <span className="text-sm font-medium">{employee.modality || 'N/A'}</span>
                 </div>
@@ -113,12 +133,12 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                   <span className="text-sm font-medium">{employee.costCenter || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Contrato:</span>
-                  <span className="text-sm font-medium">{employee.currentContract || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Tomador:</span>
                   <span className="text-sm font-medium">{employee.client || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Alocação Final:</span>
+                  <span className="text-sm font-medium">{employee.alocacaoFinal || 'N/A'}</span>
                 </div>
               </div>
             </div>
@@ -334,10 +354,67 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                     </td>
                   </tr>
 
-                  {/* Vale Alimentação */}
+                  {/* DSR por Falta */}
                   <tr className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
                       008
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      DSR POR FALTA
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {faltas || 0} faltas
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-semibold text-red-700">
+                      R$ {(dsrPorFalta || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* %VA - Desconto de 9% do VA para funcionários de BRASÍLIA */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      009
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      VA%
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.polo === 'BRASÍLIA' ? '9% do VA' : 'Não aplicável'}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-semibold text-red-700">
+                      R$ {percentualVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* %VT - Desconto de 6% do salário para funcionários de GOIÁS */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      010
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      VT%
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.polo === 'GOIÁS' ? '6% do salário' : 'Não aplicável'}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-semibold text-red-700">
+                      R$ {percentualVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* Vale Alimentação */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      011
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
                       VALE ALIMENTAÇÃO
@@ -356,7 +433,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                   {/* Vale Transporte */}
                   <tr className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
-                      009
+                      012
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
                       VALE TRANSPORTE

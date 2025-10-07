@@ -55,6 +55,10 @@ interface EmployeeFormData {
   familySalary: string;
   dangerPay: string; // Porcentagem de periculosidade (0-100)
   unhealthyPay: string; // Porcentagem de insalubridade (0-100)
+  
+  // Novos campos - Polo e Categoria Financeira
+  polo: 'BRASÍLIA' | 'GOIÁS' | '';
+  categoriaFinanceira: 'GASTO' | 'DESPESA' | '';
 }
 
 interface CreateEmployeeFormProps {
@@ -170,7 +174,11 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     modality: '',
     familySalary: '0.00',
     dangerPay: '0', // 0% por padrão
-    unhealthyPay: '0' // 0% por padrão
+    unhealthyPay: '0', // 0% por padrão
+    
+    // Novos campos - Polo e Categoria Financeira
+    polo: '',
+    categoriaFinanceira: ''
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -337,7 +345,11 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         modality: data.modality || null,
         familySalary: data.familySalary ? parseFloat(data.familySalary) : 0,
         dangerPay: data.dangerPay ? parseFloat(data.dangerPay) : 0,
-        unhealthyPay: data.unhealthyPay ? parseFloat(data.unhealthyPay) : 0
+        unhealthyPay: data.unhealthyPay ? parseFloat(data.unhealthyPay) : 0,
+        
+        // Novos campos - Polo e Categoria Financeira
+        polo: data.polo || null,
+        categoriaFinanceira: data.categoriaFinanceira || null
       };
 
       const response = await api.post('/users', {
@@ -454,6 +466,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     
     // Validação dos novos campos
     if (!formData.modality.trim()) newErrors.modality = 'Modalidade é obrigatória';
+    if (!formData.polo.trim()) newErrors.polo = 'Polo é obrigatório';
+    if (!formData.categoriaFinanceira.trim()) newErrors.categoriaFinanceira = 'Categoria Financeira é obrigatória';
     
     if (!formData.familySalary.trim()) newErrors.familySalary = 'Salário Família é obrigatório';
     else if (isNaN(parseFloat(formData.familySalary)) || parseFloat(formData.familySalary) < 0) {
@@ -1147,6 +1161,58 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     <p className="text-red-500 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
                       {errors.unhealthyPay}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Polo e Categoria Financeira */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Polo e Categoria Financeira</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Polo *
+                  </label>
+                  <select
+                    value={formData.polo}
+                    onChange={(e) => handleInputChange('polo', e.target.value)}
+                    className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
+                      errors.polo ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                  >
+                    <option value="">Selecione o polo</option>
+                    <option value="BRASÍLIA">BRASÍLIA</option>
+                    <option value="GOIÁS">GOIÁS</option>
+                  </select>
+                  {errors.polo && (
+                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                      <AlertCircle className="w-3 h-3 mr-1" />
+                      {errors.polo}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Categoria Financeira *
+                  </label>
+                  <select
+                    value={formData.categoriaFinanceira}
+                    onChange={(e) => handleInputChange('categoriaFinanceira', e.target.value)}
+                    className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
+                      errors.categoriaFinanceira ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                  >
+                    <option value="">Selecione a categoria</option>
+                    <option value="GASTO">GASTO</option>
+                    <option value="DESPESA">DESPESA</option>
+                  </select>
+                  {errors.categoriaFinanceira && (
+                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                      <AlertCircle className="w-3 h-3 mr-1" />
+                      {errors.categoriaFinanceira}
                     </p>
                   )}
                 </div>

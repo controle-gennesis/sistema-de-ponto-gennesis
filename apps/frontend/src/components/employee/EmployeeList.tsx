@@ -51,6 +51,9 @@ interface Employee {
     familySalary?: number;
     dangerPay?: number;
     unhealthyPay?: number;
+    // Novos campos - Polo e Categoria Financeira
+    polo?: string;
+    categoriaFinanceira?: string;
   };
 }
 
@@ -833,6 +836,18 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           <span className="text-gray-500 font-medium">Empresa:</span>
                           <span className="text-gray-800 font-semibold">{employee.employee.company}</span>
                         </div>
+                        {employee.employee.polo && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 font-medium">Polo:</span>
+                            <span className="text-gray-800 font-semibold">{employee.employee.polo}</span>
+                          </div>
+                        )}
+                        {employee.employee.categoriaFinanceira && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 font-medium">Categoria Financeira:</span>
+                            <span className="text-gray-800 font-semibold">{employee.employee.categoriaFinanceira}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between items-center">
                           <span className="text-gray-500 font-medium">Modalidade:</span>
                           <span className="text-gray-800 font-semibold">{employee.employee.modality}</span>
@@ -1090,6 +1105,22 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           <span className="text-sm text-gray-600">Empresa:</span>
                           <span className="text-sm font-medium">
                             {selectedEmployee.employee.company}
+                          </span>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.polo && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Polo:</span>
+                          <span className="text-sm font-medium">
+                            {selectedEmployee.employee.polo}
+                          </span>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.categoriaFinanceira && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Categoria Financeira:</span>
+                          <span className="text-sm font-medium">
+                            {selectedEmployee.employee.categoriaFinanceira}
                           </span>
                         </div>
                       )}

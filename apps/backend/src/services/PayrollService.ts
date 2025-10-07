@@ -3,6 +3,60 @@ import moment from 'moment';
 
 const prisma = new PrismaClient();
 
+// Função para calcular a alocação final baseada no centro de custo mais frequente
+async function calculateAlocacaoFinal(employeeId: string, month: number, year: number, fallbackCostCenter?: string | null): Promise<string | null> {
+  try {
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    // Buscar todos os pontos do funcionário no mês
+    const timeRecords = await prisma.timeRecord.findMany({
+      where: {
+        employeeId,
+        timestamp: {
+          gte: startDate,
+          lte: endDate
+        },
+        costCenter: {
+          not: null
+        }
+      },
+      select: {
+        costCenter: true
+      }
+    });
+
+    if (timeRecords.length === 0) {
+      // Se não tem pontos, usar o centro de custo cadastrado no funcionário
+      return fallbackCostCenter || null;
+    }
+
+    // Contar frequência de cada centro de custo
+    const costCenterCount: { [key: string]: number } = {};
+    timeRecords.forEach(record => {
+      if (record.costCenter) {
+        costCenterCount[record.costCenter] = (costCenterCount[record.costCenter] || 0) + 1;
+      }
+    });
+
+    // Encontrar o centro de custo mais frequente
+    let mostFrequentCostCenter = null;
+    let maxCount = 0;
+
+    for (const [costCenter, count] of Object.entries(costCenterCount)) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostFrequentCostCenter = costCenter;
+      }
+    }
+
+    return mostFrequentCostCenter;
+  } catch (error) {
+    console.error('Erro ao calcular alocação final:', error);
+    return fallbackCostCenter || null;
+  }
+}
+
 export interface PayrollEmployee {
   id: string;
   name: string;
@@ -10,8 +64,11 @@ export interface PayrollEmployee {
   department: string;
   employeeId: string;
   company: string | null;
+  polo: string | null;
+  categoriaFinanceira: string | null;
   costCenter: string | null;
   client: string | null;
+  alocacaoFinal: string | null; // Centro de custo mais frequente nos pontos
   cpf: string;
   bank: string | null;
   accountType: string | null;
@@ -332,6 +389,7 @@ export class PayrollService {
         const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
         const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
         const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
+        const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
         
         return {
           id: employee.id,
@@ -340,8 +398,11 @@ export class PayrollService {
           department: employee.department,
           employeeId: employee.employeeId,
           company: employee.company,
+          polo: employee.polo,
+          categoriaFinanceira: employee.categoriaFinanceira,
           costCenter: employee.costCenter,
           client: employee.client,
+          alocacaoFinal: alocacaoFinal,
           cpf: employee.user.cpf,
           bank: employee.bank,
           accountType: employee.accountType,
@@ -435,6 +496,7 @@ export class PayrollService {
     const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
     const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
     const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
+    const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
 
     return {
       id: employee.id,
@@ -443,8 +505,11 @@ export class PayrollService {
       department: employee.department,
       employeeId: employee.employeeId,
       company: employee.company,
+      polo: employee.polo,
+      categoriaFinanceira: employee.categoriaFinanceira,
       costCenter: employee.costCenter,
       client: employee.client,
+      alocacaoFinal: alocacaoFinal,
       cpf: employee.user.cpf,
       bank: employee.bank,
       accountType: employee.accountType,

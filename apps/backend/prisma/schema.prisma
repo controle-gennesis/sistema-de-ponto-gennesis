@@ -78,6 +78,10 @@ model Employee {
   dangerPay         Decimal?  @db.Decimal(10, 2) // PERICULOSIDADE
   unhealthyPay      Decimal?  @db.Decimal(10, 2) // INSALUBRIDADE
   
+  // Novos campos - Polo e Categoria Financeira
+  polo              String?   // POLO (BRASÍLIA, GOIÁS)
+  categoriaFinanceira String?  // CATEGORIA FINANCEIRA (GASTO, DESPESA)
+  
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
