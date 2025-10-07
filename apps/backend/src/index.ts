@@ -1,11 +1,24 @@
+// Carregar variáveis de ambiente PRIMEIRO, antes de qualquer importação
+import dotenv from 'dotenv';
+import path from 'path';
+
+dotenv.config({ path: path.join(__dirname, '../.env') });
+
+// Log de configuração das variáveis de ambiente
+console.log('🔧 Configuração carregada:');
+console.log(`   📊 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+console.log(`   🗄️  Database: ${process.env.DATABASE_URL ? '✅ Configurada' : '❌ Não configurada'}`);
+console.log(`   🔐 JWT Secret: ${process.env.JWT_SECRET ? '✅ Configurada' : '❌ Não configurada'}`);
+console.log(`   ☁️  AWS S3: ${process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? '✅ Configurado' : '❌ Não configurado'}`);
+console.log(`   📦 Bucket: ${process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos'}`);
+console.log('');
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import dotenv from 'dotenv';
-import path from 'path';
 
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -22,16 +35,9 @@ import medicalCertificateRoutes from './routes/medicalCertificates';
 import payrollRoutes from './routes/payroll';
 import salaryAdjustmentRoutes from './routes/salaryAdjustments';
 import salaryDiscountRoutes from './routes/salaryDiscounts';
-
-// Carregar variáveis de ambiente
-dotenv.config();
+import pointCorrectionRoutes from './routes/pointCorrections';
 
 console.log('🚀 Iniciando aplicação...');
-console.log('📋 Variáveis de ambiente carregadas:');
-console.log('   - NODE_ENV:', process.env.NODE_ENV);
-console.log('   - PORT:', process.env.PORT);
-console.log('   - DATABASE_URL:', process.env.DATABASE_URL ? 'Configurada' : 'NÃO CONFIGURADA');
-console.log('   - JWT_SECRET:', process.env.JWT_SECRET ? 'Configurada' : 'NÃO CONFIGURADA');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -73,9 +79,8 @@ if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.e
 }
 
 // Health check
-// Health check simples
 app.get('/health', (req, res) => {
-  console.log('🔍 Health check chamado');
+  console.log('🔍 Health check solicitado');
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
@@ -99,6 +104,7 @@ app.use('/api/medical-certificates', medicalCertificateRoutes);
 app.use('/api/payroll', payrollRoutes);
 app.use('/api/salary-adjustments', salaryAdjustmentRoutes);
 app.use('/api/salary-discounts', salaryDiscountRoutes);
+app.use('/api/solicitacoes', pointCorrectionRoutes);
 
 // Middleware de erro 404
 app.use(notFound);
@@ -112,16 +118,16 @@ process.env.TZ = 'America/Sao_Paulo';
 // Iniciar servidor
 try {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    console.log('');
+    console.log('🎉 SERVIDOR INICIADO COM SUCESSO!');
+    console.log('═══════════════════════════════════════');
+    console.log(`🚀 Porta: ${PORT}`);
     console.log(`📊 Ambiente: ${process.env.NODE_ENV}`);
-    console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
-    console.log(`🌐 Servidor iniciado com sucesso!`);
     console.log(`🌍 Timezone: ${process.env.TZ}`);
-    console.log(`📋 Variáveis de ambiente:`);
-    console.log(`   - NODE_ENV: ${process.env.NODE_ENV}`);
-    console.log(`   - PORT: ${process.env.PORT}`);
-    console.log(`   - DATABASE_URL: ${process.env.DATABASE_URL ? 'Configurada' : 'NÃO CONFIGURADA'}`);
-    console.log(`   - JWT_SECRET: ${process.env.JWT_SECRET ? 'Configurada' : 'NÃO CONFIGURADA'}`);
+    console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
+    console.log(`🌐 API Base: http://0.0.0.0:${PORT}/api`);
+    console.log('═══════════════════════════════════════');
+    console.log('');
   });
 } catch (error) {
   console.error('❌ Erro ao iniciar servidor:', error);

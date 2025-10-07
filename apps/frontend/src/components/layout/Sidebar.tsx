@@ -24,7 +24,8 @@ import {
   BookPlus,
   BookImage,
   Settings,
-  BarChart3
+  BarChart3,
+  FileText
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -114,6 +115,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: BookText,
         description: 'Gerenciar todas as ausências',
         permission: permissions.canManageAbsences
+          }
+        ]
+      },
+      {
+        id: 'requests',
+        name: 'Solicitações',
+        icon: FileText,
+        items: [
+          {
+            name: 'Gerenciar Solicitações',
+            href: '/ponto/gerenciar-solicitacoes',
+            icon: FileText,
+            description: 'Aprovar solicitações de correção',
+            permission: permissions.canManageAbsences // Mesma permissão das ausências
           }
         ]
       },
@@ -342,7 +357,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 ) : (
                   <button
                     onClick={() => toggleMenu(category.id)}
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-xl transition-all duration-200 ${
+                    className={`w-full flex items-center space-x-3 rounded-xl transition-all duration-200 ${
                       hasActiveItem
                         ? 'text-blue-700'
                         : 'text-gray-700 hover:bg-gray-100'
@@ -356,7 +371,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <div className="flex-1 min-w-0 text-left">
                       <p className="text-sm font-medium">{category.name}</p>
                     </div>
-                    {category.items.length > 1 && (
+                    {category.items.filter(item => item.permission).length > 0 && (
                       <div className="flex-shrink-0">
                         {isExpanded ? (
                           <ChevronUp className="w-4 h-4" />

@@ -3,10 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { BarChart3, Clock, Calendar, X, Plus } from 'lucide-react';
+import { BarChart3, Clock, Calendar, X, Plus, FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { PunchCard } from '@/components/ponto/PunchCard';
 import { TimeRecordsList } from '@/components/ponto/TimeRecordsList';
+import { PointCorrectionsModal } from '@/components/ponto/PointCorrectionsModal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import api from '@/lib/api';
@@ -121,6 +122,7 @@ export default function PontoPage() {
   // Estados para responsividade
   const [isMobilePunchModalOpen, setIsMobilePunchModalOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isSolicitacoesModalOpen, setIsSolicitacoesModalOpen] = useState(false);
 
   // Função para determinar o próximo tipo de ponto para o botão móvel
   const getNextPunchTypeLabel = () => {
@@ -239,19 +241,29 @@ export default function PontoPage() {
         <h1 className="text-3xl font-bold text-gray-900">Controle de Ponto</h1>
         <p className="mt-1 text-gray-600">Gerencie seus registros de ponto e banco de horas</p>
         
-        {/* Botão de registrar ponto - só aparece quando há pontos para bater */}
-        {!areAllPointsCompleted() && (
-          <div className="mt-4 flex justify-center">
-            <button
-              onClick={() => setIsMobilePunchModalOpen(true)}
+        {/* Botões de ação */}
+        <div className="mt-4 flex justify-center space-x-3">
+          {/* Botão de registrar ponto - só aparece quando há pontos para bater */}
+          {!areAllPointsCompleted() && (
+          <button
+            onClick={() => setIsMobilePunchModalOpen(true)}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
             >
               <Plus className="w-4 h-4" />
               <span>{getNextPunchTypeLabel()}</span>
-            </button>
+          </button>
+          )}
+          
+          {/* Botão de solicitações */}
+          <button
+            onClick={() => setIsSolicitacoesModalOpen(true)}
+            className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
+          >
+            <FileText className="w-4 h-4" />
+            <span>Solicitações</span>
+          </button>
           </div>
-        )}
-      </div>
+          </div>
 
       {/* Cards lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -313,7 +325,7 @@ export default function PontoPage() {
                   <span className="text-sm font-medium">Ver detalhamento</span>
                 </button>
               </div>
-           </Card>
+        </Card>
             </div>
       </div>
 
@@ -509,6 +521,12 @@ export default function PontoPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Solicitações */}
+      <PointCorrectionsModal 
+        isOpen={isSolicitacoesModalOpen}
+        onClose={() => setIsSolicitacoesModalOpen(false)}
+      />
       </div>
     </MainLayout>
   );

@@ -28,12 +28,6 @@ export class PhotoService {
       || !process.env.AWS_ACCESS_KEY_ID
       || !process.env.AWS_SECRET_ACCESS_KEY;
 
-    console.log('🔍 PhotoService Debug:');
-    console.log('  - STORAGE_PROVIDER:', process.env.STORAGE_PROVIDER);
-    console.log('  - AWS_ACCESS_KEY_ID:', process.env.AWS_ACCESS_KEY_ID ? 'OK' : 'FALTANDO');
-    console.log('  - AWS_SECRET_ACCESS_KEY:', process.env.AWS_SECRET_ACCESS_KEY ? 'OK' : 'FALTANDO');
-    console.log('  - useLocal:', this.useLocal);
-
     // Configurar AWS S3 quando aplicável
     this.s3 = this.useLocal ? null : new AWS.S3({
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -42,7 +36,12 @@ export class PhotoService {
     });
     
     this.bucketName = process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos';
-    console.log('  - bucketName:', this.bucketName);
+    
+    // Log de configuração do PhotoService
+    console.log('📸 PhotoService configurado:');
+    console.log(`   💾 Modo: ${this.useLocal ? 'Local Storage' : 'AWS S3'}`);
+    console.log(`   📦 Bucket: ${this.bucketName}`);
+    console.log(`   🌍 Região: ${process.env.AWS_REGION || 'us-east-1'}`);
   }
 
   /**
@@ -140,23 +139,19 @@ export class PhotoService {
    */
   async uploadPhoto(photo: any, userId: string): Promise<PhotoUploadResult> {
     try {
-      console.log('📸 PhotoService.uploadPhoto chamado:');
-      console.log('  - userId:', userId);
-      console.log('  - photo existe:', !!photo);
-      console.log('  - useLocal:', this.useLocal);
-      console.log('  - s3 existe:', !!this.s3);
-
+      console.log(`📸 Upload iniciado - Usuário: ${userId}`);
+      
       const validation = this.validatePhoto(photo);
       if (!validation.isValid) {
         throw new Error(validation.reason);
       }
 
       if (this.useLocal || !this.s3) {
-        console.log('💾 Usando armazenamento LOCAL');
+        console.log('💾 Salvando localmente...');
         return await this.saveLocalPhoto(photo, userId);
       }
 
-      console.log('☁️ Usando AWS S3');
+      console.log('☁️ Enviando para AWS S3...');
 
       const fileExtension = this.getFileExtension(photo.mimetype || 'image/jpeg');
       const fileName = `ponto/${userId}/${uuidv4()}.${fileExtension}`;
@@ -175,6 +170,8 @@ export class PhotoService {
       } as AWS.S3.PutObjectRequest;
 
       const result = await this.s3.upload(uploadParams).promise();
+      
+      console.log(`✅ Upload concluído - URL: ${result.Location}`);
 
       return {
         url: result.Location,

@@ -13,8 +13,12 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
+    console.log('Token encontrado:', token ? 'Sim' : 'Não');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      console.log('Token enviado:', token.substring(0, 20) + '...');
+    } else {
+      console.log('Nenhum token encontrado no localStorage');
     }
     
     // Se for FormData, não definir Content-Type (deixar o browser definir)

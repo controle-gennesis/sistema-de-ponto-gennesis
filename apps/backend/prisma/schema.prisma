@@ -33,6 +33,8 @@ model User {
   approvedCertificates MedicalCertificate[] @relation("CertificateApprover")
   salaryAdjustments SalaryAdjustment[]
   salaryDiscounts   SalaryDiscount[]
+  pointCorrectionRequests PointCorrectionRequest[] @relation("PointCorrectionApprover")
+  pointCorrectionComments PointCorrectionComment[]
 
   @@map("users")
 }
@@ -87,6 +89,7 @@ model Employee {
   medicalCertificates MedicalCertificate[]
   salaryAdjustments SalaryAdjustment[]
   salaryDiscounts   SalaryDiscount[]
+  pointCorrectionRequests PointCorrectionRequest[]
 
   @@map("employees")
 }
@@ -440,4 +443,64 @@ enum DiscountType {
   FINE        // Multa
   CONSIGNED   // Consignado
   OTHER       // Outros
+}
+
+// Modelo de Solicitações de Correção de Ponto
+model PointCorrectionRequest {
+  id               String            @id @default(cuid())
+  employeeId       String
+  title            String
+  description      String
+  justification    String
+  
+  // Dados originais (incorretos)
+  originalDate     DateTime
+  originalTime     String
+  originalType     TimeRecordType
+  
+  // Dados corrigidos (solicitados)
+  correctedDate    DateTime
+  correctedTime    String
+  correctedType    TimeRecordType
+  
+  // Status e aprovação
+  status           RequestStatus     @default(PENDING)
+  approvedBy       String?
+  approvedAt       DateTime?
+  rejectionReason  String?
+  
+  // Metadados
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  // Relacionamentos
+  employee         Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  approver         User?             @relation("PointCorrectionApprover", fields: [approvedBy], references: [id])
+  comments         PointCorrectionComment[]
+
+  @@map("point_correction_requests")
+}
+
+// Modelo de Comentários das Solicitações
+model PointCorrectionComment {
+  id         String                 @id @default(cuid())
+  requestId  String
+  userId     String
+  comment    String
+  isInternal Boolean                @default(false)
+  createdAt  DateTime               @default(now())
+
+  // Relacionamentos
+  request    PointCorrectionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("point_correction_comments")
+}
+
+enum RequestStatus {
+  PENDING     // Pendente
+  IN_REVIEW   // Em Análise
+  APPROVED    // Aprovada
+  REJECTED    // Rejeitada
+  CANCELLED   // Cancelada
 }
