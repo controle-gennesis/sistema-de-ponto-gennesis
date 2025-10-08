@@ -3,11 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { BarChart3, Clock, Calendar, X, Plus, FileText } from 'lucide-react';
+import { BarChart3, Clock, Calendar, X, Plus, FileText, FileCheck, Send, Plane } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { PunchCard } from '@/components/ponto/PunchCard';
 import { TimeRecordsList } from '@/components/ponto/TimeRecordsList';
-import { PointCorrectionsModal } from '@/components/ponto/PointCorrectionsModal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import api from '@/lib/api';
@@ -122,7 +121,6 @@ export default function PontoPage() {
   // Estados para responsividade
   const [isMobilePunchModalOpen, setIsMobilePunchModalOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [isSolicitacoesModalOpen, setIsSolicitacoesModalOpen] = useState(false);
 
   // Função para determinar o próximo tipo de ponto para o botão móvel
   const getNextPunchTypeLabel = () => {
@@ -253,15 +251,6 @@ export default function PontoPage() {
               <span>{getNextPunchTypeLabel()}</span>
           </button>
           )}
-          
-          {/* Botão de solicitações */}
-          <button
-            onClick={() => setIsSolicitacoesModalOpen(true)}
-            className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
-          >
-            <FileText className="w-4 h-4" />
-            <span>Solicitações</span>
-          </button>
           </div>
           </div>
 
@@ -327,6 +316,71 @@ export default function PontoPage() {
               </div>
         </Card>
             </div>
+      </div>
+
+      {/* Botões de navegação */}
+      <div className="mt-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Botão Atestados/Ausências */}
+          <button
+            onClick={() => router.push('/ponto/atestados')}
+            className="bg-white hover:bg-gray-50 border border-gray-200 rounded-lg p-6 shadow-sm"
+          >
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-colors">
+                <FileCheck className="w-6 h-6 text-blue-600" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">
+                  Atestados
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Solicitar ausências e atestados médicos
+                </p>
+              </div>
+            </div>
+          </button>
+
+          {/* Botão Solicitações */}
+          <button
+            onClick={() => router.push('/ponto/solicitacoes')}
+            className="bg-white hover:bg-gray-50 border border-gray-200 rounded-lg p-6 shadow-sm"
+          >
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center group-hover:bg-green-200 transition-colors">
+                <Send className="w-6 h-6 text-green-600" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-lg font-semibold text-gray-900 group-hover:text-green-700 transition-colors">
+                  Solicitações
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Correções de ponto e outras solicitações
+                </p>
+              </div>
+            </div>
+          </button>
+
+          {/* Botão Férias */}
+          <button
+            onClick={() => router.push('/ponto/ferias')}
+            className="bg-white hover:bg-gray-50 border border-gray-200 rounded-lg p-6 shadow-sm"
+          >
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-colors">
+                <Plane className="w-6 h-6 text-purple-600" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-lg font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">
+                  Férias
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Solicitar e gerenciar suas férias
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
       </div>
 
       {/* Modal de registros detalhados */}
@@ -521,12 +575,6 @@ export default function PontoPage() {
           </div>
         </div>
       )}
-
-      {/* Modal de Solicitações */}
-      <PointCorrectionsModal 
-        isOpen={isSolicitacoesModalOpen}
-        onClose={() => setIsSolicitacoesModalOpen(false)}
-      />
       </div>
     </MainLayout>
   );

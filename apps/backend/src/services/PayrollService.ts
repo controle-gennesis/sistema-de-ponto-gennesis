@@ -1,7 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
+import { HoursExtrasService } from './HoursExtrasService';
 
 const prisma = new PrismaClient();
+const hoursExtrasService = new HoursExtrasService();
 
 // Função para calcular a alocação final baseada no centro de custo mais frequente
 async function calculateAlocacaoFinal(employeeId: string, month: number, year: number, fallbackCostCenter?: string | null): Promise<string | null> {
@@ -91,6 +93,12 @@ export interface PayrollEmployee {
   totalDiscounts: number;
   daysWorked: number;
   totalWorkingDays: number;
+  // Horas Extras
+  he50Hours: number;
+  he50Value: number;
+  he100Hours: number;
+  he100Value: number;
+  hourlyRate: number;
 }
 
 export interface MonthlyPayrollData {
@@ -391,6 +399,16 @@ export class PayrollService {
         const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
         const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
         
+        // Calcular horas extras
+        const hoursExtras = await hoursExtrasService.calculateHoursExtrasForMonth(
+          employee.userId, 
+          year, 
+          month, 
+          Number(employee.salary),
+          Number(employee.dangerPay || 0),
+          Number(employee.unhealthyPay || 0)
+        );
+        
         return {
           id: employee.id,
           name: employee.user.name,
@@ -424,7 +442,13 @@ export class PayrollService {
           totalAdjustments,
           totalDiscounts,
           daysWorked: totals.daysWorked,
-          totalWorkingDays: totals.totalWorkingDays
+          totalWorkingDays: totals.totalWorkingDays,
+          // Horas Extras
+          he50Hours: hoursExtras.he50Hours,
+          he50Value: hoursExtras.he50Value,
+          he100Hours: hoursExtras.he100Hours,
+          he100Value: hoursExtras.he100Value,
+          hourlyRate: hoursExtras.hourlyRate
         } as PayrollEmployee;
       })
     );
@@ -497,6 +521,16 @@ export class PayrollService {
     const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
     const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
     const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
+    
+    // Calcular horas extras
+    const hoursExtras = await hoursExtrasService.calculateHoursExtrasForMonth(
+      employee.userId, 
+      year, 
+      month, 
+      Number(employee.salary),
+      Number(employee.dangerPay || 0),
+      Number(employee.unhealthyPay || 0)
+    );
 
     return {
       id: employee.id,
@@ -531,7 +565,13 @@ export class PayrollService {
       totalAdjustments,
       totalDiscounts,
       daysWorked: totals.daysWorked,
-      totalWorkingDays: totals.totalWorkingDays
+      totalWorkingDays: totals.totalWorkingDays,
+      // Horas Extras
+      he50Hours: hoursExtras.he50Hours,
+      he50Value: hoursExtras.he50Value,
+      he100Hours: hoursExtras.he100Hours,
+      he100Value: hoursExtras.he100Value,
+      hourlyRate: hoursExtras.hourlyRate
     };
   }
 

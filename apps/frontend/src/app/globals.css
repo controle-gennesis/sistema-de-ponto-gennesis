@@ -194,6 +194,47 @@
     display: none;
   }
   
+/* Scrollbar ultra-fina, sem fundo, sem setas e totalmente quadrada */
+* {
+  scrollbar-width: thin !important;
+  scrollbar-color: #9ca3af transparent !important;
+}
+
+/* WebKit (Chrome, Edge, Safari) */
+*::-webkit-scrollbar {
+  width: 2px !important; /* mais fina ainda */
+  height: 2px !important; /* para barras horizontais */
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent !important; /* sem fundo */
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #9ca3af !important;
+  border-radius: 0 !important; /* quadrada */
+  transition: background-color 0.2s ease;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #7b7c7e !important;
+}
+
+/* Remover setas completamente */
+*::-webkit-scrollbar-button {
+  display: none !important;
+}
+
+/* Segurança extra: remover todas as variações de botões */
+*::-webkit-scrollbar-button:start:decrement,
+*::-webkit-scrollbar-button:end:increment,
+*::-webkit-scrollbar-button:vertical:start:decrement,
+*::-webkit-scrollbar-button:vertical:end:increment,
+*::-webkit-scrollbar-button:horizontal:start:decrement,
+*::-webkit-scrollbar-button:horizontal:end:increment {
+  display: none !important;
+}
+
   /* Fix definitivo para linha branca nas modais */
   .fixed.inset-0 {
     top: 0 !important;

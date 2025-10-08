@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Calendar, Clock, FileText, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import api from '@/lib/api';
@@ -91,19 +90,7 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
   };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
-      <CardHeader>
-        <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-          <FileText className="w-5 h-5 text-blue-600" />
-          Nova Solicitação de Correção
-        </h3>
-        <p className="text-sm text-gray-600">
-          Solicite a correção de um registro de ponto incorreto
-        </p>
-      </CardHeader>
-      
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
           {/* Informações básicas */}
           <div className="space-y-4">
             <div>
@@ -285,7 +272,5 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
             </Button>
           </div>
         </form>
-      </CardContent>
-    </Card>
   );
 };

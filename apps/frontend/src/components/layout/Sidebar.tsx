@@ -124,6 +124,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: FileText,
         items: [
           {
+            name: 'Solicitações de Correção',
+            href: '/ponto/solicitacoes',
+            icon: FileText,
+            description: 'Minhas solicitações de correção',
+            permission: true // Todos podem ver suas próprias solicitações
+          },
+          {
             name: 'Gerenciar Solicitações',
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,

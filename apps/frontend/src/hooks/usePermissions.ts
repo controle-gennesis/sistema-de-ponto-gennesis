@@ -138,11 +138,17 @@ export function useRoutePermission(route: string) {
 
   const routePermissions: Record<string, boolean> = {
     '/ponto': permissions.canRegisterTime,
-    '/ponto/folha-pagamento': permissions.canAccessPayroll,
-    '/ponto/ferias': permissions.canManageVacations,
-    '/ponto/atestados': permissions.canManageAbsences,
-    '/ponto/banco-horas': permissions.canManageBankHours,
+    '/ponto/dashboard': permissions.canViewDashboard,
+    '/ponto/funcionarios': permissions.canManageEmployees,
     '/ponto/aniversariantes': permissions.canViewBirthdays,
+    '/ponto/atestados': true, // Todos podem registrar suas próprias ausências
+    '/ponto/gerenciar-atestados': permissions.canManageAbsences,
+    '/ponto/solicitacoes': true, // Todos podem ver suas próprias solicitações
+    '/ponto/gerenciar-solicitacoes': permissions.canManageAbsences, // Mesma permissão das ausências
+    '/ponto/ferias': true, // Todos podem solicitar suas próprias férias
+    '/ponto/gerenciar-ferias': permissions.canManageVacations,
+    '/ponto/banco-horas': permissions.canManageBankHours,
+    '/ponto/folha-pagamento': permissions.canAccessPayroll,
   };
 
   return {

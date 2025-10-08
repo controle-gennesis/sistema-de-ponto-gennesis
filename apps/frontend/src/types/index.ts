@@ -404,6 +404,12 @@ export interface PayrollEmployee {
   totalDiscounts: number;
   daysWorked: number;
   totalWorkingDays: number;
+  // Horas Extras
+  he50Hours: number;
+  he50Value: number;
+  he100Hours: number;
+  he100Value: number;
+  hourlyRate: number;
 }
 
 export interface MonthlyPayrollData {

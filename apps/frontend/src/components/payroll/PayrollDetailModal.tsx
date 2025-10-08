@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard } from 'lucide-react';
+import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon } from 'lucide-react';
 import { PayrollEmployee } from '@/types';
 
 interface PayrollDetailModalProps {
@@ -39,12 +39,44 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
   const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
   const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
   
-  const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0);
-  const totalDescontos = employee.totalDiscounts + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT;
+  // Cálculo do DSR H.E (Descanso Semanal Remunerado sobre Horas Extras)
+  const totalHorasExtras = (employee.he50Hours || 0) + (employee.he100Hours || 0);
+  const diasUteis = employee.totalWorkingDays || 0; // Segunda a Sábado
+  const diasNaoUteis = diasDoMes - diasUteis; // Domingo + feriados
+  const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+  
+  // Cálculo da BASE INSS MENSAL
+  const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
+  const valorDSRHE = dsrHE * (employee.hourlyRate || 0);
+  const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+    ? 0 
+    : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+  
+  // Cálculo do INSS MENSAL (Tabela Progressiva)
+  const calcularINSS = (baseINSS: number): number => {
+    if (baseINSS <= 0) return 0;
+    
+    if (baseINSS <= 1518) {
+      return baseINSS * 0.075; // 7,5%
+    } else if (baseINSS <= 2793) {
+      return (1518 * 0.075) + ((baseINSS - 1518) * 0.09); // 7,5% até 1518 + 9% do excedente
+    } else if (baseINSS <= 4190) {
+      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12); // 7,5% até 1518 + 9% até 2793 + 12% do excedente
+    } else if (baseINSS <= 8157) {
+      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14); // 7,5% até 1518 + 9% até 2793 + 12% até 4190 + 14% do excedente
+    } else {
+      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14); // Teto máximo
+    }
+  };
+  
+  const inssMensal = calcularINSS(baseINSSMensal);
+  
+  const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0) + (dsrHE * (employee.hourlyRate || 0));
+  const totalDescontos = employee.totalDiscounts + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal;
   const liquidoReceber = totalProventos - totalDescontos;
   
   // Cálculo com acréscimos
-  const totalProventosComAcrescimos = salarioBase + periculosidade + insalubridade + salarioFamilia + employee.totalAdjustments + (employee.totalTransportVoucher || 0);
+  const totalProventosComAcrescimos = salarioBase + periculosidade + insalubridade + salarioFamilia + employee.totalAdjustments + (employee.totalTransportVoucher || 0) + (dsrHE * (employee.hourlyRate || 0));
   const liquidoComAcrescimos = totalProventosComAcrescimos - totalDescontos;
 
   return (
@@ -448,6 +480,82 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                       -
                     </td>
                   </tr>
+
+                  {/* Total Horas Extras */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      013
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      HORAS EXTRAS
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {((employee.he50Hours || 0) + (employee.he100Hours || 0)).toFixed(2)}h
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 border-r border-gray-200">
+                      R$ {((employee.he50Value || 0) + (employee.he100Value || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400">
+                      -
+                    </td>
+                  </tr>
+
+                  {/* DSR H.E */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      014
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      DSR POR HORAS EXTRAS
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {dsrHE.toFixed(2)}h
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 border-r border-gray-200">
+                      R$ {(dsrHE * (employee.hourlyRate || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400">
+                      -
+                    </td>
+                  </tr>
+
+                  {/* BASE INSS MENSAL */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      015
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      BASE INSS MENSAL
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Mensal'}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 border-r border-gray-200">
+                      R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400">
+                      -
+                    </td>
+                  </tr>
+
+                  {/* INSS MENSAL */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      016
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      INSS MENSAL
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela Progressiva'}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-red-700">
+                      R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -530,6 +638,90 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                     </div>
                     <div className="text-sm text-purple-100">
                       Com Acréscimos
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Cards de Horas Extras */}
+          <div className="mt-6">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 text-center">
+              Horas Extras
+            </h4>
+            <div className="rounded-2xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Card H.E 50% */}
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                        <Clock className="w-5 h-5 text-orange-600" />
+                      </div>
+                      <div>
+                        <h5 className="text-lg font-semibold text-gray-900">H.E 50%</h5>
+                        <p className="text-sm text-gray-600">Horas extras com adicional de 50%</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Total de Horas:</span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {(employee.he50Hours || 0).toFixed(2)}h
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Valor por Hora:</span>
+                      <span className="text-sm font-medium text-gray-900">
+                        R$ {(employee.hourlyRate || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="border-t pt-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-base font-semibold text-gray-900">Total:</span>
+                        <span className="text-lg font-bold text-orange-600">
+                          R$ {(employee.he50Value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card H.E 100% */}
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                        <Moon className="w-5 h-5 text-purple-600" />
+                      </div>
+                      <div>
+                        <h5 className="text-lg font-semibold text-gray-900">H.E 100%</h5>
+                        <p className="text-sm text-gray-600">Horas extras com adicional de 100%</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Total de Horas:</span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {(employee.he100Hours || 0).toFixed(2)}h
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Valor por Hora:</span>
+                      <span className="text-sm font-medium text-gray-900">
+                        R$ {(employee.hourlyRate || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="border-t pt-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-base font-semibold text-gray-900">Total:</span>
+                        <span className="text-lg font-bold text-purple-600">
+                          R$ {(employee.he100Value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
