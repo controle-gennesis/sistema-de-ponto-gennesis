@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Clock, Users, TrendingUp, Calendar, Filter, Download, Search, Building2, User, CreditCard, ChevronDown, ChevronUp } from 'lucide-react';
+import { Clock, Calendar, Filter, Download, Search, Building2, User, CreditCard, ChevronDown, ChevronUp, Settings, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
@@ -72,6 +72,7 @@ export default function BankHoursPage() {
 
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true); // Minimizados por padrão
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -288,35 +289,48 @@ export default function BankHoursPage() {
 
         {/* Filtros */}
         <Card>
-          <CardHeader>
+          <CardHeader className="border-b-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-600" />
+                <Filter className="w-5 h-5 text-gray-900" />
                 <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
               </div>
-              <div className="flex items-center space-x-8">
+              <div className="flex items-center space-x-4">
+                {!isFiltersMinimized && (
+                  <>
+                    <button
+                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                      className="flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
+                    >
+                      <Settings className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={clearFilters}
+                      className="flex items-center justify-center w-8 h-8 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Limpar todos os filtros"
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                    </button>
+                  </>
+                )}
                 <button
-                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                  className="flex items-center space-x-1 text-sm text-gray-700 hover:text-gray-900 transition-colors"
+                  onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
+                  className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
                 >
-                  <span>Filtros Avançados</span>
-                  {showAdvancedFilters ? (
-                    <ChevronUp className="w-4 h-4" />
+                  {isFiltersMinimized ? (
+                    <ChevronDown className="w-5 h-5" />
                   ) : (
-                    <ChevronDown className="w-4 h-4" />
+                    <ChevronUp className="w-5 h-5" />
                   )}
-                </button>
-                <button
-                  onClick={clearFilters}
-                  className="flex items-center space-x-1 text-sm text-red-600 hover:text-red-800 transition-colors"
-                >
-                  <span>Limpar</span>
                 </button>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-4 sm:p-6">
-            <div className="space-y-4">
+          {!isFiltersMinimized && (
+            <CardContent className="p-4 sm:p-6">
+              <div className="space-y-4">
               {/* Campo de Busca Principal */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -497,59 +511,11 @@ export default function BankHoursPage() {
                   </div>
                 </div>
               )}
-            </div>
-          </CardContent>
+              </div>
+            </CardContent>
+          )}
         </Card>
 
-        {/* Resumo */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          <Card className="w-full">
-            <CardContent className="p-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0">
-                  <Users className="w-6 h-6 text-blue-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Funcionários</p>
-                  <p className="text-2xl font-bold text-gray-900">{filteredData.length}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="w-full">
-            <CardContent className="p-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-green-100 rounded-lg flex-shrink-0">
-                  <TrendingUp className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Banco Positivo</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {filteredData.filter((emp: BankHoursData) => emp.bankHours > 0).length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="w-full">
-            <CardContent className="p-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-red-100 rounded-lg flex-shrink-0">
-                  <Clock className="w-6 h-6 text-red-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Banco Negativo</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {filteredData.filter((emp: BankHoursData) => emp.bankHours < 0).length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-        </div>
 
         {/* Tabela de Banco de Horas */}
         <Card>
@@ -566,77 +532,156 @@ export default function BankHoursPage() {
               </div>
               <button 
                 onClick={exportToExcel}
-                className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm sm:text-base"
+                className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
               >
                 <Download className="w-4 h-4" />
-                <span className="hidden sm:inline">Exportar XLSX</span>
+                <span className="hidden sm:inline">Exportar</span>
                 <span className="sm:hidden">Exportar</span>
               </button>
             </div>
           </CardHeader>
-          <CardContent>
-            {loadingBankHours ? (
-              <div className="text-center py-8">
-                <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-                <p className="text-gray-600">Carregando dados...</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm">Funcionário</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden sm:table-cell">Setor</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden md:table-cell">Centro de Custo</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden lg:table-cell">Tomador</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden lg:table-cell">Horas Trabalhadas</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden lg:table-cell">Horas Esperadas</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm">Banco de Horas</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm hidden xl:table-cell">Horas Extras</th>
-                      <th className="text-center py-3 px-2 sm:px-4 font-medium text-gray-700 text-xs sm:text-sm">Status</th>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Funcionário
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                      Setor
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">
+                      Centro de Custo
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
+                      Tomador
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
+                      Horas Trabalhadas
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
+                      Horas Esperadas
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Banco de Horas
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">
+                      Horas Extras
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {loadingBankHours ? (
+                    <tr>
+                      <td colSpan={9} className="px-6 py-8 text-center">
+                        <div className="flex items-center justify-center">
+                          <div className="loading-spinner w-6 h-6 mr-2" />
+                          <span className="text-gray-600">Carregando banco de horas...</span>
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {filteredData.map((employee: BankHoursData) => (
-                      <tr key={employee.employeeId} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-2 sm:px-4">
+                  ) : filteredData.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-6 py-8 text-center">
+                        <div className="text-gray-500">
+                          <p>Nenhum funcionário encontrado.</p>
+                          <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredData.map((employee: BankHoursData) => (
+                      <tr key={employee.employeeId} className="hover:transition-colors">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                           <div>
-                            <p className="font-medium text-gray-900 text-sm sm:text-base">{employee.employeeName}</p>
-                            <p className="text-xs sm:text-sm text-gray-500">{employee.employeeCpf}</p>
-                            <div className="text-xs text-gray-400 sm:hidden mt-1">
+                            <div className="text-sm font-medium text-gray-900">
+                              {employee.employeeName}
+                            </div>
+                            <div className="text-xs sm:text-sm text-gray-500">
+                              {employee.employeeCpf}
+                            </div>
+                            <div className="text-xs text-gray-400 sm:hidden">
                               {employee.department && `${employee.department} • ${employee.costCenter || 'N/A'}`}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {employee.employeeId && `ID: ${employee.employeeId}`}
                             </div>
                           </div>
                         </td>
-                        <td className="py-3 px-2 sm:px-4 text-center hidden sm:table-cell">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden sm:table-cell">
                           <div>
-                            <p className="font-medium text-gray-900 text-sm">{employee.department}</p>
-                            <p className="text-xs text-gray-500">{employee.position}</p>
+                            <div className="text-sm font-medium text-gray-900">
+                              {employee.department || 'N/A'}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {employee.position || 'N/A'}
+                            </div>
                           </div>
                         </td>
-                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden md:table-cell">{employee.costCenter || '-'}</td>
-                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden lg:table-cell">{employee.client || '-'}</td>
-                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden lg:table-cell">{formatTime(employee.totalWorkedHours)}</td>
-                        <td className="py-3 px-2 sm:px-4 text-center text-gray-700 text-sm hidden lg:table-cell">{formatTime(employee.totalExpectedHours)}</td>
-                        <td className="py-3 px-2 sm:px-4 text-center">
-                          <span className={`font-medium text-sm ${employee.bankHours >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden md:table-cell">
+                          <span className="text-sm text-gray-900">
+                            {employee.costCenter || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
+                          <span className="text-sm text-gray-900">
+                            {employee.client || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
+                          <span className="text-sm text-gray-900">
+                            {formatTime(employee.totalWorkedHours)}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
+                          <span className="text-sm text-gray-900">
+                            {formatTime(employee.totalExpectedHours)}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                          <span className={`text-sm font-bold ${employee.bankHours >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {formatTime(employee.bankHours)}
                           </span>
                         </td>
-                        <td className="py-3 px-2 sm:px-4 text-center hidden xl:table-cell">
-                          <span className="font-medium text-orange-600 text-sm">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden xl:table-cell">
+                          <span className="text-sm font-bold text-orange-600">
                             {formatTime(employee.overtimeMultipliedHours)}
                           </span>
                         </td>
-                        <td className="py-3 px-2 sm:px-4 text-center">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
                           <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(employee.bankHours)}`}>
                             {getStatusText(employee.bankHours)}
                           </span>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Estatísticas */}
+            {filteredData.length > 0 && (
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 rounded-b-lg">
+                <div className="flex items-center justify-between text-sm text-gray-600">
+                  <div className="flex items-center space-x-6">
+                    <span>
+                      <strong>Período:</strong> {new Date(filters.startDate + 'T00:00:00').toLocaleDateString('pt-BR')} até {new Date(filters.endDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    </span>
+                    <span>
+                      <strong>Total de funcionários:</strong> {filteredData.length}
+                    </span>
+                  </div>
+                  {filters.department && (
+                    <span>
+                      <strong>Setor:</strong> {filters.department}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </CardContent>

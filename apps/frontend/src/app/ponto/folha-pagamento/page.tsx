@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText, ChevronDown, ChevronUp, X, Settings, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PayrollDetailModal } from '@/components/payroll/PayrollDetailModal';
@@ -47,6 +47,7 @@ export default function FolhaPagamentoPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<PayrollEmployee | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true); // Minimizados por padrão
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -278,35 +279,48 @@ export default function FolhaPagamentoPage() {
 
         {/* Filtros */}
         <Card>
-          <CardHeader>
+          <CardHeader className="border-b-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-600" />
+                <Filter className="w-5 h-5 text-gray-900" />
                 <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
               </div>
-              <div className="flex items-center space-x-8">
+              <div className="flex items-center space-x-4">
+                {!isFiltersMinimized && (
+                  <>
+                    <button
+                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                      className="flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
+                    >
+                      <Settings className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={clearFilters}
+                      className="flex items-center justify-center w-8 h-8 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Limpar todos os filtros"
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                    </button>
+                  </>
+                )}
                 <button
-                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                  className="flex items-center space-x-1 text-sm text-gray-700 hover:text-gray-900 transition-colors"
+                  onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
+                  className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
                 >
-                  <span>Filtros Avançados</span>
-                  {showAdvancedFilters ? (
-                    <ChevronUp className="w-4 h-4" />
+                  {isFiltersMinimized ? (
+                    <ChevronDown className="w-5 h-5" />
                   ) : (
-                    <ChevronDown className="w-4 h-4" />
+                    <ChevronUp className="w-5 h-5" />
                   )}
-                </button>
-                <button
-                  onClick={clearFilters}
-                  className="flex items-center space-x-1 text-sm text-red-600 hover:text-red-800 transition-colors"
-                >
-                  <span>Limpar</span>
                 </button>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-4 sm:p-6">
-            <div className="space-y-4">
+          {!isFiltersMinimized && (
+            <CardContent className="p-4 sm:p-6">
+              <div className="space-y-4">
               {/* Filtro Principal - Busca Geral */}
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700">
@@ -567,8 +581,9 @@ export default function FolhaPagamentoPage() {
                   </div>
                 </div>
               )}
-            </div>
-          </CardContent>
+              </div>
+            </CardContent>
+          )}
         </Card>
 
         {/* Lista de Funcionários */}
@@ -592,7 +607,7 @@ export default function FolhaPagamentoPage() {
                   title="Exportar para Excel"
                 >
                   <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Exportar XLSX</span>
+                  <span className="hidden sm:inline">Exportar</span>
                   <span className="sm:hidden">Exportar</span>
                 </button>
               </div>
@@ -613,7 +628,7 @@ export default function FolhaPagamentoPage() {
                       Empresa
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                      Centro de Custo
+                      Centro de <br/>Custo 
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                       Tomador
