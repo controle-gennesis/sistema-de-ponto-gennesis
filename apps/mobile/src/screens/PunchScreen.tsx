@@ -638,10 +638,6 @@ const getStyles = (colors: any) => StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     gap: 8,
-    shadowColor: '#ce3736',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
     elevation: 3,
   },
   cameraButtonText: {
@@ -660,10 +656,6 @@ const getStyles = (colors: any) => StyleSheet.create({
     gap: 8,
     borderWidth: 2,
     borderColor: '#ce3736',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
     elevation: 2,
   },
   viewPhotoButtonText: {

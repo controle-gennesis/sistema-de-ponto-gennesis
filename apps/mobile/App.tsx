@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, ActivityIndicator, Image, Animated } from 'react-native';
+import { View, ActivityIndicator, Image, Animated, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as NavigationBar from 'expo-navigation-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -98,6 +99,19 @@ function AppNavigator() {
   );
 }
 
+function StatusBarComponent() {
+  const { isDark, colors } = useTheme();
+
+  React.useEffect(() => {
+    if (Platform.OS === 'android') {
+      NavigationBar.setBackgroundColorAsync(isDark ? '#374151' : '#ffffff');
+      NavigationBar.setButtonStyleAsync(isDark ? 'light' : 'dark');
+    }
+  }, [isDark]);
+
+  return <StatusBar style={isDark ? 'light' : 'dark'} />;
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -105,7 +119,7 @@ export default function App() {
         <ThemeProvider>
           <AuthProvider>
             <AppNavigator />
-            <StatusBar style="auto" />
+            <StatusBarComponent />
             <Toast />
           </AuthProvider>
         </ThemeProvider>

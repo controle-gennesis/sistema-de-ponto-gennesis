@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { ArrowLeft, LogIn, LogOut, Utensils, RotateCw, Coffee, Clock } from 'lucide-react-native';
+import { ArrowLeft, LogIn, LogOut, Utensils, RotateCw, Coffee, Clock, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildApiUrl } from '../config/api';
@@ -182,13 +182,13 @@ export default function TimeRecordsScreen() {
       {/* Seletor de Mês */}
       <View style={styles.monthSelector}>
         <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.monthButton}>
-          <Text style={styles.monthButtonText}>←</Text>
+          <ChevronLeft size={28} color={colors.primary} strokeWidth={2.5} />
         </TouchableOpacity>
         <Text style={styles.monthText}>
           {monthNames[selectedMonth]} {selectedYear}
         </Text>
         <TouchableOpacity onPress={() => changeMonth(1)} style={styles.monthButton}>
-          <Text style={styles.monthButtonText}>→</Text>
+          <ChevronRight size={28} color={colors.primary} strokeWidth={2.5} />
         </TouchableOpacity>
       </View>
 
@@ -299,11 +299,6 @@ const getStyles = (colors: any) => StyleSheet.create({
   monthButton: {
     padding: 8,
   },
-  monthButtonText: {
-    fontSize: 24,
-    color: colors.primary,
-    fontWeight: 'bold',
-  },
   monthText: {
     fontSize: 18,
     fontWeight: '600',
@@ -347,11 +342,11 @@ const getStyles = (colors: any) => StyleSheet.create({
   dayDate: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text,
   },
   dayWeekday: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.textSecondary,
   },
   recordsGrid: {
     flexDirection: 'row',
