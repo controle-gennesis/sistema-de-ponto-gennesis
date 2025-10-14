@@ -103,27 +103,27 @@ export default function TimeRecordsScreen() {
   };
 
   const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'America/Sao_Paulo',
-    });
+    // Banco salva horário literal de Brasília
+    // Usar getUTCHours/Minutes para ler o valor literal sem conversão
+    const date = new Date(timestamp);
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
   };
 
   const formatDate = (timestamp: string) => {
-    return new Date(timestamp).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      timeZone: 'America/Sao_Paulo',
-    });
+    // Usar UTC para ler valores literais sem conversão
+    const date = new Date(timestamp);
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const year = date.getUTCFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const getWeekday = (timestamp: string) => {
     const date = new Date(timestamp);
-    const dayInBrasilia = new Date(date.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })).getDay();
     const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    return days[dayInBrasilia];
+    return days[date.getUTCDay()];
   };
 
   // Agrupar registros por data

@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Image,
   TextInput,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -52,6 +53,12 @@ export default function PunchScreen() {
   const [locationPermission, setLocationPermission] = useState<boolean | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [address, setAddress] = useState<string>('Obtendo localização...');
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successData, setSuccessData] = useState<{
+    type: string;
+    time: string;
+    date: string;
+  } | null>(null);
   const { user } = useAuth();
   
   const styles = getStyles(colors);
@@ -262,6 +269,16 @@ export default function PunchScreen() {
       formData.append('latitude', location.coords.latitude.toString());
       formData.append('longitude', location.coords.longitude.toString());
       formData.append('observation', observation.trim() || '');
+      // Enviar timestamp como string no formato que o banco vai interpretar como horário de Brasília
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const localTimestamp = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+      formData.append('clientTimestamp', localTimestamp);
       formData.append('photo', {
         uri: photo,
         type: 'image/jpeg',
@@ -287,16 +304,30 @@ export default function PunchScreen() {
       const data = await response.json();
       
       if (data.success) {
-        Toast.show({
-          type: 'success',
-          text1: 'Ponto registrado com sucesso!',
+        // Preparar dados para o modal de sucesso
+        const punchTypeLabels: Record<TimeRecordType, string> = {
+          ENTRY: 'Entrada',
+          LUNCH_START: 'Saída para Almoço',
+          LUNCH_END: 'Retorno do Almoço',
+          EXIT: 'Saída',
+          ABSENCE_JUSTIFIED: 'Ausência Justificada',
+        };
+        
+        const successTime = `${hours}:${minutes}:${seconds}`;
+        const successDate = now.toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
         });
+        
+        setSuccessData({
+          type: punchTypeLabels[selectedType],
+          time: successTime,
+          date: successDate,
+        });
+        setShowSuccessModal(true);
         setPhoto(null);
         setObservation('');
-        // Voltar para a página principal após sucesso
-        setTimeout(() => {
-          navigation.goBack();
-        }, 1500);
       }
     } catch (error: any) {
       Toast.show({
@@ -355,7 +386,7 @@ export default function PunchScreen() {
             {currentTime.toLocaleTimeString('pt-BR', {
               hour: '2-digit',
               minute: '2-digit',
-              second: '2-digit'
+              second: '2-digit',
             })}
           </Text>
           <Text style={styles.currentDate}>
@@ -364,7 +395,7 @@ export default function PunchScreen() {
                 weekday: 'long', 
                 day: 'numeric', 
                 month: 'long',
-                year: 'numeric'
+                year: 'numeric',
               });
               return dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
             })()}
@@ -491,6 +522,60 @@ export default function PunchScreen() {
         )}
       </TouchableOpacity>
     </ScrollView>
+
+    {/* Modal de Sucesso */}
+    <Modal
+      animationType="fade"
+      transparent={true}
+      visible={showSuccessModal}
+      onRequestClose={() => {
+        setShowSuccessModal(false);
+        navigation.goBack();
+      }}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          {/* Ícone de Sucesso */}
+          <View style={styles.successIconContainer}>
+            <Ionicons name="checkmark-circle" size={80} color="#22c55e" />
+          </View>
+
+          {/* Título */}
+          <Text style={styles.modalTitle}>Ponto Registrado!</Text>
+          
+          {/* Informações do Ponto */}
+          {successData && (
+            <View style={styles.modalInfoContainer}>
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Tipo:</Text>
+                <Text style={styles.modalInfoValue}>{successData.type}</Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Horário:</Text>
+                <Text style={styles.modalInfoValue}>{successData.time}</Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Data:</Text>
+                <Text style={styles.modalInfoValue}>{successData.date}</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Botão de Fechar */}
+          <TouchableOpacity
+            style={styles.modalButton}
+            onPress={() => {
+              setShowSuccessModal(false);
+              navigation.goBack();
+            }}
+          >
+            <Text style={styles.modalButtonText}>Fechar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
     </SafeAreaView>
   );
 }
@@ -798,5 +883,73 @@ const getStyles = (colors: any) => StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Estilos do Modal de Sucesso
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderRadius: 24,
+    padding: 32,
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  successIconContainer: {
+    marginBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  modalInfoContainer: {
+    width: '100%',
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    gap: 16,
+  },
+  modalInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalInfoLabel: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  modalInfoValue: {
+    fontSize: 16,
+    color: colors.text,
+    fontWeight: 'bold',
+  },
+  modalButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 48,
+    width: '100%',
+    elevation: 5,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });

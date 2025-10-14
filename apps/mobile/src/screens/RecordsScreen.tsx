@@ -110,12 +110,13 @@ export default function DashboardScreen() {
   };
 
   const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZone: 'America/Sao_Paulo',
-    });
+    // Banco salva horário literal de Brasília
+    // Usar getUTCHours/Minutes/Seconds para ler o valor literal sem conversão de timezone
+    const date = new Date(timestamp);
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
   };
 
   const formatDate = () => {
@@ -124,7 +125,7 @@ export default function DashboardScreen() {
       weekday: 'long', 
       day: 'numeric', 
       month: 'long', 
-      year: 'numeric' 
+      year: 'numeric',
     });
     // Capitalizar apenas a primeira letra
     return formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);

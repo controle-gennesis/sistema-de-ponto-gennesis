@@ -17,7 +17,7 @@ export class TimeRecordController {
   async punchInOut(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { type, latitude, longitude, observation } = req.body;
+      const { type, latitude, longitude, observation, clientTimestamp } = req.body;
       const photo = req.file; // Arquivo enviado via multer
 
 
@@ -145,17 +145,29 @@ export class TimeRecordController {
       }
 
 
-      // Criar timestamp no horário de Brasília
-      // O timestamp deve ser armazenado no horário local de Brasília, não UTC
-      const brasiliaTime = moment().tz('America/Sao_Paulo');
-      const timestamp = new Date(
-        brasiliaTime.year(),
-        brasiliaTime.month(),
-        brasiliaTime.date(),
-        brasiliaTime.hour(),
-        brasiliaTime.minute(),
-        brasiliaTime.second()
-      );
+      // Cliente envia timestamp no horário de Brasília (ex: "2025-10-14T16:07:00")
+      // Vamos forçar o TypeORM/Prisma a salvar EXATAMENTE esse valor sem conversão
+      let timestamp: Date;
+      if (clientTimestamp) {
+        // Criar objeto Date mas tratando como se fosse UTC (sem o 'Z')
+        // Parse manual para evitar conversão automática de timezone
+        const parts = clientTimestamp.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+        if (parts) {
+          // Usar Date.UTC para criar timestamp em UTC com os valores de Brasília
+          const year = parseInt(parts[1]);
+          const month = parseInt(parts[2]) - 1; // Month is 0-indexed
+          const day = parseInt(parts[3]);
+          const hours = parseInt(parts[4]);
+          const minutes = parseInt(parts[5]);
+          const seconds = parseInt(parts[6]);
+          timestamp = new Date(Date.UTC(year, month, day, hours, minutes, seconds));
+        } else {
+          timestamp = new Date(clientTimestamp + 'Z');
+        }
+      } else {
+        const brTime = moment().tz('America/Sao_Paulo').format('YYYY-MM-DDTHH:mm:ss');
+        timestamp = new Date(brTime + 'Z');
+      }
       
       // Calcular VA e VT baseado no tipo de registro
       // VA e VT são adicionados apenas em registros de ENTRY (primeira batida do dia)
@@ -287,10 +299,9 @@ export class TimeRecordController {
   async getTodayRecords(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Usar timezone de Brasília
+      const today = moment().tz('America/Sao_Paulo').startOf('day').toDate();
+      const tomorrow = moment().tz('America/Sao_Paulo').add(1, 'day').startOf('day').toDate();
 
       const records = await prisma.timeRecord.findMany({
         where: {
