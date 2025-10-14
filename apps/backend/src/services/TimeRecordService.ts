@@ -124,12 +124,12 @@ export class TimeRecordService {
     // Calcular horas efetivas de trabalho
     const effectiveHours = totalHours - lunchHours;
 
-    // Buscar configurações da empresa
-    const regularWorkHours = 8; // Mantemos aqui, pois banco de horas usará a regra externa de 9h/8h
+    // Buscar horas esperadas baseado no dia da semana
+    const expectedWorkHours = this.getExpectedWorkHoursByRule(date);
 
-    if (effectiveHours > regularWorkHours) {
-      regularHours = regularWorkHours;
-      overtimeHours = effectiveHours - regularWorkHours;
+    if (effectiveHours > expectedWorkHours) {
+      regularHours = expectedWorkHours;
+      overtimeHours = effectiveHours - expectedWorkHours;
     } else {
       regularHours = effectiveHours;
       overtimeHours = 0;

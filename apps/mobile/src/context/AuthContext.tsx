@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { User } from '@/types';
+import { User } from '../types';
+import { buildApiUrl } from '../config/api';
 
 interface AuthContextType {
   user: User | null;
@@ -16,6 +18,30 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+// Storage compatível com Web e Nativo
+const storage = {
+  getItem: async (key: string) => {
+    if (Platform.OS === 'web') {
+      return Promise.resolve(localStorage.getItem(key));
+    }
+    return AsyncStorage.getItem(key);
+  },
+  setItem: async (key: string, value: string) => {
+    if (Platform.OS === 'web') {
+      localStorage.setItem(key, value);
+      return Promise.resolve();
+    }
+    return AsyncStorage.setItem(key, value);
+  },
+  removeItem: async (key: string) => {
+    if (Platform.OS === 'web') {
+      localStorage.removeItem(key);
+      return Promise.resolve();
+    }
+    return AsyncStorage.removeItem(key);
+  }
+};
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,8 +52,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const loadStoredAuth = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      const userData = await AsyncStorage.getItem('user');
+      const token = await storage.getItem('token');
+      const userData = await storage.getItem('user');
       
       if (token && userData) {
         setUser(JSON.parse(userData));
@@ -41,7 +67,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch('http://localhost:5000/api/auth/login', {
+      const response = await fetch(buildApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -59,8 +85,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (data.success) {
         const { user: userData, token } = data.data;
         
-        await AsyncStorage.setItem('token', token);
-        await AsyncStorage.setItem('user', JSON.stringify(userData));
+        await storage.setItem('token', token);
+        await storage.setItem('user', JSON.stringify(userData));
         
         setUser(userData);
       }
@@ -71,10 +97,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await storage.getItem('token');
       
       if (token) {
-        await fetch('http://localhost:5000/api/auth/logout', {
+        await fetch(buildApiUrl('/api/auth/logout'), {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -84,8 +110,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
     } finally {
-      await AsyncStorage.removeItem('token');
-      await AsyncStorage.removeItem('user');
+      await storage.removeItem('token');
+      await storage.removeItem('user');
       setUser(null);
     }
   };

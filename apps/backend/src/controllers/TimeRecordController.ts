@@ -6,7 +6,7 @@ import { TimeRecordService } from '../services/TimeRecordService';
 import { LocationService } from '../services/LocationService';
 import { PhotoService } from '../services/PhotoService';
 import { uploadPhoto, handleUploadError } from '../middleware/upload';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 const prisma = new PrismaClient();
 const timeRecordService = new TimeRecordService();
@@ -86,10 +86,9 @@ export class TimeRecordController {
       }
 
       // Verificar se já existe registro no mesmo dia para o mesmo tipo
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Usar timezone de Brasília
+      const today = moment().tz('America/Sao_Paulo').startOf('day').toDate();
+      const tomorrow = moment().tz('America/Sao_Paulo').add(1, 'day').startOf('day').toDate();
 
       const existingRecord = await prisma.timeRecord.findFirst({
         where: {
@@ -146,9 +145,17 @@ export class TimeRecordController {
       }
 
 
-      // Criar registro de ponto com timestamp correto (horário local do Brasil)
-      const now = new Date();
-      const brazilTime = new Date(now.getTime() - (3 * 60 * 60 * 1000)); // Subtrair 3 horas para converter UTC para horário de Brasília
+      // Criar timestamp no horário de Brasília
+      // O timestamp deve ser armazenado no horário local de Brasília, não UTC
+      const brasiliaTime = moment().tz('America/Sao_Paulo');
+      const timestamp = new Date(
+        brasiliaTime.year(),
+        brasiliaTime.month(),
+        brasiliaTime.date(),
+        brasiliaTime.hour(),
+        brasiliaTime.minute(),
+        brasiliaTime.second()
+      );
       
       // Calcular VA e VT baseado no tipo de registro
       // VA e VT são adicionados apenas em registros de ENTRY (primeira batida do dia)
@@ -180,7 +187,7 @@ export class TimeRecordController {
           userId,
           employeeId: employee.id,
           type,
-          timestamp: brazilTime, // Usar horário local do Brasil
+          timestamp: timestamp, // Usar timestamp correto
           latitude: latNum !== null && !Number.isNaN(latNum) ? latNum : null,
           longitude: lonNum !== null && !Number.isNaN(lonNum) ? lonNum : null,
           photoUrl: photoUrl || null,
