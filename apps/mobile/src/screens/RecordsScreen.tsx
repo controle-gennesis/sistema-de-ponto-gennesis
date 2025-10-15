@@ -17,6 +17,7 @@ import { useTheme } from '../context/ThemeContext';
 import { Clock, Eye, LogIn, Utensils, RotateCw, LogOut, Menu, Plus, Moon, Sun } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildApiUrl } from '../config/api';
+import MenuComponent from '../components/Menu';
 
 type RootStackParamList = {
   Main: undefined;
@@ -39,6 +40,7 @@ export default function DashboardScreen() {
   const [todaySummary, setTodaySummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   
   const styles = getStyles(colors);
 
@@ -212,7 +214,7 @@ export default function DashboardScreen() {
       <View style={styles.fixedTopBar}>
         <TouchableOpacity 
           style={styles.menuButton}
-          onPress={() => {}}
+          onPress={() => setShowMenu(true)}
         >
           <Menu size={28} color={colors.headerText} strokeWidth={2} />
         </TouchableOpacity>
@@ -354,6 +356,12 @@ export default function DashboardScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Menu Component */}
+      <MenuComponent
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+      />
     </View>
   );
 }

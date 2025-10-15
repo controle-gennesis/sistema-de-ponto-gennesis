@@ -238,21 +238,7 @@ export default function PontoPage() {
       <div className="text-center mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Controle de Ponto</h1>
         <p className="mt-1 text-gray-600">Gerencie seus registros de ponto e banco de horas</p>
-        
-        {/* Botões de ação */}
-        <div className="mt-4 flex justify-center space-x-3">
-          {/* Botão de registrar ponto - só aparece quando há pontos para bater */}
-          {!areAllPointsCompleted() && (
-          <button
-            onClick={() => setIsMobilePunchModalOpen(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{getNextPunchTypeLabel()}</span>
-          </button>
-          )}
-          </div>
-          </div>
+      </div>
 
       {/* Cards lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -48,11 +48,10 @@ export class AuthController {
       });
 
       // Gerar token
-      const signOptions: SignOptions = { expiresIn: '24h' };
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role },
         process.env.JWT_SECRET as string,
-        signOptions
+        { expiresIn: '7d' }
       );
 
       return res.status(201).json({
@@ -91,11 +90,10 @@ export class AuthController {
       }
 
       // Gerar token
-      const signOptions: SignOptions = { expiresIn: '24h' };
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role },
         process.env.JWT_SECRET as string,
-        signOptions
+        { expiresIn: '7d' }
       );
 
       // Remover senha da resposta
@@ -256,11 +254,10 @@ export class AuthController {
       }
 
       // Gerar novo token
-      const signOptions: SignOptions = { expiresIn: '24h' };
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role },
         process.env.JWT_SECRET as string,
-        signOptions
+        { expiresIn: '7d' }
       );
 
       return res.json({
