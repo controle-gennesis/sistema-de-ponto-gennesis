@@ -54,6 +54,8 @@ export default function PunchScreen() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [address, setAddress] = useState<string>('Obtendo localização...');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showWarningModal, setShowWarningModal] = useState(false);
   const [successData, setSuccessData] = useState<{
     type: string;
     time: string;
@@ -235,20 +237,7 @@ export default function PunchScreen() {
   };
 
   const handleConfirm = () => {
-    Alert.alert(
-      'Confirmar Registro',
-      `Deseja registrar o ponto de ${PUNCH_TYPES.find(p => p.type === selectedType)?.label}?`,
-      [
-        {
-          text: 'Cancelar',
-          style: 'cancel'
-        },
-        {
-          text: 'Confirmar',
-          onPress: punchInOut
-        }
-      ]
-    );
+    punchInOut();
   };
 
   const punchInOut = async () => {
@@ -370,7 +359,7 @@ export default function PunchScreen() {
     <SafeAreaView style={styles.safeArea}>
       {/* Header com botão voltar */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => setShowWarningModal(true)}>
           <ArrowLeft size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerTextContainer}>
@@ -494,7 +483,7 @@ export default function PunchScreen() {
             {!location && !photo && 'Preparando registro...'}
             {location && !photo && 'Tire sua foto'}
             {!location && photo && 'Obtendo localização...'}
-            {location && photo && 'Tudo pronto! Confirme abaixo'}
+            {location && photo && 'Tudo pronto, confirme abaixo!'}
           </Text>
       </View>
 
@@ -504,7 +493,7 @@ export default function PunchScreen() {
             styles.confirmButton,
             (loading || !photo || !location || allPointsCompleted) && styles.confirmButtonDisabled
           ]}
-          onPress={handleConfirm}
+          onPress={() => setShowConfirmModal(true)}
           disabled={loading || !photo || !location || allPointsCompleted}
           activeOpacity={0.8}
       >
@@ -543,25 +532,25 @@ export default function PunchScreen() {
           {/* Título */}
           <Text style={styles.modalTitle}>Ponto Registrado!</Text>
           
-          {/* Informações do Ponto */}
-          {successData && (
-            <View style={styles.modalInfoContainer}>
-              <View style={styles.modalInfoRow}>
-                <Text style={styles.modalInfoLabel}>Tipo:</Text>
-                <Text style={styles.modalInfoValue}>{successData.type}</Text>
-              </View>
-              
-              <View style={styles.modalInfoRow}>
-                <Text style={styles.modalInfoLabel}>Horário:</Text>
-                <Text style={styles.modalInfoValue}>{successData.time}</Text>
-              </View>
-              
-              <View style={styles.modalInfoRow}>
-                <Text style={styles.modalInfoLabel}>Data:</Text>
-                <Text style={styles.modalInfoValue}>{successData.date}</Text>
-              </View>
-            </View>
-          )}
+           {/* Informações do Ponto */}
+           {successData && (
+             <View style={styles.modalInfoContainer}>
+               <View style={styles.modalInfoRow}>
+                 <Text style={styles.modalInfoLabel}>Tipo:</Text>
+                 <Text style={styles.modalInfoValue}>{successData.type}</Text>
+               </View>
+               
+               <View style={styles.modalInfoRow}>
+                 <Text style={styles.modalInfoLabel}>Horário:</Text>
+                 <Text style={styles.modalInfoValue}>{successData.time}</Text>
+               </View>
+               
+               <View style={styles.modalInfoRow}>
+                 <Text style={styles.modalInfoLabel}>Data:</Text>
+                 <Text style={styles.modalInfoValue}>{successData.date}</Text>
+               </View>
+             </View>
+           )}
 
           {/* Botão de Fechar */}
           <TouchableOpacity
@@ -576,6 +565,88 @@ export default function PunchScreen() {
         </View>
       </View>
     </Modal>
+
+    {/* Modal de Confirmação */}
+    <Modal
+      visible={showConfirmModal}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={() => setShowConfirmModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          {/* Título */}
+          <Text style={styles.modalTitle}>Confirmar Registro</Text>
+          
+          {/* Mensagem */}
+          <Text style={styles.modalMessage}>
+            Tem certeza que deseja registrar o ponto de {PUNCH_TYPES.find(p => p.type === selectedType)?.label.toLowerCase()}?
+          </Text>
+
+          {/* Botões */}
+          <View style={styles.modalButtonsContainer}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonSecondary]}
+              onPress={() => setShowConfirmModal(false)}
+            >
+              <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonPrimary]}
+              onPress={() => {
+                setShowConfirmModal(false);
+                handleConfirm();
+              }}
+            >
+              <Text style={styles.modalButtonPrimaryText}>Confirmar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Modal de Aviso - Voltar */}
+    <Modal
+      visible={showWarningModal}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={() => setShowWarningModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          {/* Título */}
+          <Text style={styles.modalTitle}>Atenção!</Text>
+          
+          {/* Mensagem */}
+          <Text style={styles.modalMessage}>
+            Você tem certeza que deseja sair? Seus dados não salvos serão perdidos.
+          </Text>
+
+          {/* Botões */}
+          <View style={styles.modalButtonsContainer}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonSecondary]}
+              onPress={() => setShowWarningModal(false)}
+            >
+              <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonDanger]}
+              onPress={() => {
+                setShowWarningModal(false);
+                navigation.goBack();
+              }}
+            >
+              <Text style={styles.modalButtonDangerText}>Sair</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+
+    <Toast />
     </SafeAreaView>
   );
 }
@@ -914,20 +985,52 @@ const getStyles = (colors: any) => StyleSheet.create({
     color: colors.text,
     marginBottom: 24,
     textAlign: 'center',
+
   },
-  modalInfoContainer: {
-    width: '100%',
-    backgroundColor: colors.background,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    gap: 16,
-  },
-  modalInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
+   modalMainContainer: {
+     width: '100%',
+     backgroundColor: colors.card,
+     borderRadius: 16,
+     padding: 20,
+     marginBottom: 24,
+     borderWidth: 1,
+     borderColor: '#e5e7eb',
+     gap: 16,
+   },
+   modalInfoContainer: {
+     width: '100%',
+     backgroundColor: colors.background,
+     borderRadius: 16,
+     padding: 20,
+     marginBottom: 24,
+     gap: 16,
+   },
+   modalInfoRow: {
+     flexDirection: 'row',
+     justifyContent: 'space-between',
+     alignItems: 'center',
+   },
+   modalInfoColumn: {
+     flexDirection: 'column',
+     alignItems: 'flex-start',
+     marginBottom: 12,
+   },
+   modalInfoRowWithIcon: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     gap: 12,
+   },
+   modalIconContainer: {
+     width: 40,
+     height: 40,
+     borderRadius: 20,
+     backgroundColor: '#fee2e2',
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+   modalInfoTextContainer: {
+     flex: 1,
+   },
   modalInfoLabel: {
     fontSize: 16,
     color: colors.textSecondary,
@@ -951,5 +1054,61 @@ const getStyles = (colors: any) => StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  modalButtonsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modalButtonSecondary: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonPrimary: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonDanger: {
+    flex: 1,
+    backgroundColor: '#ce3736',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonSecondaryText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalButtonPrimaryText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalButtonDangerText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
