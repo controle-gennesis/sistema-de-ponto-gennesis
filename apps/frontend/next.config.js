@@ -19,8 +19,8 @@ const nextConfig = {
   // Configuração para evitar problemas de SSR
   swcMinify: true,
   // Desabilitar prerendering das páginas de erro
-  output: 'export',
-  trailingSlash: true,
+  // output: 'export', // Comentado para Railway usar servidor Next.js
+  // trailingSlash: true, // Comentado para Railway
   // Configuração para evitar problemas de Context
   reactStrictMode: false,
   // Desabilitar todas as otimizações de SSR
