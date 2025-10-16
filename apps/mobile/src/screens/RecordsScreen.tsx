@@ -244,7 +244,7 @@ export default function DashboardScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.welcomeContainer}>
-            <Text style={styles.welcomeText}>Bem-vindo,</Text>
+            <Text style={styles.welcomeText}>Olá,</Text>
             <Text style={styles.userName}>{getFirstName()}!</Text>
           </View>
           
