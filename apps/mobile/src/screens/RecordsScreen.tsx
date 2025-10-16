@@ -138,11 +138,6 @@ export default function DashboardScreen() {
     return user.name.split(' ')[0];
   };
 
-  const getSecondName = () => {
-    if (!user?.name) return '';
-    return user.name.split(' ')[1];
-  };
-
   // Estrutura dos pontos do dia
   const allPunchTypes = [
     { type: 'ENTRY', label: 'Entrada', icon: LogIn },
@@ -250,7 +245,7 @@ export default function DashboardScreen() {
         <View style={styles.header}>
           <View style={styles.welcomeContainer}>
             <Text style={styles.welcomeText}>Bem-vindo,</Text>
-            <Text style={styles.userName}>{getFirstName()} {getSecondName()}!</Text>
+            <Text style={styles.userName}>{getFirstName()}!</Text>
           </View>
           
           {/* Botão de Registrar Ponto */}
@@ -583,7 +578,7 @@ const getStyles = (colors: any) => StyleSheet.create({
     borderRadius: 25,
     padding: 14,
     alignItems: 'center',
-    elevation: 2,
+    elevation: 0,
   },
   recordIcon: {
     marginBottom: 8,
@@ -614,7 +609,7 @@ const getStyles = (colors: any) => StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 12,
     gap: 8,
-    elevation: 3,
+    elevation: 0,
     marginTop: 20,
   },
   seeMoreText: {

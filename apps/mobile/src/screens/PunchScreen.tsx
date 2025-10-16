@@ -927,7 +927,7 @@ const getStyles = (colors: any) => StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 5,
+    elevation: 0,
   },
   confirmButtonDisabled: {
     backgroundColor: '#d1d5db',

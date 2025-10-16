@@ -221,14 +221,7 @@ const getStyles = (colors: any) => StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    elevation: 0,
   },
   infoItem: {
     flexDirection: 'row',
@@ -263,7 +256,7 @@ const getStyles = (colors: any) => StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     gap: 8,
-    elevation: 3,
+    elevation: 0,
   },
   logoutText: {
     color: '#fff',

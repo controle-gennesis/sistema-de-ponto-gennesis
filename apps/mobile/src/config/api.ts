@@ -7,9 +7,9 @@ const getApiBaseUrl = () => {
     return 'http://localhost:5000';
   }
 
-  // For Android emulator
+  // For Android emulator - usar Railway em produção
   if (__DEV__ && Platform.OS === 'android') {
-    return 'http://10.0.2.2:5000';
+    return 'https://sistema-pontobackend-production.up.railway.app';
   }
 
   // For iOS simulator or physical device in development
@@ -27,7 +27,7 @@ const getApiBaseUrl = () => {
   }
 
   // Fallback for production if not explicitly set
-  return 'https://your-production-backend.com'; // Replace with your actual production URL
+  return 'https://sistema-pontobackend-production.up.railway.app'; // Railway URL
 };
 
 export const API_CONFIG = {

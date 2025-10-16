@@ -104,7 +104,7 @@ function StatusBarComponent() {
 
   React.useEffect(() => {
     if (Platform.OS === 'android') {
-      NavigationBar.setBackgroundColorAsync(isDark ? '#374151' : '#ffffff');
+      // Removido setBackgroundColorAsync devido ao edge-to-edge
       NavigationBar.setButtonStyleAsync(isDark ? 'light' : 'dark');
     }
   }, [isDark]);

@@ -67,20 +67,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string) => {
     try {
+      console.log('🔐 Tentando fazer login...');
+      console.log('📧 Email:', email);
+      console.log('🌐 URL:', buildApiUrl('/api/auth/login'));
+      
+      // Adicionar timeout de 10 segundos
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
       const response = await fetch(buildApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email, password }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
+      
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response ok:', response.ok);
 
       if (!response.ok) {
         const error = await response.json();
+        console.error('❌ Erro na resposta:', error);
         throw new Error(error.error || 'Erro ao fazer login');
       }
 
       const data = await response.json();
+      console.log('✅ Dados recebidos:', data);
       
       if (data.success) {
         const { user: userData, token } = data.data;
@@ -89,8 +105,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         await storage.setItem('user', JSON.stringify(userData));
         
         setUser(userData);
+        console.log('🎉 Login realizado com sucesso!');
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error('💥 Erro no login:', error);
+      if (error.name === 'AbortError') {
+        throw new Error('Timeout: Servidor não respondeu em 10 segundos');
+      }
       throw error;
     }
   };

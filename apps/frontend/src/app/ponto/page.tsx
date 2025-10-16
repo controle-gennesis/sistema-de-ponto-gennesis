@@ -6,9 +6,8 @@ export const dynamic = 'force-dynamic';
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { BarChart3, Clock, Calendar, X, Plus, FileText, FileCheck, Send, Plane } from 'lucide-react';
+import { BarChart3, Clock, Calendar, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { PunchCard } from '@/components/ponto/PunchCard';
 import { TimeRecordsList } from '@/components/ponto/TimeRecordsList';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
@@ -122,55 +121,10 @@ export default function PontoPage() {
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Estados para responsividade
-  const [isMobilePunchModalOpen, setIsMobilePunchModalOpen] = useState(false);
+  // Modal de registro removido - apenas mobile
   const [isMobile, setIsMobile] = useState(false);
 
-  // Função para determinar o próximo tipo de ponto para o botão móvel
-  const getNextPunchTypeLabel = () => {
-    if (!todayRecords?.data?.records || todayRecords.data.records.length === 0) {
-      return 'Registrar Entrada';
-    }
-
-    const records = todayRecords.data.records;
-    
-    // Verificar se todos os pontos foram batidos
-    const hasEntry = records.some((r: any) => r.type === 'ENTRY');
-    const hasLunchStart = records.some((r: any) => r.type === 'LUNCH_START');
-    const hasLunchEnd = records.some((r: any) => r.type === 'LUNCH_END');
-    const hasExit = records.some((r: any) => r.type === 'EXIT');
-    
-    if (hasEntry && hasLunchStart && hasLunchEnd && hasExit) {
-      return 'Ponto Completo Hoje';
-    }
-
-    const lastRecord = records[records.length - 1];
-    
-    switch (lastRecord.type) {
-      case 'ENTRY':
-        return 'Registrar Almoço';
-      case 'LUNCH_START':
-        return 'Registrar Retorno';
-      case 'LUNCH_END':
-        return 'Registrar Saída';
-      case 'EXIT':
-        return 'Registrar Entrada';
-      default:
-        return 'Registrar Ponto';
-    }
-  };
-
-  // Função para verificar se todos os pontos foram batidos
-  const areAllPointsCompleted = () => {
-    if (!todayRecords?.data?.records) return false;
-    
-    const records = todayRecords.data.records;
-    const hasEntry = records.some((r: any) => r.type === 'ENTRY');
-    const hasLunchStart = records.some((r: any) => r.type === 'LUNCH_START');
-    const hasLunchEnd = records.some((r: any) => r.type === 'LUNCH_END');
-    const hasExit = records.some((r: any) => r.type === 'EXIT');
-
-    return hasEntry && hasLunchStart && hasLunchEnd && hasExit;
-  };
+  // Funções de registro removidas - apenas mobile
 
   const { data: bankHoursDetailed } = useQuery({
     queryKey: ['bank-hours-detailed', selectedBankYear, selectedBankMonth, isBankDetailsOpen],
@@ -243,19 +197,7 @@ export default function PontoPage() {
         <p className="mt-1 text-gray-600">Gerencie seus registros de ponto e banco de horas</p>
       </div>  
            
-      {/* Botões de ação */}
-      <div className="mt-4 flex justify-center space-x-3">
-        {/* Botão de registrar ponto - só aparece quando há pontos para bater */}
-        {!areAllPointsCompleted() && (
-        <button
-          onClick={() => setIsMobilePunchModalOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{getNextPunchTypeLabel()}</span>
-        </button>
-        )}
-      </div>
+      {/* Botões de ação removidos - registro apenas no mobile */}
 
       {/* Cards lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -321,70 +263,7 @@ export default function PontoPage() {
             </div>
       </div>
 
-      {/* Botões de navegação */}
-      <div className="mt-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Botão Atestados/Ausências */}
-          <button
-            onClick={() => router.push('/ponto/atestados')}
-            className="bg-white hover:bg-gray-50 border border-gray-200 rounded-lg p-6 shadow-sm"
-          >
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-colors">
-                <FileCheck className="w-6 h-6 text-blue-600" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">
-                  Atestados
-                </h3>
-                <p className="text-sm text-gray-600">
-                  Solicitar ausências e atestados médicos
-                </p>
-              </div>
-            </div>
-          </button>
-
-          {/* Botão Solicitações */}
-          <button
-            onClick={() => router.push('/ponto/solicitacoes')}
-            className="bg-white hover:bg-gray-50 border border-gray-200 rounded-lg p-6 shadow-sm"
-          >
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center group-hover:bg-green-200 transition-colors">
-                <Send className="w-6 h-6 text-green-600" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-lg font-semibold text-gray-900 group-hover:text-green-700 transition-colors">
-                  Solicitações
-                </h3>
-                <p className="text-sm text-gray-600">
-                  Correções de ponto e outras solicitações
-                </p>
-              </div>
-            </div>
-          </button>
-
-          {/* Botão Férias */}
-          <button
-            onClick={() => router.push('/ponto/ferias')}
-            className="bg-white hover:bg-gray-50 border border-gray-200 rounded-lg p-6 shadow-sm"
-          >
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-colors">
-                <Plane className="w-6 h-6 text-purple-600" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-lg font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">
-                  Férias
-                </h3>
-                <p className="text-sm text-gray-600">
-                  Solicitar e gerenciar suas férias
-                </p>
-              </div>
-            </div>
-          </button>
-        </div>
-      </div>
+      {/* Botões de navegação removidos */}
 
       {/* Modal de registros detalhados */}
       {isPanelOpen && (
@@ -566,18 +445,7 @@ export default function PontoPage() {
         }}
       />
 
-      {/* Modal de Registrar Ponto */}
-      {isMobilePunchModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobilePunchModalOpen(false)} />
-          <div className="relative w-full max-w-md sm:max-w-lg md:max-w-2xl lg:max-w-3xl">
-            <PunchCard 
-              showCloseButton={true} 
-              onClose={() => setIsMobilePunchModalOpen(false)}
-            />
-          </div>
-        </div>
-      )}
+      {/* Modal de registro removido - apenas mobile */}
       </div>
     </MainLayout>
   );
