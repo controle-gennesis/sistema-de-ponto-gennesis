@@ -24,7 +24,7 @@ const nextConfig = {
   // Configuração para evitar problemas de Context
   reactStrictMode: false,
   // Desabilitar todas as otimizações de SSR
-  distDir: 'dist',
+  // distDir: 'dist', // Comentado para Railway
   // Desabilitar prerendering de páginas específicas
   generateBuildId: async () => {
     return 'build-' + Date.now();
