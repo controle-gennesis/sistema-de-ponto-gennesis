@@ -29,4 +29,7 @@ router.put('/:id', authorize('ADMIN'), timeRecordController.updateRecord);
 router.get('/reports/attendance', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), timeRecordController.getAttendanceReport);
 router.get('/reports/late-arrivals', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), timeRecordController.getLateArrivalsReport);
 
+// Centro de custo por funcionário
+router.get('/employee/:employeeId/cost-center', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), timeRecordController.getEmployeeCostCenter);
+
 export default router;

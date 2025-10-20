@@ -801,4 +801,154 @@ export class TimeRecordController {
       next(error);
     }
   }
+
+  async getEmployeeCostCenter(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { employeeId } = req.params;
+      const { month, year } = req.query;
+
+      if (!month || !year) {
+        throw createError('Mês e ano são obrigatórios', 400);
+      }
+
+      const monthNum = parseInt(month as string);
+      const yearNum = parseInt(year as string);
+
+      // Verificar se o funcionário existe
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              cpf: true
+            }
+          }
+        }
+      });
+
+      if (!employee) {
+        throw createError('Funcionário não encontrado', 404);
+      }
+
+      // Calcular início e fim do mês
+      const startDate = new Date(yearNum, monthNum - 1, 1);
+      const endDate = new Date(yearNum, monthNum, 0, 23, 59, 59);
+
+      // Buscar todos os registros do funcionário no mês
+      const timeRecords = await prisma.timeRecord.findMany({
+        where: {
+          employeeId: employeeId,
+          timestamp: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        orderBy: {
+          timestamp: 'asc'
+        }
+      });
+
+      // Buscar férias aprovadas no período
+      const vacations = await prisma.vacation.findMany({
+        where: {
+          userId: employee.userId,
+          status: 'APPROVED',
+          OR: [
+            {
+              AND: [
+                { startDate: { lte: endDate } },
+                { endDate: { gte: startDate } }
+              ]
+            }
+          ]
+        }
+      });
+
+      // Buscar atestados médicos aprovados no período
+      const medicalCertificates = await prisma.medicalCertificate.findMany({
+        where: {
+          userId: employee.userId,
+          status: 'APPROVED',
+          OR: [
+            {
+              AND: [
+                { startDate: { lte: endDate } },
+                { endDate: { gte: startDate } }
+              ]
+            }
+          ]
+        }
+      });
+
+      // Agrupar registros por dia
+      const daysMap = new Map<string, any[]>();
+      
+      timeRecords.forEach(record => {
+        const dateKey = moment(record.timestamp).format('YYYY-MM-DD');
+        if (!daysMap.has(dateKey)) {
+          daysMap.set(dateKey, []);
+        }
+        daysMap.get(dateKey)!.push({
+          id: record.id,
+          type: record.type,
+          timestamp: record.timestamp,
+          costCenter: record.costCenter || 'SEDE',
+          isValid: record.isValid
+        });
+      });
+
+      // Criar array de dias do mês
+      const daysInMonth = [];
+      const daysCount = endDate.getDate();
+      
+      for (let day = 1; day <= daysCount; day++) {
+        const date = new Date(yearNum, monthNum - 1, day);
+        const dateKey = moment(date).format('YYYY-MM-DD');
+        const dayRecords = daysMap.get(dateKey) || [];
+        
+        // Verificar se está em férias
+        const isOnVacation = vacations.some(vacation => {
+          const vacationStart = moment(vacation.startDate).format('YYYY-MM-DD');
+          const vacationEnd = moment(vacation.endDate).format('YYYY-MM-DD');
+          return dateKey >= vacationStart && dateKey <= vacationEnd;
+        });
+
+        // Verificar se está com atestado médico
+        const hasMedicalCertificate = medicalCertificates.some(cert => {
+          const certStart = moment(cert.startDate).format('YYYY-MM-DD');
+          const certEnd = moment(cert.endDate).format('YYYY-MM-DD');
+          return dateKey >= certStart && dateKey <= certEnd;
+        });
+        
+        daysInMonth.push({
+          date: dateKey,
+          day: day,
+          points: dayRecords,
+          costCenter: dayRecords.length > 0 ? dayRecords[0].costCenter : null,
+          isOnVacation,
+          hasMedicalCertificate
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          employee: {
+            id: employee.id,
+            name: employee.user.name,
+            cpf: employee.user.cpf,
+            admissionDate: employee.hireDate,
+            hireDate: employee.hireDate // Debug: adicionar também como hireDate
+          },
+          month: monthNum,
+          year: yearNum,
+          days: daysInMonth
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }

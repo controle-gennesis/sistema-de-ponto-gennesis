@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 export class BankHoursController {
   async getBankHoursByEmployee(req: Request, res: Response) {
     try {
-      const { search, startDate, endDate, department, position, costCenter, client, status } = req.query;
+      const { search, startDate, endDate, department, position, costCenter, client, polo, status } = req.query;
       
       // Usar as datas fornecidas ou calcular período padrão (mês atual)
       let startDateFilter: Date;
@@ -76,6 +76,13 @@ export class BankHoursController {
       if (client) {
         whereClause.client = {
           contains: client as string,
+          mode: 'insensitive'
+        };
+      }
+
+      if (polo) {
+        whereClause.polo = {
+          contains: polo as string,
           mode: 'insensitive'
         };
       }

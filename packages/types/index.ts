@@ -49,6 +49,7 @@ export interface Employee {
   familySalary?: number; // SALÁRIO FAMÍLIA
   dangerPay?: number; // PERICULOSIDADE
   unhealthyPay?: number; // INSALUBRIDADE
+  admissionDate?: string; // Data de admissão
   
   createdAt: string;
   updatedAt: string;

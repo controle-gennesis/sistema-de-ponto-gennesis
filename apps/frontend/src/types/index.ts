@@ -392,6 +392,7 @@ export interface PayrollEmployee {
   pixKeyType: string | null;
   pixKey: string | null;
   modality: string | null;
+  admissionDate?: string | null;
   familySalary: number;
   dangerPay: number; // Porcentagem (0, 30, 40)
   unhealthyPay: number; // Porcentagem (0, 10, 20, 40)
@@ -438,6 +439,7 @@ export interface PayrollFilters {
   modality?: string;
   bank?: string;
   accountType?: string;
+  polo?: string;
   month: number;
   year: number;
 }

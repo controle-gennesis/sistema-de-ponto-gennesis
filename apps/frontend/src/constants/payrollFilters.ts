@@ -64,6 +64,12 @@ export const COST_CENTERS_LIST = [
   'DIRETOR'
 ];
 
+// Lista de polos
+export const POLOS_LIST = [
+  'BRASÍLIA',
+  'GOIÁS'
+];
+
 // Lista de tomadores corretos (usando a lista existente)
 export const CLIENTS_LIST = [
   '001 - LOTAÇÃO DF',

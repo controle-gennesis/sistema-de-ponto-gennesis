@@ -127,6 +127,7 @@ export interface PayrollFilters {
   modality?: string;
   bank?: string;
   accountType?: string;
+  polo?: string;
   month: number;
   year: number;
 }
@@ -293,7 +294,7 @@ export class PayrollService {
    * Gera folha de pagamento mensal
    */
   async generateMonthlyPayroll(filters: PayrollFilters): Promise<MonthlyPayrollData> {
-    const { search, company, department, position, costCenter, client, modality, bank, accountType, month, year } = filters;
+    const { search, company, department, position, costCenter, client, modality, bank, accountType, polo, month, year } = filters;
 
     // Validar período
     const currentDate = new Date();
@@ -363,6 +364,10 @@ export class PayrollService {
 
     if (accountType) {
       where.accountType = { contains: accountType, mode: 'insensitive' };
+    }
+
+    if (polo) {
+      where.polo = { contains: polo, mode: 'insensitive' };
     }
 
     // Buscar funcionários

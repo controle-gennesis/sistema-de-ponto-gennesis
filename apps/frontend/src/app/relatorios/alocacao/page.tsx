@@ -3,13 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText, ChevronDown, ChevronUp, X, ListPlus , RotateCcw } from 'lucide-react';
+import { Users, Search, Filter, ChevronDown, ChevronUp, X, Building2, FileText, Calendar, ListPlus, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PayrollDetailModal } from '@/components/payroll/PayrollDetailModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
-import { PayrollEmployee, PayrollFilters, MonthlyPayrollData } from '@/types';
+import { PayrollEmployee, PayrollFilters } from '@/types';
 import { 
   DEPARTMENTS_LIST, 
   COMPANIES_LIST, 
@@ -21,9 +20,8 @@ import {
   POLOS_LIST
 } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
-import * as XLSX from 'xlsx';
 
-export default function FolhaPagamentoPage() {
+export default function AlocacaoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   
@@ -46,10 +44,15 @@ export default function FolhaPagamentoPage() {
     month: currentMonth,
     year: currentYear
   });
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<PayrollEmployee | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true); // Minimizados por padrão
+  const [modalCurrentMonth, setModalCurrentMonth] = useState(new Date().getMonth());
+  const [modalCurrentYear, setModalCurrentYear] = useState(new Date().getFullYear());
+  
+  // Estado para armazenar dados reais de cada funcionário
+  const [employeeDataMap, setEmployeeDataMap] = useState<Record<string, any>>({});
+  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -59,8 +62,8 @@ export default function FolhaPagamentoPage() {
     }
   });
 
-  const { data: payrollResponse, isLoading: loadingPayroll } = useQuery({
-    queryKey: ['payroll-monthly', filters],
+  const { data: employeesResponse, isLoading: loadingEmployees } = useQuery({
+    queryKey: ['employees-alocacao', filters],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters.search) params.append('search', filters.search);
@@ -81,10 +84,258 @@ export default function FolhaPagamentoPage() {
     }
   });
 
+  // Query para buscar dados do funcionário selecionado
+  const { data: employeeData, isLoading: loadingEmployeeData } = useQuery({
+    queryKey: ['employee-cost-center', selectedEmployee?.id, modalCurrentMonth, modalCurrentYear],
+    queryFn: async () => {
+      console.log('=== API CALL STARTED ===');
+      console.log('selectedEmployee?.id:', selectedEmployee?.id);
+      console.log('modalCurrentMonth:', modalCurrentMonth);
+      console.log('modalCurrentYear:', modalCurrentYear);
+      
+      if (!selectedEmployee?.id) {
+        console.log('No employee ID - returning null');
+        return null;
+      }
+      
+      const res = await api.get(`/time-records/employee/${selectedEmployee.id}/cost-center?month=${modalCurrentMonth + 1}&year=${modalCurrentYear}`);
+      console.log('API Response:', res.data);
+      console.log('API Response Employee:', res.data?.data?.employee);
+      console.log('API Response Employee AdmissionDate:', res.data?.data?.employee?.admissionDate);
+      console.log('API Response Employee HireDate:', res.data?.data?.employee?.hireDate);
+      return res.data;
+    },
+    enabled: !!selectedEmployee?.id && isModalOpen
+  });
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
     router.push('/auth/login');
+  };
+
+  const handleViewDetails = (employee: PayrollEmployee) => {
+    console.log('=== MODAL OPENING ===');
+    console.log('Employee from table:', JSON.stringify(employee, null, 2));
+    console.log('Employee admissionDate:', employee.admissionDate);
+    console.log('Employee hireDate:', (employee as any).hireDate);
+    setSelectedEmployee(employee);
+    setIsModalOpen(true);
+  };
+
+  // Função para buscar dados reais de um funcionário
+  const fetchEmployeeData = async (employeeId: string) => {
+    if (employeeDataMap[employeeId]) {
+      return employeeDataMap[employeeId];
+    }
+    
+    try {
+      const response = await api.get(`/time-records/employee/${employeeId}/cost-center?month=${filters.month}&year=${filters.year}`);
+      const data = response.data;
+      
+      setEmployeeDataMap(prev => ({
+        ...prev,
+        [employeeId]: data
+      }));
+      
+      return data;
+    } catch (error) {
+      console.error('Erro ao buscar dados do funcionário:', error);
+      return null;
+    }
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedEmployee(null);
+  };
+
+  const handlePreviousMonth = () => {
+    if (modalCurrentMonth === 0) {
+      setModalCurrentMonth(11);
+      setModalCurrentYear(modalCurrentYear - 1);
+    } else {
+      setModalCurrentMonth(modalCurrentMonth - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (modalCurrentMonth === 11) {
+      setModalCurrentMonth(0);
+      setModalCurrentYear(modalCurrentYear + 1);
+    } else {
+      setModalCurrentMonth(modalCurrentMonth + 1);
+    }
+  };
+
+  const getModalMonthName = (monthNumber: number) => {
+    const date = new Date();
+    date.setMonth(monthNumber);
+    const monthName = date.toLocaleString('pt-BR', { month: 'long' });
+    return monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  };
+
+  const getDaysInMonth = (year: number, month: number) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (year: number, month: number) => {
+    return new Date(year, month, 1).getDay();
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'FINAL_DE_SEMANA':
+        return 'bg-gray-400';
+      case 'FALTA':
+        return 'bg-red-500';
+      case 'ATESTADO':
+        return 'bg-yellow-500';
+      case 'FERIAS':
+        return 'bg-green-500';
+      case 'NAO_ADMITIDO':
+        return 'bg-gray-300';
+      case 'FUTURO':
+        return 'bg-gray-200';
+      default:
+        return 'bg-gray-200';
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'FINAL_DE_SEMANA':
+        return 'Final de Semana';
+      case 'FALTA':
+        return 'Falta';
+      case 'ATESTADO':
+        return 'Atestado';
+      case 'FERIAS':
+        return 'Férias';
+      case 'NAO_ADMITIDO':
+        return 'Não Admitido';
+      case 'FUTURO':
+        return '-';
+      default:
+        return 'N/A';
+    }
+  };
+
+  const getTextColor = (status: string) => {
+    // Se for um centro de custo específico (não um status especial)
+    if (status && !['FINAL_DE_SEMANA', 'FALTA', 'ATESTADO', 'FERIAS', 'NAO_ADMITIDO', 'FUTURO'].includes(status)) {
+      return 'text-blue-600 font-semibold'; // Cor padrão para centros de custo
+    }
+    
+    switch (status) {
+      case 'FINAL_DE_SEMANA':
+        return 'text-gray-400';
+      case 'FALTA':
+        return 'text-red-600 font-semibold';
+      case 'ATESTADO':
+        return 'text-yellow-600 font-semibold';
+      case 'FERIAS':
+        return 'text-green-600 font-semibold';
+      case 'NAO_ADMITIDO':
+        return 'text-gray-400';
+      case 'FUTURO':
+        return 'text-gray-300';
+      default:
+        return 'text-blue-600 font-semibold'; // Cor padrão para centros de custo
+    }
+  };
+
+  // Função para determinar o status de um dia específico
+  const getDayStatus = (day: number, month: number, year: number) => {
+    console.log('=== getDayStatus called ===');
+    console.log('selectedEmployee:', selectedEmployee);
+    console.log('employeeData:', employeeData);
+    
+    if (!selectedEmployee || !employeeData?.data) {
+      console.log('Missing data - returning FUTURO');
+      return { status: 'FUTURO', costCenter: null };
+    }
+
+    const date = new Date(year, month, day);
+    const dateString = date.toISOString().split('T')[0];
+    const today = new Date();
+    // Buscar admissionDate do employeeData (que vem da API), não do selectedEmployee (que vem da tabela)
+    const employeeFromApi = employeeData?.data?.employee;
+    const admissionDate = employeeFromApi?.admissionDate ? new Date(employeeFromApi.admissionDate) : 
+                          employeeFromApi?.hireDate ? new Date(employeeFromApi.hireDate) : null;
+    
+    // Debug: verificar se admissionDate está chegando
+    console.log('EmployeeFromApi:', employeeFromApi);
+    console.log('AdmissionDate from API:', admissionDate, 'Date:', date, 'DateString:', dateString);
+    console.log('Date <= AdmissionDate:', admissionDate ? date <= admissionDate : false, 'Date < AdmissionDate:', admissionDate ? date < admissionDate : false);
+
+    // Verificar se é futuro
+    if (date > today) {
+      return { status: 'FUTURO', costCenter: null };
+    }
+
+    // Verificar se funcionário estava admitido na data (incluindo o dia da admissão)
+    if (admissionDate) {
+      const admissionDateString = admissionDate.toISOString().split('T')[0];
+      console.log('Comparing dates:', dateString, '<', admissionDateString, 'Result:', dateString < admissionDateString);
+      console.log('Is admission day:', dateString === admissionDateString);
+      
+      if (dateString < admissionDateString) {
+        // Se é final de semana antes da admissão, mostrar como final de semana
+        if (date.getDay() === 0 || date.getDay() === 6) {
+          return { status: 'FINAL_DE_SEMANA', costCenter: null };
+        }
+        // Se é dia útil antes da admissão, mostrar como não admitido
+        return { status: 'NAO_ADMITIDO', costCenter: null };
+      }
+      
+      // Se é exatamente o dia da admissão
+      if (dateString === admissionDateString) {
+        // Buscar dados do dia da admissão para ver se trabalhou
+        const dayData = employeeData.data.days?.find((d: any) => d.date === dateString);
+        
+        if (dayData && dayData.points && dayData.points.length > 0) {
+          // Se trabalhou, mostrar o centro de custo normalmente
+          const costCenter = dayData.points[0].costCenter;
+          return { status: costCenter, costCenter };
+        } else {
+          // Se não trabalhou no dia da admissão, mostrar como falta normalmente
+          return { status: 'FALTA', costCenter: null };
+        }
+      }
+    }
+
+    // Verificar se é final de semana após admissão
+    if (date.getDay() === 0 || date.getDay() === 6) {
+      return { status: 'FINAL_DE_SEMANA', costCenter: null };
+    }
+
+    // Buscar dados do dia específico
+    const dayData = employeeData.data.days?.find((d: any) => d.date === dateString);
+    
+    if (dayData) {
+      // Verificar se está em férias
+      if (dayData.isOnVacation) {
+        return { status: 'FERIAS', costCenter: null };
+      }
+      
+      // Verificar se está com atestado médico
+      if (dayData.hasMedicalCertificate) {
+        return { status: 'ATESTADO', costCenter: null };
+      }
+      
+      // Se tem pontos, usar o centro de custo do primeiro ponto
+      if (dayData.points && dayData.points.length > 0) {
+        const costCenter = dayData.points[0].costCenter;
+        return { status: costCenter, costCenter };
+      }
+      
+      // Se não tem pontos mas deveria ter (dia útil após admissão)
+      return { status: 'FALTA', costCenter: null };
+    }
+
+    // Se não encontrou dados para o dia
+    return { status: 'FALTA', costCenter: null };
   };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -127,16 +378,6 @@ export default function FolhaPagamentoPage() {
     setFilters(prev => ({ ...prev, accountType: e.target.value }));
   };
 
-  const handleViewDetails = (employee: PayrollEmployee) => {
-    setSelectedEmployee(employee);
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedEmployee(null);
-  };
-
   const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setFilters(prev => ({ ...prev, month: parseInt(e.target.value) }));
   };
@@ -175,56 +416,26 @@ export default function FolhaPagamentoPage() {
     }));
   };
 
-  const exportToExcel = () => {
-    if (!payrollData || payrollData.employees.length === 0) {
-      alert('Não há dados para exportar');
-      return;
-    }
+  const getMonthName = (monthNumber: number) => {
+    const date = new Date();
+    date.setMonth(monthNumber - 1);
+    return date.toLocaleString('pt-BR', { month: 'long' });
+  };
 
-    // Preparar dados para exportação
-    const exportData = payrollData.employees.map(employee => ({
-      'Nome': `${employee.name} (CPF: ${employee.cpf})`,
-      'Função/Setor': `${employee.position || 'N/A'} • ${employee.department || 'N/A'}`,
-      'ID Funcionário': employee.employeeId,
-      'Empresa': employee.company || 'Não informado',
-      'Centro de Custo': employee.costCenter || 'N/A',
-      'Cliente': employee.client || 'Não informado',
-      'Dados Bancários': `${employee.bank || 'N/A'} • ${employee.accountType || 'N/A'} • Ag: ${employee.agency || 'N/A'} • OP: ${employee.operation || 'N/A'} • Conta: ${employee.account || 'N/A'}-${employee.digit || 'N/A'}`,
-      'PIX': `${employee.pixKeyType || 'N/A'} - ${employee.pixKey || 'N/A'}`,
-      'Modalidade': employee.modality || 'Não informado',
-      'Salário Base': employee.salary,
-      'Salário Família': employee.familySalary,
-      'Periculosidade (R$)': employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0,
-      'Insalubridade (R$)': employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0,
-      'VA Diário': employee.dailyFoodVoucher,
-      'VT Diário': employee.dailyTransportVoucher,
-      'Total VA': employee.totalFoodVoucher,
-      'Total VT': employee.totalTransportVoucher,
-      'Total VA+VT': employee.totalFoodVoucher + employee.totalTransportVoucher,
-      'Acréscimos': employee.totalAdjustments,
-      'Descontos': employee.totalDiscounts,
-      'Presença': `Dias: ${employee.daysWorked} • Faltas: ${employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0}`,
-      'Desconto por Faltas': (() => {
-        const salario = employee.salary;
-        const periculosidade = employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0;
-        const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
-        const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
-        return ((salario + periculosidade + insalubridade) / 30) * faltas;
-      })()
-    }));
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(value);
+  };
 
-    // Criar planilha
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Folha de Pagamento');
+  const formatCPF = (cpf: string) => {
+    return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  };
 
-    // Gerar nome do arquivo
-    const monthName = payrollData.period.monthName;
-    const year = payrollData.period.year;
-    const fileName = `Folha_Pagamento_${monthName}_${year}.xlsx`;
-
-    // Baixar arquivo
-    XLSX.writeFile(wb, fileName);
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('pt-BR');
   };
 
   if (loadingUser) {
@@ -244,11 +455,7 @@ export default function FolhaPagamentoPage() {
     role: 'EMPLOYEE'
   };
 
-  const payrollData: MonthlyPayrollData | null = payrollResponse?.data || null;
-  const employees: PayrollEmployee[] = payrollData?.employees || [];
-  const uniqueDepartments = Array.from(
-    new Set(employees.map(emp => emp.department).filter(Boolean))
-  ).sort();
+  const employees = employeesResponse?.data?.employees || [];
 
   // Opções de mês e ano
   const monthOptions = [
@@ -269,7 +476,7 @@ export default function FolhaPagamentoPage() {
   const yearOptions = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 
   return (
-    <ProtectedRoute route="/ponto/folha-pagamento">
+    <ProtectedRoute route="/relatorios/alocacao">
       <MainLayout 
         userRole={user.role} 
         userName={user.name} 
@@ -279,9 +486,9 @@ export default function FolhaPagamentoPage() {
         {/* Header */}
         <div className="text-center">
           <div className="flex items-center justify-center space-x-3 mb-2">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Folha de Pagamento</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Alocação de Funcionários</h1>
           </div>
-          <p className="text-sm sm:text-base text-gray-600">Gerencie e visualize informações salariais dos funcionários</p>
+          <p className="text-sm sm:text-base text-gray-600">Visualize a alocação de todos os funcionários</p>
         </div>
 
         {/* Filtros */}
@@ -614,24 +821,12 @@ export default function FolhaPagamentoPage() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center">
                 <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0">
-                  <FileSpreadsheet className="w-6 h-6 text-blue-600" />
+                  <Users className="w-6 h-6 text-blue-600" />
                 </div>
                 <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900">Folha de Pagamento</h3>
-                  <p className="text-sm text-gray-600">Dados de remuneração dos funcionários</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Alocação de Funcionários</h3>
+                  <p className="text-sm text-gray-600">Dados de alocação dos funcionários</p>
                 </div>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={exportToExcel}
-                  disabled={!payrollData || payrollData.employees.length === 0}
-                  className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
-                  title="Exportar para Excel"
-                >
-                  <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Exportar</span>
-                  <span className="sm:hidden">Exportar</span>
-                </button>
               </div>
             </div>
           </CardHeader>
@@ -640,42 +835,65 @@ export default function FolhaPagamentoPage() {
               <table className="w-full">
                 <thead className="border-b border-gray-200">
                   <tr>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Nome
+                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-white z-10 border-r border-gray-200">
+                      Funcionário
                     </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
-                      Setor
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">
-                      Empresa
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                      Centro de <br/>Custo 
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                      Tomador
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Líquido Total
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {/* Colunas dos dias do mês */}
+                    {Array.from({ length: getDaysInMonth(filters.year, filters.month - 1) }, (_, i) => {
+                      const day = i + 1;
+                      const date = new Date(filters.year, filters.month - 1, day);
+                      const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+                      const dayName = dayNames[date.getDay()];
+                      
+                      return (
+                        <th key={day} className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-16">
+                          <div>{dayName}</div>
+                          <div>({day}/{filters.month})</div>
+                        </th>
+                      );
+                    })}
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-white z-10 border-l border-gray-200">
                       Ações
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {loadingPayroll ? (
+                  {loadingEmployees ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-8 text-center">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-gray-200">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
-                          <span className="text-gray-600">Carregando folha de pagamento...</span>
+                          <span className="text-gray-600">Carregando funcionários...</span>
+                        </div>
+                      </td>
+                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-6 py-8 text-center">
+                        <div className="flex items-center justify-center">
+                          <div className="loading-spinner w-6 h-6 mr-2" />
+                          <span className="text-gray-600">Carregando funcionários...</span>
+                        </div>
+                      </td>
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
+                        <div className="flex items-center justify-center">
+                          <div className="loading-spinner w-6 h-6 mr-2" />
+                          <span className="text-gray-600">Carregando funcionários...</span>
                         </div>
                       </td>
                     </tr>
                   ) : employees.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-8 text-center">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-gray-200">
+                        <div className="text-gray-500">
+                          <p>Nenhum funcionário encontrado.</p>
+                          <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
+                        </div>
+                      </td>
+                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-6 py-8 text-center">
+                        <div className="text-gray-500">
+                          <p>Nenhum funcionário encontrado.</p>
+                          <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
+                        </div>
+                      </td>
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
                         <div className="text-gray-500">
                           <p>Nenhum funcionário encontrado.</p>
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
@@ -683,84 +901,147 @@ export default function FolhaPagamentoPage() {
                       </td>
                     </tr>
                   ) : (
-                    employees.map((employee) => (
+                    employees.map((employee: PayrollEmployee) => (
                       <tr key={employee.id} className="hover:transition-colors">
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-gray-200">
                           <div>
                             <div className="text-sm font-medium text-gray-900">
                               {employee.name}
                             </div>
                             <div className="text-xs sm:text-sm text-gray-500">
-                              {employee.cpf || 'N/A'}
-                            </div>
-                            <div className="text-xs text-gray-400 sm:hidden">
-                              {employee.department && `${employee.department} • ${employee.company || 'N/A'}`}
-                            </div>
-                            <div className="text-xs text-gray-400">
-                              {employee.employeeId && `ID: ${employee.employeeId}`}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden sm:table-cell">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
                               {employee.department || 'N/A'}
                             </div>
-                            <div className="text-xs text-gray-500">
-                              {employee.position || 'N/A'}
-                            </div>
                             <div className="text-xs text-gray-400">
-                              {employee.modality || 'N/A'}
+                              {employee.polo || 'N/A'}
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden md:table-cell">
-                          <span className="text-sm text-gray-900">
-                            {employee.company || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
-                          <span className="text-sm text-gray-900">
-                            {employee.costCenter || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
-                          <span className="text-sm text-gray-900">
-                            {employee.client || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
-                          <span className="text-sm font-bold text-green-600">
-                            R$ {(() => {
-                              const salarioBase = employee.salary;
-                              const periculosidade = employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0;
-                              const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
-                              const salarioFamilia = employee.familySalary || 0;
-                              const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
+                        {/* Células dos dias do mês - DADOS REAIS DO FUNCIONÁRIO */}
+                        {Array.from({ length: getDaysInMonth(filters.year, filters.month - 1) }, (_, i) => {
+                          const day = i + 1;
+                          const month = filters.month - 1;
+                          const year = filters.year;
+                          const date = new Date(year, month, day);
+                          const today = new Date();
+                          const dateString = date.toISOString().split('T')[0];
+                          
+                          let cellClass = 'px-1 py-2 text-center text-xs ';
+                          let cellContent = '';
+                          
+                          // Verificar se é futuro
+                          if (date > today) {
+                            cellClass += 'text-gray-400';
+                            cellContent = '-';
+                          }
+                          // Verificar se é final de semana
+                          else if (date.getDay() === 0 || date.getDay() === 6) {
+                            cellClass += 'text-gray-400';
+                            cellContent = 'FDS';
+                          }
+                          // Para dias úteis, usar dados reais baseados no funcionário
+                          else {
+                            // Buscar dados reais do funcionário
+                            const employeeData = employeeDataMap[employee.id];
+                            
+                            // Verificar se funcionário estava admitido na data
+                            const admissionDate = employeeData?.data?.employee?.admissionDate ? 
+                                                 new Date(employeeData.data.employee.admissionDate) : 
+                                                 employee.admissionDate ? new Date(employee.admissionDate) : null;
+                            
+                            if (admissionDate) {
+                              const admissionDateString = admissionDate.toISOString().split('T')[0];
                               
-                              // Calcular número de dias do mês
-                              const diasDoMes = new Date(filters.year, filters.month, 0).getDate();
-                              
-                              const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
-                              const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
-                              
-                              // Cálculos de %VA e %VT baseados no polo
-                              const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
-                              const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
-                              
-                              const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0);
-                              const totalDescontos = employee.totalDiscounts + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT;
-                              const liquidoReceber = totalProventos - totalDescontos;
-                              
-                              return liquidoReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                            })()}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                              // Se é antes da admissão
+                              if (dateString < admissionDateString) {
+                                cellClass += 'text-gray-400';
+                                cellContent = 'N/A';
+                              }
+                              // Se é dia da admissão ou depois
+                              else {
+                                if (employeeData?.data?.days) {
+                                  // Encontrar dados do dia específico
+                                  const dayData = employeeData.data.days.find((d: any) => d.date === dateString);
+                                  
+                                  if (dayData) {
+                                    // Verificar se está em férias
+                                    if (dayData.isOnVacation) {
+                                      cellClass += 'text-green-600';
+                                      cellContent = 'FÉRIAS';
+                                    }
+                                    // Verificar se está com atestado médico
+                                    else if (dayData.hasMedicalCertificate) {
+                                      cellClass += 'text-yellow-600';
+                                      cellContent = 'ATESTADO';
+                                    }
+                                    // Se tem pontos, usar o centro de custo do primeiro ponto
+                                    else if (dayData.points && dayData.points.length > 0) {
+                                      const costCenter = dayData.points[0].costCenter;
+                                      cellClass += 'text-blue-600';
+                                      cellContent = costCenter || 'N/A';
+                                    }
+                                    // Se não tem pontos mas deveria ter (dia útil após admissão)
+                                    else {
+                                      cellClass += 'text-red-600';
+                                      cellContent = 'Falta';
+                                    }
+                                  } else {
+                                    // Se não encontrou dados para o dia, mostrar falta
+                                    cellClass += 'text-red-600';
+                                    cellContent = 'Falta';
+                                  }
+                                } else {
+                                  // Se não tem dados do funcionário ainda, mostrar indicador de carregamento
+                                  cellClass += 'text-gray-400';
+                                  cellContent = '...';
+                                  
+                                  // Buscar dados do funcionário em background
+                                  fetchEmployeeData(employee.id);
+                                }
+                              }
+                            } else {
+                              // Se não tem data de admissão, usar lógica padrão
+                              if (employeeData?.data?.days) {
+                                const dayData = employeeData.data.days.find((d: any) => d.date === dateString);
+                                
+                                if (dayData) {
+                                  if (dayData.isOnVacation) {
+                                    cellClass += 'text-green-600';
+                                    cellContent = 'FÉRIAS';
+                                  } else if (dayData.hasMedicalCertificate) {
+                                    cellClass += 'text-yellow-600';
+                                    cellContent = 'ATESTADO';
+                                  } else if (dayData.points && dayData.points.length > 0) {
+                                    const costCenter = dayData.points[0].costCenter;
+                                    cellClass += 'text-blue-600';
+                                    cellContent = costCenter || 'N/A';
+                                  } else {
+                                    cellClass += 'text-red-600';
+                                    cellContent = 'Falta';
+                                  }
+                                } else {
+                                  cellClass += 'text-red-600';
+                                  cellContent = 'Falta';
+                                }
+                              } else {
+                                // Se não tem dados do funcionário ainda, mostrar indicador de carregamento
+                                cellClass += 'text-gray-400';
+                                cellContent = '...';
+                                fetchEmployeeData(employee.id);
+                              }
+                            }
+                          }
+                          
+                          return (
+                            <td key={day} className={cellClass}>
+                              {cellContent}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
                           <button
                             onClick={() => handleViewDetails(employee)}
                             className="p-2 text-yellow-600 hover:text-yellow-600 hover:bg-yellow-100 rounded-lg transition-colors"
-                            title="Folha de Pagamento"
+                            title="Ver Centro de Custo"
                           >
                             <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
                           </button>
@@ -773,16 +1054,16 @@ export default function FolhaPagamentoPage() {
             </div>
 
             {/* Estatísticas */}
-            {employees.length > 0 && payrollData && (
+            {employees.length > 0 && (
               <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 rounded-b-lg">
                 <div className="flex items-center justify-between text-sm text-gray-600">
                   <div className="flex items-center space-x-6">
                     <span>
-                      <strong>Período:</strong> {payrollData.period.monthName} de {payrollData.period.year}
+                      <strong>Período:</strong> {getMonthName(filters.month)} de {filters.year}
                     </span>
-                  <span>
-                      <strong>Total de funcionários:</strong> {payrollData.totals.totalEmployees}
-                  </span>
+                    <span>
+                      <strong>Total de funcionários:</strong> {employees.length}
+                    </span>
                   </div>
                   {filters.department && (
                     <span>
@@ -799,18 +1080,102 @@ export default function FolhaPagamentoPage() {
             )}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Modal de Detalhes */}
-      {selectedEmployee && (
-        <PayrollDetailModal
-          employee={selectedEmployee}
-          month={filters.month}
-          year={filters.year}
-          isOpen={isModalOpen}
-          onClose={handleCloseModal}
-        />
-      )}
+        {/* Modal de Centro de Custo */}
+        {isModalOpen && selectedEmployee && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={handleCloseModal} />
+            <div className="relative w-full max-w-4xl rounded-lg bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto">
+              <button
+                onClick={handleCloseModal}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+              >
+                <X className="h-6 w-6" />
+              </button>
+              
+              <div className="mb-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Centro de Custo - {selectedEmployee.name}
+                </h3>
+                <p className="text-sm text-gray-600">
+                  CPF: {selectedEmployee.cpf} | Setor: {selectedEmployee.department}
+                </p>
+              </div>
+
+              {/* Navegação do Mês */}
+              <div className="flex items-center justify-between mb-6">
+                <button
+                  onClick={handlePreviousMonth}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <h4 className="text-lg font-semibold text-gray-900">
+                  {getModalMonthName(modalCurrentMonth)} de {modalCurrentYear}
+                </h4>
+                <button
+                  onClick={handleNextMonth}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Calendário */}
+              {loadingEmployeeData ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-2 text-gray-600">Carregando dados...</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-7 gap-1 mb-6">
+                {/* Cabeçalho dos dias da semana */}
+                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day) => (
+                  <div key={day} className="p-2 text-center text-sm font-medium text-gray-500 bg-gray-50">
+                    {day}
+                  </div>
+                ))}
+                
+                {/* Dias do mês */}
+                {Array.from({ length: getFirstDayOfMonth(modalCurrentYear, modalCurrentMonth) }, (_, i) => (
+                  <div key={`empty-${i}`} className="p-2 h-12"></div>
+                ))}
+                
+                {Array.from({ length: getDaysInMonth(modalCurrentYear, modalCurrentMonth) }, (_, i) => {
+                  const day = i + 1;
+                  const date = new Date(modalCurrentYear, modalCurrentMonth, day);
+                  
+                  // Usar dados reais do funcionário
+                  const dayStatus = getDayStatus(day, modalCurrentMonth, modalCurrentYear);
+                  
+                  // Debug: verificar status do dia
+                  console.log('Day:', day, 'Status:', dayStatus.status, 'CostCenter:', dayStatus.costCenter);
+                  
+                  return (
+                    <div
+                      key={day}
+                      className={`p-1 h-16 border border-gray-200 rounded-lg flex flex-col items-center justify-center text-xs font-medium cursor-pointer hover:bg-gray-50 ${
+                        dayStatus.status === 'NAO_ADMITIDO' ? 'bg-gray-100 border-gray-300' : ''
+                      } ${
+                        dayStatus.status === 'FINAL_DE_SEMANA' ? 'bg-gray-100 border-gray-300' : ''
+                      }`}
+                      title={`${day} - ${getStatusLabel(dayStatus.status)}${dayStatus.costCenter ? ` (${dayStatus.costCenter})` : ''}`}
+                    >
+                      <div className="text-gray-600 mb-1">{day}</div>
+                      <div className={`text-xs text-center leading-tight ${getTextColor(dayStatus.costCenter || dayStatus.status)}`}>
+                        {dayStatus.status === 'NAO_ADMITIDO' ? 'Não Admitido' : (dayStatus.costCenter || getStatusLabel(dayStatus.status))}
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+              )}
+
+              {/* Legenda removida */}
+            </div>
+          </div>
+        )}
+      </div>
       </MainLayout>
     </ProtectedRoute>
   );

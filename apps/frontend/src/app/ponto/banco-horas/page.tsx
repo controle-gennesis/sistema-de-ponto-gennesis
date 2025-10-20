@@ -3,11 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Clock, Calendar, Filter, Download, Search, Building2, User, CreditCard, ChevronDown, ChevronUp, Settings, RotateCcw } from 'lucide-react';
+import { Clock, Calendar, Filter, Download, Search, Building2, User, CreditCard, ChevronDown, ChevronUp, ListPlus, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
-import { DEPARTMENTS_LIST, COST_CENTERS_LIST, CLIENTS_LIST } from '@/constants/payrollFilters';
+import { DEPARTMENTS_LIST, COST_CENTERS_LIST, CLIENTS_LIST, POLOS_LIST } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
@@ -37,6 +37,7 @@ interface BankHoursFilters {
   position?: string;
   costCenter?: string;
   client?: string;
+  polo?: string;
   status?: string;
   startDate: string;
   endDate: string;
@@ -64,6 +65,7 @@ export default function BankHoursPage() {
       position: '',
       costCenter: '',
       client: '',
+      polo: '',
       status: '',
       startDate: firstDay.toISOString().split('T')[0],
       endDate: today.toISOString().split('T')[0]
@@ -98,6 +100,10 @@ export default function BankHoursPage() {
 
   const handleClientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setFilters(prev => ({ ...prev, client: e.target.value }));
+  };
+
+  const handlePoloChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, polo: e.target.value }));
   };
 
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -162,6 +168,7 @@ export default function BankHoursPage() {
           position: filters.position,
           costCenter: filters.costCenter,
           client: filters.client,
+          polo: filters.polo,
           status: filters.status,
           startDate: filters.startDate, 
           endDate: filters.endDate
@@ -303,7 +310,7 @@ export default function BankHoursPage() {
                       className="flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
                       title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
                     >
-                      <Settings className="w-5 h-5" />
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
                     </button>
                     <button
                       onClick={clearFilters}
@@ -387,12 +394,6 @@ export default function BankHoursPage() {
                 <div className="border-t pt-4 space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-medium text-gray-700">Filtros Específicos</h4>
-                    <button
-                      onClick={clearAdvancedFilters}
-                      className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded transition-colors"
-                    >
-                      Limpar Filtros Avançados
-                    </button>
                   </div>
                   
                   {/* Grupo 1: Informações Básicas */}
@@ -502,6 +503,27 @@ export default function BankHoursPage() {
                             {CLIENTS_LIST.map(client => (
                               <option key={client} value={client}>
                                 {client}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Polo
+                        </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <select
+                            value={filters.polo}
+                            onChange={handlePoloChange}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                          >
+                            <option value="">Todos os polos</option>
+                            {POLOS_LIST.map(polo => (
+                              <option key={polo} value={polo}>
+                                {polo}
                               </option>
                             ))}
                           </select>

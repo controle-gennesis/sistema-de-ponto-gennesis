@@ -154,6 +154,7 @@ export class PayrollController {
         modality,
         bank,
         accountType,
+        polo,
         month, 
         year,
         page = 1,
@@ -180,6 +181,7 @@ export class PayrollController {
         modality: modality as string,
         bank: bank as string,
         accountType: accountType as string,
+        polo: polo as string,
         month: monthNum,
         year: yearNum
       };

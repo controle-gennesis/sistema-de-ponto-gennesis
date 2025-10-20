@@ -178,7 +178,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: FileSpreadsheet,
         description: 'Gestão de folha de pagamento',
         permission: permissions.canAccessPayroll
-          }
+      },
+      {
+        name: 'Alocação',
+        href: '/relatorios/alocacao',
+        icon: Users,
+        description: 'Alocação de funcionários',
+        permission: permissions.canAccessPayroll
+      }
         ]
       }
     ];

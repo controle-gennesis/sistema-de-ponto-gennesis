@@ -149,6 +149,7 @@ export function useRoutePermission(route: string) {
     '/ponto/gerenciar-ferias': permissions.canManageVacations,
     '/ponto/banco-horas': permissions.canManageBankHours,
     '/ponto/folha-pagamento': permissions.canAccessPayroll,
+    '/relatorios/alocacao': permissions.canAccessPayroll,
   };
 
   return {
