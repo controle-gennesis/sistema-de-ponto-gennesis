@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 const prisma = new PrismaClient();
 
@@ -306,83 +306,17 @@ export class TimeRecordService {
   }
 
   async calculateBankHours(userId: string, startDate: Date, endDate: Date) {
-    // Respeitar data de admissão para não contar antes do ingresso
-    const employee = await prisma.employee.findFirst({ where: { userId } });
-    const adjustedStart = employee ? moment.max(moment(startDate).startOf('day'), moment(employee.hireDate).startOf('day')) : moment(startDate).startOf('day');
-    const cursor = adjustedStart.clone();
-    // Limitar até o dia atual (não incluir dias futuros)
-    const today = moment().endOf('day');
-    const end = moment.min(moment(endDate).endOf('day'), today);
-    let totalOvertimeHours = 0;
-    let totalOwedHours = 0;
-
-    while (cursor.isSameOrBefore(end, 'day')) {
-      const expected = this.getExpectedWorkHoursByRule(cursor.toDate());
-      if (expected > 0) {
-        // Buscar registros do dia (incluindo inválidos) para não perder horas trabalhadas
-        const dayStart = cursor.clone().startOf('day').toDate();
-        const dayEnd = cursor.clone().endOf('day').toDate();
-        const dayRecords = await prisma.timeRecord.findMany({
-          where: {
-            userId,
-            timestamp: { gte: dayStart, lte: dayEnd },
-          },
-          orderBy: { timestamp: 'asc' },
-        });
-
-        let effective = 0;
-        
-        // Verificar se há ausência justificada para este dia
-        const hasAbsenceJustified = dayRecords.some((r: any) => r.type === 'ABSENCE_JUSTIFIED');
-        
-        if (dayRecords.length === 0) {
-          // Ausência completa
-          totalOwedHours += expected;
-        } else if (hasAbsenceJustified) {
-          // Ausência justificada - considerar como horas trabalhadas
-          effective = expected;
-        } else {
-          const entry = dayRecords.find((r: any) => r.type === 'ENTRY');
-          const exit = [...dayRecords].reverse().find((r: any) => r.type === 'EXIT');
-          if (entry && exit) {
-            const total = moment(exit.timestamp).diff(moment(entry.timestamp), 'hours', true);
-            const lunchStart = dayRecords.find((r: any) => r.type === 'LUNCH_START');
-            const lunchEnd = dayRecords.find((r: any) => r.type === 'LUNCH_END');
-            let lunch = 0;
-            if (lunchStart && lunchEnd) {
-              lunch = moment(lunchEnd.timestamp).diff(moment(lunchStart.timestamp), 'hours', true);
-            } else {
-              // Assumir 1h de almoço na ausência de registros
-              lunch = 1;
-            }
-            effective = Math.max(0, total - lunch);
-          } else {
-            // Sem entrada/saída completos: considera ausência
-            totalOwedHours += expected;
-          }
-
-          if (effective > 0) {
-            if (effective >= expected) {
-              const overtimeHours = effective - expected;
-              // Aplicar multiplicador apenas sobre as horas extras
-              const dayOfWeek = cursor.day();
-              const multiplier = entry ? this.calculateOvertimeMultiplier(entry.timestamp, dayOfWeek) : 1.5;
-              totalOvertimeHours += overtimeHours * multiplier;
-            } else {
-              totalOwedHours += (expected - effective);
-            }
-          }
-        }
-      }
-      cursor.add(1, 'day');
-    }
-
+    // Usar o método detalhado para garantir consistência
+    const detailedResult = await this.calculateBankHoursDetailed(userId, startDate, endDate);
+    
     return {
-      startDate: adjustedStart.toDate(),
-      endDate,
-      totalOvertimeHours,
-      totalOwedHours,
-      balanceHours: totalOvertimeHours - totalOwedHours,
+      startDate: detailedResult.startDate,
+      endDate: detailedResult.endDate,
+      totalOvertimeHours: detailedResult.totalOvertimeHours,
+      totalOwedHours: detailedResult.totalOwedHours,
+      balanceHours: detailedResult.balanceHours,
+      totalOvertimeRaw: detailedResult.days.reduce((acc, d) => acc + Math.max((d.workedHours || 0) - (d.expectedHours || 0), 0), 0),
+      balanceHoursRaw: detailedResult.days.reduce((acc, d) => acc + Math.max((d.workedHours || 0) - (d.expectedHours || 0), 0), 0) - detailedResult.totalOwedHours,
     };
   }
 
@@ -399,6 +333,8 @@ export class TimeRecordService {
       expectedHours: number;
       workedHours: number;
       overtimeHours: number;
+      overtimeHours15?: number; // horas extras com multiplicador 1.5 (já multiplicadas)
+      overtimeHours20?: number; // horas extras com multiplicador 2.0 (já multiplicadas)
       owedHours: number;
       notes: string[];
     }> = [];
@@ -407,6 +343,8 @@ export class TimeRecordService {
       const expected = this.getExpectedWorkHoursByRule(cursor.toDate());
       let worked = 0;
       let overtime = 0;
+      let overtime15 = 0; // 1.5x
+      let overtime20 = 0; // 2.0x
       let owed = 0;
       const notes: string[] = [];
 
@@ -438,23 +376,90 @@ export class TimeRecordService {
           if (!entry) notes.push('Entrada não registrada');
           if (!exit) notes.push('Saída não registrada');
           if (entry && exit) {
-            const total = moment(exit.timestamp).diff(moment(entry.timestamp), 'hours', true);
+            const TZ = 'America/Sao_Paulo';
+            // Reinterpretar o horário UTC como relógio local (usar campos UTC como clock time local)
+            const toLocal = (d: Date) => moment.tz({
+              year: d.getUTCFullYear(),
+              month: d.getUTCMonth(),
+              day: d.getUTCDate(),
+              hour: d.getUTCHours(),
+              minute: d.getUTCMinutes(),
+              second: d.getUTCSeconds(),
+            }, TZ);
+            const entryMoment = toLocal(entry.timestamp);
+            const exitMoment = toLocal(exit.timestamp);
+
+            const total = exitMoment.diff(entryMoment, 'hours', true);
             let lunch = 0;
+            let firstIntervalStart = entryMoment.clone();
+            let firstIntervalEnd = exitMoment.clone();
+            let secondIntervalStart: moment.Moment | null = null;
+            let secondIntervalEnd: moment.Moment | null = null;
+
             if (lunchStart && lunchEnd) {
-              lunch = moment(lunchEnd.timestamp).diff(moment(lunchStart.timestamp), 'hours', true);
+              const lunchStartMoment = toLocal(lunchStart.timestamp);
+              const lunchEndMoment = toLocal(lunchEnd.timestamp);
+              lunch = lunchEndMoment.diff(lunchStartMoment, 'hours', true);
+              firstIntervalEnd = lunchStartMoment.clone();
+              secondIntervalStart = lunchEndMoment.clone();
+              secondIntervalEnd = exitMoment.clone();
             } else {
               lunch = 1; // assume 1h
               notes.push('Almoço não registrado - assumindo 1h');
             }
+
+            // Horas trabalhadas totais
             worked = Math.max(0, total - lunch);
-            if (worked >= expected) {
-              const rawOvertime = worked - expected;
-              // Aplicar multiplicador apenas sobre as horas extras
-              const dayOfWeek = cursor.day();
-              const multiplier = entry ? this.calculateOvertimeMultiplier(entry.timestamp, dayOfWeek) : 1.5;
-              overtime = rawOvertime * multiplier;
+
+            // Calcular horas trabalhadas após as 22:00 no DIA LOCAL usando apenas momentos em TZ local
+            const TZ2 = 'America/Sao_Paulo';
+            const localDayStr = entryMoment.tz(TZ2).format('YYYY-MM-DD');
+            const boundary22Local = moment.tz(`${localDayStr} 22:00`, 'YYYY-MM-DD HH:mm', TZ2);
+            const endOfLocalDayLocal = boundary22Local.clone().endOf('day');
+
+            const overlapAfter22Local = (startLocal: moment.Moment, endLocal: moment.Moment) => {
+              const s = moment.max(startLocal, boundary22Local);
+              const e = moment.min(endLocal, endOfLocalDayLocal);
+              if (e.isAfter(s)) return e.diff(s, 'hours', true);
+              return 0;
+            };
+
+            let workedAfter22 = 0;
+            workedAfter22 += overlapAfter22Local(firstIntervalStart, firstIntervalEnd);
+            if (secondIntervalStart && secondIntervalEnd) {
+              workedAfter22 += overlapAfter22Local(secondIntervalStart, secondIntervalEnd);
+            }
+            // workedAfter22 mantém precisão cheia
+            const workedBefore22 = Math.max(0, worked - workedAfter22);
+
+            const dayOfWeek = cursor.day();
+
+            if (expected > 0) {
+              if (worked >= expected) {
+                const rawOvertime = worked - expected; // total de horas extras
+                // Parte 2x são as horas após 22h, limitadas ao total de extras
+                const extra20 = Math.min(workedAfter22, rawOvertime);
+                const extra15 = Math.max(0, rawOvertime - extra20);
+                overtime15 = extra15 * 1.5;
+                overtime20 = extra20 * 2.0;
+                overtime = overtime15 + overtime20;
+
+
+              } else {
+                owed = expected - worked;
+              }
             } else {
-              owed = expected - worked;
+              // Dias sem horas esperadas (sábado/domingo): tudo é extra
+              if (dayOfWeek === 0) {
+                // Domingo: todas as horas são 2x
+                overtime20 = worked * 2.0;
+                overtime15 = 0;
+              } else {
+                // Sábado: 1.5x antes de 22h, 2x depois de 22h
+                overtime15 = workedBefore22 * 1.5;
+                overtime20 = workedAfter22 * 2.0;
+              }
+              overtime = overtime15 + overtime20;
             }
           } else {
             owed = expected;
@@ -465,9 +470,11 @@ export class TimeRecordService {
       days.push({
         date: cursor.toDate(),
         expectedHours: expected,
-        workedHours: Number(worked.toFixed(2)),
-        overtimeHours: Number(overtime.toFixed(2)),
-        owedHours: Number(owed.toFixed(2)),
+        workedHours: worked,
+        overtimeHours: overtime,
+        overtimeHours15: overtime15,
+        overtimeHours20: overtime20,
+        owedHours: owed,
         notes,
       });
 
@@ -480,9 +487,9 @@ export class TimeRecordService {
     return {
       startDate: adjustedStart.toDate(),
       endDate,
-      totalOvertimeHours: Number(totalOvertimeHours.toFixed(2)),
-      totalOwedHours: Number(totalOwedHours.toFixed(2)),
-      balanceHours: Number((totalOvertimeHours - totalOwedHours).toFixed(2)),
+      totalOvertimeHours: totalOvertimeHours,
+      totalOwedHours: totalOwedHours,
+      balanceHours: totalOvertimeHours - totalOwedHours,
       days,
     };
   }

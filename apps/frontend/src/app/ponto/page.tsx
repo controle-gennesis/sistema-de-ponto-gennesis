@@ -331,7 +331,7 @@ export default function PontoPage() {
       {isBankDetailsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsBankDetailsOpen(false)} />
-          <div className="relative w-full max-w-4xl mx-4 bg-white rounded-lg shadow-2xl overflow-hidden">
+          <div className="relative w-full max-w-6xl mx-4 bg-white rounded-lg shadow-2xl overflow-hidden">
             <div className="px-6 py-4 border-b">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -399,34 +399,59 @@ export default function PontoPage() {
             <div className="max-h-[70vh] overflow-auto p-6">
               <div className="w-full overflow-x-auto">
                 <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-600 border-b">
-                      <th className="py-2 pr-4">Data</th>
-                      <th className="py-2 pr-4">Dia da Semana</th>
-                      <th className="py-2 pr-4">Esperado</th>
-                      <th className="py-2 pr-4">Trabalhado</th>
-                      <th className="py-2 pr-4">Extras</th>
-                      <th className="py-2 pr-4">Devidas</th>
-                      <th className="py-2 pr-4">Observações</th>
+                  <thead className="sticky top-0 bg-white z-10">
+                    <tr className="text-center text-gray-600 border-b">
+                      <th className="py-2 pr-4 sticky top-0 bg-white">Data</th>
+                      <th className="py-2 pr-4 sticky top-0 bg-white text-left">Dia da Semana</th>
+                      <th className="py-2 pr-4 sticky top-0 bg-white">Esperado</th>
+                      <th className="py-2 pr-4 sticky top-0 bg-white">Trabalhado</th>
+                      <th className="py-2 pr-4 sticky top-0 bg-white">Horas Normais</th>
+                      <th className="py-2 pr-4 sticky top-0 bg-white" title="Horas Extras com Multiplicadores:\n• 1,5x: Horas extras em dias úteis e sábados até 22h\n• 2,0x: Horas extras em domingos e após 22h\n• Total: Soma das horas multiplicadas">Horas Extras</th>
+                      <th className="py-2 pr-4 sticky top-0 bg-white">Devidas</th>
+                      <th className="py-2 pr-4 sticky top-0 bg-white">Observações</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(bankHoursDetailed?.data?.days || []).map((d: any, idx: number) => (
                       <tr key={idx} className="border-b">
-                        <td className="py-2 pr-4">{formatDate(d.date)}</td>
+                        <td className="py-2 pr-4 text-center">{formatDate(d.date)}</td>
                         <td className="py-2 pr-4">{getWeekday(d.date)}</td>
-                        <td className="py-2 pr-4">
+                        <td className="py-2 pr-4 text-center">
                           <span className={d.notes?.includes('Ausência Justificada') ? 'line-through text-gray-500' : ''}>
                             {formatHours(d.expectedHours || 0)}
                           </span>
                         </td>
-                        <td className="py-2 pr-4">{formatHours(d.workedHours || 0)}</td>
-                        <td className="py-2 pr-4 text-blue-700">{formatHours(d.overtimeHours || 0)}</td>
-                        <td className="py-2 pr-4 text-red-700">{formatHours(d.owedHours || 0)}</td>
-                        <td className="py-2 pr-4 text-gray-600">{(d.notes || []).join(', ')}</td>
+                        <td className="py-2 pr-4 text-center">{formatHours(d.workedHours || 0)}</td>
+                        <td className="py-2 pr-4 text-center">{formatHours(Math.min(d.workedHours || 0, d.expectedHours || 0))}</td>
+                        <td className="py-2 pr-4 text-center text-blue-700" title={`Detalhamento das Horas Extras:\n• 1,5x: ${formatHours(d.overtimeHours15 || 0)} (${((d.overtimeHours15 || 0) / 1.5).toFixed(2)}h × 1,5)\n• 2,0x: ${formatHours(d.overtimeHours20 || 0)} (${((d.overtimeHours20 || 0) / 2.0).toFixed(2)}h × 2,0)\n• Total: ${formatHours((d.overtimeHours !== undefined ? d.overtimeHours : (d.overtimeHours15 || 0) + (d.overtimeHours20 || 0)) || 0)}`}>{formatHours((d.overtimeHours !== undefined ? d.overtimeHours : (d.overtimeHours15 || 0) + (d.overtimeHours20 || 0)) || 0)}</td>
+                        <td className="py-2 pr-4 text-center text-red-700">{formatHours(d.owedHours || 0)}</td>
+                        <td className="py-2 pr-4 text-center text-gray-600">{(d.notes || []).join(', ')}</td>
                       </tr>
                     ))}
                   </tbody>
+                {bankHoursDetailed?.data?.days && bankHoursDetailed.data.days.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t font-semibold text-sm">
+                      <td className="py-2 pr-4" colSpan={2}>Totais do mês</td>
+                      <td className="py-2 pr-4 text-center">
+                        {formatHours((bankHoursDetailed.data.days as any[]).reduce((acc, d: any) => acc + (d.expectedHours || 0), 0))}
+                      </td>
+                      <td className="py-2 pr-4 text-center">
+                        {formatHours((bankHoursDetailed.data.days as any[]).reduce((acc, d: any) => acc + (d.workedHours || 0), 0))}
+                      </td>
+                      <td className="py-2 pr-4 text-center">
+                        {formatHours((bankHoursDetailed.data.days as any[]).reduce((acc, d: any) => acc + Math.min((d.workedHours || 0), (d.expectedHours || 0)), 0))}
+                      </td>
+                      <td className="py-2 pr-4 text-center text-blue-700">
+                        {formatHours((bankHoursDetailed.data.days as any[]).reduce((acc, d: any) => acc + (d.overtimeHours !== undefined ? d.overtimeHours : ((d.overtimeHours15 || 0) + (d.overtimeHours20 || 0))), 0))}
+                      </td>
+                      <td className="py-2 pr-4 text-center text-red-700">
+                        {formatHours((bankHoursDetailed.data.days as any[]).reduce((acc, d: any) => acc + (d.owedHours || 0), 0))}
+                      </td>
+                      <td className="py-2 pr-4 text-center"></td>
+                    </tr>
+                  </tfoot>
+                )}
                 </table>
               </div>
             </div>

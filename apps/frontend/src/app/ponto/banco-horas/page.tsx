@@ -179,11 +179,6 @@ export default function BankHoursPage() {
   });
 
   const formatHours = (hours: number) => {
-    const sign = hours >= 0 ? '+' : '';
-    return `${sign}${hours.toFixed(1)}h`;
-  };
-
-  const formatTime = (hours: number) => {
     const totalMinutes = Math.abs(hours) * 60;
     const h = Math.floor(totalMinutes / 60);
     const m = Math.floor(totalMinutes % 60);
@@ -191,6 +186,15 @@ export default function BankHoursPage() {
     
     const sign = hours >= 0 ? '+' : '-';
     return `${sign}${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const formatHoursNoSign = (hours: number) => {
+    const totalMinutes = Math.abs(hours) * 60;
+    const h = Math.floor(totalMinutes / 60);
+    const m = Math.floor(totalMinutes % 60);
+    const s = Math.floor((totalMinutes % 1) * 60);
+    
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   const getStatusColor = (bankHours: number) => {
@@ -221,11 +225,11 @@ export default function BankHoursPage() {
       'Cargo': employee.position,
       'Centro de Custo': employee.costCenter || '-',
       'Tomador': employee.client || '-',
-      'Horas Trabalhadas': formatTime(employee.totalWorkedHours),
-      'Horas Esperadas': formatTime(employee.totalExpectedHours),
-      'Banco de Horas': formatTime(employee.bankHours),
-      'Horas Extras (Multiplicadas)': formatTime(employee.overtimeMultipliedHours),
-      'Status': getStatusText(employee.bankHours)
+      'Horas Esperadas': formatHoursNoSign(employee.totalExpectedHours),
+      'Horas Trabalhadas': formatHoursNoSign(employee.totalWorkedHours),
+      'Horas Extras (ponderadas)': formatHoursNoSign(employee.overtimeMultipliedHours),
+      'Horas Devidas': formatHoursNoSign(employee.pendingHours),
+      'Saldo Atual': formatHours(employee.bankHours)
     }));
 
     // Criar workbook
@@ -456,7 +460,7 @@ export default function BankHoursPage() {
                             <option value="">Todos os status</option>
                             <option value="positive">Positivo</option>
                             <option value="negative">Negativo</option>
-                            <option value="neutral">Neutro</option>
+                            <option value="zero">Neutro</option>
                           </select>
                         </div>
                       </div>
@@ -580,26 +584,26 @@ export default function BankHoursPage() {
                       Tomador
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                      Horas Trabalhadas
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                       Horas Esperadas
                     </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Banco de Horas
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
+                      Horas Trabalhadas
                     </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Horas Extras
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
+                      Horas Devidas
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Saldo Atual
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {loadingBankHours ? (
                     <tr>
-                      <td colSpan={9} className="px-6 py-8 text-center">
+                      <td colSpan={8} className="px-6 py-8 text-center">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
                           <span className="text-gray-600">Carregando banco de horas...</span>
@@ -608,7 +612,7 @@ export default function BankHoursPage() {
                     </tr>
                   ) : filteredData.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-6 py-8 text-center">
+                      <td colSpan={8} className="px-6 py-8 text-center">
                         <div className="text-gray-500">
                           <p>Nenhum funcionário encontrado.</p>
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
@@ -656,27 +660,27 @@ export default function BankHoursPage() {
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
                           <span className="text-sm text-gray-900">
-                            {formatTime(employee.totalWorkedHours)}
+                            {formatHoursNoSign(employee.totalExpectedHours)}
                           </span>
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
                           <span className="text-sm text-gray-900">
-                            {formatTime(employee.totalExpectedHours)}
+                            {formatHoursNoSign(employee.totalWorkedHours)}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                          <span className="text-sm text-gray-900">
+                            {formatHoursNoSign(employee.overtimeMultipliedHours)}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                          <span className="text-sm text-gray-900">
+                            {formatHoursNoSign(employee.pendingHours)}
                           </span>
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
                           <span className={`text-sm font-bold ${employee.bankHours >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatTime(employee.bankHours)}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden xl:table-cell">
-                          <span className="text-sm font-bold text-orange-600">
-                            {formatTime(employee.overtimeMultipliedHours)}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
-                          <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(employee.bankHours)}`}>
-                            {getStatusText(employee.bankHours)}
+                            {formatHours(employee.bankHours)}
                           </span>
                         </td>
                       </tr>
