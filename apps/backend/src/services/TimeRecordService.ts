@@ -308,7 +308,7 @@ export class TimeRecordService {
   async calculateBankHours(userId: string, startDate: Date, endDate: Date) {
     // Usar o método detalhado para garantir consistência
     const detailedResult = await this.calculateBankHoursDetailed(userId, startDate, endDate);
-    
+
     return {
       startDate: detailedResult.startDate,
       endDate: detailedResult.endDate,
@@ -435,7 +435,7 @@ export class TimeRecordService {
             const dayOfWeek = cursor.day();
 
             if (expected > 0) {
-              if (worked >= expected) {
+            if (worked >= expected) {
                 const rawOvertime = worked - expected; // total de horas extras
                 // Parte 2x são as horas após 22h, limitadas ao total de extras
                 const extra20 = Math.min(workedAfter22, rawOvertime);
@@ -445,8 +445,8 @@ export class TimeRecordService {
                 overtime = overtime15 + overtime20;
 
 
-              } else {
-                owed = expected - worked;
+            } else {
+              owed = expected - worked;
               }
             } else {
               // Dias sem horas esperadas (sábado/domingo): tudo é extra

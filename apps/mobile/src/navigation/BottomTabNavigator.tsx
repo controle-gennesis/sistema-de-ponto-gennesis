@@ -6,7 +6,7 @@ import { useTheme } from '../context/ThemeContext';
 
 // Screens
 import DashboardScreen from '../screens/RecordsScreen';
-import Screen1 from '../screens/Screen1';
+import BankHoursScreen from '../screens/BankHoursScreen';
 import Screen2 from '../screens/ProfileScreen';
 
 export type BottomTabParamList = {
@@ -44,7 +44,7 @@ export default function BottomTabNavigator() {
     >
       <Tab.Screen
         name="Home"
-        component={Screen1}
+        component={BankHoursScreen}
         options={{
           tabBarLabel: 'Banco de Horas',
           tabBarIcon: ({ color, size }) => <CalendarClock size={size} color={color} />,
