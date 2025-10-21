@@ -923,10 +923,6 @@ const getStyles = (colors: any) => StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: 12,
     paddingVertical: 18,
-    shadowColor: '#ce3736',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
     elevation: 0,
   },
   confirmButtonDisabled: {

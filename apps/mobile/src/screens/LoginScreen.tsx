@@ -11,6 +11,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuth } from '../context/AuthContext';
@@ -57,6 +58,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <StatusBar style={isDark ? "light" : "dark"} backgroundColor={colors.background} />
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -136,7 +138,7 @@ export default function LoginScreen() {
 const getStyles = (colors: any) => StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,

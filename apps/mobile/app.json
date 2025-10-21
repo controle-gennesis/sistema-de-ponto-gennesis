@@ -9,7 +9,7 @@
     "splash": {
       "image": "./assets/favicon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#3b82f6"
+      "backgroundColor": "#111827"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -17,6 +17,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.engenharia.sistemaponto",
+      "statusBar": {
+        "style": "light",
+        "backgroundColor": "#111827"
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "Este app precisa acessar a câmera para capturar fotos ao bater o ponto.",
         "NSLocationWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
@@ -26,7 +30,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/favicon.png",
-        "backgroundColor": "#3b82f6"
+        "backgroundColor": "#111827"
       },
       "package": "com.engenharia.sistemaponto",
       "navigationBar": {
