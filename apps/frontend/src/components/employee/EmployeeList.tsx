@@ -226,9 +226,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       // Processar registros do dia
       dayRecords.forEach((record: any) => {
         const date = new Date(record.timestamp);
-        const hours = date.getUTCHours().toString().padStart(2, '0');
-        const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-        const seconds = date.getUTCSeconds().toString().padStart(2, '0');
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        const seconds = date.getSeconds().toString().padStart(2, '0');
         const time = `${hours}:${minutes}:${seconds}`;
 
         switch (record.type) {
@@ -501,11 +501,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     
     // Converter timestamp para formato local sem conversão de timezone
     const date = new Date(record.timestamp);
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const hours = String(date.getUTCHours()).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
     const localTimestamp = `${year}-${month}-${day}T${hours}:${minutes}`;
     
     setEditForm({
@@ -1449,9 +1449,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                       <span className="text-sm font-medium text-gray-900">
                                         {(() => {
                                           const date = new Date(record.timestamp);
-                                          const hours = date.getUTCHours().toString().padStart(2, '0');
-                                          const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-                                          const seconds = date.getUTCSeconds().toString().padStart(2, '0');
+                                          const hours = date.getHours().toString().padStart(2, '0');
+                                          const minutes = date.getMinutes().toString().padStart(2, '0');
+                                          const seconds = date.getSeconds().toString().padStart(2, '0');
                                           return `${hours}:${minutes}:${seconds}`;
                                         })()}
                                       </span>

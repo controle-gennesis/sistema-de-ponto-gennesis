@@ -60,20 +60,20 @@ export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onVie
   };
 
   const formatTime = (timestamp: string) => {
-    // O timestamp já está em horário de Brasília, então extrair diretamente
+    // O timestamp já está em horário local, então extrair diretamente
     const date = new Date(timestamp);
-    const hours = date.getUTCHours().toString().padStart(2, '0');
-    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-    const seconds = date.getUTCSeconds().toString().padStart(2, '0');
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const seconds = date.getSeconds().toString().padStart(2, '0');
     return `${hours}:${minutes}:${seconds}`;
   };
 
   const formatDate = (timestamp: string) => {
-    // O timestamp já está em horário de Brasília, então extrair diretamente
+    // O timestamp já está em horário local, então extrair diretamente
     const date = new Date(timestamp);
-    const day = date.getUTCDate().toString().padStart(2, '0');
-    const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-    const year = date.getUTCFullYear();
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
     return `${day}/${month}/${year}`;
   };
 
