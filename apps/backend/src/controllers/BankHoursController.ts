@@ -131,13 +131,13 @@ export class BankHoursController {
       if (status) {
         switch (status) {
           case 'positive':
-            filteredData = bankHoursData.filter(emp => emp.bankHours > 0);
+          filteredData = bankHoursData.filter(emp => emp.bankHours > 0);
             break;
           case 'negative':
-            filteredData = bankHoursData.filter(emp => emp.bankHours < 0);
+          filteredData = bankHoursData.filter(emp => emp.bankHours < 0);
             break;
           case 'zero':
-            filteredData = bankHoursData.filter(emp => emp.bankHours === 0);
+          filteredData = bankHoursData.filter(emp => emp.bankHours === 0);
             break;
         }
       }

@@ -697,7 +697,7 @@ export default function FolhaPagamentoPage() {
                               {employee.department && `${employee.department} • ${employee.company || 'N/A'}`}
                             </div>
                             <div className="text-xs text-gray-400">
-                              {employee.employeeId && `ID: ${employee.employeeId}`}
+                              {employee.employeeId || 'N/A'}
                             </div>
                           </div>
                         </td>

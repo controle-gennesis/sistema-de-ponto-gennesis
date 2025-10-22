@@ -846,7 +846,7 @@ export default function AlocacaoPage() {
                       const dayName = dayNames[date.getDay()];
                       
                       return (
-                        <th key={day} className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-16">
+                        <th key={day} className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-16">
                           <div>{dayName}</div>
                           <div>({day}/{filters.month})</div>
                         </th>
@@ -863,19 +863,19 @@ export default function AlocacaoPage() {
                       <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-gray-200">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
-                          <span className="text-gray-600">Carregando funcionários...</span>
+                            <span className="text-gray-600">Carregando...</span>
                         </div>
                       </td>
-                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-6 py-8 text-center">
+                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-3 sm:px-6 py-4 text-center">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
-                          <span className="text-gray-600">Carregando funcionários...</span>
+                            <span className="text-gray-600">Carregando...</span>
                         </div>
                       </td>
                       <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
-                          <span className="text-gray-600">Carregando funcionários...</span>
+                            <span className="text-gray-600">Carregando...</span>
                         </div>
                       </td>
                     </tr>
@@ -887,7 +887,7 @@ export default function AlocacaoPage() {
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
                         </div>
                       </td>
-                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-6 py-8 text-center">
+                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-3 sm:px-6 py-4 text-center">
                         <div className="text-gray-500">
                           <p>Nenhum funcionário encontrado.</p>
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
@@ -925,7 +925,7 @@ export default function AlocacaoPage() {
                           const today = new Date();
                           const dateString = date.toISOString().split('T')[0];
                           
-                          let cellClass = 'px-1 py-2 text-center text-xs ';
+                          let cellClass = 'px-3 sm:px-6 py-4 text-center text-xs ';
                           let cellContent = '';
                           
                           // Verificar se é futuro
@@ -1040,10 +1040,10 @@ export default function AlocacaoPage() {
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
                           <button
                             onClick={() => handleViewDetails(employee)}
-                            className="p-2 text-yellow-600 hover:text-yellow-600 hover:bg-yellow-100 rounded-lg transition-colors"
-                            title="Ver Centro de Custo"
+                            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-yellow-600 hover:text-yellow-600 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors"
+                            title="Ver detalhes"
                           >
-                            <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+                            <FileText className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
