@@ -103,27 +103,27 @@ export default function TimeRecordsScreen() {
   };
 
   const formatTime = (timestamp: string) => {
-    // Banco salva horário literal de Brasília
-    // Usar getUTCHours/Minutes para ler o valor literal sem conversão
+    // Banco salva horário literal local
+    // Usar getHours/Minutes para ler o valor literal sem conversão
     const date = new Date(timestamp);
-    const hours = String(date.getUTCHours()).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
     return `${hours}:${minutes}`;
   };
 
   const formatDate = (timestamp: string) => {
-    // Usar UTC para ler valores literais sem conversão
+    // Usar valores locais para ler valores literais sem conversão
     const date = new Date(timestamp);
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const year = date.getUTCFullYear();
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
     return `${day}/${month}/${year}`;
   };
 
   const getWeekday = (timestamp: string) => {
     const date = new Date(timestamp);
     const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    return days[date.getUTCDay()];
+    return days[date.getDay()];
   };
 
   // Agrupar registros por data
