@@ -377,15 +377,8 @@ export class TimeRecordService {
           if (!exit) notes.push('Saída não registrada');
           if (entry && exit) {
             const TZ = 'America/Sao_Paulo';
-            // Reinterpretar o horário UTC como relógio local (usar campos UTC como clock time local)
-            const toLocal = (d: Date) => moment.tz({
-              year: d.getUTCFullYear(),
-              month: d.getUTCMonth(),
-              day: d.getUTCDate(),
-              hour: d.getUTCHours(),
-              minute: d.getUTCMinutes(),
-              second: d.getUTCSeconds(),
-            }, TZ);
+            // Usar o horário diretamente como está salvo (sem conversão)
+            const toLocal = (d: Date) => moment(d);
             const entryMoment = toLocal(entry.timestamp);
             const exitMoment = toLocal(exit.timestamp);
 
@@ -411,10 +404,9 @@ export class TimeRecordService {
             // Horas trabalhadas totais
             worked = Math.max(0, total - lunch);
 
-            // Calcular horas trabalhadas após as 22:00 no DIA LOCAL usando apenas momentos em TZ local
-            const TZ2 = 'America/Sao_Paulo';
-            const localDayStr = entryMoment.tz(TZ2).format('YYYY-MM-DD');
-            const boundary22Local = moment.tz(`${localDayStr} 22:00`, 'YYYY-MM-DD HH:mm', TZ2);
+            // Calcular horas trabalhadas após as 22:00 usando horário local
+            const localDayStr = entryMoment.format('YYYY-MM-DD');
+            const boundary22Local = moment(`${localDayStr} 22:00`, 'YYYY-MM-DD HH:mm');
             const endOfLocalDayLocal = boundary22Local.clone().endOf('day');
 
             const overlapAfter22Local = (startLocal: moment.Moment, endLocal: moment.Moment) => {
