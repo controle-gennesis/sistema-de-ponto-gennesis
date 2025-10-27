@@ -411,6 +411,13 @@ export interface PayrollEmployee {
   he100Hours: number;
   he100Value: number;
   hourlyRate: number;
+  // Férias
+  vacationDays: number;
+  baseInssFerias: number;
+  inssFerias: number;
+  // Valores Manuais
+  inssRescisao: number;
+  inss13: number;
 }
 
 export interface MonthlyPayrollData {

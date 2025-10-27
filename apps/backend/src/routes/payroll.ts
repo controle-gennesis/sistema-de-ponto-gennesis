@@ -35,4 +35,9 @@ router.get('/employees', (req, res, next) =>
   payrollController.getEmployeesForPayroll(req, res, next)
 );
 
+// Salvar valores manuais de INSS
+router.post('/manual-inss', (req, res, next) => 
+  payrollController.saveManualInssValues(req, res, next)
+);
+
 export default router;

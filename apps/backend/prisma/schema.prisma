@@ -94,6 +94,7 @@ model Employee {
   salaryAdjustments SalaryAdjustment[]
   salaryDiscounts   SalaryDiscount[]
   pointCorrectionRequests PointCorrectionRequest[]
+  manualInssValues   ManualInssValue[]
 
   @@map("employees")
 }
@@ -499,6 +500,25 @@ model PointCorrectionComment {
   user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("point_correction_comments")
+}
+
+// Modelo de Valores Manuais de INSS (Rescisão e 13°)
+model ManualInssValue {
+  id         String   @id @default(cuid())
+  employeeId String
+  month      Int      // Mês (1-12)
+  year       Int      // Ano
+  inssRescisao Decimal @default(0) // INSS RESCISÃO
+  inss13     Decimal  @default(0)  // INSS 13°
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relacionamentos
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // Índice único para evitar duplicatas
+  @@unique([employeeId, month, year])
+  @@map("manual_inss_values")
 }
 
 enum RequestStatus {

@@ -145,27 +145,26 @@ export class TimeRecordController {
       }
 
 
-      // Cliente envia timestamp no horário local (ex: "2025-10-14T16:07:00")
-      // Vamos salvar EXATAMENTE esse valor sem conversão de timezone
+      // Cliente envia timestamp no horário local (ex: "2025-01-15T08:00:00")
+      // Parse manual e adicionar 3 horas para compensar UTC-3 de Brasília
       let timestamp: Date;
       if (clientTimestamp) {
-        // Parse manual para evitar conversão automática de timezone
         const parts = clientTimestamp.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
         if (parts) {
-          // Criar Date com os valores locais (sem conversão UTC)
           const year = parseInt(parts[1]);
-          const month = parseInt(parts[2]) - 1; // Month is 0-indexed
+          const month = parseInt(parts[2]) - 1;
           const day = parseInt(parts[3]);
           const hours = parseInt(parts[4]);
           const minutes = parseInt(parts[5]);
           const seconds = parseInt(parts[6]);
-          timestamp = new Date(year, month, day, hours, minutes, seconds);
+          // Criar timestamp em UTC (PostgreSQL armazena em UTC)
+          // Para Brasília (UTC-3), adicionamos 3h para que ao exibir mostre o horário correto
+          timestamp = new Date(Date.UTC(year, month, day, hours + 3, minutes, seconds));
         } else {
           timestamp = new Date(clientTimestamp);
         }
       } else {
-        // Se não há clientTimestamp, usar horário atual local
-        timestamp = new Date();
+        timestamp = moment.tz('America/Sao_Paulo').toDate();
       }
       
       // Calcular VA e VT baseado no tipo de registro
@@ -192,13 +191,13 @@ export class TimeRecordController {
           transportVoucherAmount = employee.dailyTransportVoucher || 0;
         }
       }
-      
+
       const timeRecord = await prisma.timeRecord.create({
         data: {
           userId,
           employeeId: employee.id,
           type,
-          timestamp: timestamp, // Usar timestamp correto
+          timestamp: timestamp, // Usar timestamp exatamente como veio do mobile
           latitude: latNum !== null && !Number.isNaN(latNum) ? latNum : null,
           longitude: lonNum !== null && !Number.isNaN(lonNum) ? lonNum : null,
           photoUrl: photoUrl || null,

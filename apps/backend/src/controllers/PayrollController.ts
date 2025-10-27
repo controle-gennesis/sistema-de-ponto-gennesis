@@ -211,4 +211,47 @@ export class PayrollController {
       next(error);
     }
   }
+
+  /**
+   * Salva valores manuais de INSS
+   */
+  async saveManualInssValues(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { employeeId, month, year, inssRescisao, inss13 } = req.body;
+
+      // Validar parâmetros obrigatórios
+      if (!employeeId || !month || !year) {
+        throw createError('ID do funcionário, mês e ano são obrigatórios', 400);
+      }
+
+      // Validar valores numéricos
+      if (month < 1 || month > 12) {
+        throw createError('Mês deve estar entre 1 e 12', 400);
+      }
+
+      if (year < 2020 || year > 2030) {
+        throw createError('Ano deve estar entre 2020 e 2030', 400);
+      }
+
+      if (inssRescisao < 0 || inss13 < 0) {
+        throw createError('Valores de INSS não podem ser negativos', 400);
+      }
+
+      const result = await payrollService.saveManualInssValues({
+        employeeId: employeeId, // Já é string, não precisa converter
+        month: parseInt(month),
+        year: parseInt(year),
+        inssRescisao: parseFloat(inssRescisao) || 0,
+        inss13: parseFloat(inss13) || 0
+      });
+
+      res.json({
+        success: true,
+        message: 'Valores manuais de INSS salvos com sucesso',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }

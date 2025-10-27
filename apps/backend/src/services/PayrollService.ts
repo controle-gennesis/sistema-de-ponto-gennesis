@@ -99,6 +99,13 @@ export interface PayrollEmployee {
   he100Hours: number;
   he100Value: number;
   hourlyRate: number;
+  // Férias
+  vacationDays: number;
+  baseInssFerias: number;
+  inssFerias: number;
+  // Valores Manuais
+  inssRescisao: number;
+  inss13: number;
 }
 
 export interface MonthlyPayrollData {
@@ -413,6 +420,49 @@ export class PayrollService {
           Number(employee.dangerPay || 0),
           Number(employee.unhealthyPay || 0)
         );
+
+        // Calcular variáveis necessárias para BASE INSS MENSAL
+        const salarioBase = Number(employee.salary);
+        const periculosidade = Number(employee.dangerPay || 0);
+        const insalubridade = Number(employee.unhealthyPay || 0);
+        const faltas = totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0;
+        
+        // Calcular número de dias do mês
+        const diasDoMes = new Date(year, month, 0).getDate();
+        const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
+        const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
+        
+        // Calcular DSR H.E
+        const totalHorasExtras = hoursExtras.he50Hours + hoursExtras.he100Hours;
+        const diasUteis = totals.totalWorkingDays || 0;
+        const diasNaoUteis = diasDoMes - diasUteis;
+        const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+        
+        // Calcular valor do DSR H.E considerando as diferentes taxas
+        // hoursExtras.he50Hours e hoursExtras.he100Hours já vêm multiplicados do HoursExtrasService
+        const valorDSRHE = diasUteis > 0 ? 
+          ((hoursExtras.he50Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate) +  // DSR sobre HE 50% (já multiplicado)
+          ((hoursExtras.he100Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate)   // DSR sobre HE 100% (já multiplicado)
+          : 0;
+        
+        // Calcular BASE INSS MENSAL
+        const valorHorasExtras = hoursExtras.he50Value + hoursExtras.he100Value;
+        const baseInssMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+          ? 0 
+          : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+        
+        const { vacationDays, baseInssFerias, inssFerias } = await this.calculateBaseInssFerias(employee.id, month, year, baseInssMensal);
+        
+        // Buscar valores manuais de INSS
+        const manualInss = await prisma.manualInssValue.findUnique({
+          where: {
+            employeeId_month_year: {
+              employeeId: employee.id,
+              month: month,
+              year: year
+            }
+          }
+        });
         
         return {
           id: employee.id,
@@ -453,7 +503,14 @@ export class PayrollService {
           he50Value: hoursExtras.he50Value,
           he100Hours: hoursExtras.he100Hours,
           he100Value: hoursExtras.he100Value,
-          hourlyRate: hoursExtras.hourlyRate
+          hourlyRate: hoursExtras.hourlyRate,
+          // Férias
+          vacationDays,
+          baseInssFerias,
+          inssFerias,
+          // Valores Manuais
+          inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
+          inss13: manualInss ? Number(manualInss.inss13) : 0
         } as PayrollEmployee;
       })
     );
@@ -502,6 +559,106 @@ export class PayrollService {
   }
 
   /**
+   * Calcula o INSS usando a tabela progressiva
+   */
+  private calculateINSS(baseINSS: number): number {
+    if (baseINSS <= 0) return 0;
+    
+    if (baseINSS <= 1518) {
+      return baseINSS * 0.075; // 7,5%
+    } else if (baseINSS <= 2793) {
+      return (1518 * 0.075) + ((baseINSS - 1518) * 0.09); // 7,5% até 1518 + 9% do excedente
+    } else if (baseINSS <= 4190) {
+      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12); // 7,5% até 1518 + 9% até 2793 + 12% do excedente
+    } else if (baseINSS <= 8157) {
+      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14); // 7,5% até 1518 + 9% até 2793 + 12% até 4190 + 14% do excedente
+    } else {
+      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14); // Teto máximo
+    }
+  }
+
+  /**
+   * Calcula a BASE INSS FÉRIAS e INSS FÉRIAS para um funcionário
+   */
+  private async calculateBaseInssFerias(employeeId: string, month: number, year: number, baseInssMensal: number): Promise<{ vacationDays: number; baseInssFerias: number; inssFerias: number }> {
+    try {
+      // Buscar férias do funcionário no mês especificado
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+
+      const vacations = await prisma.vacation.findMany({
+        where: {
+          employeeId,
+          startDate: {
+            lte: endDate
+          },
+          endDate: {
+            gte: startDate
+          },
+          status: 'APPROVED' // Apenas férias aprovadas
+        }
+      });
+
+      // Calcular total de dias de férias no mês
+      let totalVacationDays = 0;
+      for (const vacation of vacations) {
+        const vacationStart = new Date(vacation.startDate);
+        const vacationEnd = new Date(vacation.endDate);
+        
+        // Calcular interseção com o mês
+        const monthStart = new Date(year, month - 1, 1);
+        const monthEnd = new Date(year, month, 0);
+        
+        const intersectionStart = new Date(Math.max(vacationStart.getTime(), monthStart.getTime()));
+        const intersectionEnd = new Date(Math.min(vacationEnd.getTime(), monthEnd.getTime()));
+        
+        if (intersectionStart <= intersectionEnd) {
+          const daysDiff = Math.ceil((intersectionEnd.getTime() - intersectionStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          totalVacationDays += daysDiff;
+        }
+      }
+
+      // Buscar dados do funcionário para calcular a base
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        include: { user: true }
+      });
+
+      if (!employee) {
+        return { vacationDays: 0, baseInssFerias: 0, inssFerias: 0 };
+      }
+
+      // Calcular BASE INSS FÉRIAS e INSS FÉRIAS
+      let baseInssFerias = 0;
+      let inssFerias = 0;
+      
+      if (employee.modality !== 'MEI' && employee.modality !== 'ESTÁGIO' && totalVacationDays > 0) {
+        const salarioBase = Number(employee.salary);
+        const periculosidade = Number(employee.dangerPay || 0);
+        const insalubridade = Number(employee.unhealthyPay || 0);
+        
+        const remuneracaoBase = salarioBase + periculosidade + insalubridade;
+        const salarioProporcional = remuneracaoBase * (totalVacationDays / 30);
+        const tercoFerias = salarioProporcional / 3;
+        
+        baseInssFerias = salarioProporcional + tercoFerias;
+        
+        // Calcular INSS FÉRIAS: INSS(Total) - INSS(Mensal)
+        const baseInssTotal = baseInssMensal + baseInssFerias;
+        const inssTotal = this.calculateINSS(baseInssTotal);
+        const inssMensal = this.calculateINSS(baseInssMensal);
+        
+        inssFerias = Math.max(0, inssTotal - inssMensal);
+      }
+
+      return { vacationDays: totalVacationDays, baseInssFerias, inssFerias };
+    } catch (error) {
+      console.error('Erro ao calcular BASE INSS FÉRIAS:', error);
+      return { vacationDays: 0, baseInssFerias: 0, inssFerias: 0 };
+    }
+  }
+
+  /**
    * Obtém dados de um funcionário específico para folha
    */
   async getEmployeePayrollData(employeeId: string, month: number, year: number): Promise<PayrollEmployee | null> {
@@ -536,6 +693,49 @@ export class PayrollService {
       Number(employee.dangerPay || 0),
       Number(employee.unhealthyPay || 0)
     );
+
+    // Calcular variáveis necessárias para BASE INSS MENSAL
+    const salarioBase = Number(employee.salary);
+    const periculosidade = Number(employee.dangerPay || 0);
+    const insalubridade = Number(employee.unhealthyPay || 0);
+    const faltas = totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0;
+    
+    // Calcular número de dias do mês
+    const diasDoMes = new Date(year, month, 0).getDate();
+    const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
+    const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
+    
+    // Calcular DSR H.E
+    const totalHorasExtras = hoursExtras.he50Hours + hoursExtras.he100Hours;
+    const diasUteis = totals.totalWorkingDays || 0;
+    const diasNaoUteis = diasDoMes - diasUteis;
+    const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+    
+    // Calcular valor do DSR H.E considerando as diferentes taxas
+    // hoursExtras.he50Hours e hoursExtras.he100Hours já vêm multiplicados do HoursExtrasService
+    const valorDSRHE = diasUteis > 0 ? 
+      ((hoursExtras.he50Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate) +  // DSR sobre HE 50% (já multiplicado)
+      ((hoursExtras.he100Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate)   // DSR sobre HE 100% (já multiplicado)
+      : 0;
+    
+    // Calcular BASE INSS MENSAL
+    const valorHorasExtras = hoursExtras.he50Value + hoursExtras.he100Value;
+    const baseInssMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+      ? 0 
+      : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+    
+    const { vacationDays, baseInssFerias, inssFerias } = await this.calculateBaseInssFerias(employee.id, month, year, baseInssMensal);
+    
+    // Buscar valores manuais de INSS
+    const manualInss = await prisma.manualInssValue.findUnique({
+      where: {
+        employeeId_month_year: {
+          employeeId: employee.id,
+          month: month,
+          year: year
+        }
+      }
+    });
 
     return {
       id: employee.id,
@@ -576,7 +776,14 @@ export class PayrollService {
       he50Value: hoursExtras.he50Value,
       he100Hours: hoursExtras.he100Hours,
       he100Value: hoursExtras.he100Value,
-      hourlyRate: hoursExtras.hourlyRate
+      hourlyRate: hoursExtras.hourlyRate,
+      // Férias
+      vacationDays,
+      baseInssFerias,
+      inssFerias,
+      // Valores Manuais
+      inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
+      inss13: manualInss ? Number(manualInss.inss13) : 0
     };
   }
 
@@ -634,5 +841,52 @@ export class PayrollService {
     }, {} as Record<string, any>);
 
     return Object.values(statsByDepartment);
+  }
+
+  /**
+   * Salva valores manuais de INSS para um funcionário
+   */
+  async saveManualInssValues(data: {
+    employeeId: string;
+    month: number;
+    year: number;
+    inssRescisao: number;
+    inss13: number;
+  }) {
+    const { employeeId, month, year, inssRescisao, inss13 } = data;
+
+    // Verificar se o funcionário existe
+    const employee = await prisma.employee.findUnique({
+      where: { id: employeeId }
+    });
+
+    if (!employee) {
+      throw new Error('Funcionário não encontrado');
+    }
+
+    // Salvar ou atualizar os valores manuais
+    const result = await prisma.manualInssValue.upsert({
+      where: {
+        employeeId_month_year: {
+          employeeId: employeeId,
+          month,
+          year
+        }
+      },
+      update: {
+        inssRescisao,
+        inss13,
+        updatedAt: new Date()
+      },
+      create: {
+        employeeId: employeeId,
+        month,
+        year,
+        inssRescisao,
+        inss13
+      }
+    });
+
+    return result;
   }
 }

@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon, Save, Plus } from 'lucide-react';
 import { PayrollEmployee } from '@/types';
 
 interface PayrollDetailModalProps {
@@ -8,6 +8,7 @@ interface PayrollDetailModalProps {
   year: number;
   isOpen: boolean;
   onClose: () => void;
+  onEmployeeUpdate?: (updatedEmployee: PayrollEmployee) => void;
 }
 
 const monthNames = [
@@ -15,11 +16,79 @@ const monthNames = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
-export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: PayrollDetailModalProps) {
+export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate }: PayrollDetailModalProps) {
   if (!isOpen) return null;
 
   const monthName = monthNames[month - 1];
   
+  // Estados para os valores manuais editáveis
+  const [inssRescisao, setInssRescisao] = useState(employee.inssRescisao || 0);
+  const [inss13, setInss13] = useState(employee.inss13 || 0);
+  const [editingField, setEditingField] = useState<'inssRescisao' | 'inss13' | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Atualizar estados quando o funcionário mudar
+  useEffect(() => {
+    setInssRescisao(employee.inssRescisao || 0);
+    setInss13(employee.inss13 || 0);
+  }, [employee]);
+  
+  // Função para salvar os valores manuais
+  const handleSaveManualValues = async () => {
+    setIsSaving(true);
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`${API_URL}/payroll/manual-inss`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          employeeId: employee.id,
+          month,
+          year,
+          inssRescisao,
+          inss13
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao salvar valores manuais');
+      }
+
+      // Recarregar dados do funcionário
+      const employeeResponse = await fetch(`${API_URL}/payroll/employee/${employee.id}?month=${month}&year=${year}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+
+      if (employeeResponse.ok) {
+        const updatedEmployeeData = await employeeResponse.json();
+        if (updatedEmployeeData.success && updatedEmployeeData.data) {
+          // Atualizar os estados locais
+          setInssRescisao(updatedEmployeeData.data.inssRescisao || 0);
+          setInss13(updatedEmployeeData.data.inss13 || 0);
+          
+          // Notificar o componente pai sobre a atualização
+          if (onEmployeeUpdate) {
+            onEmployeeUpdate(updatedEmployeeData.data);
+          }
+        }
+      }
+
+      setEditingField(null);
+      console.log('Valores salvos com sucesso!');
+    } catch (error) {
+      console.error('Erro ao salvar:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Cálculos
   const salarioBase = employee.salary;
   const periculosidade = employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0;
@@ -45,9 +114,15 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
   const diasNaoUteis = diasDoMes - diasUteis; // Domingo + feriados
   const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
   
+  // Cálculo do valor do DSR H.E considerando as diferentes taxas
+  // he50Hours e he100Hours já vêm multiplicados do backend
+  const valorDSRHE = diasUteis > 0 ? 
+    ((employee.he50Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0) +  // DSR sobre HE 50% (já multiplicado)
+    ((employee.he100Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0)   // DSR sobre HE 100% (já multiplicado)
+    : 0;
+  
   // Cálculo da BASE INSS MENSAL
   const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
-  const valorDSRHE = dsrHE * (employee.hourlyRate || 0);
   const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
     ? 0 
     : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
@@ -554,6 +629,162 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose }: P
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-700">
                       R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* BASE INSS FÉRIAS */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      017
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      BASE INSS FÉRIAS
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.modality === 'MEI' || employee.modality === 'ESTÁGIO' ? 'Não aplicável' : `${employee.vacationDays || 0} dias`}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 border-r border-gray-200">
+                      R$ {(employee.baseInssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400">
+                      -
+                    </td>
+                  </tr>
+
+                  {/* INSS FÉRIAS */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      018
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      INSS FÉRIAS
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.modality === 'MEI' || employee.modality === 'ESTÁGIO' ? 'Não aplicável' : 'Sobre férias'}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-red-700">
+                      R$ {(employee.inssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* INSS RESCISÃO */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      019
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      INSS RESCISÃO
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      Manual
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm font-bold text-red-700">
+                      {editingField === 'inssRescisao' ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <input
+                            type="text"
+                            value={inssRescisao === 0 ? '' : inssRescisao.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setInssRescisao(parseFloat(value.replace(',', '.')) || 0);
+                            }}
+                            className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="0"
+                          />
+                          <button
+                            onClick={handleSaveManualValues}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : inssRescisao > 0 ? (
+                        <div 
+                          className="cursor-pointer hover:bg-gray-100 px-2 py-1 rounded text-right"
+                          onClick={() => setEditingField('inssRescisao')}
+                          title="Clique para editar"
+                        >
+                          R$ {inssRescisao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      ) : (
+                        <div className="flex justify-center">
+                          <button
+                            onClick={() => setEditingField('inssRescisao')}
+                            className="flex items-center justify-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+                            title="Adicionar valor"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Adicionar
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+
+                  {/* INSS 13° */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      020
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      INSS 13°
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      Manual
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm font-bold text-red-700">
+                      {editingField === 'inss13' ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <input
+                            type="text"
+                            value={inss13 === 0 ? '' : inss13.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setInss13(parseFloat(value.replace(',', '.')) || 0);
+                            }}
+                            className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="0"
+                          />
+                          <button
+                            onClick={handleSaveManualValues}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : inss13 > 0 ? (
+                        <div 
+                          className="cursor-pointer hover:bg-gray-100 px-2 py-1 rounded text-right"
+                          onClick={() => setEditingField('inss13')}
+                          title="Clique para editar"
+                        >
+                          R$ {inss13.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      ) : (
+                        <div className="flex justify-center">
+                          <button
+                            onClick={() => setEditingField('inss13')}
+                            className="flex items-center justify-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+                            title="Adicionar valor"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Adicionar
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 </tbody>
