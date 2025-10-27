@@ -418,6 +418,10 @@ export interface PayrollEmployee {
   // Valores Manuais
   inssRescisao: number;
   inss13: number;
+  // FGTS
+  fgts: number;
+  fgtsFerias: number;
+  fgtsTotal: number;
 }
 
 export interface MonthlyPayrollData {

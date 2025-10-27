@@ -106,6 +106,10 @@ export interface PayrollEmployee {
   // Valores Manuais
   inssRescisao: number;
   inss13: number;
+  // FGTS
+  fgts: number;
+  fgtsFerias: number;
+  fgtsTotal: number;
 }
 
 export interface MonthlyPayrollData {
@@ -464,6 +468,20 @@ export class PayrollService {
           }
         });
         
+        // Calcular FGTS: 8% sobre a base de cálculo (mesma base do INSS)
+        const baseFGTS = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+          ? 0 
+          : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+        const fgts = baseFGTS * 0.08; // 8% de alíquota
+        
+        // Calcular FGTS Férias: 8% sobre a base INSS Férias
+        const fgtsFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+          ? 0 
+          : baseInssFerias * 0.08; // 8% sobre a base de férias
+        
+        // Calcular FGTS Total: Soma FGTS + FGTS Férias
+        const fgtsTotal = fgts + fgtsFerias;
+        
         return {
           id: employee.id,
           name: employee.user.name,
@@ -510,7 +528,11 @@ export class PayrollService {
           inssFerias,
           // Valores Manuais
           inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
-          inss13: manualInss ? Number(manualInss.inss13) : 0
+          inss13: manualInss ? Number(manualInss.inss13) : 0,
+          // FGTS
+          fgts,
+          fgtsFerias,
+          fgtsTotal
         } as PayrollEmployee;
       })
     );
@@ -737,6 +759,20 @@ export class PayrollService {
       }
     });
 
+    // Calcular FGTS: 8% sobre a base de cálculo (mesma base do INSS)
+    const baseFGTS = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+      ? 0 
+      : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+    const fgts = baseFGTS * 0.08; // 8% de alíquota
+    
+    // Calcular FGTS Férias: 8% sobre a base INSS Férias
+    const fgtsFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO'
+      ? 0 
+      : baseInssFerias * 0.08; // 8% sobre a base de férias
+
+    // Calcular FGTS Total: Soma FGTS + FGTS Férias
+    const fgtsTotal = fgts + fgtsFerias;
+
     return {
       id: employee.id,
       name: employee.user.name,
@@ -783,7 +819,11 @@ export class PayrollService {
       inssFerias,
       // Valores Manuais
       inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
-      inss13: manualInss ? Number(manualInss.inss13) : 0
+      inss13: manualInss ? Number(manualInss.inss13) : 0,
+      // FGTS
+      fgts,
+      fgtsFerias,
+      fgtsTotal
     };
   }
 
