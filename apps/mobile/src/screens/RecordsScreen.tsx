@@ -112,12 +112,12 @@ export default function DashboardScreen() {
   };
 
   const formatTime = (timestamp: string) => {
-    // Banco salva horário literal local
-    // Usar getHours/Minutes/Seconds para ler o valor literal sem conversão de timezone
+    // Banco salva horário em UTC
+    // Usar getUTCHours/Minutes/Seconds para ler o valor correto
     const date = new Date(timestamp);
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
     return `${hours}:${minutes}:${seconds}`;
   };
 

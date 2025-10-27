@@ -145,10 +145,11 @@ export class TimeRecordController {
       }
 
 
-      // Cliente envia timestamp no horário local (ex: "2025-01-15T08:00:00")
-      // Parse manual e adicionar 3 horas para compensar UTC-3 de Brasília
+      // Cliente envia timestamp no horário local (ex: "2025-01-15T09:19:00")
+      // Salvar EXATAMENTE esse valor sem conversão
       let timestamp: Date;
       if (clientTimestamp) {
+        // Parse manual para criar Date no horário local
         const parts = clientTimestamp.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
         if (parts) {
           const year = parseInt(parts[1]);
@@ -157,9 +158,10 @@ export class TimeRecordController {
           const hours = parseInt(parts[4]);
           const minutes = parseInt(parts[5]);
           const seconds = parseInt(parts[6]);
-          // Criar timestamp em UTC (PostgreSQL armazena em UTC)
-          // Para Brasília (UTC-3), adicionamos 3h para que ao exibir mostre o horário correto
-          timestamp = new Date(Date.UTC(year, month, day, hours + 3, minutes, seconds));
+          // Criar timestamp simulando que é UTC mas sem timezone
+          // Assim salva no banco o horário literal exato
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+          timestamp = new Date(dateStr + 'Z'); // Adicionar Z para forçar UTC
         } else {
           timestamp = new Date(clientTimestamp);
         }
