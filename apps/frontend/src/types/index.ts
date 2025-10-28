@@ -424,6 +424,9 @@ export interface PayrollEmployee {
   fgtsTotal: number;
   // INSS Total
   inssTotal: number;
+  // IRRF
+  irrfMensal: number;
+  irrfFerias: number;
 }
 
 export interface MonthlyPayrollData {

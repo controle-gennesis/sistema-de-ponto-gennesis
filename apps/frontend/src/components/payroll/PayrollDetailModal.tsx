@@ -807,10 +807,48 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     </td>
                   </tr>
 
-                  {/* FGTS */}
+                  {/* IRRF Mensal */}
                   <tr className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
                       022
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      IRRF MENSAL
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2025'}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-red-700">
+                      R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* IRRF Férias */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      023
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
+                      IRRF FÉRIAS
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600 border-r border-gray-200">
+                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2025'}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-gray-400 border-r border-gray-200">
+                      -
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-red-700">
+                      R$ {(employee.irrfFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* FGTS */}
+                  <tr className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
+                      024
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
                       FGTS
@@ -829,7 +867,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   {/* FGTS Férias */}
                   <tr className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
-                      023
+                      025
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">
                       FGTS FÉRIAS
@@ -848,7 +886,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   {/* FGTS Total */}
                   <tr className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 text-center text-sm font-medium text-gray-900 border-r border-gray-200">
-                      024
+                      026
                     </td>
                     <td className="px-6 py-4 text-sm font-bold text-gray-900 border-r border-gray-200">
                       FGTS TOTAL

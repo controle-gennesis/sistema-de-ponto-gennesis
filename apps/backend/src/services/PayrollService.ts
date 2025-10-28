@@ -112,6 +112,9 @@ export interface PayrollEmployee {
   fgtsTotal: number;
   // INSS Total
   inssTotal: number;
+  // IRRF
+  irrfMensal: number;
+  irrfFerias: number;
 }
 
 export interface MonthlyPayrollData {
@@ -491,6 +494,23 @@ export class PayrollService {
         const inssRescisaoValue = manualInss ? Number(manualInss.inssRescisao) : 0;
         const inssTotal = inssMensal + baseInssFerias + inssFerias + inssRescisaoValue;
         
+        // Calcular Base IRRF: Salário Bruto + Periculosidade + Insalubridade - INSS
+        const salarioBruto = salarioBase + periculosidade + insalubridade;
+        const baseIRRF = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+          ? 0 
+          : salarioBruto - inssMensal;
+        
+        // Calcular IRRF Mensal
+        const irrfMensal = this.calculateIRRF(baseIRRF);
+        
+        // Calcular Base IRRF Férias: (Salário + 1/3 Férias + Periculosidade + Insalubridade) - INSS Total
+        const baseIRRFFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+          ? 0 
+          : (salarioBruto + baseInssFerias) - inssTotal;
+        
+        // Calcular IRRF Férias
+        const irrfFerias = this.calculateIRRF(baseIRRFFerias);
+        
         return {
           id: employee.id,
           name: employee.user.name,
@@ -543,7 +563,10 @@ export class PayrollService {
           fgtsFerias,
           fgtsTotal,
           // INSS Total
-          inssTotal
+          inssTotal,
+          // IRRF
+          irrfMensal,
+          irrfFerias
         } as PayrollEmployee;
       })
     );
@@ -607,6 +630,26 @@ export class PayrollService {
       return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14); // 7,5% até 1518 + 9% até 2793 + 12% até 4190 + 14% do excedente
     } else {
       return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14); // Teto máximo
+    }
+  }
+
+  /**
+   * Calcula o IRRF Mensal baseado na tabela progressiva de 2025
+   */
+  private calculateIRRF(baseIRRF: number): number {
+    if (baseIRRF <= 0) return 0;
+    
+    // Aplicar tabela progressiva do IRRF
+    if (baseIRRF <= 2112.00) {
+      return 0; // Isento
+    } else if (baseIRRF <= 2826.65) {
+      return (baseIRRF * 0.075) - 158.40; // 7,5% - parcela a deduzir
+    } else if (baseIRRF <= 3751.05) {
+      return (baseIRRF * 0.15) - 370.40; // 15% - parcela a deduzir
+    } else if (baseIRRF <= 4664.68) {
+      return (baseIRRF * 0.225) - 651.73; // 22,5% - parcela a deduzir
+    } else {
+      return (baseIRRF * 0.275) - 884.96; // 27,5% - parcela a deduzir
     }
   }
 
@@ -790,6 +833,23 @@ export class PayrollService {
     // Calcular INSS Total: INSS Mensal + Base INSS Férias + INSS Férias + INSS Rescisão
     const inssRescisaoValue = manualInss ? Number(manualInss.inssRescisao) : 0;
     const inssTotal = inssMensal + baseInssFerias + inssFerias + inssRescisaoValue;
+    
+    // Calcular Base IRRF: Salário Bruto + Periculosidade + Insalubridade - INSS
+    const salarioBruto = salarioBase + periculosidade + insalubridade;
+    const baseIRRF = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+      ? 0 
+      : salarioBruto - inssMensal;
+    
+    // Calcular IRRF Mensal
+    const irrfMensal = this.calculateIRRF(baseIRRF);
+    
+    // Calcular Base IRRF Férias: (Salário + 1/3 Férias + Periculosidade + Insalubridade) - INSS Total
+    const baseIRRFFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+      ? 0 
+      : (salarioBruto + baseInssFerias) - inssTotal;
+    
+    // Calcular IRRF Férias
+    const irrfFerias = this.calculateIRRF(baseIRRFFerias);
 
     return {
       id: employee.id,
@@ -843,7 +903,10 @@ export class PayrollService {
       fgtsFerias,
       fgtsTotal,
       // INSS Total
-      inssTotal
+      inssTotal,
+      // IRRF
+      irrfMensal,
+      irrfFerias
     };
   }
 
