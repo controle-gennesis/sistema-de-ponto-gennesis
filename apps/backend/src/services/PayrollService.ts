@@ -110,6 +110,8 @@ export interface PayrollEmployee {
   fgts: number;
   fgtsFerias: number;
   fgtsTotal: number;
+  // INSS Total
+  inssTotal: number;
 }
 
 export interface MonthlyPayrollData {
@@ -482,6 +484,13 @@ export class PayrollService {
         // Calcular FGTS Total: Soma FGTS + FGTS Férias
         const fgtsTotal = fgts + fgtsFerias;
         
+        // Calcular INSS Mensal sobre a base
+        const inssMensal = this.calculateINSS(baseInssMensal);
+        
+        // Calcular INSS Total: INSS Mensal + Base INSS Férias + INSS Férias + INSS Rescisão
+        const inssRescisaoValue = manualInss ? Number(manualInss.inssRescisao) : 0;
+        const inssTotal = inssMensal + baseInssFerias + inssFerias + inssRescisaoValue;
+        
         return {
           id: employee.id,
           name: employee.user.name,
@@ -532,7 +541,9 @@ export class PayrollService {
           // FGTS
           fgts,
           fgtsFerias,
-          fgtsTotal
+          fgtsTotal,
+          // INSS Total
+          inssTotal
         } as PayrollEmployee;
       })
     );
@@ -772,6 +783,13 @@ export class PayrollService {
 
     // Calcular FGTS Total: Soma FGTS + FGTS Férias
     const fgtsTotal = fgts + fgtsFerias;
+    
+    // Calcular INSS Mensal sobre a base
+    const inssMensal = this.calculateINSS(baseInssMensal);
+    
+    // Calcular INSS Total: INSS Mensal + Base INSS Férias + INSS Férias + INSS Rescisão
+    const inssRescisaoValue = manualInss ? Number(manualInss.inssRescisao) : 0;
+    const inssTotal = inssMensal + baseInssFerias + inssFerias + inssRescisaoValue;
 
     return {
       id: employee.id,
@@ -823,7 +841,9 @@ export class PayrollService {
       // FGTS
       fgts,
       fgtsFerias,
-      fgtsTotal
+      fgtsTotal,
+      // INSS Total
+      inssTotal
     };
   }
 
