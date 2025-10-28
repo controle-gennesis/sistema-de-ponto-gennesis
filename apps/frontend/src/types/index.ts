@@ -427,6 +427,7 @@ export interface PayrollEmployee {
   // IRRF
   irrfMensal: number;
   irrfFerias: number;
+  irrfTotal: number;
 }
 
 export interface MonthlyPayrollData {

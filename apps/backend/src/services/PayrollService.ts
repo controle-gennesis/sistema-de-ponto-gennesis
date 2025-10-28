@@ -115,6 +115,7 @@ export interface PayrollEmployee {
   // IRRF
   irrfMensal: number;
   irrfFerias: number;
+  irrfTotal: number;
 }
 
 export interface MonthlyPayrollData {
@@ -511,6 +512,9 @@ export class PayrollService {
         // Calcular IRRF Férias
         const irrfFerias = this.calculateIRRF(baseIRRFFerias);
         
+        // Calcular IRRF Total: Soma IRRF Mensal + IRRF Férias
+        const irrfTotal = irrfMensal + irrfFerias;
+        
         return {
           id: employee.id,
           name: employee.user.name,
@@ -566,7 +570,8 @@ export class PayrollService {
           inssTotal,
           // IRRF
           irrfMensal,
-          irrfFerias
+          irrfFerias,
+          irrfTotal
         } as PayrollEmployee;
       })
     );
@@ -850,6 +855,9 @@ export class PayrollService {
     
     // Calcular IRRF Férias
     const irrfFerias = this.calculateIRRF(baseIRRFFerias);
+    
+    // Calcular IRRF Total: Soma IRRF Mensal + IRRF Férias
+    const irrfTotal = irrfMensal + irrfFerias;
 
     return {
       id: employee.id,
@@ -906,7 +914,8 @@ export class PayrollService {
       inssTotal,
       // IRRF
       irrfMensal,
-      irrfFerias
+      irrfFerias,
+      irrfTotal
     };
   }
 
