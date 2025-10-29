@@ -117,7 +117,8 @@ export const createEmployee = async (req: Request, res: Response) => {
       pixKeyType,
       pixKey,
       polo,
-      categoriaFinanceira
+      categoriaFinanceira,
+      fixedAdjustments
     } = req.body;
 
     // Verificar se email já existe
@@ -204,6 +205,20 @@ export const createEmployee = async (req: Request, res: Response) => {
           }
         }
       });
+
+      // Criar acréscimo fixo se o valor for maior que zero
+      if (fixedAdjustments && parseFloat(fixedAdjustments) > 0) {
+        await tx.salaryAdjustment.create({
+          data: {
+            employeeId: employee.id,
+            type: 'OTHER',
+            description: 'Acréscimo fixo mensal',
+            amount: parseFloat(fixedAdjustments),
+            isFixed: true,
+            createdBy: user.id
+          }
+        });
+      }
 
       return employee;
     });

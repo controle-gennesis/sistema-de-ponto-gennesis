@@ -189,7 +189,7 @@ export class UserController {
             throw new Error('Data de contratação inválida');
           }
 
-          await tx.employee.create({
+          const employee = await tx.employee.create({
             data: {
               userId: user.id,
               employeeId: employeeData.employeeId,
@@ -232,6 +232,20 @@ export class UserController {
               categoriaFinanceira: employeeData.categoriaFinanceira || null
             }
           });
+
+          // Criar acréscimo fixo se o valor for maior que zero
+          if (employeeData.fixedAdjustments && parseFloat(employeeData.fixedAdjustments) > 0) {
+            await tx.salaryAdjustment.create({
+              data: {
+                employeeId: employee.id,
+                type: 'OTHER',
+                description: 'Acréscimo fixo mensal',
+                amount: parseFloat(employeeData.fixedAdjustments),
+                isFixed: true,
+                createdBy: user.id
+              }
+            });
+          }
         }
 
         return user;
