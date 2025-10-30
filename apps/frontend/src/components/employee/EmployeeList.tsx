@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
@@ -65,6 +65,7 @@ interface EmployeeListProps {
 export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [reactivateConfirm, setReactivateConfirm] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
@@ -102,6 +103,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   // Estados para edição de funcionário
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
+  const [editVisibleSections, setEditVisibleSections] = useState<Array<'personal'|'professional'|'bank'|'remuneration'>|undefined>(undefined);
 
   const queryClient = useQueryClient();
 
@@ -355,9 +357,31 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setDeleteConfirm(null);
+      // Fechar modal de detalhes após desligar
+      setSelectedEmployee(null);
     },
     onError: (error: any) => {
       console.error('Erro ao deletar funcionário:', error);
+    }
+  });
+
+  // Reativar funcionário
+  const reactivateEmployeeMutation = useMutation({
+    mutationFn: async (employeeId: string) => {
+      const res = await api.put(`/users/${employeeId}`, { isActive: true });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      // Atualizar estado local do selecionado para refletir reativação imediata
+      setSelectedEmployee((prev: any) => prev ? { ...prev, isActive: true } : prev);
+      setReactivateConfirm(null);
+      // Fechar modal de detalhes após reativar
+      setSelectedEmployee(null);
+    },
+    onError: (error: any) => {
+      console.error('Erro ao reativar funcionário:', error);
     }
   });
 
@@ -496,6 +520,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const handleCloseEditForm = () => {
     setEditingEmployee(null);
     setShowEditForm(false);
+    setEditVisibleSections(undefined);
   };
 
   const handleEditRecord = (record: any) => {
@@ -869,36 +894,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         </div>
                       </div>
                 
-                      {/* Botões de ação - apenas para administradores */}
-                      {canManageEmployees && (
-                        <div className="flex justify-center space-x-2">
-                          {/* Botão de editar */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditEmployee(employee);
-                            }}
-                            className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-all duration-200 hover:scale-105"
-                            title="Editar funcionário"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          
-                          {/* Botão de deletar */}
-                          {showDeleteButton && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteConfirm(employee.id);
-                              }}
-                              className="p-2.5 text-red-600 hover:bg-red-50 rounded-xl transition-all duration-200 hover:scale-105"
-                              title="Desligar funcionário"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      {/* Ações removidas do card da lista conforme solicitação */}
                     </>
                 )}
               </div>
@@ -950,7 +946,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
 
         {/* Modal de confirmação de exclusão */}
         {deleteConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setDeleteConfirm(null)} />
             <div className="relative bg-white rounded-lg shadow-2xl max-w-md w-full mx-4">
               <div className="p-6">
@@ -959,7 +955,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <AlertTriangle className="w-6 h-6 text-red-600" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Confirmar Exclusão</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">Confirmar Desligamento</h3>
                     <p className="text-sm text-gray-600">Esta ação não pode ser desfeita</p>
                   </div>
                 </div>
@@ -983,12 +979,60 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     {deleteEmployeeMutation.isPending ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        <span>Excluindo...</span>
+                        <span>Desligando...</span>
                       </>
                     ) : (
                       <>
                         <Trash2 className="w-4 h-4" />
                         <span>Desligar</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de confirmação de admissão (reativar) */}
+        {reactivateConfirm && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setReactivateConfirm(null)} />
+            <div className="relative bg-white rounded-lg shadow-2xl max-w-md w-full mx-4">
+              <div className="p-6">
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className="p-2 bg-green-100 rounded-full">
+                    <CheckCircle className="w-6 h-6 text-green-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Confirmar Reativação</h3>
+                    <p className="text-sm text-gray-600">Deseja reativar este funcionário?</p>
+                  </div>
+                </div>
+                <p className="text-gray-700 mb-6">
+                  O funcionário voltará a ficar ativo e poderá acessar o sistema normalmente.
+                </p>
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => setReactivateConfirm(null)}
+                    className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => reactivateEmployeeMutation.mutate(reactivateConfirm)}
+                    disabled={reactivateEmployeeMutation.isPending}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                  >
+                    {reactivateEmployeeMutation.isPending ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Reativando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Confirmar</span>
                       </>
                     )}
                   </button>
@@ -1017,6 +1061,25 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {canManageEmployees && showDeleteButton && (
+                        selectedEmployee.isActive ? (
+                          <button
+                            onClick={() => setDeleteConfirm(selectedEmployee.id)}
+                            className="px-3 py-1.5 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                            title="Desligar funcionário"
+                          >
+                            Desligar
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setReactivateConfirm(selectedEmployee.id)}
+                            className="px-3 py-1.5 text-sm rounded-lg border border-green-200 text-green-600 hover:bg-green-50"
+                            title="Reativar funcionário"
+                          >
+                            Reativar
+                          </button>
+                        )
+                      )}
                       <button
                         onClick={() => setSelectedEmployee(null)}
                         className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
@@ -1072,7 +1135,19 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   {/* Card - Informações Pessoais */}
                   <div className="rounded-xl border border-gray-200 p-5 bg-white">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-semibold text-gray-900">Informações Pessoais</h4>
+                      <h4 className="text-sm font-semibold text-gray-900">Dados Pessoais</h4>
+                      {canManageEmployees && (
+                        <button
+                          onClick={() => {
+                            setEditingEmployee(selectedEmployee);
+                            setEditVisibleSections(['personal']);
+                            setShowEditForm(true);
+                          }}
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        >
+                          Editar
+                        </button>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 gap-4">
                       <div>
@@ -1105,7 +1180,19 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   {/* Card - Informações Profissionais */}
                   <div className="rounded-xl border border-gray-200 p-5 bg-white">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-semibold text-gray-900">Informações Profissionais</h4>
+                      <h4 className="text-sm font-semibold text-gray-900">Dados Profissionais</h4>
+                      {canManageEmployees && (
+                        <button
+                          onClick={() => {
+                            setEditingEmployee(selectedEmployee);
+                            setEditVisibleSections(['professional']);
+                            setShowEditForm(true);
+                          }}
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        >
+                          Editar
+                        </button>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
@@ -1169,6 +1256,18 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   <div className="rounded-xl border border-gray-200 p-5 bg-white">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="text-sm font-semibold text-gray-900">Dados Bancários</h4>
+                      {canManageEmployees && (
+                        <button
+                          onClick={() => {
+                            setEditingEmployee(selectedEmployee);
+                            setEditVisibleSections(['bank']);
+                            setShowEditForm(true);
+                          }}
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        >
+                          Editar
+                        </button>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {selectedEmployee.employee?.bank && (
@@ -1191,7 +1290,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       )}
                       {selectedEmployee.employee?.operation && (
                         <div>
-                          <div className="text-xs text-gray-500">OP</div>
+                          <div className="text-xs text-gray-500">Operação</div>
                           <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.operation}</div>
                         </div>
                       )}
@@ -1207,16 +1306,16 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.digit}</div>
                         </div>
                       )}
+                      {selectedEmployee.employee?.pixKeyType && (
+                        <div>
+                          <div className="text-xs text-gray-500">Tipo de Chave</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.pixKeyType}</div>
+                        </div>
+                      )}
                       {selectedEmployee.employee?.pixKey && (
                         <div>
                           <div className="text-xs text-gray-500">Chave PIX</div>
                           <div className="text-sm font-medium text-gray-900 break-all">{selectedEmployee.employee.pixKey}</div>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.pixKeyType && (
-                        <div>
-                          <div className="text-xs text-gray-500">Tipo de Chave PIX</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.pixKeyType}</div>
                         </div>
                       )}
                     </div>
@@ -1225,7 +1324,19 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   {/* Card - Remuneração e Benefícios */}
                   <div className="rounded-xl border border-gray-200 p-5 bg-white">
                   <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-semibold text-gray-900">Remuneração</h4>
+                    <h4 className="text-sm font-semibold text-gray-900">Valores e Adicionais</h4>
+                    {canManageEmployees && (
+                      <button
+                        onClick={() => {
+                          setEditingEmployee(selectedEmployee);
+                          setEditVisibleSections(['remuneration']);
+                          setShowEditForm(true);
+                        }}
+                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                      >
+                        Editar
+                      </button>
+                    )}
                   </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Linha 1: Salário | Periculosidade */}
@@ -1681,6 +1792,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         <EditEmployeeForm
           employee={editingEmployee}
           onClose={handleCloseEditForm}
+          visibleSections={editVisibleSections}
         />
       )}
     </Card>

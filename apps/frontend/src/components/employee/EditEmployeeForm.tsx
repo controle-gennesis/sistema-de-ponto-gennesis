@@ -100,12 +100,15 @@ interface Employee {
   };
 }
 
+type VisibleSection = 'personal' | 'professional' | 'bank' | 'remuneration';
+
 interface EditEmployeeFormProps {
   employee: Employee;
   onClose: () => void;
+  visibleSections?: VisibleSection[];
 }
 
-export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
+export function EditEmployeeForm({ employee, onClose, visibleSections }: EditEmployeeFormProps) {
   // Lista de setores disponíveis
   const sectors = [
     'Projetos',
@@ -158,6 +161,35 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     'E-MAIL'
   ];
 
+  // Utilidades de moeda BRL
+  const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const parseCurrencyBRToNumber = (raw: string) => {
+    if (!raw) return 0;
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return 0;
+    return parseInt(digits, 10) / 100;
+  };
+
+  const maskCurrencyInput = (raw: string) => {
+    const digits = raw.replace(/\D/g, '');
+    const asNumber = digits ? parseInt(digits, 10) / 100 : 0;
+    return currencyFormatter.format(asNumber);
+  };
+
+  // Utilidades de porcentagem 0-100
+  const parsePercentToNumber = (raw: string) => {
+    if (!raw) return 0;
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return 0;
+    const value = Math.min(100, parseInt(digits, 10));
+    return value;
+  };
+
+  const maskPercentInput = (raw: string) => {
+    const value = parsePercentToNumber(raw);
+    return `${value}%`;
+  };
+
   // Inicializar dados do formulário com dados do funcionário
   const [formData, setFormData] = useState<EmployeeFormData>({
     name: employee.name || '',
@@ -169,7 +201,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     position: employee.employee?.position || '',
     hireDate: employee.employee?.hireDate ? new Date(employee.employee.hireDate).toISOString().split('T')[0] : '',
     birthDate: employee.employee?.birthDate ? new Date(employee.employee.birthDate).toISOString().split('T')[0] : '',
-    salary: employee.employee?.salary !== undefined && employee.employee?.salary !== null ? employee.employee.salary.toString() : '',
+    salary: employee.employee?.salary !== undefined && employee.employee?.salary !== null ? currencyFormatter.format(employee.employee.salary) : '',
     isRemote: employee.employee?.isRemote ?? false,
     workStartTime: employee.employee?.workSchedule?.startTime || '07:00',
     workEndTime: employee.employee?.workSchedule?.endTime || '17:00',
@@ -178,8 +210,8 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     toleranceMinutes: employee.employee?.workSchedule?.toleranceMinutes?.toString() || '10',
     costCenter: employee.employee?.costCenter || '',
     client: employee.employee?.client || '',
-    dailyFoodVoucher: employee.employee?.dailyFoodVoucher !== undefined && employee.employee?.dailyFoodVoucher !== null ? employee.employee.dailyFoodVoucher.toString() : '33.40',
-    dailyTransportVoucher: employee.employee?.dailyTransportVoucher !== undefined && employee.employee?.dailyTransportVoucher !== null ? employee.employee.dailyTransportVoucher.toString() : '11.00',
+    dailyFoodVoucher: employee.employee?.dailyFoodVoucher !== undefined && employee.employee?.dailyFoodVoucher !== null ? currencyFormatter.format(employee.employee.dailyFoodVoucher) : '',
+    dailyTransportVoucher: employee.employee?.dailyTransportVoucher !== undefined && employee.employee?.dailyTransportVoucher !== null ? currencyFormatter.format(employee.employee.dailyTransportVoucher) : '',
     company: employee.employee?.company || '',
     bank: employee.employee?.bank || '',
     accountType: employee.employee?.accountType || '',
@@ -190,9 +222,9 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     pixKeyType: employee.employee?.pixKeyType || '',
     pixKey: employee.employee?.pixKey || '',
     modality: (employee.employee?.modality as any) || '',
-    familySalary: employee.employee?.familySalary !== undefined && employee.employee?.familySalary !== null ? employee.employee.familySalary.toString() : '0.00',
-    dangerPay: employee.employee?.dangerPay !== undefined && employee.employee?.dangerPay !== null ? employee.employee.dangerPay.toString() : '0',
-    unhealthyPay: employee.employee?.unhealthyPay !== undefined && employee.employee?.unhealthyPay !== null ? employee.employee.unhealthyPay.toString() : '0',
+    familySalary: employee.employee?.familySalary !== undefined && employee.employee?.familySalary !== null ? currencyFormatter.format(employee.employee.familySalary) : '',
+    dangerPay: employee.employee?.dangerPay !== undefined && employee.employee?.dangerPay !== null ? `${employee.employee.dangerPay}%` : '0%',
+    unhealthyPay: employee.employee?.unhealthyPay !== undefined && employee.employee?.unhealthyPay !== null ? `${employee.employee.unhealthyPay}%` : '0%',
     
     // Novos campos - Polo e Categoria Financeira
     polo: (employee.employee?.polo as any) || '',
@@ -330,7 +362,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
           position: data.position,
           hireDate: data.hireDate,
           birthDate: data.birthDate,
-          salary: parseFloat(data.salary),
+          salary: parseCurrencyBRToNumber(data.salary as any),
           isRemote: data.isRemote,
           workSchedule: {
             startTime: data.workStartTime,
@@ -342,8 +374,8 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
           },
           costCenter: data.costCenter,
           client: data.client,
-          dailyFoodVoucher: parseFloat(data.dailyFoodVoucher),
-          dailyTransportVoucher: parseFloat(data.dailyTransportVoucher),
+          dailyFoodVoucher: parseCurrencyBRToNumber(data.dailyFoodVoucher as any),
+          dailyTransportVoucher: parseCurrencyBRToNumber(data.dailyTransportVoucher as any),
           company: data.company,
           bank: data.bank,
           accountType: data.accountType,
@@ -354,9 +386,9 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
           pixKeyType: data.pixKeyType,
           pixKey: data.pixKey,
           modality: data.modality,
-          familySalary: parseFloat(data.familySalary),
-          dangerPay: parseFloat(data.dangerPay),
-          unhealthyPay: parseFloat(data.unhealthyPay),
+          familySalary: parseCurrencyBRToNumber(data.familySalary as any),
+          dangerPay: parsePercentToNumber(data.dangerPay as any),
+          unhealthyPay: parsePercentToNumber(data.unhealthyPay as any),
           
           // Novos campos - Polo e Categoria Financeira
           polo: data.polo,
@@ -399,19 +431,14 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-4xl mx-4 bg-white rounded-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-        <div className="px-6 py-4 border-b flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Edit className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Editar Funcionário</h3>
-              <p className="text-sm text-gray-600">Atualize os dados do funcionário</p>
-            </div>
+        <div className="px-8 py-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-1">Editar Funcionário</h3>
+            <p className="text-sm text-gray-500">Atualize os dados do funcionário</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded hover:bg-gray-100 text-gray-600"
+            className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
             aria-label="Fechar"
           >
             <X className="w-5 h-5" />
@@ -420,12 +447,16 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
               {/* Dados Pessoais */}
+              {(!visibleSections || visibleSections.includes('personal')) && (
               <div className="space-y-4">
-                <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados Pessoais</h4>
+                <div className="border-l-4 border-blue-500 pl-4">
+                  <h4 className="text-xl font-bold text-gray-900">Dados Pessoais</h4>
+                  <p className="text-sm text-gray-500 mt-0.5">Informações básicas do funcionário</p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Nome Completo *
+                      Nome Completo
                     </label>
                     <input
                       type="text"
@@ -446,7 +477,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Email *
+                      Email
                     </label>
                     <input
                       type="email"
@@ -467,7 +498,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      CPF *
+                      CPF
                     </label>
                     <input
                       type="text"
@@ -491,42 +522,33 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                   </div>
 
 
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Status
+                      Data de Nascimento
                     </label>
-                    <select
-                      value={formData.isActive ? 'active' : 'inactive'}
-                      onChange={(e) => handleInputChange('isActive', e.target.value === 'active')}
-                      className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
-                    >
-                      <option value="active">Ativo</option>
-                      <option value="inactive">Inativo</option>
-                    </select>
+                    <input
+                      type="date"
+                      value={formData.birthDate}
+                      onChange={(e) => handleInputChange('birthDate', e.target.value)}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Dados Profissionais */}
+              {(!visibleSections || visibleSections.includes('professional')) && (
               <div className="space-y-4">
-                <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados Profissionais</h4>
+                <div className="border-l-4 border-blue-500 pl-4">
+                  <h4 className="text-xl font-bold text-gray-900">Dados Profissionais</h4>
+                  <p className="text-sm text-gray-500 mt-0.5">Informações profissionais e da empresa</p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Matrícula
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.employeeId}
-                      disabled
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md bg-gray-100 text-gray-500 cursor-not-allowed"
-                      placeholder="Matrícula não pode ser alterada"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Departamento *
+                      Setor
                     </label>
                     <select
                       value={formData.sector}
@@ -550,7 +572,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Cargo *
+                      Cargo
                     </label>
                     <select
                       value={formData.position}
@@ -574,7 +596,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Data de Admissão *
+                      Data de Admissão
                     </label>
                     <input
                       type="date"
@@ -593,83 +615,33 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Data de Nascimento
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.birthDate}
-                      onChange={(e) => handleInputChange('birthDate', e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Modalidade</label>
+                    <select
+                      value={formData.modality}
+                      onChange={(e) => handleInputChange('modality', e.target.value)}
+                      className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    >
+                      <option value="">Selecione</option>
+                      <option value="CLT">CLT</option>
+                      <option value="MEI">MEI</option>
+                      <option value="ESTAGIARIO">Estagiário</option>
+                    </select>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Salário *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.salary}
-                      onChange={(e) => handleInputChange('salary', e.target.value)}
-                      className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        errors.salary ? 'border-red-500' : 'border-gray-300'
-                      }`}
-                      placeholder="0.00"
-                    />
-                    {errors.salary && (
-                      <p className="text-red-500 text-sm mt-1 flex items-center">
-                        <AlertCircle className="w-4 h-4 mr-1" />
-                        {errors.salary}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Campos VA e VT */}
-              <div className="space-y-4">
-                <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Vale Alimentação e Transporte</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      VA Diário (R$)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.dailyFoodVoucher}
-                      onChange={(e) => handleInputChange('dailyFoodVoucher', e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="33.40"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Regime</label>
+                    <select
+                      value={formData.isRemote ? 'REMOTO' : 'PRESENCIAL'}
+                      onChange={(e) => handleInputChange('isRemote', e.target.value === 'REMOTO')}
+                      className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    >
+                      <option value="PRESENCIAL">Presencial</option>
+                      <option value="REMOTO">Remoto</option>
+                    </select>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      VT Diário (R$)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.dailyTransportVoucher}
-                      onChange={(e) => handleInputChange('dailyTransportVoucher', e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="11.00"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Dados da Empresa */}
-              <div className="space-y-4">
-                <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados da Empresa</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Empresa
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
                     <select
                       value={formData.company}
                       onChange={(e) => handleInputChange('company', e.target.value)}
@@ -683,9 +655,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Centro de Custo
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Centro de Custo</label>
                     <select
                       value={formData.costCenter}
                       onChange={(e) => handleInputChange('costCenter', e.target.value)}
@@ -704,9 +674,7 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Tomador
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tomador</label>
                     <select
                       value={formData.client}
                       onChange={(e) => handleInputChange('client', e.target.value)}
@@ -714,66 +682,206 @@ export function EditEmployeeForm({ employee, onClose }: EditEmployeeFormProps) {
                     >
                       <option value="">Selecione um tomador</option>
                       {TOMADORES_LIST.map((tomador) => (
-                        <option key={tomador} value={tomador}>
-                          {tomador}
-                        </option>
+                        <option key={tomador} value={tomador}>{tomador}</option>
                       ))}
                     </select>
                   </div>
-                </div>
-              </div>
 
-              {/* Polo e Categoria Financeira */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Polo e Categoria Financeira</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Polo *
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Polo</label>
                     <select
                       value={formData.polo}
                       onChange={(e) => handleInputChange('polo', e.target.value)}
-                      className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                        errors.polo ? 'border-red-500' : 'border-gray-300'
-                      }`}
+                      className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${errors.polo ? 'border-red-500' : 'border-gray-300'}`}
                     >
                       <option value="">Selecione o polo</option>
                       <option value="BRASÍLIA">BRASÍLIA</option>
                       <option value="GOIÁS">GOIÁS</option>
                     </select>
                     {errors.polo && (
-                      <p className="text-red-500 text-xs mt-1 flex items-center">
-                        <AlertCircle className="w-3 h-3 mr-1" />
-                        {errors.polo}
-                      </p>
+                      <p className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1" />{errors.polo}</p>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Categoria Financeira *
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Categoria Financeira</label>
                     <select
                       value={formData.categoriaFinanceira}
                       onChange={(e) => handleInputChange('categoriaFinanceira', e.target.value)}
-                      className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                        errors.categoriaFinanceira ? 'border-red-500' : 'border-gray-300'
-                      }`}
+                      className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${errors.categoriaFinanceira ? 'border-red-500' : 'border-gray-300'}`}
                     >
                       <option value="">Selecione a categoria</option>
                       <option value="GASTO">GASTO</option>
                       <option value="DESPESA">DESPESA</option>
                     </select>
                     {errors.categoriaFinanceira && (
-                      <p className="text-red-500 text-xs mt-1 flex items-center">
-                        <AlertCircle className="w-3 h-3 mr-1" />
-                        {errors.categoriaFinanceira}
+                      <p className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1" />{errors.categoriaFinanceira}</p>
+                    )}
+                  </div>
+
+                </div>
+              </div>
+              )}
+
+              {/* Remuneração */}
+              {(!visibleSections || visibleSections.includes('remuneration')) && (
+              <div className="space-y-4">
+                <div className="border-l-4 border-blue-500 pl-4">
+                  <h4 className="text-xl font-bold text-gray-900">Valores e Adicionais</h4>
+                  <p className="text-sm text-gray-500 mt-0.5">Informações salariais e benefícios</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Salário Base
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.salary}
+                      onChange={(e) => setFormData(prev => ({ ...prev, salary: maskCurrencyInput(e.target.value) }))}
+                      inputMode="numeric"
+                      className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        errors.salary ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                      placeholder="R$ 0,00"
+                    />
+                    {errors.salary && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.salary}
                       </p>
                     )}
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Vale Alimentação Diário
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.dailyFoodVoucher}
+                      onChange={(e) => setFormData(prev => ({ ...prev, dailyFoodVoucher: maskCurrencyInput(e.target.value) }))}
+                      inputMode="numeric"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="R$ 0,00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Vale Transporte Diário
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.dailyTransportVoucher}
+                      onChange={(e) => setFormData(prev => ({ ...prev, dailyTransportVoucher: maskCurrencyInput(e.target.value) }))}
+                      inputMode="numeric"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="R$ 0,00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Salário Família</label>
+                    <input
+                      type="text"
+                      value={formData.familySalary}
+                      onChange={(e) => setFormData(prev => ({ ...prev, familySalary: maskCurrencyInput(e.target.value) }))}
+                      inputMode="numeric"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="R$ 0,00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Periculosidade</label>
+                    <input
+                      type="text"
+                      value={formData.dangerPay}
+                      onChange={(e) => setFormData(prev => ({ ...prev, dangerPay: maskPercentInput(e.target.value) }))}
+                      inputMode="numeric"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0%"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Insalubridade</label>
+                    <input
+                      type="text"
+                      value={formData.unhealthyPay}
+                      onChange={(e) => setFormData(prev => ({ ...prev, unhealthyPay: maskPercentInput(e.target.value) }))}
+                      inputMode="numeric"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0%"
+                    />
+                  </div>
                 </div>
               </div>
+              )}
+
+              
+
+              {/* Dados Bancários e PIX */}
+              {(!visibleSections || visibleSections.includes('bank')) && (
+              <div className="space-y-4">
+                <div className="border-l-4 border-blue-500 pl-4">
+                  <h4 className="text-xl font-bold text-gray-900">Dados Bancários</h4>
+                  <p className="text-sm text-gray-500 mt-0.5">Informações bancárias e chave PIX</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Banco</label>
+                    <select
+                      value={formData.bank}
+                      onChange={(e)=>handleInputChange('bank', e.target.value)}
+                      className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    >
+                      <option value="">Selecione</option>
+                      {banks.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Conta</label>
+                    <select
+                      value={formData.accountType}
+                      onChange={(e)=>handleInputChange('accountType', e.target.value)}
+                      className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    >
+                      <option value="">Selecione</option>
+                      {accountTypes.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Agência</label>
+                    <input type="text" value={formData.agency} onChange={(e)=>handleInputChange('agency', e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Operação</label>
+                    <input type="text" value={formData.operation} onChange={(e)=>handleInputChange('operation', e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Conta</label>
+                    <input type="text" value={formData.account} onChange={(e)=>handleInputChange('account', e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Dígito</label>
+                    <input type="text" value={formData.digit} onChange={(e)=>handleInputChange('digit', e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Chave</label>
+                    <select value={formData.pixKeyType} onChange={(e)=>handleInputChange('pixKeyType', e.target.value)} className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white">
+                      <option value="">Selecione</option>
+                      {pixKeyTypes.map((t)=> (<option key={t} value={t}>{t}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Chave PIX</label>
+                    <input type="text" value={formData.pixKey} onChange={(e)=>handleInputChange('pixKey', e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+              </div>
+              )}
 
               {/* Botões de Ação */}
               <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
