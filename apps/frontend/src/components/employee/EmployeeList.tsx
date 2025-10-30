@@ -85,6 +85,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [editingDiscount, setEditingDiscount] = useState<SalaryDiscount | null>(null);
   const [discounts, setDiscounts] = useState<SalaryDiscount[]>([]);
   const [isDiscountsMinimized, setIsDiscountsMinimized] = useState(true);
+  // Aba do modal de detalhes: 'info' | 'remuneration' | 'records'
+  const [detailsTab, setDetailsTab] = useState<'info' | 'remuneration' | 'records'>('info');
   const [editForm, setEditForm] = useState<{
     type: string;
     timestamp: string;
@@ -795,7 +797,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               {filteredEmployees.map((employee: Employee) => (
               <div
                 key={employee.id}
-                onClick={() => setSelectedEmployee(employee)}
+                onClick={() => { setSelectedEmployee(employee); setDetailsTab('info'); }}
                   className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-lg hover:border-gray-200 cursor-pointer transition-all duration-300 transform hover:-translate-y-1"
                 >
                   {/* Avatar com iniciais - Centralizado */}
@@ -812,8 +814,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <span className="text-base font-semibold text-gray-900 mb-2">{employee.name}</span>
                         {employee.employee && (
                           <>
-                        <p className="text-sm font-medium text-gray-800 mb-1">{employee.employee.position}</p>
-                        <p className="text-xs text-gray-500 bg-gray-50 px-3 py-1 rounded-full">{employee.employee.department}</p>
+                        <p className="text-xs text-gray-500 bg-gray-50 px-3 py-1 rounded-full">{employee.employee.position} de {employee.employee.department}</p>
                       </>
                     )}
                   </div>
@@ -1001,231 +1002,293 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {selectedEmployee && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedEmployee(null)} />
-            <div className="relative w-full max-w-6xl mx-4 bg-white rounded-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-              <div className="px-6 py-4 border-b flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <User className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {selectedEmployee.name}
-                    </h3>
-                    <p className="text-sm text-gray-600">
-                      {selectedEmployee.employee?.position} - {selectedEmployee.employee?.department}
-                    </p>
+            <div className="relative w-full max-w-5xl mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden h-[85vh] overflow-y-auto">
+              {/* Header + Abas fixos */}
+              <div className="sticky top-0 z-20 bg-white">
+                <div className="px-6 pt-6">
+                  <div className="rounded-xl border border-gray-200 bg-white px-5 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="w-14 h-14 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                        {selectedEmployee.name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-semibold text-gray-900 truncate">{selectedEmployee.name}</h3>
+                        <p className="text-sm text-gray-600 truncate">{selectedEmployee.employee?.position} de {selectedEmployee.employee?.department}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedEmployee(null)}
+                        className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+                        aria-label="Fechar"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedEmployee(null)}
-                  className="p-2 rounded hover:bg-gray-100 text-gray-600"
-                  aria-label="Fechar"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+
+                <div className="px-6 pt-4">
+                  <div className="flex items-center gap-6 border-b border-gray-200">
+                    <button
+                      onClick={() => setDetailsTab('info')}
+                      className={`pb-2 -mb-px text-sm transition-colors border-b-2 ${
+                        detailsTab === 'info'
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300'
+                      }`}
+                    >
+                      Informações
+                    </button>
+                    <button
+                      onClick={() => setDetailsTab('remuneration')}
+                      className={`pb-2 -mb-px text-sm transition-colors border-b-2 ${
+                        detailsTab === 'remuneration'
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300'
+                      }`}
+                    >
+                      Proventos e Descontos
+                    </button>
+                    <button
+                      onClick={() => setDetailsTab('records')}
+                      className={`pb-2 -mb-px text-sm transition-colors border-b-2 ${
+                        detailsTab === 'records'
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300'
+                      }`}
+                    >
+                      Registros de Ponto
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div className="p-6">
-                {/* Informações do funcionário */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                  <div className="space-y-4">
-                    <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados Pessoais</h4>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Nome:</span>
-                        <span className="text-sm font-medium">{selectedEmployee.name}</span>
+              {/* Conteúdo em Cards */}
+              <div className="p-6 space-y-6">
+                {detailsTab === 'info' && (
+                  <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Card - Informações Pessoais */}
+                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-sm font-semibold text-gray-900">Informações Pessoais</h4>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4">
+                      <div>
+                        <div className="text-xs text-gray-500">Nome</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.name}</div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Email:</span>
-                        <span className="text-sm font-medium">{selectedEmployee.email}</span>
+                      <div>
+                        <div className="text-xs text-gray-500">CPF</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.cpf}</div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">CPF:</span>
-                        <span className="text-sm font-medium">{selectedEmployee.cpf}</span>
+                      <div>
+                        <div className="text-xs text-gray-500">Email</div>
+                        <div className="text-sm font-medium text-gray-900 break-all">{selectedEmployee.email}</div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Matrícula:</span>
-                        <span className="text-sm font-medium">{selectedEmployee.employee?.employeeId}</span>
-                      </div>
+                      {selectedEmployee.employee?.employeeId && (
+                        <div>
+                          <div className="text-xs text-gray-500">Matrícula</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.employeeId}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.birthDate && (
+                        <div>
+                          <div className="text-xs text-gray-500">Nascimento</div>
+                          <div className="text-sm font-medium text-gray-900">{formatDate(selectedEmployee.employee.birthDate)}</div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="space-y-4">
-                    <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados Profissionais</h4>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Setor:</span>
-                        <span className="text-sm font-medium">{selectedEmployee.employee?.department}</span>
+                  {/* Card - Informações Profissionais */}
+                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-sm font-semibold text-gray-900">Informações Profissionais</h4>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <div className="text-xs text-gray-500">Cargo</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.position || '—'}</div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Cargo:</span>
-                        <span className="text-sm font-medium">{selectedEmployee.employee?.position}</span>
+                      <div>
+                        <div className="text-xs text-gray-500">Setor</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.department || '—'}</div>
                       </div>
                       {selectedEmployee.employee?.modality && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Modalidade:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.modality}
-                          </span>
+                        <div>
+                          <div className="text-xs text-gray-500">Modalidade</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.modality}</div>
                         </div>
                       )}
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Data de Admissão:</span>
-                        <span className="text-sm font-medium">
-                          {selectedEmployee.employee?.hireDate ? formatDate(selectedEmployee.employee.hireDate) : 'N/A'}
-                        </span>
+                      <div>
+                        <div className="text-xs text-gray-500">Admissão</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.hireDate ? formatDate(selectedEmployee.employee.hireDate) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500">Regime</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.isRemote ? 'Remoto' : 'Presencial'}</div>
                       </div>
                       {selectedEmployee.employee?.costCenter && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Centro de Custo:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.costCenter}
-                          </span>
+                        <div>
+                          <div className="text-xs text-gray-500">Centro de Custo</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.costCenter}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.client && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Tomador:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.client}
-                          </span>
+                        <div>
+                          <div className="text-xs text-gray-500">Tomador</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.client}</div>
                         </div>
                       )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Novos campos - Dados da Empresa e Contrato */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                  <div className="space-y-4">
-                    <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados da Empresa</h4>
-                    <div className="space-y-2">
                       {selectedEmployee.employee?.company && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Empresa:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.company}
-                          </span>
+                        <div>
+                          <div className="text-xs text-gray-500">Empresa</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.company}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.polo && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Polo:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.polo}
-                          </span>
+                        <div>
+                          <div className="text-xs text-gray-500">Polo</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.polo}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.categoriaFinanceira && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Categoria Financeira:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.categoriaFinanceira}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados Bancários</h4>
-                    <div className="space-y-2">
-                      {selectedEmployee.employee?.bank && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Banco:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.bank}
-                          </span>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.accountType && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Tipo de Conta:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.accountType}
-                          </span>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.agency && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Agência:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.agency}
-                          </span>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.operation && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">OP:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.operation}
-                          </span>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.account && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Conta:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.account}
-                          </span>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.digit && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Dígito:</span>
-                          <span className="text-sm font-medium">
-                            {selectedEmployee.employee.digit}
-                          </span>
+                        <div>
+                          <div className="text-xs text-gray-500">Categoria Financeira</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.categoriaFinanceira}</div>
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
 
-                {/* Dados PIX */}
-                {(selectedEmployee.employee?.pixKeyType || selectedEmployee.employee?.pixKey) && (
-                  <div className="mb-6">
-                    <div className="space-y-4">
-                      <h4 className="text-md font-semibold text-gray-900 border-b pb-2">Dados PIX</h4>
-                      <div className="space-y-2">
-                        {selectedEmployee.employee?.pixKeyType && (
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Tipo de Chave:</span>
-                            <span className="text-sm font-medium">
-                              {selectedEmployee.employee.pixKeyType}
-                            </span>
-                          </div>
-                        )}
-                        {selectedEmployee.employee?.pixKey && (
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Chave PIX:</span>
-                            <span className="text-sm font-medium">
-                              {selectedEmployee.employee.pixKey}
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Card - Dados Bancários */}
+                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-sm font-semibold text-gray-900">Dados Bancários</h4>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {selectedEmployee.employee?.bank && (
+                        <div>
+                          <div className="text-xs text-gray-500">Banco</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.bank}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.accountType && (
+                        <div>
+                          <div className="text-xs text-gray-500">Tipo de Conta</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.accountType}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.agency && (
+                        <div>
+                          <div className="text-xs text-gray-500">Agência</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.agency}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.operation && (
+                        <div>
+                          <div className="text-xs text-gray-500">OP</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.operation}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.account && (
+                        <div>
+                          <div className="text-xs text-gray-500">Conta</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.account}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.digit && (
+                        <div>
+                          <div className="text-xs text-gray-500">Dígito</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.digit}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.pixKey && (
+                        <div>
+                          <div className="text-xs text-gray-500">Chave PIX</div>
+                          <div className="text-sm font-medium text-gray-900 break-all">{selectedEmployee.employee.pixKey}</div>
+                        </div>
+                      )}
+                      {selectedEmployee.employee?.pixKeyType && (
+                        <div>
+                          <div className="text-xs text-gray-500">Tipo de Chave PIX</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.pixKeyType}</div>
+                        </div>
+                      )}
                     </div>
                   </div>
+
+                  {/* Card - Remuneração e Benefícios */}
+                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-gray-900">Remuneração</h4>
+                  </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Linha 1: Salário | Periculosidade */}
+                      <div>
+                        <div className="text-xs text-gray-500">Salário</div>
+                        <div className="text-sm font-semibold text-gray-900">{selectedEmployee.employee?.salary != null ? `R$ ${Number(selectedEmployee.employee.salary).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500">Periculosidade</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.dangerPay != null ? `${Number(selectedEmployee.employee.dangerPay)}%` : '—'}</div>
+                      </div>
+                      {/* Linha 2: VA Diário | Insalubridade */}
+                      <div>
+                        <div className="text-xs text-gray-500">VA Diário</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.dailyFoodVoucher != null ? `R$ ${Number(selectedEmployee.employee.dailyFoodVoucher).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500">Insalubridade</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.unhealthyPay != null ? `${Number(selectedEmployee.employee.unhealthyPay)}%` : '—'}</div>
+                      </div>
+                      {/* Linha 3: VT Diário | vazio */}
+                      <div>
+                        <div className="text-xs text-gray-500">VT Diário</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.dailyTransportVoucher != null ? `R$ ${Number(selectedEmployee.employee.dailyTransportVoucher).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                      </div>
+                      <div className="hidden sm:block" />
+                      {/* Linha 4: Salário Família | vazio */}
+                      <div>
+                        <div className="text-xs text-gray-500">Salário Família</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.familySalary != null ? `R$ ${Number(selectedEmployee.employee.familySalary).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                      </div>
+                      <div className="hidden sm:block" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card - PIX */}
+                {/* PIX movido para Dados Bancários */}
+                  </>
                 )}
 
-                
-
+                {detailsTab === 'remuneration' && (
+                  <>
                 {/* Seção de Acréscimos Salariais */}
-                <div className="mb-6 p-4 bg-white border border-gray-200 rounded-lg">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center space-x-3">
-                      <h4 className="text-md font-semibold text-gray-900">
-                        Acréscimos
-                        {adjustments.length > 0 && (
-                          <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
-                            {adjustments.length}
-                          </span>
-                        )}
-                      </h4>
+                <div className="rounded-xl border border-gray-200 bg-white mb-4">
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-semibold text-gray-900">Acréscimos</h4>
+                      <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+                        {adjustments.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowAddAdjustmentForm(true); setIsAdjustmentsMinimized(false); }}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Adicionar</span>
+                      </button>
                       <button
                         onClick={() => setIsAdjustmentsMinimized(!isAdjustmentsMinimized)}
-                        className="p-1 text-gray-500 hover:text-gray-700 transition-colors"
+                        className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"
                         title={isAdjustmentsMinimized ? "Expandir seção" : "Minimizar seção"}
                       >
                         {isAdjustmentsMinimized ? (
@@ -1235,67 +1298,44 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         )}
                       </button>
                     </div>
-                    <button
-                      onClick={() => {
-                        setShowAddAdjustmentForm(true);
-                        setIsAdjustmentsMinimized(false);
-                      }}
-                      className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Adicionar Acréscimo</span>
-                    </button>
                   </div>
-                  
-                  {/* Conteúdo da seção - só exibe se não estiver minimizada */}
-                  <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
-                    isAdjustmentsMinimized ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'
-                  }`}>
-                    <div className="space-y-4">
-                      {/* Formulário para adicionar acréscimo */}
+                  <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isAdjustmentsMinimized ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'}`}>
+                    <div className="px-4 pb-4 space-y-4">
                       {showAddAdjustmentForm && selectedEmployee.employee && (
-                        <AdjustmentForm 
-                          employeeId={selectedEmployee.employee.id}
-                          onSave={handleAddAdjustment}
-                          onCancel={() => setShowAddAdjustmentForm(false)}
-                        />
+                        <AdjustmentForm employeeId={selectedEmployee.employee.id} onSave={handleAddAdjustment} onCancel={() => setShowAddAdjustmentForm(false)} />
                       )}
-                      
-                      {/* Formulário de edição */}
                       {editingAdjustment && selectedEmployee.employee && (
-                        <AdjustmentForm 
-                          employeeId={selectedEmployee.employee.id}
-                          adjustment={editingAdjustment}
-                          onSave={handleUpdateAdjustment}
-                          onCancel={() => setEditingAdjustment(null)}
-                        />
+                        <AdjustmentForm employeeId={selectedEmployee.employee.id} adjustment={editingAdjustment} onSave={handleUpdateAdjustment} onCancel={() => setEditingAdjustment(null)} />
                       )}
-                      
-                      {/* Lista de acréscimos existentes */}
-                      <AdjustmentsList 
-                        adjustments={adjustments}
-                        onEdit={handleEditAdjustment}
-                        onDelete={handleDeleteAdjustment}
-                      />
+                      {adjustments.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500 bg-gray-50">Nenhum acréscimo cadastrado.</div>
+                      ) : (
+                        <AdjustmentsList adjustments={adjustments} onEdit={handleEditAdjustment} onDelete={handleDeleteAdjustment} />
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* Seção de Descontos Salariais */}
-                <div className="mb-6 p-4 bg-white border border-gray-200 rounded-lg">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center space-x-3">
-                      <h4 className="text-md font-semibold text-gray-900">
-                        Descontos
-                        {discounts.length > 0 && (
-                          <span className="ml-2 px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
-                            {discounts.length}
-                          </span>
-                        )}
-                      </h4>
+                <div className="rounded-xl border border-gray-200 bg-white mb-6">
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-semibold text-gray-900">Descontos</h4>
+                      <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-red-50 text-red-600 border border-red-100">
+                        {discounts.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowAddDiscountForm(true); setIsDiscountsMinimized(false); }}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Adicionar</span>
+                      </button>
                       <button
                         onClick={() => setIsDiscountsMinimized(!isDiscountsMinimized)}
-                        className="p-1 text-gray-500 hover:text-gray-700 transition-colors"
+                        className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"
                         title={isDiscountsMinimized ? "Expandir seção" : "Minimizar seção"}
                       >
                         {isDiscountsMinimized ? (
@@ -1305,56 +1345,32 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         )}
                       </button>
                     </div>
-                    <button
-                      onClick={() => {
-                        setShowAddDiscountForm(true);
-                        setIsDiscountsMinimized(false);
-                      }}
-                      className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Adicionar Desconto</span>
-                    </button>
                   </div>
-                  
-                  {/* Conteúdo da seção - só exibe se não estiver minimizada */}
-                  <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
-                    isDiscountsMinimized ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'
-                  }`}>
-                    <div className="space-y-4">
-                      {/* Formulário para adicionar desconto */}
+                  <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isDiscountsMinimized ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'}`}>
+                    <div className="px-4 pb-4 space-y-4">
                       {showAddDiscountForm && selectedEmployee.employee && (
-                        <DiscountForm 
-                          employeeId={selectedEmployee.employee.id}
-                          onSave={handleAddDiscount}
-                          onCancel={() => setShowAddDiscountForm(false)}
-                        />
+                        <DiscountForm employeeId={selectedEmployee.employee.id} onSave={handleAddDiscount} onCancel={() => setShowAddDiscountForm(false)} />
                       )}
-                      
-                      {/* Formulário de edição */}
                       {editingDiscount && selectedEmployee.employee && (
-                        <DiscountForm 
-                          employeeId={selectedEmployee.employee.id}
-                          discount={editingDiscount}
-                          onSave={handleUpdateDiscount}
-                          onCancel={() => setEditingDiscount(null)}
-                        />
+                        <DiscountForm employeeId={selectedEmployee.employee.id} discount={editingDiscount} onSave={handleUpdateDiscount} onCancel={() => setEditingDiscount(null)} />
                       )}
-                      
-                      {/* Lista de descontos existentes */}
-                      <DiscountsList 
-                        discounts={discounts}
-                        onEdit={handleEditDiscount}
-                        onDelete={handleDeleteDiscount}
-                      />
+                      {discounts.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500 bg-gray-50">Nenhum desconto cadastrado.</div>
+                      ) : (
+                        <DiscountsList discounts={discounts} onEdit={handleEditDiscount} onDelete={handleDeleteDiscount} />
+                      )}
                     </div>
                   </div>
                 </div>
+                  </>
+                )}
 
+                {detailsTab === 'records' && (
+                  <>
                 {/* Seletor de mês/ano */}
-                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                <div className="rounded-xl border border-gray-200 p-5 bg-white">
                   <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-md font-semibold text-gray-900">Registros de Ponto</h4>
+                    <h4 className="text-sm font-semibold text-gray-900">Registros de Ponto</h4>
                     {employeeRecordsData?.data && employeeRecordsData.data.length > 0 && (
                       <button
                         onClick={exportToExcel}
@@ -1559,6 +1575,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
                     )}
                   </div>
+                )}
+                  </>
                 )}
               </div>
             </div>
