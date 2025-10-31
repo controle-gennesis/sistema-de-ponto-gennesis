@@ -39,16 +39,11 @@ export class BankHoursController {
         }
       };
 
-      if (search) {
-        whereClause.user = {
-          ...whereClause.user,
-          OR: [
-            { name: { contains: search as string, mode: 'insensitive' } },
-            { cpf: { contains: search as string, mode: 'insensitive' } }
-          ]
-        };
-      }
+      // Verificar se precisa filtrar manualmente (se há números na busca)
+      const searchNumbers = search ? (search as string).replace(/\D/g, '') : '';
+      const shouldFilterManually = search && searchNumbers.length > 0;
 
+      // Aplicar filtros específicos primeiro
       if (department) {
         whereClause.department = { contains: department as string, mode: 'insensitive' };
       }
@@ -69,8 +64,29 @@ export class BankHoursController {
         whereClause.polo = { contains: polo as string, mode: 'insensitive' };
       }
 
+      // Aplicar busca geral (se não for filtro manual)
+      if (search && !shouldFilterManually) {
+        whereClause.AND = [
+          {
+            OR: [
+              { user: { name: { contains: search as string, mode: 'insensitive' } } },
+              { user: { cpf: { contains: search as string, mode: 'insensitive' } } },
+              { user: { email: { contains: search as string, mode: 'insensitive' } } },
+              { employeeId: { contains: search as string, mode: 'insensitive' } },
+              { department: { contains: search as string, mode: 'insensitive' } },
+              { position: { contains: search as string, mode: 'insensitive' } },
+              { company: { contains: search as string, mode: 'insensitive' } },
+              { costCenter: { contains: search as string, mode: 'insensitive' } },
+              { client: { contains: search as string, mode: 'insensitive' } },
+              { modality: { contains: search as string, mode: 'insensitive' } },
+              { polo: { contains: search as string, mode: 'insensitive' } }
+            ]
+          }
+        ];
+      }
+
       // Buscar funcionários com filtros aplicados
-      const employees = await prisma.employee.findMany({
+      let employees = await prisma.employee.findMany({
         where: whereClause,
         include: {
           user: {
@@ -87,6 +103,43 @@ export class BankHoursController {
           }
         }
       });
+
+      // Filtrar manualmente se necessário (considerando CPF sem formatação e todos os campos)
+      if (shouldFilterManually && search) {
+        const searchLower = (search as string).toLowerCase();
+        employees = employees.filter((employee: any) => {
+          // Verificar CPF sem formatação
+          if (employee.user?.cpf) {
+            const employeeCpfNumbers = employee.user.cpf.replace(/\D/g, '');
+            if (employeeCpfNumbers.includes(searchNumbers)) {
+              return true;
+            }
+          }
+          
+          // Verificar todos os outros campos
+          const matchesSearch = (
+            employee.user?.name?.toLowerCase().includes(searchLower) ||
+            employee.user?.email?.toLowerCase().includes(searchLower) ||
+            employee.employeeId?.toLowerCase().includes(searchLower) ||
+            employee.department?.toLowerCase().includes(searchLower) ||
+            employee.position?.toLowerCase().includes(searchLower) ||
+            employee.company?.toLowerCase().includes(searchLower) ||
+            employee.costCenter?.toLowerCase().includes(searchLower) ||
+            employee.client?.toLowerCase().includes(searchLower) ||
+            employee.modality?.toLowerCase().includes(searchLower) ||
+            employee.polo?.toLowerCase().includes(searchLower)
+          );
+          
+          return matchesSearch;
+        });
+        
+        // Reordenar por nome
+        employees.sort((a: any, b: any) => {
+          const nameA = a.user?.name || '';
+          const nameB = b.user?.name || '';
+          return nameA.localeCompare(nameB);
+        });
+      }
 
       // Calcular banco de horas para cada funcionário usando TimeRecordService
       const bankHoursData = await Promise.all(

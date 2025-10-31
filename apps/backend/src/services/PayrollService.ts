@@ -328,27 +328,36 @@ export class PayrollService {
       }
     };
 
+    // Construir busca considerando CPF sem formatação
+    let searchNumbers = '';
+    let shouldFilterManually = false;
+    
     if (search) {
-      where.OR = [
-        // Busca nos dados do usuário
-        { user: { name: { contains: search, mode: 'insensitive' } } },
-        { user: { cpf: { contains: search, mode: 'insensitive' } } },
-        { user: { email: { contains: search, mode: 'insensitive' } } },
-        // Busca nos dados do funcionário
-        { employeeId: { contains: search, mode: 'insensitive' } },
-        { department: { contains: search, mode: 'insensitive' } },
-        { position: { contains: search, mode: 'insensitive' } },
-        { company: { contains: search, mode: 'insensitive' } },
-        { costCenter: { contains: search, mode: 'insensitive' } },
-        { client: { contains: search, mode: 'insensitive' } },
-        { modality: { contains: search, mode: 'insensitive' } },
-        { bank: { contains: search, mode: 'insensitive' } },
-        { accountType: { contains: search, mode: 'insensitive' } },
-        { agency: { contains: search, mode: 'insensitive' } },
-        { account: { contains: search, mode: 'insensitive' } },
-        { pixKeyType: { contains: search, mode: 'insensitive' } },
-        { pixKey: { contains: search, mode: 'insensitive' } }
-      ];
+      searchNumbers = search.replace(/\D/g, ''); // Remove tudo que não é número
+      // Se o termo de busca contém números, vamos filtrar manualmente para considerar CPF sem formatação
+      shouldFilterManually = searchNumbers.length > 0;
+      
+      if (!shouldFilterManually) {
+        // Se não tem números, usar busca normal do Prisma
+        where.OR = [
+          { user: { name: { contains: search, mode: 'insensitive' } } },
+          { user: { cpf: { contains: search, mode: 'insensitive' } } },
+          { user: { email: { contains: search, mode: 'insensitive' } } },
+          { employeeId: { contains: search, mode: 'insensitive' } },
+          { department: { contains: search, mode: 'insensitive' } },
+          { position: { contains: search, mode: 'insensitive' } },
+          { company: { contains: search, mode: 'insensitive' } },
+          { costCenter: { contains: search, mode: 'insensitive' } },
+          { client: { contains: search, mode: 'insensitive' } },
+          { modality: { contains: search, mode: 'insensitive' } },
+          { bank: { contains: search, mode: 'insensitive' } },
+          { accountType: { contains: search, mode: 'insensitive' } },
+          { agency: { contains: search, mode: 'insensitive' } },
+          { account: { contains: search, mode: 'insensitive' } },
+          { pixKeyType: { contains: search, mode: 'insensitive' } },
+          { pixKey: { contains: search, mode: 'insensitive' } }
+        ];
+      }
     }
 
     if (company) {
@@ -387,9 +396,26 @@ export class PayrollService {
       where.polo = { contains: polo, mode: 'insensitive' };
     }
 
+    // Construir where clause para busca manual (aplicar filtros específicos)
+    let manualWhere: any = {
+      user: {
+        isActive: true
+      }
+    };
+    
+    if (company) manualWhere.company = { contains: company, mode: 'insensitive' };
+    if (department) manualWhere.department = { contains: department, mode: 'insensitive' };
+    if (position) manualWhere.position = { contains: position, mode: 'insensitive' };
+    if (costCenter) manualWhere.costCenter = { contains: costCenter, mode: 'insensitive' };
+    if (client) manualWhere.client = { contains: client, mode: 'insensitive' };
+    if (modality) manualWhere.modality = { contains: modality, mode: 'insensitive' };
+    if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
+    if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
+    if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
+
     // Buscar funcionários
-    const employees = await prisma.employee.findMany({
-      where,
+    let employees = await prisma.employee.findMany({
+      where: shouldFilterManually ? manualWhere : where,
       include: {
         user: {
           select: {
@@ -405,6 +431,46 @@ export class PayrollService {
         }
       }
     });
+
+    // Filtrar manualmente se necessário (quando há números na busca)
+    if (shouldFilterManually && search) {
+      const searchLower = search.toLowerCase();
+      employees = employees.filter((employee: any) => {
+        // Verificar CPF sem formatação
+        if (employee.user?.cpf) {
+          const employeeCpfNumbers = employee.user.cpf.replace(/\D/g, '');
+          if (employeeCpfNumbers.includes(searchNumbers)) {
+            return true;
+          }
+        }
+        
+        // Verificar outros campos
+        return (
+          employee.user?.name?.toLowerCase().includes(searchLower) ||
+          employee.user?.email?.toLowerCase().includes(searchLower) ||
+          employee.employeeId?.toLowerCase().includes(searchLower) ||
+          employee.department?.toLowerCase().includes(searchLower) ||
+          employee.position?.toLowerCase().includes(searchLower) ||
+          employee.company?.toLowerCase().includes(searchLower) ||
+          employee.costCenter?.toLowerCase().includes(searchLower) ||
+          employee.client?.toLowerCase().includes(searchLower) ||
+          employee.modality?.toLowerCase().includes(searchLower) ||
+          employee.bank?.toLowerCase().includes(searchLower) ||
+          employee.accountType?.toLowerCase().includes(searchLower) ||
+          employee.agency?.toLowerCase().includes(searchLower) ||
+          employee.account?.toLowerCase().includes(searchLower) ||
+          employee.pixKeyType?.toLowerCase().includes(searchLower) ||
+          employee.pixKey?.toLowerCase().includes(searchLower)
+        );
+      });
+      
+      // Reordenar por nome
+      employees.sort((a: any, b: any) => {
+        const nameA = a.user?.name || '';
+        const nameB = b.user?.name || '';
+        return nameA.localeCompare(nameB);
+      });
+    }
 
     // Calcular totais para cada funcionário e filtrar apenas os ativos no período
     const employeesWithTotals = await Promise.all(
