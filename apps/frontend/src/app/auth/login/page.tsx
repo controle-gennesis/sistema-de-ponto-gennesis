@@ -3,13 +3,9 @@
 // Desabilitar prerendering
 export const dynamic = 'force-dynamic';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Eye, EyeOff, Mail, Lock, AlertCircle, ChevronLeft, ChevronRight, LogIn } from 'lucide-react';
 import { authService } from '@/lib/auth';
 import { toast } from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
@@ -24,6 +20,31 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  // Dados do carrossel
+  const carouselData = [
+    {
+      image: '/01.jpg',
+      text: 'Capturando Momentos, Criando Memórias'
+    },
+    {
+      image: '/02.jpg',
+      text: 'Simplificando seu trabalho diário'
+    },
+    {
+      image: '/03.jpg',
+      text: 'Eficiência e qualidade em cada ação'
+    }
+  ];
+
+  // Auto-play do carrossel
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % carouselData.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [carouselData.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +83,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative">
+    <div className="min-h-screen flex relative">
       {/* Overlay de carregamento */}
       {loading && (
         <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center z-50">
@@ -78,56 +99,139 @@ export default function LoginPage() {
         </div>
       )}
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <Card>
-          <CardHeader className="border-b-0">
-            <div className="flex justify-center">
-              <img 
-                src="/logo.png" 
-                alt="Logo Gennesis Engenharia" 
-                className="h-24 w-auto object-contain"
-              />
+      {/* Coluna esquerda - Carrossel */}
+      <div className="hidden lg:flex lg:w-1/2 relative">
+        <div className="w-full h-full flex items-center justify-center p-4">
+          {/* Card do carrossel com bordas arredondadas */}
+          <div className="relative w-full h-full">
+            {/* Borda gradiente wrapper */}
+            <div className="absolute inset-0 rounded-2xl p-[2px]">
+              {/* Conteúdo do card */}
+              <div className="w-full h-full bg-black rounded-[22px] flex flex-col relative overflow-hidden">
+                {/* Logo no canto superior esquerdo */}
+                <div className="absolute top-6 left-6 z-20">
+                  <img 
+                    src="/logogrande.png" 
+                    alt="Logo Gennesis Engenharia" 
+                    className="h-12 w-auto object-contain"
+                  />
+                </div>
+
+                {/* Link para o site no canto superior direito */}
+                <div className="absolute top-6 right-6 z-20">
+                  <a 
+                    href="https://gennesisengenharia.com.br/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-full text-white text-sm font-medium transition-colors backdrop-blur-sm"
+                  >
+                    <span>Voltar para o site</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </a>
+                </div>
+
+                {/* Carrossel */}
+                <div className="relative flex-1 overflow-hidden">
+                  {carouselData.map((slide, index) => (
+                    <div
+                      key={index}
+                      className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+                        index === currentSlide ? 'opacity-100 z-10' : 'opacity-0 z-0'
+                      }`}
+                    >
+                      {/* Imagem de fundo cobrindo tudo */}
+                      <div className="absolute inset-0">
+                        <img 
+                          src={slide.image} 
+                          alt={`Slide ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {/* Overlay escuro para melhorar legibilidade do texto */}
+                        <div className="absolute inset-0 bg-black/30"></div>
+                      </div>
+                      
+                      {/* Texto centralizado sobre a imagem - posicionado mais abaixo */}
+                      <div className="absolute inset-0 flex items-end justify-center pb-24 z-10">
+                        <p className="text-white text-3xl font-medium text-center px-12 leading-relaxed drop-shadow-lg">
+                          {slide.text}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Controles do carrossel */}
+                <div className="absolute bottom-12 left-1/2 transform -translate-x-1/2 flex items-center space-x-4 z-30">
+                  {/* Indicadores */}
+                  <div className="flex space-x-2">
+                    {carouselData.map((_, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setCurrentSlide(index)}
+                        className={`h-2 rounded-full transition-all duration-500 ease-in-out ${
+                          index === currentSlide ? 'bg-white w-14' : 'bg-white/40 w-2'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
-            <h2 className="text-center text-2xl font-bold text-gray-900">
-              Entrar na sua conta
-            </h2>
-            <p className="mt-2 text-center text-sm text-gray-600">
-              Digite suas credenciais para acessar o sistema
-            </p>
-          </CardHeader>
+          </div>
+        </div>
+      </div>
 
-          <CardContent className="pt-0">
+      {/* Coluna direita - Formulário de Login */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center bg-white p-8">
+          <div className="w-full max-w-md">
+            <div>
+              {/* <div className="flex justify-center mb-6">
+                <LogIn className="w-16 h-16 text-gray-900" />
+              </div> */}
+              <h2 className="text-3xl font-bold text-gray-900 mb-2 text-center">
+               Bem-vindo(a) de volta!
+              </h2>
+              <p className="text-gray-600 mb-8 text-center">
+                Por favor, insira seu email e senha para acessar o sistema.
+              </p>
+
             <form onSubmit={handleSubmit} className="space-y-6">
-              <Input
-                label="Email"
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleChange}
-                required
-                leftIcon={<Mail className="w-4 h-4" />}
-                placeholder="seu@email.com"
-              />
+              <div>
+                <div className="relative">
+                  <input
+                    type="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleChange}
+                    required
+                    placeholder="Email"
+                    className="w-full px-4 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
 
-              <Input
-                label="Senha"
-                name="password"
-                type={showPassword ? 'text' : 'password'}
-                value={formData.password}
-                onChange={handleChange}
-                required
-                leftIcon={<Lock className="w-4 h-4" />}
-                rightIcon={
+              <div>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    required
+                    placeholder="Senha"
+                    className="w-full px-4 pr-12 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
-                }
-                placeholder="Sua senha"
-              />
+                </div>
+              </div>
 
               {error && (
                 <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -141,38 +245,16 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <Button
+              <button
                 type="submit"
-                loading={loading}
                 disabled={loading}
-                className="w-full"
-                size="lg"
+                className="w-full bg-gray-900 hover:bg-gray-800 text-white py-4 text-base font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Entrando...' : 'Entrar'}
-              </Button>
+              </button>
             </form>
-
-            {/* <div className="mt-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300" />
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">
-                    Dados de teste
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2 text-xs text-gray-500">
-                <p><strong>Admin:</strong> admin@engenharia.com.br / admin123</p>
-                <p><strong>RH:</strong> rh@engenharia.com.br / rh123</p>
-                <p><strong>Funcionário:</strong> joao.silva@engenharia.com.br / func123</p>
-              </div>
-            </div> */}
-          </CardContent>
-        </Card>
-
+          </div>
+        </div>
       </div>
     </div>
   );
