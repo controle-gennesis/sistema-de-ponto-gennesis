@@ -20,9 +20,13 @@ export const COMPANIES_LIST = [
 export const MODALITIES_LIST = [
   'CLT',
   'ESTAGIÁRIO',
-  'MEI',
-  'PJ',
-  'TERCEIRIZADO'
+  'MEI'
+];
+
+// Lista de categorias financeiras
+export const CATEGORIAS_FINANCEIRAS_LIST = [
+  'GASTO',
+  'DESPESA'
 ];
 
 export const BANKS_LIST = [

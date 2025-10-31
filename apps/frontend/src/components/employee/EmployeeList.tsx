@@ -1,11 +1,20 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
+import { 
+  DEPARTMENTS_LIST,
+  COMPANIES_LIST,
+  MODALITIES_LIST,
+  COST_CENTERS_LIST,
+  CLIENTS_LIST,
+  POLOS_LIST,
+  CATEGORIAS_FINANCEIRAS_LIST
+} from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import { AdjustmentsList } from './AdjustmentsList';
 import { AdjustmentForm } from './AdjustmentForm';
@@ -73,6 +82,12 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [positionFilter, setPositionFilter] = useState<string>('all');
   const [costCenterFilter, setCostCenterFilter] = useState<string>('all');
   const [clientFilter, setClientFilter] = useState<string>('all');
+  const [companyFilter, setCompanyFilter] = useState<string>('all');
+  const [poloFilter, setPoloFilter] = useState<string>('all');
+  const [categoriaFinanceiraFilter, setCategoriaFinanceiraFilter] = useState<string>('all');
+  const [modalityFilter, setModalityFilter] = useState<string>('all');
+  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -108,33 +123,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const queryClient = useQueryClient();
 
   // Listas de opções para filtros
-  const departments = [
-    'Todos',
-    'Projetos',
-    'Contratos e Licitações',
-    'Suprimentos',
-    'Jurídico',
-    'Departamento Pessoal',
-    'Engenharia',
-    'Administrativo',
-    'Financeiro'
-  ];
+  const departments = ['Todos', ...DEPARTMENTS_LIST];
 
   const positions = ['Todos', ...CARGOS_LIST];
 
-  const costCenters = [
-    'Todos',
-    'SEDES',
-    'DF - ADM LOCAL',
-    'ITAMARATY - SERVIÇOS EVENTUAIS',
-    'ITAMARATY - MÃO DE OBRA',
-    'SES GDF - LOTE 14',
-    'SES GDF - LOTE 10',
-    'ADM CENTRAL ENGPAC',
-    'DIRETOR'
-  ];
+  const costCenters = ['Todos', ...COST_CENTERS_LIST];
 
-  const clients = ['Todos', ...TOMADORES_LIST];
+  const clients = ['Todos', ...CLIENTS_LIST];
 
   // Função para agrupar registros por dia
   const groupRecordsByDay = (records: any[]) => {
@@ -309,23 +304,21 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     XLSX.writeFile(wb, fileName);
   };
 
-  // Buscar funcionários
+  // Buscar funcionários - buscar todos para filtrar no frontend
   const { data: employeesData, isLoading, error } = useQuery({
-    queryKey: ['employees', searchTerm, currentPage, statusFilter],
+    queryKey: ['employees', statusFilter],
     queryFn: async () => {
       const res = await api.get('/users', {
         params: { 
-          search: searchTerm, 
-          page: currentPage,
-          limit: itemsPerPage,
-          status: statusFilter
+          page: 1,
+          limit: 10000, // Buscar muitos para filtrar no frontend
+          status: statusFilter === 'all' ? 'all' : statusFilter
         }
       });
       return res.data;
     },
     enabled: true, // Permitir que todos os usuários vejam a lista
   });
-
 
   // Buscar registros de ponto do funcionário selecionado
   const { data: employeeRecordsData, isLoading: loadingRecords } = useQuery({
@@ -635,34 +628,101 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   };
 
   const employees = employeesData?.data || [];
+  // Listas com base em fontes globais
+  const companies: string[] = ['Todos', ...COMPANIES_LIST];
+  const polos: string[] = ['Todos', ...POLOS_LIST];
+  const categoriasFinanceiras: string[] = ['Todos', ...CATEGORIAS_FINANCEIRAS_LIST];
+  const modalities: string[] = ['Todos', ...MODALITIES_LIST];
   const pagination = employeesData?.pagination || { total: 0, totalPages: 0 };
 
   // Filtrar apenas funcionários (não RH/Admin) e por todos os filtros
-  const filteredEmployees = employees.filter((emp: Employee) => {
-    const isEmployee = emp.role === 'EMPLOYEE';
+  const filteredEmployees = useMemo(() => {
+    if (!employees || employees.length === 0) {
+      return [];
+    }
     
-    const matchesDepartment = departmentFilter === 'all' || 
-      (emp.employee?.department && emp.employee.department.toLowerCase().includes(departmentFilter.toLowerCase()));
-    
-    const matchesPosition = positionFilter === 'all' || 
-      (emp.employee?.position && emp.employee.position.toLowerCase().includes(positionFilter.toLowerCase()));
-    
-    const matchesCostCenter = costCenterFilter === 'all' || 
-      (emp.employee?.costCenter && emp.employee.costCenter.toLowerCase().includes(costCenterFilter.toLowerCase()));
-    
-    const matchesClient = clientFilter === 'all' || 
-      (emp.employee?.client && emp.employee.client.toLowerCase().includes(clientFilter.toLowerCase()));
-    
-    return isEmployee && matchesDepartment && matchesPosition && matchesCostCenter && matchesClient;
-  }).sort((a: Employee, b: Employee) => {
-    // Ordenação alfabética por nome
-    return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
-  });
+    return employees.filter((emp: Employee) => {
+      // Apenas funcionários (não RH/Admin)
+      if (emp.role !== 'EMPLOYEE') return false;
+      
+      // Busca geral - verifica em todos os campos
+      if (searchTerm.trim() !== '') {
+        const searchLower = searchTerm.toLowerCase().trim();
+        const searchNumbers = searchTerm.replace(/\D/g, '');
+        
+        const matchesSearch = 
+          (emp.name || '').toLowerCase().includes(searchLower) ||
+          (emp.email || '').toLowerCase().includes(searchLower) ||
+          (emp.cpf && searchNumbers.length > 0 && emp.cpf.replace(/\D/g, '').includes(searchNumbers)) ||
+          (emp.employee?.employeeId || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.department || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.position || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.company || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.polo || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.costCenter || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.client || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.categoriaFinanceira || '').toLowerCase().includes(searchLower) ||
+          (emp.employee?.modality || '').toLowerCase().includes(searchLower);
+        
+        if (!matchesSearch) {
+          return false;
+        }
+      }
+      
+      // Filtros específicos
+      if (departmentFilter !== 'all' && 
+          (!emp.employee?.department || !emp.employee.department.toLowerCase().includes(departmentFilter.toLowerCase()))) {
+        return false;
+      }
+      
+      if (positionFilter !== 'all' && 
+          (!emp.employee?.position || !emp.employee.position.toLowerCase().includes(positionFilter.toLowerCase()))) {
+        return false;
+      }
+      
+      if (costCenterFilter !== 'all' && 
+          (!emp.employee?.costCenter || !emp.employee.costCenter.toLowerCase().includes(costCenterFilter.toLowerCase()))) {
+        return false;
+      }
+      
+      if (clientFilter !== 'all' && 
+          (!emp.employee?.client || !emp.employee.client.toLowerCase().includes(clientFilter.toLowerCase()))) {
+        return false;
+      }
+      
+      if (companyFilter !== 'all' && emp.employee?.company !== companyFilter) {
+        return false;
+      }
+      
+      if (poloFilter !== 'all' && emp.employee?.polo !== poloFilter) {
+        return false;
+      }
+      
+      if (categoriaFinanceiraFilter !== 'all' && emp.employee?.categoriaFinanceira !== categoriaFinanceiraFilter) {
+        return false;
+      }
+      
+      if (modalityFilter !== 'all' && emp.employee?.modality !== modalityFilter) {
+        return false;
+      }
+      
+      return true;
+    }).sort((a: Employee, b: Employee) => {
+      // Ordenação alfabética por nome
+      return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+    });
+  }, [employees, searchTerm, departmentFilter, positionFilter, costCenterFilter, clientFilter, companyFilter, poloFilter, categoriaFinanceiraFilter, modalityFilter]);
+
+  // Aplicar paginação nos funcionários filtrados
+  const totalFiltered = filteredEmployees.length;
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedEmployees = filteredEmployees.slice(startIndex, endIndex);
 
   // Calcular informações de paginação
-  const totalPages = Math.ceil(pagination.total / itemsPerPage);
-  const startItem = (currentPage - 1) * itemsPerPage + 1;
-  const endItem = Math.min(currentPage * itemsPerPage, pagination.total);
+  const totalPages = Math.ceil(totalFiltered / itemsPerPage);
+  const startItem = totalFiltered === 0 ? 0 : startIndex + 1;
+  const endItem = Math.min(endIndex, totalFiltered);
 
   // Resetar página quando buscar
   const handleSearch = (value: string) => {
@@ -673,7 +733,257 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   // Verificar se o usuário tem permissões administrativas baseadas no cargo
   const { canManageEmployees } = usePermissions();
 
+  // Função para limpar todos os filtros
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('active');
+    setDepartmentFilter('all');
+    setPositionFilter('all');
+    setCostCenterFilter('all');
+    setClientFilter('all');
+    setCompanyFilter('all');
+    setPoloFilter('all');
+    setCategoriaFinanceiraFilter('all');
+    setModalityFilter('all');
+    setCurrentPage(1);
+  };
+
   return (
+    <>
+      {/* Card de Filtros - fora do card de gestão (mesmo padrão das outras telas) */}
+      <Card className="mb-6">
+        <CardHeader className="border-b-0 pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Filter className="w-5 h-5 text-gray-900" />
+              <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+            </div>
+            <div className="flex items-center space-x-4">
+              {!isFiltersMinimized && (
+                <>
+                  <button
+                    onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                    className="flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                    title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
+                  </button>
+                  <button
+                    onClick={clearFilters}
+                    className="flex items-center justify-center w-8 h-8 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                    title="Limpar todos os filtros"
+                  >
+                    <RotateCcw className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
+                className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
+              >
+                {isFiltersMinimized ? (
+                  <ChevronDown className="w-5 h-5" />
+                ) : (
+                  <ChevronUp className="w-5 h-5" />
+                )}
+              </button>
+            </div>
+          </div>
+        </CardHeader>
+        {!isFiltersMinimized && (
+          <CardContent className="p-4 sm:p-6">
+            <div className="space-y-4">
+              {/* Filtro Principal - Busca Geral e Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                <div className="space-y-2 sm:col-span-10">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Buscar Funcionário
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Status
+                  </label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
+                    className="w-full px-3 pr-8 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white text-sm"
+                  >
+                    <option value="active">Ativos</option>
+                    <option value="inactive">Inativos</option>
+                    <option value="all">Todos</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Filtros Avançados - Condicionais */}
+              {showAdvancedFilters && (
+                <div className="border-t pt-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium text-gray-700">Filtros Específicos</h4>
+                  </div>
+                  
+                  {/* Grupo 1: Informações Básicas */}
+                  <div className="space-y-3">
+                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Básicas</h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Setor
+                        </label>
+                        <select
+                          value={departmentFilter}
+                          onChange={(e) => setDepartmentFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todos</option>
+                          {departments.filter(d => d !== 'Todos').map((dept) => (
+                            <option key={dept} value={dept}>{dept}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Cargo
+                        </label>
+                        <select
+                          value={positionFilter}
+                          onChange={(e) => setPositionFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todos</option>
+                          {positions.filter(p => p !== 'Todos').map((pos) => (
+                            <option key={pos} value={pos}>{pos}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Empresa
+                        </label>
+                        <select
+                          value={companyFilter}
+                          onChange={(e) => setCompanyFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todas</option>
+                          {companies.filter(c => c !== 'Todos').map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Polo
+                        </label>
+                        <select
+                          value={poloFilter}
+                          onChange={(e) => setPoloFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todos</option>
+                          {polos.filter(p => p !== 'Todos').map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Grupo 2: Informações Financeiras */}
+                  <div className="space-y-3">
+                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Financeiras</h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Centro de Custo
+                        </label>
+                        <select
+                          value={costCenterFilter}
+                          onChange={(e) => setCostCenterFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todos</option>
+                          {costCenters.filter(cc => cc !== 'Todos').map((center) => (
+                            <option key={center} value={center}>{center}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tomador
+                        </label>
+                        <select
+                          value={clientFilter}
+                          onChange={(e) => setClientFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todos</option>
+                          {clients.filter(c => c !== 'Todos').map((tomador) => (
+                            <option key={tomador} value={tomador}>{tomador}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Categoria Financeira
+                        </label>
+                        <select
+                          value={categoriaFinanceiraFilter}
+                          onChange={(e) => setCategoriaFinanceiraFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todas</option>
+                          {categoriasFinanceiras.filter(c => c !== 'Todos').map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Modalidade
+                        </label>
+                        <select
+                          value={modalityFilter}
+                          onChange={(e) => setModalityFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="all">Todas</option>
+                          {modalities.filter(m => m !== 'Todos').map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
     <Card className="w-full">
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -697,17 +1007,30 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       </CardHeader>
       <CardContent>
         {/* Busca e Filtros */}
-        <div className="mb-6 border border-gray-200 rounded-lg">
+        <div className="hidden">
           {/* Cabeçalho dos Filtros */}
-          <div className="px-4 py-3 border-b border-gray-200
-          ">
-            <div className="flex items-center space-x-2">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
               <Filter className="w-5 h-5 text-gray-600" />
               <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+              </div>
+              <button
+                onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
+                className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
+              >
+                {isFiltersMinimized ? (
+                  <ChevronDown className="w-5 h-5" />
+                ) : (
+                  <ChevronUp className="w-5 h-5" />
+                )}
+              </button>
             </div>
           </div>
           
           {/* Conteúdo dos Filtros */}
+          {!isFiltersMinimized && (
           <div className="p-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
                 <div className="relative flex-1">
@@ -793,6 +1116,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 </div>
               </div>
             </div>
+          )}
         </div>
 
         {/* Lista de funcionários */}
@@ -811,7 +1135,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
             {/* Informações de paginação */}
             <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
               <span>
-                Mostrando {startItem} a {endItem} de {pagination.total} funcionários
+                Mostrando {startItem} a {endItem} de {totalFiltered} funcionários
               </span>
               <span>
                 Página {currentPage} de {totalPages}
@@ -819,7 +1143,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredEmployees.map((employee: Employee) => (
+              {paginatedEmployees.map((employee: Employee) => (
               <div
                 key={employee.id}
                 onClick={() => { setSelectedEmployee(employee); setDetailsTab('info'); }}
@@ -1054,12 +1378,12 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="w-14 h-14 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
                         {selectedEmployee.name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase()}
-                      </div>
+                  </div>
                       <div className="min-w-0">
                         <h3 className="text-lg font-semibold text-gray-900 truncate">{selectedEmployee.name}</h3>
                         <p className="text-sm text-gray-600 truncate">{selectedEmployee.employee?.position} de {selectedEmployee.employee?.department}</p>
-                      </div>
-                    </div>
+                  </div>
+                </div>
                     <div className="flex items-center gap-2">
                       {canManageEmployees && showDeleteButton && (
                         selectedEmployee.isActive ? (
@@ -1080,16 +1404,16 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           </button>
                         )
                       )}
-                      <button
-                        onClick={() => setSelectedEmployee(null)}
+                <button
+                  onClick={() => setSelectedEmployee(null)}
                         className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
-                        aria-label="Fechar"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
+                  aria-label="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
                     </div>
                   </div>
-                </div>
+              </div>
 
                 <div className="px-6 pt-4">
                   <div className="flex items-center gap-6 border-b border-gray-200">
@@ -1123,9 +1447,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     >
                       Registros de Ponto
                     </button>
-                  </div>
-                </div>
-              </div>
+                      </div>
+                      </div>
+                      </div>
 
               {/* Conteúdo em Cards */}
               <div className="p-6 space-y-6">
@@ -1148,7 +1472,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           Editar
                         </button>
                       )}
-                    </div>
+                      </div>
                     <div className="grid grid-cols-1 gap-4">
                       <div>
                         <div className="text-xs text-gray-500">Nome</div>
@@ -1193,7 +1517,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           Editar
                         </button>
                       )}
-                    </div>
+                      </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <div className="text-xs text-gray-500">Cargo</div>
@@ -1248,8 +1572,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         </div>
                       )}
                     </div>
+                    </div>
                   </div>
-                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Card - Dados Bancários */}
@@ -1306,20 +1630,20 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.digit}</div>
                         </div>
                       )}
-                      {selectedEmployee.employee?.pixKeyType && (
+                        {selectedEmployee.employee?.pixKeyType && (
                         <div>
                           <div className="text-xs text-gray-500">Tipo de Chave</div>
                           <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.pixKeyType}</div>
-                        </div>
-                      )}
-                      {selectedEmployee.employee?.pixKey && (
+                          </div>
+                        )}
+                        {selectedEmployee.employee?.pixKey && (
                         <div>
                           <div className="text-xs text-gray-500">Chave PIX</div>
                           <div className="text-sm font-medium text-gray-900 break-all">{selectedEmployee.employee.pixKey}</div>
-                        </div>
-                      )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
                   {/* Card - Remuneração e Benefícios */}
                   <div className="rounded-xl border border-gray-200 p-5 bg-white">
@@ -1386,8 +1710,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <div className="flex items-center gap-2">
                       <h4 className="text-sm font-semibold text-gray-900">Acréscimos</h4>
                       <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-blue-50 text-blue-600 border border-blue-100">
-                        {adjustments.length}
-                      </span>
+                            {adjustments.length}
+                          </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -1433,8 +1757,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <div className="flex items-center gap-2">
                       <h4 className="text-sm font-semibold text-gray-900">Descontos</h4>
                       <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-red-50 text-red-600 border border-red-100">
-                        {discounts.length}
-                      </span>
+                            {discounts.length}
+                          </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -1796,5 +2120,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         />
       )}
     </Card>
+    </>
   );
 }
