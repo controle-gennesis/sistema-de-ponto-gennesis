@@ -207,7 +207,7 @@ export default function LoginPage() {
                     onChange={handleChange}
                     required
                     placeholder="Email"
-                    className="w-full px-4 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    className="w-full px-4 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                   />
                 </div>
               </div>
@@ -221,7 +221,7 @@ export default function LoginPage() {
                     onChange={handleChange}
                     required
                     placeholder="Senha"
-                    className="w-full px-4 pr-12 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    className="w-full px-4 pr-12 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                   />
                   <button
                     type="button"
