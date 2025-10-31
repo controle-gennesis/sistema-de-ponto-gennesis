@@ -80,7 +80,7 @@ export default function LoginPage() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <Card>
-          <CardHeader>
+          <CardHeader className="border-b-0">
             <div className="flex justify-center">
               <img 
                 src="/logo.png" 
@@ -96,7 +96,7 @@ export default function LoginPage() {
             </p>
           </CardHeader>
 
-          <CardContent>
+          <CardContent className="pt-0">
             <form onSubmit={handleSubmit} className="space-y-6">
               <Input
                 label="Email"

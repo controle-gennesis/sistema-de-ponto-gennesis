@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Cake, Search, Calendar, Users, Mail, Filter } from 'lucide-react';
+import { Cake, Search, Calendar, Users, Mail, Filter, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
@@ -18,6 +18,7 @@ interface BirthdayEmployee {
   department: string;
   position: string;
   birthDate: string;
+  birthMonth?: number;
   birthDay: number;
   age: number;
   daysUntilBirthday: number;
@@ -49,11 +50,12 @@ export default function AniversariantesPage() {
     }
   });
 
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<string | number>(new Date().getMonth() + 1);
+  const selectedYear = new Date().getFullYear(); // Sempre o ano atual
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [showAllBirthdays, setShowAllBirthdays] = useState<boolean>(false);
+  const showAllBirthdays = true; // Sempre true para mostrar todos os aniversários do mês
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -79,10 +81,10 @@ export default function AniversariantesPage() {
     queryKey: ['birthdays', selectedMonth, selectedYear, searchTerm, showAllBirthdays],
     queryFn: async () => {
       const params = new URLSearchParams({
-        month: selectedMonth.toString(),
+        ...(selectedMonth !== 'all' && { month: selectedMonth.toString() }),
         year: selectedYear.toString(),
         ...(searchTerm && { search: searchTerm }),
-        ...(showAllBirthdays && { showAll: 'true' })
+        showAll: 'true' // Sempre mostrar todos os aniversários do mês
       });
       
       const res = await api.get(`/users/birthdays?${params}`);
@@ -131,6 +133,30 @@ export default function AniversariantesPage() {
     return `Em ${days} dias`;
   };
 
+  // Função para agrupar aniversariantes por mês
+  const groupByMonth = (employees: BirthdayEmployee[]) => {
+    const grouped: Record<number, BirthdayEmployee[]> = {};
+    
+    employees.forEach((employee) => {
+      const month = employee.birthMonth || (selectedMonth !== 'all' && typeof selectedMonth === 'number' ? selectedMonth : new Date().getMonth() + 1);
+      if (!grouped[month]) {
+        grouped[month] = [];
+      }
+      grouped[month].push(employee);
+    });
+
+    // Ordenar por mês e dentro de cada mês por dia
+    const sortedMonths = Object.keys(grouped)
+      .map(Number)
+      .sort((a, b) => a - b);
+
+    sortedMonths.forEach((month) => {
+      grouped[month].sort((a, b) => a.birthDay - b.birthDay);
+    });
+
+    return { grouped, sortedMonths };
+  };
+
   const sendBirthdayMessage = (employee: BirthdayEmployee) => {
     const subject = `Parabéns pelo seu aniversário! 🎉`;
     const body = `Olá ${employee.name},\n\nFeliz aniversário! Que este novo ano de vida seja repleto de alegrias, conquistas e momentos especiais.\n\nUm abraço da equipe Gennesis Engenharia!`;
@@ -152,7 +178,9 @@ export default function AniversariantesPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Aniversariantes</h1>
               <p className="mt-2 text-gray-600">
-                {months[selectedMonth - 1]} {selectedYear}
+                {selectedMonth === 'all' 
+                  ? `Todos os meses - ${selectedYear}` 
+                  : `${months[typeof selectedMonth === 'number' ? selectedMonth - 1 : 0]} ${selectedYear}`}
               </p>
             </div>
           </div>
@@ -194,87 +222,71 @@ export default function AniversariantesPage() {
         </div>
 
         {/* Filtros */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center space-x-2">
-              <Filter className="w-5 h-5 text-gray-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+        <Card className="mb-6">
+          <CardHeader className="border-b-0 pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Filter className="w-5 h-5 text-gray-900" />
+                <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+              </div>
+              <button
+                onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
+                className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
+              >
+                {isFiltersMinimized ? (
+                  <ChevronDown className="w-5 h-5" />
+                ) : (
+                  <ChevronUp className="w-5 h-5" />
+                )}
+              </button>
             </div>
           </CardHeader>
-          <CardContent className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Mês */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Mês
-                </label>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {months.map((month, index) => (
-                    <option key={index} value={index + 1}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          {!isFiltersMinimized && (
+            <CardContent className="p-4 sm:p-6">
+              <div className="space-y-4">
+                {/* Filtro Principal - Busca Geral e Mês */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                  <div className="space-y-2 sm:col-span-10">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Buscar Aniversariante
+                    </label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Digite o nome do funcionário ou o setor..."
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                  </div>
 
-              {/* Ano */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ano
-                </label>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {Array.from({ length: 5 }, (_, i) => {
-                    const year = new Date().getFullYear() - 2 + i;
-                    return (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {/* Busca */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Buscar por nome
-                </label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Nome do funcionário..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+                  <div className="space-y-2 sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Mês
+                    </label>
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setSelectedMonth(value === 'all' ? 'all' : parseInt(value));
+                      }}
+                      className="w-full px-3 pr-8 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white text-sm"
+                    >
+                      <option value="all">Todos</option>
+                      {months.map((month, index) => (
+                        <option key={index} value={index + 1}>
+                          {month}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
-
-            {/* Opção para mostrar todos os aniversários */}
-            <div className="mt-4">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={showAllBirthdays}
-                  onChange={(e) => setShowAllBirthdays(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700">
-                  Mostrar todos os aniversários do mês (incluindo os que já passaram)
-                </span>
-              </label>
-            </div>
-          </CardContent>
+            </CardContent>
+          )}
         </Card>
 
         {/* Lista de Aniversariantes */}
@@ -296,12 +308,122 @@ export default function AniversariantesPage() {
                   Nenhum aniversariante encontrado
                 </h3>
                 <p className="text-gray-600">
-                  Não há funcionários fazendo aniversário em {months[selectedMonth - 1]} {selectedYear}
+                  {selectedMonth === 'all' 
+                    ? `Não há funcionários fazendo aniversário` 
+                    : `Não há funcionários fazendo aniversário em ${typeof selectedMonth === 'number' ? months[selectedMonth - 1] : ''} ${selectedYear}`}
                 </p>
               </div>
+            ) : selectedMonth === 'all' ? (
+              // Renderização agrupada por mês quando "Todos" está selecionado
+              (() => {
+                const { grouped, sortedMonths } = groupByMonth(birthdayResponse.employees);
+                return (
+                  <div className="space-y-6">
+                    {sortedMonths.map((month) => (
+                      <div key={month} className="space-y-4">
+                        {/* Header do mês */}
+                        <div className="flex items-center pb-2 border-b border-gray-200">
+                          <h3 className="text-base font-semibold text-gray-700">
+                            {months[month - 1]}
+                          </h3>
+                          <span className="ml-2 text-sm text-gray-500">
+                            {grouped[month].length}
+                          </span>
+                        </div>
+
+                        {/* Grid de cards do mês */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                          {grouped[month].map((employee) => (
+                            <Card
+                              key={employee.id}
+                              className={`relative transition-all duration-200 hover:shadow-lg hover:-translate-y-1 ${
+                                employee.isTodayBirthday
+                                  ? 'border-blue-300 bg-gradient-to-br from-blue-50 to-blue-50'
+                                  : 'border-gray-200 hover:border-blue-200'
+                              }`}
+                            >
+                              {/* Badge de hoje */}
+                              {employee.isTodayBirthday && (
+                                <div className="absolute -top-2 -right-2 bg-pink-500 text-white text-xs font-bold px-2 py-1 rounded-full z-10">
+                                  HOJE!
+                                </div>
+                              )}
+
+                              <CardContent className="p-6">
+                                <div className="text-center">
+                                  {/* Avatar */}
+                                  <div className={`w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center text-xl font-bold text-blue-500 bg-white-500 border-2 border-blue-500`}>
+                                    {employee.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                  </div>
+
+                                  {/* Nome */}
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                                    {employee.name}
+                                  </h3>
+
+                                  {/* Departamento */}
+                                  <p className="text-sm text-gray-600 mb-3">
+                                    {employee.department}
+                                  </p>
+
+                                  {/* Data de aniversário */}
+                                  <div className="flex items-center justify-center space-x-2 mb-2">
+                                    <Calendar className="w-4 h-4 text-blue-500" />
+                                    <span className="text-sm font-medium text-gray-700">
+                                      {employee.birthDay} de {months[month - 1]}
+                                    </span>
+                                  </div>
+
+                                  {/* Idade */}
+                                  <p className="text-sm text-gray-600 mb-3">
+                                    {getAgeText(employee.age)}
+                                  </p>
+
+                                  {/* Dias restantes */}
+                                  <div className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium mb-4 ${
+                                    employee.isTodayBirthday
+                                      ? 'bg-pink-100 text-pink-800'
+                                      : 'bg-blue-100 text-blue-800'
+                                  }`}>
+                                    {getDaysText(employee.daysUntilBirthday, employee.isTodayBirthday)}
+                                  </div>
+
+                                  {/* Botão de parabéns */}
+                                  <button
+                                    onClick={() => sendBirthdayMessage(employee)}
+                                    className="w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:transition-all duration-200 flex items-center justify-center space-x-2"
+                                  >
+                                    <Mail className="w-4 h-4" />
+                                    <span>Enviar Parabéns</span>
+                                  </button>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {birthdayResponse.employees.map((employee) => (
+              // Renderização normal quando um mês específico está selecionado
+              <div className="space-y-4">
+                {/* Header do mês */}
+                {typeof selectedMonth === 'number' && (
+                  <div className="flex items-center pb-2 border-b border-gray-200">
+                    <h3 className="text-base font-semibold text-gray-700">
+                      {months[selectedMonth - 1]}
+                    </h3>
+                    <span className="ml-2 text-sm text-gray-500">
+                      {birthdayResponse.employees.length}
+                    </span>
+                  </div>
+                )}
+
+                {/* Grid de cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {birthdayResponse.employees.map((employee) => (
                   <Card
                     key={employee.id}
                     className={`relative transition-all duration-200 hover:shadow-lg hover:-translate-y-1 ${
@@ -338,7 +460,7 @@ export default function AniversariantesPage() {
                         <div className="flex items-center justify-center space-x-2 mb-2">
                           <Calendar className="w-4 h-4 text-blue-500" />
                           <span className="text-sm font-medium text-gray-700">
-                            {employee.birthDay} de {months[selectedMonth - 1]}
+                            {employee.birthDay} de {employee.birthMonth ? months[employee.birthMonth - 1] : (typeof selectedMonth === 'number' ? months[selectedMonth - 1] : '')}
                           </span>
                         </div>
 
@@ -367,7 +489,8 @@ export default function AniversariantesPage() {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </CardContent>

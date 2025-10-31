@@ -398,7 +398,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
     
     // Usar mês e ano atual se não fornecidos
     const currentDate = new Date();
-    const targetMonth = month ? parseInt(month as string) : currentDate.getMonth() + 1;
+    const targetMonth = month ? parseInt(month as string) : null; // null significa todos os meses
     const targetYear = year ? parseInt(year as string) : currentDate.getFullYear();
     
     // Construir filtros
@@ -416,18 +416,31 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
       whereClause.department = department as string;
     }
     
-    // Filtro por nome (busca)
+    // Filtro por nome ou departamento (busca)
     if (search && search !== '') {
-      whereClause.user = {
-        ...whereClause.user,
-        name: {
-          contains: search as string,
-          mode: 'insensitive'
+      whereClause.AND = [
+        {
+          OR: [
+            {
+              user: {
+                name: {
+                  contains: search as string,
+                  mode: 'insensitive'
+                }
+              }
+            },
+            {
+              department: {
+                contains: search as string,
+                mode: 'insensitive'
+              }
+            }
+          ]
         }
-      };
+      ];
     }
     
-    // Buscar funcionários com aniversário no mês especificado
+    // Buscar funcionários com aniversário
     const employees = await prisma.employee.findMany({
       where: whereClause,
       include: {
@@ -444,13 +457,19 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
       }
     });
     
-    // Filtrar apenas os que fazem aniversário no mês/ano especificado
+    // Filtrar apenas os que fazem aniversário no mês/ano especificado (ou todos os meses se targetMonth for null)
     const birthdayEmployees = employees.filter((employee: any) => {
       if (!employee.birthDate) return false;
       
       const birthDate = new Date(employee.birthDate);
       const birthMonth = birthDate.getMonth() + 1; // getMonth() retorna 0-11
       const birthDay = birthDate.getDate();
+      
+      // Se targetMonth for null, mostrar todos os meses
+      if (targetMonth === null) {
+        // Quando mostrar todos os meses, sempre retornar true (já que showAll está sempre true no frontend)
+        return true;
+      }
       
       // Verificar se é do mês correto
       if (birthMonth !== targetMonth) return false;
@@ -473,6 +492,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
     }).map((employee: any) => {
       const birthDate = new Date(employee.birthDate!);
       const birthDay = birthDate.getDate();
+      const birthMonth = birthDate.getMonth() + 1;
       
       // Calcular idade que fará
       const currentYear = targetYear;
@@ -480,7 +500,8 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
       
       // Calcular dias restantes até o aniversário
       const today = new Date();
-      const thisYearBirthday = new Date(currentYear, targetMonth - 1, birthDay);
+      const monthToUse = targetMonth || birthMonth; // Se não houver mês específico, usar o mês de nascimento
+      const thisYearBirthday = new Date(currentYear, monthToUse - 1, birthDay);
       
       // Se o aniversário já passou este ano, usar próximo ano
       if (thisYearBirthday < today) {
@@ -499,12 +520,21 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
         department: employee.department,
         position: employee.position,
         birthDate: employee.birthDate,
+        birthMonth, // Adicionar birthMonth para ordenação
         birthDay,
         age,
         daysUntilBirthday,
         isTodayBirthday: daysUntilBirthday === 0
       };
-    }).sort((a: any, b: any) => a.birthDay - b.birthDay); // Ordenar por dia do mês
+    }).sort((a: any, b: any) => {
+      // Se não há mês específico, ordenar por mês primeiro, depois por dia
+      if (targetMonth === null) {
+        if (a.birthMonth !== b.birthMonth) {
+          return a.birthMonth - b.birthMonth;
+        }
+      }
+      return a.birthDay - b.birthDay; // Ordenar por dia do mês
+    });
     
     // Estatísticas
     const stats = {
@@ -523,7 +553,7 @@ export const getBirthdayEmployees = async (req: Request, res: Response) => {
       data: {
         employees: birthdayEmployees,
         stats,
-        month: targetMonth,
+        month: targetMonth || 0, // 0 significa todos os meses
         year: targetYear
       }
     });
