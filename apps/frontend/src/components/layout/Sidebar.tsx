@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { 
   Home, 
   Users, 
@@ -25,7 +25,8 @@ import {
   BookImage,
   Settings,
   BarChart3,
-  FileText
+  FileText,
+  Search
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -47,7 +48,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     return false;
   });
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
   const pathname = usePathname();
+  const router = useRouter();
   const { permissions, isLoading, userPosition, user } = usePermissions();
 
   const isEmployee = userRole === 'EMPLOYEE';
@@ -198,9 +201,30 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     ];
 
     // Filtrar categorias que têm pelo menos um item com permissão
-    return menuCategories.filter(category => 
+    let filteredCategories = menuCategories.filter(category => 
       category.items.some(item => item.permission)
     );
+
+    // Aplicar filtro de pesquisa se houver termo de busca
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase().trim();
+      filteredCategories = filteredCategories
+        .map(category => {
+          // Filtrar itens dentro da categoria
+          const filteredItems = category.items.filter(item => {
+            if (!item.permission) return false;
+            const matchesName = item.name.toLowerCase().includes(searchLower);
+            const matchesDescription = item.description?.toLowerCase().includes(searchLower) || false;
+            return matchesName || matchesDescription;
+          });
+
+          // Retornar categoria apenas se tiver itens após o filtro
+          return filteredItems.length > 0 ? { ...category, items: filteredItems } : null;
+        })
+        .filter(category => category !== null) as typeof menuCategories;
+    }
+
+    return filteredCategories;
   };
 
   const menuItems = getMenuItems();
@@ -239,6 +263,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       setExpandedMenus(newExpandedMenus);
     }
   }, [pathname]); // Executa quando a rota muda
+
+  // Expandir automaticamente todos os grupos quando houver pesquisa
+  React.useEffect(() => {
+    if (searchTerm.trim()) {
+      const allCategoryIds = menuItems.map(category => category.id);
+      setExpandedMenus(new Set(allCategoryIds));
+    }
+  }, [searchTerm]); // Executa quando o termo de pesquisa muda
 
   // Salvar estado no localStorage sempre que mudar
   React.useEffect(() => {
@@ -318,6 +350,36 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           </div>
         </div>
 
+        {/* Search Bar */}
+        {!isCollapsed ? (
+          <div className="px-4">
+            <div className="relative flex items-center">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="mt-2 mb-2 text-sm w-full pl-10 pr-12 py-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="px-4">
+            <div className="flex justify-center">
+              <button
+                onClick={() => setIsCollapsed(false)}
+                className="w-10 h-10 rounded-xl bg-white border border-gray-200 text-gray-400 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
+                title="Buscar"
+              >
+                <Search className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Navigation */}
         <nav className={`flex-1 space-y-4 p-4 overflow-y-auto`}>
           {menuItems.map((category, index) => {
@@ -344,7 +406,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                           className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
                             active 
                               ? 'text-red-600 hover:bg-red-50' 
-                              : 'text-gray-600 hover:bg-gray-100'
+                              : 'text-gray-600 hover:bg-gray-50'
                           }`}
                           title={singleItem.name}
                         >
@@ -357,8 +419,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                         onClick={() => setIsOpen(false)}
                         className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 ${
                           active 
-                            ? 'text-red-700' 
-                            : 'text-gray-700 hover:bg-gray-100'
+                            ? 'text-red-700 hover:bg-red-50' 
+                            : 'text-gray-700 hover:bg-gray-50'
                         }`}
                       >
                         <div className="rounded-xl transition-all duration-200 p-3">
@@ -383,11 +445,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 {isCollapsed ? (
                   <div className="flex justify-center">
                     <button
-                      onClick={() => toggleMenu(category.id)}
+                      onClick={() => {
+                        // Abrir a sidebar e expandir o grupo
+                        setIsCollapsed(false);
+                        setExpandedMenus(prev => {
+                          const newSet = new Set(prev);
+                          newSet.add(category.id);
+                          return newSet;
+                        });
+                      }}
                         className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
                           hasActiveItem 
                             ? 'text-red-600 hover:bg-red-50' 
-                            : 'text-gray-600 hover:bg-gray-100'
+                            : 'text-gray-600 hover:bg-gray-50'
                         }`}
                       title={category.name}
                     >
@@ -399,8 +469,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     onClick={() => toggleMenu(category.id)}
                     className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 ${
                       hasActiveItem 
-                        ? 'text-red-700' 
-                        : 'text-gray-700 hover:bg-gray-100'
+                        ? 'text-red-700 hover:bg-red-50' 
+                        : 'text-gray-700 hover:bg-gray-50'
                     }`}
                   >
                     <div className="rounded-xl transition-all duration-200 p-3">
@@ -436,7 +506,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 onClick={() => setIsOpen(false)}
                             className={`flex items-center px-3 py-2 rounded-xl transition-all duration-200 ${
                               active
-                                ? 'text-red-700'
+                                ? 'text-red-700 hover:bg-red-50'
                                 : 'text-gray-700 hover:bg-gray-50'
                             }`}
                           >
@@ -456,18 +526,25 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             
                         return (
                           <div key={item.href} className="flex justify-center">
-                            <Link
-                              href={item.href}
-                              onClick={() => setIsOpen(false)}
+                            <button
+                              onClick={() => {
+                                // Abrir a sidebar e expandir o grupo
+                                setIsCollapsed(false);
+                                setExpandedMenus(prev => {
+                                  const newSet = new Set(prev);
+                                  newSet.add(category.id);
+                                  return newSet;
+                                });
+                              }}
                               className={`w-8 h-8 rounded-xl transition-all duration-200 flex items-center justify-center ${
                                 active 
                                   ? 'text-red-600 hover:bg-red-50' 
-                                  : 'hover:bg-gray-100 text-gray-600'
+                                  : 'hover:bg-gray-50 text-gray-600'
                               }`}
                               title={item.name}
                             >
                               <ItemIcon className="w-4 h-4" />
-                            </Link>
+                            </button>
                           </div>
                         );
                       })}
@@ -482,7 +559,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         {/* Botões de ação - sempre visíveis na parte inferior */}
         <div className="flex-shrink-0">
           {/* Alterar Senha */}
-          <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
+          <div className={`${isCollapsed ? 'px-2 pt-2 pb-1' : 'px-4 pt-4 pb-1'}`}>
             <button
               onClick={() => {
                 // Emitir evento customizado para abrir modal de alterar senha
@@ -491,7 +568,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               className={`flex items-center text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors duration-200 ${
                 isCollapsed 
                   ? 'justify-center w-12 h-12 mx-auto' 
-                  : 'w-full space-x-3 px-3 py-2'
+                  : 'w-full space-x-3 px-4 py-3'
               }`}
               title={isCollapsed ? 'Alterar Senha' : undefined}
             >
@@ -501,13 +578,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           </div>
 
           {/* Logout */}
-          <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
+          <div className={`${isCollapsed ? 'px-2 pt-1 pb-2' : 'px-4 pt-1 pb-4'}`}>
             <button
               onClick={onLogout}
               className={`flex items-center text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition-colors duration-200 ${
                 isCollapsed 
                   ? 'justify-center w-12 h-12 mx-auto' 
-                  : 'w-full space-x-3 px-3 py-2'
+                  : 'w-full space-x-3 px-4 py-3'
               }`}
               title={isCollapsed ? 'Sair' : undefined}
             >
