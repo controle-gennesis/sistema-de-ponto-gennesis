@@ -267,29 +267,27 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
       {/* Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-full bg-white shadow-lg transform transition-all duration-300 ease-in-out z-50 ${
+        className={`fixed top-0 left-0 h-full bg-white border-r border-gray-200 transform transition-all duration-300 ease-in-out z-50 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0 lg:fixed lg:shadow-lg ${
+        } lg:translate-x-0 lg:fixed lg:border-gray-200 ${
           isCollapsed ? 'w-20' : 'w-72'
         } flex flex-col overflow-y-auto`}
       >
         {/* Header */}
-        <div className={`border-b border-gray-200 ${isCollapsed ? 'p-4' : 'p-6'}`}>
+        <div className={`${isCollapsed ? 'p-4' : 'p-4'}`}>
           <div className="flex items-center justify-between">
             {!isCollapsed && (
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden">
-                    <img src="../logo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+                    <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
                 <div>
-                  <h1 className="text-xl font-semibold text-gray-900">Gênnesis</h1>
-                  <p className="text-sm text-gray-600">Engenharia</p>
+                  <h1 className="text-xl font-semibold text-gray-900">Attendance</h1>
                 </div>
               </div>
             )}
             {isCollapsed && (
-              <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center mx-auto overflow-hidden">
-                <img src="/logo.png" alt="Logo Gennesis" className="w-8 h-8 object-contain" />
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center mx-auto overflow-hidden">
               </div>
             )}
             <div className="flex items-center space-x-2">
@@ -312,30 +310,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           </div>
         </div>
 
-        {/* User Info */}
-        <div className={`border-b border-gray-200 ${isCollapsed ? 'p-2' : 'p-4'}`}>
-          <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'space-x-3'}`}>
-            <div className="rounded-lg p-3">
-              <User className="w-6 h-6 text-gray-600" />
-            </div>
-            {!isCollapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {userName}
-                </p>
-                <p className="text-xs text-gray-500 capitalize">
-                  {userPosition || 'Funcionário'}
-                </p>
-                {user?.employee?.department && (
-                  <p className="text-xs text-gray-400 capitalize">
-                    {user.employee.department}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Navigation */}
         <nav className={`flex-1 space-y-4 p-4 overflow-y-auto`}>
           {menuItems.map((category, index) => {
@@ -346,11 +320,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             return (
               <div key={category.id}>
                 {/* Separador entre grupos */}
-                {index > 0 && (
-                  <div className={`${isCollapsed ? 'my-4' : 'my-3'}`}>
-                    <div className="border-t border-gray-200"></div>
-                  </div>
-                )}
                 
                 <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
                 {/* Categoria Header */}
@@ -358,11 +327,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   <div className="flex justify-center">
                     <button
                       onClick={() => toggleMenu(category.id)}
-                        className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                          hasActiveItem
-                            ? 'text-blue-600'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
+                        className="w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center text-gray-600 hover:bg-gray-100"
                       title={category.name}
                     >
                       <CategoryIcon className="w-5 h-5" />
@@ -371,26 +336,24 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 ) : (
                   <button
                     onClick={() => toggleMenu(category.id)}
-                    className={`w-full flex items-center space-x-3 rounded-xl transition-all duration-200 ${
-                      hasActiveItem
-                        ? 'text-blue-700'
+                    className={`w-full flex items-center space-x rounded-xl transition-all duration-200 ${
+                      hasActiveItem 
+                        ? 'text-red-700' 
                         : 'text-gray-700 hover:bg-gray-100'
                     }`}
                   >
                     <div className="rounded-xl transition-all duration-200 p-3">
-                      <CategoryIcon className={`w-5 h-5 flex-shrink-0 ${
-                        hasActiveItem ? 'text-blue-600' : 'text-gray-600'
-                      }`} />
+                      <CategoryIcon className={`w-5 h-5 flex-shrink-0 ${hasActiveItem ? 'text-red-600' : 'text-gray-600'}`} />
                     </div>
                     <div className="flex-1 min-w-0 text-left">
-                      <p className="text-sm font-medium">{category.name}</p>
+                      <p className={`text-sm font-medium ${hasActiveItem ? 'text-red-700' : ''}`}>{category.name}</p>
                     </div>
                     {category.items.filter(item => item.permission).length > 0 && (
                       <div className="flex-shrink-0">
                         {isExpanded ? (
-                          <ChevronUp className="w-4 h-4" />
+                          <ChevronUp className={`w-4 h-4 ${hasActiveItem ? 'text-red-600' : ''}`} />
                         ) : (
-                          <ChevronDown className="w-4 h-4" />
+                          <ChevronDown className={`w-4 h-4 ${hasActiveItem ? 'text-red-600' : ''}`} />
                         )}
                       </div>
                     )}
@@ -398,22 +361,46 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 )}
 
                 {/* Submenu Items */}
-                {isExpanded && (
-                  <div className={`space-y-2 ${isCollapsed ? '' : 'ml-4'}`}>
+                {isExpanded && !isCollapsed && (
+                  <div className="relative ml-6 pl-4 border-l border-gray-300 space-y-2">
+                    {category.items
+                      .filter(item => item.permission)
+                      .map((item) => {
+                        const active = isActive(item.href);
+            
+                        return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setIsOpen(false)}
+                            className={`flex items-center px-3 py-2 rounded-xl transition-all duration-200 ${
+                              active
+                                ? 'text-red-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            <p className="text-sm font-medium">{item.name}</p>
+              </Link>
+                        );
+                      })}
+                  </div>
+                )}
+                {isExpanded && isCollapsed && (
+                  <div className="space-y-2">
                     {category.items
                       .filter(item => item.permission)
                       .map((item) => {
                         const ItemIcon = item.icon;
-            const active = isActive(item.href);
+                        const active = isActive(item.href);
             
-                        return isCollapsed ? (
+                        return (
                           <div key={item.href} className="flex justify-center">
                             <Link
                               href={item.href}
                               onClick={() => setIsOpen(false)}
                               className={`w-8 h-8 rounded-xl transition-all duration-200 flex items-center justify-center ${
                                 active 
-                                  ? 'text-blue-600' 
+                                  ? 'text-red-600' 
                                   : 'hover:bg-gray-100 text-gray-600'
                               }`}
                               title={item.name}
@@ -421,25 +408,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                               <ItemIcon className="w-4 h-4" />
                             </Link>
                           </div>
-                        ) : (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setIsOpen(false)}
-                            className={`flex items-center space-x-3 px-3 py-2 rounded-xl transition-all duration-200 ${
-                              active
-                                ? 'text-blue-700'
-                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                            }`}
-                          >
-                            <ItemIcon className={`w-4 h-4 flex-shrink-0 ${
-                              active ? 'text-blue-600' : 'text-gray-500'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{item.name}</p>
-                              <p className={`text-xs truncate ${active ? 'text-blue-500' : 'text-gray-500'}`}>{item.description}</p>
-                  </div>
-              </Link>
                         );
                       })}
                   </div>
@@ -453,7 +421,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         {/* Botões de ação - sempre visíveis na parte inferior */}
         <div className="flex-shrink-0">
           {/* Alterar Senha */}
-          <div className={`border-t border-gray-200 ${isCollapsed ? 'p-2' : 'p-4'}`}>
+          <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
             <button
               onClick={() => {
                 // Emitir evento customizado para abrir modal de alterar senha
@@ -472,7 +440,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           </div>
 
           {/* Logout */}
-          <div className={`border-t border-gray-200 ${isCollapsed ? 'p-2' : 'p-4'}`}>
+          <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
             <button
               onClick={onLogout}
               className={`flex items-center text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition-colors duration-200 ${
