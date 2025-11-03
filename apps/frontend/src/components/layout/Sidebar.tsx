@@ -438,6 +438,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       </Link>
                     )}
                   </div>
+                  {/* Linha separadora embaixo do Dashboard */}
+                  {category.id === 'main' && (
+                    <div className="my-4 border-t border-gray-200"></div>
+                  )}
                 </div>
               );
             }
