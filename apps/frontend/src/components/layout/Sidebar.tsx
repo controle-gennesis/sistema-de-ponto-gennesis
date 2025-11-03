@@ -49,6 +49,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   });
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [showButtonText, setShowButtonText] = useState(!isCollapsed);
   const pathname = usePathname();
   const router = useRouter();
   const { permissions, isLoading, userPosition, user } = usePermissions();
@@ -286,6 +287,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     }
   }, [isCollapsed, onMenuToggle]);
 
+  // Controlar quando mostrar o texto dos botões
+  React.useEffect(() => {
+    setShowButtonText(!isCollapsed);
+  }, [isCollapsed]);
+
   return (
     <>
       {/* Botão de menu mobile */}
@@ -306,23 +312,23 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
       {/* Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-full bg-white border-r border-gray-200 transform transition-all duration-300 ease-in-out z-50 ${
+        className={`fixed top-0 left-0 h-full bg-white border-r border-gray-200 transform transition-all duration-500 ease-in-out z-50 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0 lg:fixed lg:border-gray-200 ${
           isCollapsed ? 'w-20' : 'w-72'
-        } flex flex-col overflow-y-auto`}
+        } flex flex-col overflow-hidden`}
       >
         {/* Header */}
-        <div className={`${isCollapsed ? 'p-4' : 'p-4'}`}>
-          <div className="flex items-center justify-between">
+        <div className={`${isCollapsed ? 'p-4' : 'p-4'} overflow-hidden`}>
+          <div className="flex items-center justify-between overflow-hidden">
             {!isCollapsed && (
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-3 transition-opacity duration-500 ease-in-out">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
                     <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
-                <div>
-                  <h1 className="text-base font-semibold text-gray-900">Attendance</h1>
-                  <p className="text-sm text-gray-500">v1.0.2</p>
+                <div className="transition-all duration-500 ease-in-out">
+                  <h1 className="text-base font-semibold text-gray-900 transition-all duration-500">Attendance</h1>
+                  <p className="text-sm text-gray-500 transition-all duration-500">v1.0.2</p>
                 </div>
               </div>
             )}
@@ -352,9 +358,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
         {/* Search Bar */}
         {!isCollapsed ? (
-          <div className="px-4">
-            <div className="relative flex items-center">
-              <div className="relative flex-1">
+          <div className="px-4 overflow-hidden">
+            <div className="relative flex items-center overflow-hidden">
+              <div className="relative flex-1 overflow-hidden">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
@@ -367,8 +373,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             </div>
           </div>
         ) : (
-          <div className="px-4">
-            <div className="flex justify-center">
+          <div className="px-4 overflow-hidden">
+            <div className="flex justify-center overflow-hidden">
               <button
                 onClick={() => setIsCollapsed(false)}
                 className="w-10 h-10 rounded-xl bg-white border border-gray-200 text-gray-400 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
@@ -381,7 +387,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         )}
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-4 p-4 overflow-y-auto`}>
+        <nav className={`flex-1 space-y-4 p-4 overflow-y-auto overflow-x-hidden`}>
           {menuItems.map((category, index) => {
             const CategoryIcon = category.icon;
             const hasActiveItem = category.items.some(item => isActive(item.href));
@@ -417,7 +423,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       <Link
                         href={singleItem.href}
                         onClick={() => setIsOpen(false)}
-                        className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 ${
+                        className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 overflow-hidden ${
                           active 
                             ? 'text-red-700 hover:bg-red-50' 
                             : 'text-gray-700 hover:bg-gray-50'
@@ -426,8 +432,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                         <div className="rounded-xl transition-all duration-200 p-3">
                           <SingleItemIcon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-red-600' : 'text-gray-600'}`} />
                         </div>
-                        <div className="flex-1 min-w-0 text-left">
-                          <p className={`text-sm font-medium ${active ? 'text-red-700' : ''}`}>{singleItem.name}</p>
+                        <div className={`flex-1 min-w-0 text-left transition-all duration-300 ease-in-out ${isCollapsed ? 'opacity-0 w-0 overflow-hidden max-w-0' : 'opacity-100 max-w-full'}`}>
+                          <p className={`text-sm font-medium whitespace-nowrap ${active ? 'text-red-700' : ''}`}>{singleItem.name}</p>
                         </div>
                       </Link>
                     )}
@@ -437,10 +443,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             }
             
             return (
-              <div key={category.id}>
+              <div key={category.id} className="overflow-hidden">
                 {/* Separador entre grupos */}
                 
-                <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
+                <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'} overflow-hidden`}>
                 {/* Categoria Header */}
                 {isCollapsed ? (
                   <div className="flex justify-center">
@@ -467,7 +473,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 ) : (
                   <button
                     onClick={() => toggleMenu(category.id)}
-                    className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 ${
+                    className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 overflow-hidden ${
                       hasActiveItem 
                         ? 'text-red-700 hover:bg-red-50' 
                         : 'text-gray-700 hover:bg-gray-50'
@@ -476,8 +482,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <div className="rounded-xl transition-all duration-200 p-3">
                       <CategoryIcon className={`w-5 h-5 flex-shrink-0 ${hasActiveItem ? 'text-red-600' : 'text-gray-600'}`} />
                     </div>
-                    <div className="flex-1 min-w-0 text-left">
-                      <p className={`text-sm font-medium ${hasActiveItem ? 'text-red-700' : ''}`}>{category.name}</p>
+                    <div className="flex-1 min-w-0 text-left overflow-hidden">
+                      <p className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${hasActiveItem ? 'text-red-700' : ''}`}>{category.name}</p>
                     </div>
                     {category.items.filter(item => item.permission).length > 0 && (
                       <div className="flex-shrink-0 pr-3">
@@ -504,7 +510,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 key={item.href}
                 href={item.href}
                 onClick={() => setIsOpen(false)}
-                            className={`flex items-center px-3 py-2 rounded-xl transition-all duration-200 ${
+                            className={`flex items-center px-3 py-2 rounded-xl transition-all duration-200 overflow-hidden ${
                               active
                                 ? 'text-red-700 hover:bg-red-50'
                                 : 'text-gray-700 hover:bg-gray-50'
@@ -557,15 +563,15 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         </nav>
 
         {/* Botões de ação - sempre visíveis na parte inferior */}
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 overflow-hidden">
           {/* Alterar Senha */}
-          <div className={`${isCollapsed ? 'px-2 pt-2 pb-1' : 'px-4 pt-4 pb-1'}`}>
+          <div className={`${isCollapsed ? 'px-2 pt-2 pb-1' : 'px-4 pt-4 pb-1'} overflow-hidden`}>
             <button
               onClick={() => {
                 // Emitir evento customizado para abrir modal de alterar senha
                 window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
               }}
-              className={`flex items-center text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors duration-200 ${
+              className={`flex items-center text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors duration-200 overflow-hidden ${
                 isCollapsed 
                   ? 'justify-center w-12 h-12 mx-auto' 
                   : 'w-full space-x-3 px-4 py-3'
@@ -573,15 +579,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               title={isCollapsed ? 'Alterar Senha' : undefined}
             >
               <Lock className="w-5 h-5 flex-shrink-0 text-blue-700" />
-              {!isCollapsed && <span className="text-sm font-medium text-blue-700">Alterar Senha</span>}
+              {showButtonText && (
+                <span className="text-sm font-medium text-blue-700 whitespace-nowrap overflow-hidden">
+                  Alterar Senha
+                </span>
+              )}
             </button>
           </div>
 
           {/* Logout */}
-          <div className={`${isCollapsed ? 'px-2 pt-1 pb-2' : 'px-4 pt-1 pb-4'}`}>
+          <div className={`${isCollapsed ? 'px-2 pt-1 pb-2' : 'px-4 pt-1 pb-4'} overflow-hidden`}>
             <button
               onClick={onLogout}
-              className={`flex items-center text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition-colors duration-200 ${
+              className={`flex items-center text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition-colors overflow-hidden ${
                 isCollapsed 
                   ? 'justify-center w-12 h-12 mx-auto' 
                   : 'w-full space-x-3 px-4 py-3'
@@ -589,7 +599,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               title={isCollapsed ? 'Sair' : undefined}
             >
               <LogOut className="w-5 h-5 flex-shrink-0 text-red-700" />
-              {!isCollapsed && <span className="text-sm font-medium text-red-700">Sair</span>}
+              {showButtonText && (
+                <span className="text-sm font-medium text-red-700 whitespace-nowrap overflow-hidden">
+                  Sair
+                </span>
+              )}
             </button>
           </div>
         </div>
