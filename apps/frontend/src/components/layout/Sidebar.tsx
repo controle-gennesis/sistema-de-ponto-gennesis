@@ -327,7 +327,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   <div className="flex justify-center">
                     <button
                       onClick={() => toggleMenu(category.id)}
-                        className="w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center text-gray-600 hover:bg-gray-100"
+                        className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                          hasActiveItem 
+                            ? 'text-red-600 hover:bg-red-50' 
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
                       title={category.name}
                     >
                       <CategoryIcon className="w-5 h-5" />
@@ -400,7 +404,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                               onClick={() => setIsOpen(false)}
                               className={`w-8 h-8 rounded-xl transition-all duration-200 flex items-center justify-center ${
                                 active 
-                                  ? 'text-red-600' 
+                                  ? 'text-red-600 hover:bg-red-50' 
                                   : 'hover:bg-gray-100 text-gray-600'
                               }`}
                               title={item.name}
