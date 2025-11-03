@@ -11,8 +11,8 @@ import {
   Menu, 
   X,
   User,
-  ChevronLeft,
-  ChevronRight,
+  PanelRightOpen,
+  PanelLeftOpen,
   ChevronDown,
   ChevronUp,
   Lock,
@@ -56,6 +56,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const getMenuItems = () => {
     const menuCategories = [
       {
+        id: 'time-control',
+        name: 'Registros de Ponto',
+        icon: Clock,
+        items: [
+          {
+            name: 'Registros de Ponto',
+            href: '/ponto',
+            icon: Clock,
+            description: 'Gerencie seus registros',
+            permission: permissions.canRegisterTime
+          }
+        ]
+      },
+      {
         id: 'main',
         name: 'Principal',
         icon: Home,
@@ -66,14 +80,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Home,
         description: 'Visão geral do sistema',
         permission: permissions.canViewDashboard
-      },
-      {
-        name: 'Controle de Ponto',
-        href: '/ponto',
-        icon: Clock,
-        description: 'Gerencie seus registros',
-        permission: permissions.canRegisterTime
-          }
+      }
         ]
       },
       {
@@ -282,7 +289,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
                 <div>
-                  <h1 className="text-xl font-semibold text-gray-900">Attendance</h1>
+                  <h1 className="text-base font-semibold text-gray-900">Attendance</h1>
+                  <p className="text-sm text-gray-500">v1.0.2</p>
                 </div>
               </div>
             )}
@@ -298,7 +306,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 }`}
                 title={isCollapsed ? 'Expandir menu' : 'Colapsar menu'}
               >
-                {isCollapsed ? <ChevronRight className="w-5 h-5 flex-shrink-0" /> : <ChevronLeft className="w-5 h-5 flex-shrink-0" />}
+                {isCollapsed ? <PanelLeftOpen className="w-5 h-5 flex-shrink-0" /> : <PanelRightOpen className="w-5 h-5 flex-shrink-0" />}
               </button>
               <button
                 onClick={() => setIsOpen(false)}
@@ -316,6 +324,55 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const CategoryIcon = category.icon;
             const hasActiveItem = category.items.some(item => isActive(item.href));
             const isExpanded = isMenuExpanded(category.id);
+            const visibleItems = category.items.filter(item => item.permission);
+            const isSingleItem = visibleItems.length === 1;
+            const singleItem = isSingleItem ? visibleItems[0] : null;
+            
+            // Se tiver apenas um item, renderizar como link direto
+            if (isSingleItem && singleItem) {
+              const active = isActive(singleItem.href);
+              const SingleItemIcon = singleItem.icon || CategoryIcon;
+              
+              return (
+                <div key={category.id}>
+                  <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
+                    {isCollapsed ? (
+                      <div className="flex justify-center">
+                        <Link
+                          href={singleItem.href}
+                          onClick={() => setIsOpen(false)}
+                          className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                            active 
+                              ? 'text-red-600 hover:bg-red-50' 
+                              : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                          title={singleItem.name}
+                        >
+                          <SingleItemIcon className="w-5 h-5" />
+                        </Link>
+                      </div>
+                    ) : (
+                      <Link
+                        href={singleItem.href}
+                        onClick={() => setIsOpen(false)}
+                        className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 ${
+                          active 
+                            ? 'text-red-700' 
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        <div className="rounded-xl transition-all duration-200 p-3">
+                          <SingleItemIcon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-red-600' : 'text-gray-600'}`} />
+                        </div>
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className={`text-sm font-medium ${active ? 'text-red-700' : ''}`}>{singleItem.name}</p>
+                        </div>
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              );
+            }
             
             return (
               <div key={category.id}>
@@ -340,7 +397,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 ) : (
                   <button
                     onClick={() => toggleMenu(category.id)}
-                    className={`w-full flex items-center space-x rounded-xl transition-all duration-200 ${
+                    className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 ${
                       hasActiveItem 
                         ? 'text-red-700' 
                         : 'text-gray-700 hover:bg-gray-100'
@@ -353,7 +410,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       <p className={`text-sm font-medium ${hasActiveItem ? 'text-red-700' : ''}`}>{category.name}</p>
                     </div>
                     {category.items.filter(item => item.permission).length > 0 && (
-                      <div className="flex-shrink-0">
+                      <div className="flex-shrink-0 pr-3">
                         {isExpanded ? (
                           <ChevronUp className={`w-4 h-4 ${hasActiveItem ? 'text-red-600' : ''}`} />
                         ) : (
