@@ -62,26 +62,45 @@ export default function AlocacaoPage() {
     }
   });
 
-  const { data: employeesResponse, isLoading: loadingEmployees } = useQuery({
+  const { data: employeesResponse, isLoading: loadingEmployees, error: employeesError } = useQuery({
     queryKey: ['employees-alocacao', filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (filters.search) params.append('search', filters.search);
-      if (filters.department) params.append('department', filters.department);
-      if (filters.company) params.append('company', filters.company);
-      if (filters.position) params.append('position', filters.position);
-      if (filters.costCenter) params.append('costCenter', filters.costCenter);
-      if (filters.client) params.append('client', filters.client);
-      if (filters.modality) params.append('modality', filters.modality);
-      if (filters.bank) params.append('bank', filters.bank);
-      if (filters.accountType) params.append('accountType', filters.accountType);
-      if (filters.polo) params.append('polo', filters.polo);
-      params.append('month', filters.month.toString());
-      params.append('year', filters.year.toString());
-      
-      const res = await api.get(`/payroll/employees?${params.toString()}`);
-      return res.data;
-    }
+      try {
+        const params = new URLSearchParams();
+        if (filters.search) params.append('search', filters.search);
+        if (filters.department) params.append('department', filters.department);
+        if (filters.company) params.append('company', filters.company);
+        if (filters.position) params.append('position', filters.position);
+        if (filters.costCenter) params.append('costCenter', filters.costCenter);
+        if (filters.client) params.append('client', filters.client);
+        if (filters.modality) params.append('modality', filters.modality);
+        if (filters.bank) params.append('bank', filters.bank);
+        if (filters.accountType) params.append('accountType', filters.accountType);
+        if (filters.polo) params.append('polo', filters.polo);
+        params.append('month', filters.month.toString());
+        params.append('year', filters.year.toString());
+        
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        console.log('🔍 Alocação - API URL:', apiUrl);
+        console.log('🔍 Alocação - Endpoint completo:', `${apiUrl}/payroll/employees?${params.toString()}`);
+        
+        const res = await api.get(`/payroll/employees?${params.toString()}`);
+        console.log('✅ Alocação - Resposta da API:', res);
+        console.log('✅ Alocação - res.data:', res.data);
+        console.log('✅ Alocação - res.data.data:', res.data?.data);
+        console.log('✅ Alocação - res.data.data.employees:', res.data?.data?.employees);
+        console.log('✅ Alocação - Quantidade de funcionários:', res.data?.data?.employees?.length || 0);
+        
+        return res.data;
+      } catch (error: any) {
+        console.error('❌ Alocação - Erro ao buscar funcionários:', error);
+        console.error('❌ Alocação - Erro completo:', error.response || error);
+        console.error('❌ Alocação - Status:', error.response?.status);
+        console.error('❌ Alocação - Mensagem:', error.response?.data || error.message);
+        throw error;
+      }
+    },
+    retry: 1
   });
 
   // Query para buscar dados do funcionário selecionado
@@ -460,6 +479,17 @@ export default function AlocacaoPage() {
   };
 
   const employees = employeesResponse?.data?.employees || [];
+  
+  // Debug logs
+  useEffect(() => {
+    console.log('🔍 DEBUG Alocação - employeesResponse:', employeesResponse);
+    console.log('🔍 DEBUG Alocação - employeesResponse?.data:', employeesResponse?.data);
+    console.log('🔍 DEBUG Alocação - employeesResponse?.data?.employees:', employeesResponse?.data?.employees);
+    console.log('🔍 DEBUG Alocação - employees (array final):', employees);
+    console.log('🔍 DEBUG Alocação - employees.length:', employees.length);
+    console.log('🔍 DEBUG Alocação - employeesError:', employeesError);
+    console.log('🔍 DEBUG Alocação - loadingEmployees:', loadingEmployees);
+  }, [employeesResponse, employees, employeesError, loadingEmployees]);
 
     // Limpar e buscar dados dos funcionários quando o mês/ano mudar ou quando a lista de funcionários carregar
     useEffect(() => {
