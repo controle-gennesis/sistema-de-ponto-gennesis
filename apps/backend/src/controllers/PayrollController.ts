@@ -201,7 +201,7 @@ export class PayrollController {
         const endIndex = startIndex + limitNum;
         const paginatedEmployees = payrollData.employees.slice(startIndex, endIndex);
 
-        res.json({
+        return res.json({
           success: true,
           data: {
             employees: paginatedEmployees,
@@ -234,7 +234,7 @@ export class PayrollController {
       }
     } catch (error) {
       console.error('❌ PayrollController - Erro no getEmployeesForPayroll:', error);
-      next(error);
+      return next(error);
     }
   }
 
