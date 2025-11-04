@@ -97,6 +97,13 @@ export default function AlocacaoPage() {
         console.error('❌ Alocação - Erro completo:', error.response || error);
         console.error('❌ Alocação - Status:', error.response?.status);
         console.error('❌ Alocação - Mensagem:', error.response?.data || error.message);
+        console.error('❌ Alocação - Data completa:', JSON.stringify(error.response?.data, null, 2));
+        
+        // Se for erro 409, logar mais detalhes
+        if (error.response?.status === 409) {
+          console.error('❌ Alocação - Erro 409 (Conflict):', error.response?.data);
+        }
+        
         throw error;
       }
     },
@@ -928,6 +935,26 @@ export default function AlocacaoPage() {
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
                             <span className="text-gray-600">Carregando...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : employeesError ? (
+                    <tr>
+                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1) + 2} className="px-3 sm:px-6 py-8 text-center">
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-2xl mx-auto">
+                          <p className="text-red-800 font-medium text-lg mb-2">Erro ao carregar funcionários</p>
+                          <p className="text-red-600 text-sm">
+                            {employeesError?.response?.data?.error || employeesError?.message || 'Erro desconhecido'}
+                          </p>
+                          {employeesError?.response?.status === 409 && (
+                            <p className="text-red-500 text-xs mt-2">
+                              Erro 409: Conflito de dados. Verifique os logs do backend.
+                            </p>
+                          )}
+                          <p className="text-gray-500 text-xs mt-3">
+                            Status: {employeesError?.response?.status || 'N/A'} | 
+                            Verifique o console (F12) para mais detalhes
+                          </p>
                         </div>
                       </td>
                     </tr>

@@ -186,28 +186,46 @@ export class PayrollController {
         year: yearNum
       };
 
-      const payrollData = await payrollService.generateMonthlyPayroll(filters);
+      try {
+        const payrollData = await payrollService.generateMonthlyPayroll(filters);
 
-      // Aplicar paginação
-      const startIndex = (pageNum - 1) * limitNum;
-      const endIndex = startIndex + limitNum;
-      const paginatedEmployees = payrollData.employees.slice(startIndex, endIndex);
+        // Aplicar paginação
+        const startIndex = (pageNum - 1) * limitNum;
+        const endIndex = startIndex + limitNum;
+        const paginatedEmployees = payrollData.employees.slice(startIndex, endIndex);
 
-      res.json({
-        success: true,
-        data: {
-          employees: paginatedEmployees,
-          period: payrollData.period,
-          totals: payrollData.totals,
-          pagination: {
-            page: pageNum,
-            limit: limitNum,
-            total: payrollData.employees.length,
-            totalPages: Math.ceil(payrollData.employees.length / limitNum)
+        res.json({
+          success: true,
+          data: {
+            employees: paginatedEmployees,
+            period: payrollData.period,
+            totals: payrollData.totals,
+            pagination: {
+              page: pageNum,
+              limit: limitNum,
+              total: payrollData.employees.length,
+              totalPages: Math.ceil(payrollData.employees.length / limitNum)
+            }
           }
+        });
+      } catch (serviceError: any) {
+        console.error('Erro no PayrollService:', serviceError);
+        console.error('Erro completo:', JSON.stringify(serviceError, null, 2));
+        
+        // Se for um erro do Prisma, tratar adequadamente
+        if (serviceError.name === 'PrismaClientKnownRequestError') {
+          console.error('Erro do Prisma:', serviceError.code, serviceError.meta);
+          return res.status(500).json({
+            success: false,
+            error: 'Erro ao processar dados do banco de dados',
+            details: process.env.NODE_ENV === 'development' ? serviceError.message : undefined
+          });
         }
-      });
+        
+        throw serviceError;
+      }
     } catch (error) {
+      console.error('Erro no getEmployeesForPayroll:', error);
       next(error);
     }
   }
