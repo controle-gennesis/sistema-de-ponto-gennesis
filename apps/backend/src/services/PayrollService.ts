@@ -311,57 +311,29 @@ export class PayrollService {
    * Gera folha de pagamento mensal
    */
   async generateMonthlyPayroll(filters: PayrollFilters): Promise<MonthlyPayrollData> {
-    const { search, company, department, position, costCenter, client, modality, bank, accountType, polo, month, year } = filters;
+    try {
+      const { search, company, department, position, costCenter, client, modality, bank, accountType, polo, month, year } = filters;
 
-    // Validar período
-    const currentDate = new Date();
-    const selectedDate = new Date(year, month - 1, 1);
-    
-    if (selectedDate > currentDate) {
-      throw new Error('Não é possível gerar folha para períodos futuros');
-    }
-
-    // Construir filtros de busca
-    const where: any = {
-      user: {
-        isActive: true
-      }
-    };
-
-    // Construir busca considerando CPF sem formatação
-    let searchNumbers = '';
-    let shouldFilterManually = false;
-    
-    if (search) {
-      searchNumbers = search.replace(/\D/g, ''); // Remove tudo que não é número
-      // Se o termo de busca contém números, vamos filtrar manualmente para considerar CPF sem formatação
-      shouldFilterManually = searchNumbers.length > 0;
+      // Validar período
+      const currentDate = new Date();
+      const selectedDate = new Date(year, month - 1, 1);
       
-      if (!shouldFilterManually) {
-        // Se não tem números, usar busca normal do Prisma
-        where.OR = [
-          { user: { name: { contains: search, mode: 'insensitive' } } },
-          { user: { cpf: { contains: search, mode: 'insensitive' } } },
-          { user: { email: { contains: search, mode: 'insensitive' } } },
-          { employeeId: { contains: search, mode: 'insensitive' } },
-          { department: { contains: search, mode: 'insensitive' } },
-          { position: { contains: search, mode: 'insensitive' } },
-          { company: { contains: search, mode: 'insensitive' } },
-          { costCenter: { contains: search, mode: 'insensitive' } },
-          { client: { contains: search, mode: 'insensitive' } },
-          { modality: { contains: search, mode: 'insensitive' } },
-          { bank: { contains: search, mode: 'insensitive' } },
-          { accountType: { contains: search, mode: 'insensitive' } },
-          { agency: { contains: search, mode: 'insensitive' } },
-          { account: { contains: search, mode: 'insensitive' } },
-          { pixKeyType: { contains: search, mode: 'insensitive' } },
-          { pixKey: { contains: search, mode: 'insensitive' } }
-        ];
+      if (selectedDate > currentDate) {
+        throw new Error('Não é possível gerar folha para períodos futuros');
       }
-    }
 
-    // Aplicar filtros adicionais apenas se não houver busca com OR (para evitar conflito)
-    if (!where.OR) {
+      // Construir filtros de busca
+      const where: any = {
+        user: {
+          isActive: true
+        }
+      };
+
+      // Construir busca considerando CPF sem formatação
+      let searchNumbers = '';
+      let shouldFilterManually = false;
+      
+      // Aplicar filtros específicos primeiro (igual ao banco de horas)
       if (company) {
         where.company = { contains: company, mode: 'insensitive' };
       }
@@ -397,91 +369,85 @@ export class PayrollService {
       if (polo) {
         where.polo = { contains: polo, mode: 'insensitive' };
       }
-    } else {
-      // Se houver OR, aplicar filtros adicionais dentro de AND
-      const andConditions: any[] = [];
-      
-      if (company) {
-        andConditions.push({ company: { contains: company, mode: 'insensitive' } });
+
+      // Aplicar busca geral (igual ao banco de horas - usando AND com OR dentro)
+      if (search) {
+        searchNumbers = search.replace(/\D/g, ''); // Remove tudo que não é número
+        // Se o termo de busca contém números, vamos filtrar manualmente para considerar CPF sem formatação
+        shouldFilterManually = searchNumbers.length > 0;
+        
+        if (!shouldFilterManually) {
+          // Se não tem números, usar busca normal do Prisma (igual ao banco de horas)
+          where.AND = [
+            ...(where.AND || []),
+            {
+              OR: [
+                { user: { name: { contains: search, mode: 'insensitive' } } },
+                { user: { cpf: { contains: search, mode: 'insensitive' } } },
+                { user: { email: { contains: search, mode: 'insensitive' } } },
+                { employeeId: { contains: search, mode: 'insensitive' } },
+                { department: { contains: search, mode: 'insensitive' } },
+                { position: { contains: search, mode: 'insensitive' } },
+                { company: { contains: search, mode: 'insensitive' } },
+                { costCenter: { contains: search, mode: 'insensitive' } },
+                { client: { contains: search, mode: 'insensitive' } },
+                { modality: { contains: search, mode: 'insensitive' } },
+                { bank: { contains: search, mode: 'insensitive' } },
+                { accountType: { contains: search, mode: 'insensitive' } },
+                { agency: { contains: search, mode: 'insensitive' } },
+                { account: { contains: search, mode: 'insensitive' } },
+                { pixKeyType: { contains: search, mode: 'insensitive' } },
+                { pixKey: { contains: search, mode: 'insensitive' } }
+              ]
+            }
+          ];
+        }
       }
 
-      if (department) {
-        andConditions.push({ department: { contains: department, mode: 'insensitive' } });
-      }
-
-      if (position) {
-        andConditions.push({ position: { contains: position, mode: 'insensitive' } });
-      }
-
-      if (costCenter) {
-        andConditions.push({ costCenter: { contains: costCenter, mode: 'insensitive' } });
-      }
-
-      if (client) {
-        andConditions.push({ client: { contains: client, mode: 'insensitive' } });
-      }
-
-      if (modality) {
-        andConditions.push({ modality: { contains: modality, mode: 'insensitive' } });
-      }
-
-      if (bank) {
-        andConditions.push({ bank: { contains: bank, mode: 'insensitive' } });
-      }
-
-      if (accountType) {
-        andConditions.push({ accountType: { contains: accountType, mode: 'insensitive' } });
-      }
-
-      if (polo) {
-        andConditions.push({ polo: { contains: polo, mode: 'insensitive' } });
-      }
-
-      if (andConditions.length > 0) {
-        where.AND = andConditions;
-      }
-    }
-
-    // Construir where clause para busca manual (aplicar filtros específicos)
-    let manualWhere: any = {
-      user: {
-        isActive: true
-      }
-    };
-    
-    if (company) manualWhere.company = { contains: company, mode: 'insensitive' };
-    if (department) manualWhere.department = { contains: department, mode: 'insensitive' };
-    if (position) manualWhere.position = { contains: position, mode: 'insensitive' };
-    if (costCenter) manualWhere.costCenter = { contains: costCenter, mode: 'insensitive' };
-    if (client) manualWhere.client = { contains: client, mode: 'insensitive' };
-    if (modality) manualWhere.modality = { contains: modality, mode: 'insensitive' };
-    if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
-    if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
-    if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
-
-    // Buscar funcionários
-    let employees = await prisma.employee.findMany({
-      where: shouldFilterManually ? manualWhere : where,
-      include: {
+      // Construir where clause para busca manual (aplicar filtros específicos)
+      let manualWhere: any = {
         user: {
-          select: {
-            id: true,
-            name: true,
-            cpf: true
+          isActive: true
+        }
+      };
+      
+      if (company) manualWhere.company = { contains: company, mode: 'insensitive' };
+      if (department) manualWhere.department = { contains: department, mode: 'insensitive' };
+      if (position) manualWhere.position = { contains: position, mode: 'insensitive' };
+      if (costCenter) manualWhere.costCenter = { contains: costCenter, mode: 'insensitive' };
+      if (client) manualWhere.client = { contains: client, mode: 'insensitive' };
+      if (modality) manualWhere.modality = { contains: modality, mode: 'insensitive' };
+      if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
+      if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
+      if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
+
+      // Buscar funcionários
+      console.log('🔍 PayrollService - where clause:', JSON.stringify(shouldFilterManually ? manualWhere : where, null, 2));
+      
+      let employees = await prisma.employee.findMany({
+        where: shouldFilterManually ? manualWhere : where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              cpf: true
+            }
+          }
+        },
+        orderBy: {
+          user: {
+            name: 'asc'
           }
         }
-      },
-      orderBy: {
-        user: {
-          name: 'asc'
-        }
-      }
-    });
+      });
+      
+      console.log('✅ PayrollService - Funcionários encontrados:', employees.length);
 
-    // Filtrar manualmente se necessário (quando há números na busca)
-    if (shouldFilterManually && search) {
-      const searchLower = search.toLowerCase();
-      employees = employees.filter((employee: any) => {
+      // Filtrar manualmente se necessário (quando há números na busca)
+      if (shouldFilterManually && search) {
+        const searchLower = search.toLowerCase();
+        employees = employees.filter((employee: any) => {
         // Verificar CPF sem formatação
         if (employee.user?.cpf) {
           const employeeCpfNumbers = employee.user.cpf.replace(/\D/g, '');
@@ -508,227 +474,235 @@ export class PayrollService {
           employee.pixKeyType?.toLowerCase().includes(searchLower) ||
           employee.pixKey?.toLowerCase().includes(searchLower)
         );
-      });
-      
-      // Reordenar por nome
-      employees.sort((a: any, b: any) => {
-        const nameA = a.user?.name || '';
-        const nameB = b.user?.name || '';
-        return nameA.localeCompare(nameB);
-      });
-    }
-
-    // Calcular totais para cada funcionário e filtrar apenas os ativos no período
-    const employeesWithTotals = await Promise.all(
-      employees.map(async (employee: any) => {
-        // Verificar se o funcionário estava ativo no período
-        const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
-        
-        if (!isActiveInPeriod) {
-          return null; // Funcionário não estava ativo no período
-        }
-
-        const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
-        const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
-        const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
-        const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
-        
-        // Calcular horas extras
-        const hoursExtras = await hoursExtrasService.calculateHoursExtrasForMonth(
-          employee.userId, 
-          year, 
-          month, 
-          Number(employee.salary),
-          Number(employee.dangerPay || 0),
-          Number(employee.unhealthyPay || 0)
-        );
-
-        // Calcular variáveis necessárias para BASE INSS MENSAL
-        const salarioBase = Number(employee.salary);
-        const periculosidade = Number(employee.dangerPay || 0);
-        const insalubridade = Number(employee.unhealthyPay || 0);
-        const faltas = totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0;
-        
-        // Calcular número de dias do mês
-        const diasDoMes = new Date(year, month, 0).getDate();
-        const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
-        const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
-        
-        // Calcular DSR H.E
-        const totalHorasExtras = hoursExtras.he50Hours + hoursExtras.he100Hours;
-        const diasUteis = totals.totalWorkingDays || 0;
-        const diasNaoUteis = diasDoMes - diasUteis;
-        const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
-        
-        // Calcular valor do DSR H.E considerando as diferentes taxas
-        // hoursExtras.he50Hours e hoursExtras.he100Hours já vêm multiplicados do HoursExtrasService
-        const valorDSRHE = diasUteis > 0 ? 
-          ((hoursExtras.he50Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate) +  // DSR sobre HE 50% (já multiplicado)
-          ((hoursExtras.he100Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate)   // DSR sobre HE 100% (já multiplicado)
-          : 0;
-        
-        // Calcular BASE INSS MENSAL
-        const valorHorasExtras = hoursExtras.he50Value + hoursExtras.he100Value;
-        const baseInssMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
-          ? 0 
-          : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
-        
-        const { vacationDays, baseInssFerias, inssFerias } = await this.calculateBaseInssFerias(employee.id, month, year, baseInssMensal);
-        
-        // Buscar valores manuais de INSS
-        const manualInss = await prisma.manualInssValue.findUnique({
-          where: {
-            employeeId_month_year: {
-              employeeId: employee.id,
-              month: month,
-              year: year
-            }
-          }
         });
         
-        // Calcular FGTS: 8% sobre a base de cálculo (mesma base do INSS)
-        const baseFGTS = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
-          ? 0 
-          : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
-        const fgts = baseFGTS * 0.08; // 8% de alíquota
-        
-        // Calcular FGTS Férias: 8% sobre a base INSS Férias
-        const fgtsFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
-          ? 0 
-          : baseInssFerias * 0.08; // 8% sobre a base de férias
-        
-        // Calcular FGTS Total: Soma FGTS + FGTS Férias
-        const fgtsTotal = fgts + fgtsFerias;
-        
-        // Calcular INSS Mensal sobre a base
-        const inssMensal = this.calculateINSS(baseInssMensal);
-        
-        // Calcular INSS Total: INSS Mensal + Base INSS Férias + INSS Férias + INSS Rescisão
-        const inssRescisaoValue = manualInss ? Number(manualInss.inssRescisao) : 0;
-        const inssTotal = inssMensal + baseInssFerias + inssFerias + inssRescisaoValue;
-        
-        // Calcular Base IRRF: Salário Bruto + Periculosidade + Insalubridade - INSS
-        const salarioBruto = salarioBase + periculosidade + insalubridade;
-        const baseIRRF = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
-          ? 0 
-          : salarioBruto - inssMensal;
-        
-        // Calcular IRRF Mensal
-        const irrfMensal = this.calculateIRRF(baseIRRF);
-        
-        // Calcular Base IRRF Férias: (Salário + 1/3 Férias + Periculosidade + Insalubridade) - INSS Total
-        const baseIRRFFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
-          ? 0 
-          : (salarioBruto + baseInssFerias) - inssTotal;
-        
-        // Calcular IRRF Férias
-        const irrfFerias = this.calculateIRRF(baseIRRFFerias);
-        
-        // Calcular IRRF Total: Soma IRRF Mensal + IRRF Férias
-        const irrfTotal = irrfMensal + irrfFerias;
-        
-        return {
-          id: employee.id,
-          name: employee.user.name,
-          position: employee.position,
-          department: employee.department,
-          employeeId: employee.employeeId,
-          company: employee.company,
-          polo: employee.polo,
-          categoriaFinanceira: employee.categoriaFinanceira,
-          costCenter: employee.costCenter,
-          client: employee.client,
-          alocacaoFinal: alocacaoFinal,
-          cpf: employee.user.cpf,
-          bank: employee.bank,
-          accountType: employee.accountType,
-          agency: employee.agency,
-          operation: employee.operation,
-          account: employee.account,
-          digit: employee.digit,
-          pixKeyType: employee.pixKeyType,
-          pixKey: employee.pixKey,
-          modality: employee.modality,
-          familySalary: Number(employee.familySalary || 0),
-          dangerPay: Number(employee.dangerPay || 0),
-          unhealthyPay: Number(employee.unhealthyPay || 0),
-          salary: Number(employee.salary),
-          dailyFoodVoucher: employee.dailyFoodVoucher || 0,
-          dailyTransportVoucher: employee.dailyTransportVoucher || 0,
-          totalFoodVoucher: totals.totalVA,
-          totalTransportVoucher: totals.totalVT,
-          totalAdjustments,
-          totalDiscounts,
-          daysWorked: totals.daysWorked,
-          totalWorkingDays: totals.totalWorkingDays,
-          // Horas Extras
-          he50Hours: hoursExtras.he50Hours,
-          he50Value: hoursExtras.he50Value,
-          he100Hours: hoursExtras.he100Hours,
-          he100Value: hoursExtras.he100Value,
-          hourlyRate: hoursExtras.hourlyRate,
-          // Férias
-          vacationDays,
-          baseInssFerias,
-          inssFerias,
-          // Valores Manuais
-          inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
-          inss13: manualInss ? Number(manualInss.inss13) : 0,
-          // FGTS
-          fgts,
-          fgtsFerias,
-          fgtsTotal,
-          // INSS Total
-          inssTotal,
-          // IRRF
-          irrfMensal,
-          irrfFerias,
-          irrfTotal
-        } as PayrollEmployee;
-      })
-    );
-
-    // Filtrar funcionários nulos (que não estavam ativos no período)
-    const activeEmployees = employeesWithTotals.filter(emp => emp !== null) as PayrollEmployee[];
-
-    // Calcular totais gerais apenas dos funcionários ativos
-    const totalFoodVoucher = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalFoodVoucher, 0
-    );
-    
-    const totalTransportVoucher = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalTransportVoucher, 0
-    );
-
-    const totalAdjustments = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalAdjustments, 0
-    );
-
-    const totalDiscounts = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalDiscounts, 0
-    );
-
-    // Nome do mês em português
-    const monthNames = [
-      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-    ];
-
-    return {
-      employees: activeEmployees,
-      period: {
-        month,
-        year,
-        monthName: monthNames[month - 1]
-      },
-      totals: {
-        totalEmployees: activeEmployees.length,
-        totalFoodVoucher,
-        totalTransportVoucher,
-        totalAdjustments,
-        totalDiscounts
+        // Reordenar por nome
+        employees.sort((a: any, b: any) => {
+          const nameA = a.user?.name || '';
+          const nameB = b.user?.name || '';
+          return nameA.localeCompare(nameB);
+        });
       }
-    };
+
+      // Calcular totais para cada funcionário e filtrar apenas os ativos no período
+      const employeesWithTotals = await Promise.all(
+        employees.map(async (employee: any) => {
+          // Verificar se o funcionário estava ativo no período
+          const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
+          
+          if (!isActiveInPeriod) {
+            return null; // Funcionário não estava ativo no período
+          }
+
+          const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
+          const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
+          const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
+          const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
+          
+          // Calcular horas extras
+          const hoursExtras = await hoursExtrasService.calculateHoursExtrasForMonth(
+            employee.userId, 
+            year, 
+            month, 
+            Number(employee.salary),
+            Number(employee.dangerPay || 0),
+            Number(employee.unhealthyPay || 0)
+          );
+
+          // Calcular variáveis necessárias para BASE INSS MENSAL
+          const salarioBase = Number(employee.salary);
+          const periculosidade = Number(employee.dangerPay || 0);
+          const insalubridade = Number(employee.unhealthyPay || 0);
+          const faltas = totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0;
+          
+          // Calcular número de dias do mês
+          const diasDoMes = new Date(year, month, 0).getDate();
+          const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
+          const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
+          
+          // Calcular DSR H.E
+          const totalHorasExtras = hoursExtras.he50Hours + hoursExtras.he100Hours;
+          const diasUteis = totals.totalWorkingDays || 0;
+          const diasNaoUteis = diasDoMes - diasUteis;
+          const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+          
+          // Calcular valor do DSR H.E considerando as diferentes taxas
+          // hoursExtras.he50Hours e hoursExtras.he100Hours já vêm multiplicados do HoursExtrasService
+          const valorDSRHE = diasUteis > 0 ? 
+            ((hoursExtras.he50Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate) +  // DSR sobre HE 50% (já multiplicado)
+            ((hoursExtras.he100Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate)   // DSR sobre HE 100% (já multiplicado)
+            : 0;
+          
+          // Calcular BASE INSS MENSAL
+          const valorHorasExtras = hoursExtras.he50Value + hoursExtras.he100Value;
+          const baseInssMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+            ? 0 
+            : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+          
+          const { vacationDays, baseInssFerias, inssFerias } = await this.calculateBaseInssFerias(employee.id, month, year, baseInssMensal);
+          
+          // Buscar valores manuais de INSS
+          const manualInss = await prisma.manualInssValue.findUnique({
+            where: {
+              employeeId_month_year: {
+                employeeId: employee.id,
+                month: month,
+                year: year
+              }
+            }
+          });
+          
+          // Calcular FGTS: 8% sobre a base de cálculo (mesma base do INSS)
+          const baseFGTS = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+            ? 0 
+            : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+          const fgts = baseFGTS * 0.08; // 8% de alíquota
+          
+          // Calcular FGTS Férias: 8% sobre a base INSS Férias
+          const fgtsFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+            ? 0 
+            : baseInssFerias * 0.08; // 8% sobre a base de férias
+          
+          // Calcular FGTS Total: Soma FGTS + FGTS Férias
+          const fgtsTotal = fgts + fgtsFerias;
+          
+          // Calcular INSS Mensal sobre a base
+          const inssMensal = this.calculateINSS(baseInssMensal);
+          
+          // Calcular INSS Total: INSS Mensal + Base INSS Férias + INSS Férias + INSS Rescisão
+          const inssRescisaoValue = manualInss ? Number(manualInss.inssRescisao) : 0;
+          const inssTotal = inssMensal + baseInssFerias + inssFerias + inssRescisaoValue;
+          
+          // Calcular Base IRRF: Salário Bruto + Periculosidade + Insalubridade - INSS
+          const salarioBruto = salarioBase + periculosidade + insalubridade;
+          const baseIRRF = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+            ? 0 
+            : salarioBruto - inssMensal;
+          
+          // Calcular IRRF Mensal
+          const irrfMensal = this.calculateIRRF(baseIRRF);
+          
+          // Calcular Base IRRF Férias: (Salário + 1/3 Férias + Periculosidade + Insalubridade) - INSS Total
+          const baseIRRFFerias = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+            ? 0 
+            : (salarioBruto + baseInssFerias) - inssTotal;
+          
+          // Calcular IRRF Férias
+          const irrfFerias = this.calculateIRRF(baseIRRFFerias);
+          
+          // Calcular IRRF Total: Soma IRRF Mensal + IRRF Férias
+          const irrfTotal = irrfMensal + irrfFerias;
+          
+          return {
+            id: employee.id,
+            name: employee.user.name,
+            position: employee.position,
+            department: employee.department,
+            employeeId: employee.employeeId,
+            company: employee.company,
+            polo: employee.polo,
+            categoriaFinanceira: employee.categoriaFinanceira,
+            costCenter: employee.costCenter,
+            client: employee.client,
+            alocacaoFinal: alocacaoFinal,
+            cpf: employee.user.cpf,
+            bank: employee.bank,
+            accountType: employee.accountType,
+            agency: employee.agency,
+            operation: employee.operation,
+            account: employee.account,
+            digit: employee.digit,
+            pixKeyType: employee.pixKeyType,
+            pixKey: employee.pixKey,
+            modality: employee.modality,
+            familySalary: Number(employee.familySalary || 0),
+            dangerPay: Number(employee.dangerPay || 0),
+            unhealthyPay: Number(employee.unhealthyPay || 0),
+            salary: Number(employee.salary),
+            dailyFoodVoucher: employee.dailyFoodVoucher || 0,
+            dailyTransportVoucher: employee.dailyTransportVoucher || 0,
+            totalFoodVoucher: totals.totalVA,
+            totalTransportVoucher: totals.totalVT,
+            totalAdjustments,
+            totalDiscounts,
+            daysWorked: totals.daysWorked,
+            totalWorkingDays: totals.totalWorkingDays,
+            // Horas Extras
+            he50Hours: hoursExtras.he50Hours,
+            he50Value: hoursExtras.he50Value,
+            he100Hours: hoursExtras.he100Hours,
+            he100Value: hoursExtras.he100Value,
+            hourlyRate: hoursExtras.hourlyRate,
+            // Férias
+            vacationDays,
+            baseInssFerias,
+            inssFerias,
+            // Valores Manuais
+            inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
+            inss13: manualInss ? Number(manualInss.inss13) : 0,
+            // FGTS
+            fgts,
+            fgtsFerias,
+            fgtsTotal,
+            // INSS Total
+            inssTotal,
+            // IRRF
+            irrfMensal,
+            irrfFerias,
+            irrfTotal
+          } as PayrollEmployee;
+        })
+      );
+
+      // Filtrar funcionários nulos (que não estavam ativos no período)
+      const activeEmployees = employeesWithTotals.filter(emp => emp !== null) as PayrollEmployee[];
+
+      // Calcular totais gerais apenas dos funcionários ativos
+      const totalFoodVoucher = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalFoodVoucher, 0
+      );
+      
+      const totalTransportVoucher = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalTransportVoucher, 0
+      );
+
+      const totalAdjustments = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalAdjustments, 0
+      );
+
+      const totalDiscounts = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalDiscounts, 0
+      );
+
+      // Nome do mês em português
+      const monthNames = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      ];
+
+      return {
+        employees: activeEmployees,
+        period: {
+          month,
+          year,
+          monthName: monthNames[month - 1]
+        },
+        totals: {
+          totalEmployees: activeEmployees.length,
+          totalFoodVoucher,
+          totalTransportVoucher,
+          totalAdjustments,
+          totalDiscounts
+        }
+      };
+    } catch (error: any) {
+      console.error('❌ PayrollService - Erro ao gerar folha:', error);
+      console.error('❌ PayrollService - Erro completo:', JSON.stringify(error, null, 2));
+      console.error('❌ PayrollService - Erro name:', error.name);
+      console.error('❌ PayrollService - Erro code:', error.code);
+      console.error('❌ PayrollService - Erro meta:', error.meta);
+      throw error;
+    }
   }
 
   /**
