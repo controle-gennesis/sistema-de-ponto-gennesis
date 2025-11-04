@@ -171,43 +171,69 @@ export class PayrollController {
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
 
+      // Filtrar apenas valores não vazios (igual ao banco de horas)
       const filters: PayrollFilters = {
-        search: search as string,
-        company: company as string,
-        department: department as string,
-        position: position as string,
-        costCenter: costCenter as string,
-        client: client as string,
-        modality: modality as string,
-        bank: bank as string,
-        accountType: accountType as string,
-        polo: polo as string,
+        search: search && (search as string).trim() ? (search as string).trim() : undefined,
+        company: company && (company as string).trim() ? (company as string).trim() : undefined,
+        department: department && (department as string).trim() ? (department as string).trim() : undefined,
+        position: position && (position as string).trim() ? (position as string).trim() : undefined,
+        costCenter: costCenter && (costCenter as string).trim() ? (costCenter as string).trim() : undefined,
+        client: client && (client as string).trim() ? (client as string).trim() : undefined,
+        modality: modality && (modality as string).trim() ? (modality as string).trim() : undefined,
+        bank: bank && (bank as string).trim() ? (bank as string).trim() : undefined,
+        accountType: accountType && (accountType as string).trim() ? (accountType as string).trim() : undefined,
+        polo: polo && (polo as string).trim() ? (polo as string).trim() : undefined,
         month: monthNum,
         year: yearNum
       };
 
-      const payrollData = await payrollService.generateMonthlyPayroll(filters);
+      console.log('🔍 PayrollController - Filtros processados:', JSON.stringify(filters, null, 2));
 
-      // Aplicar paginação
-      const startIndex = (pageNum - 1) * limitNum;
-      const endIndex = startIndex + limitNum;
-      const paginatedEmployees = payrollData.employees.slice(startIndex, endIndex);
+      try {
+        const payrollData = await payrollService.generateMonthlyPayroll(filters);
+        console.log('✅ PayrollController - Dados retornados:', {
+          employeesCount: payrollData.employees.length,
+          period: payrollData.period
+        });
 
-      res.json({
-        success: true,
-        data: {
-          employees: paginatedEmployees,
-          period: payrollData.period,
-          totals: payrollData.totals,
-          pagination: {
-            page: pageNum,
-            limit: limitNum,
-            total: payrollData.employees.length,
-            totalPages: Math.ceil(payrollData.employees.length / limitNum)
+        // Aplicar paginação
+        const startIndex = (pageNum - 1) * limitNum;
+        const endIndex = startIndex + limitNum;
+        const paginatedEmployees = payrollData.employees.slice(startIndex, endIndex);
+
+        res.json({
+          success: true,
+          data: {
+            employees: paginatedEmployees,
+            period: payrollData.period,
+            totals: payrollData.totals,
+            pagination: {
+              page: pageNum,
+              limit: limitNum,
+              total: payrollData.employees.length,
+              totalPages: Math.ceil(payrollData.employees.length / limitNum)
+            }
           }
+        });
+      } catch (serviceError: any) {
+        console.error('❌ PayrollController - Erro no PayrollService:', serviceError);
+        console.error('❌ PayrollController - Erro name:', serviceError?.name);
+        console.error('❌ PayrollController - Erro code:', serviceError?.code);
+        console.error('❌ PayrollController - Erro message:', serviceError?.message);
+        console.error('❌ PayrollController - Erro completo:', JSON.stringify(serviceError, null, 2));
+        
+        if (serviceError?.name === 'PrismaClientKnownRequestError') {
+          console.error('❌ PayrollController - Erro do Prisma:', serviceError.code, serviceError.meta);
+          return res.status(500).json({
+            success: false,
+            error: 'Erro ao processar dados do banco de dados',
+            details: process.env.NODE_ENV === 'development' ? serviceError.message : undefined
+          });
         }
-      });
+        throw serviceError;
+      }
     } catch (error) {
+      console.error('❌ PayrollController - Erro no getEmployeesForPayroll:', error);
       next(error);
     }
   }

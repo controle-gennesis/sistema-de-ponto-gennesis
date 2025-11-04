@@ -421,28 +421,33 @@ export class PayrollService {
     if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
 
     // Buscar funcionários
-    let employees = await prisma.employee.findMany({
-      where: shouldFilterManually ? manualWhere : where,
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            cpf: true
+    console.log('🔍 PayrollService - where clause:', JSON.stringify(shouldFilterManually ? manualWhere : where, null, 2));
+    
+    try {
+      let employees = await prisma.employee.findMany({
+        where: shouldFilterManually ? manualWhere : where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              cpf: true
+            }
+          }
+        },
+        orderBy: {
+          user: {
+            name: 'asc'
           }
         }
-      },
-      orderBy: {
-        user: {
-          name: 'asc'
-        }
-      }
-    });
+      });
+      
+      console.log('✅ PayrollService - Funcionários encontrados:', employees.length);
 
-    // Filtrar manualmente se necessário (quando há números na busca)
-    if (shouldFilterManually && search) {
-      const searchLower = search.toLowerCase();
-      employees = employees.filter((employee: any) => {
+      // Filtrar manualmente se necessário (quando há números na busca)
+      if (shouldFilterManually && search) {
+        const searchLower = search.toLowerCase();
+        employees = employees.filter((employee: any) => {
         // Verificar CPF sem formatação
         if (employee.user?.cpf) {
           const employeeCpfNumbers = employee.user.cpf.replace(/\D/g, '');
@@ -469,19 +474,19 @@ export class PayrollService {
           employee.pixKeyType?.toLowerCase().includes(searchLower) ||
           employee.pixKey?.toLowerCase().includes(searchLower)
         );
-      });
-      
-      // Reordenar por nome
-      employees.sort((a: any, b: any) => {
-        const nameA = a.user?.name || '';
-        const nameB = b.user?.name || '';
-        return nameA.localeCompare(nameB);
-      });
-    }
+        });
+        
+        // Reordenar por nome
+        employees.sort((a: any, b: any) => {
+          const nameA = a.user?.name || '';
+          const nameB = b.user?.name || '';
+          return nameA.localeCompare(nameB);
+        });
+      }
 
-    // Calcular totais para cada funcionário e filtrar apenas os ativos no período
-    const employeesWithTotals = await Promise.all(
-      employees.map(async (employee: any) => {
+      // Calcular totais para cada funcionário e filtrar apenas os ativos no período
+      const employeesWithTotals = await Promise.all(
+        employees.map(async (employee: any) => {
         // Verificar se o funcionário estava ativo no período
         const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
         
@@ -647,49 +652,57 @@ export class PayrollService {
           irrfTotal
         } as PayrollEmployee;
       })
-    );
+      );
 
-    // Filtrar funcionários nulos (que não estavam ativos no período)
-    const activeEmployees = employeesWithTotals.filter(emp => emp !== null) as PayrollEmployee[];
+      // Filtrar funcionários nulos (que não estavam ativos no período)
+      const activeEmployees = employeesWithTotals.filter(emp => emp !== null) as PayrollEmployee[];
 
-    // Calcular totais gerais apenas dos funcionários ativos
-    const totalFoodVoucher = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalFoodVoucher, 0
-    );
-    
-    const totalTransportVoucher = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalTransportVoucher, 0
-    );
+      // Calcular totais gerais apenas dos funcionários ativos
+      const totalFoodVoucher = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalFoodVoucher, 0
+      );
+      
+      const totalTransportVoucher = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalTransportVoucher, 0
+      );
 
-    const totalAdjustments = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalAdjustments, 0
-    );
+      const totalAdjustments = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalAdjustments, 0
+      );
 
-    const totalDiscounts = activeEmployees.reduce(
-      (sum, emp) => sum + emp.totalDiscounts, 0
-    );
+      const totalDiscounts = activeEmployees.reduce(
+        (sum, emp) => sum + emp.totalDiscounts, 0
+      );
 
-    // Nome do mês em português
-    const monthNames = [
-      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-    ];
+      // Nome do mês em português
+      const monthNames = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      ];
 
-    return {
-      employees: activeEmployees,
-      period: {
-        month,
-        year,
-        monthName: monthNames[month - 1]
-      },
-      totals: {
-        totalEmployees: activeEmployees.length,
-        totalFoodVoucher,
-        totalTransportVoucher,
-        totalAdjustments,
-        totalDiscounts
-      }
-    };
+      return {
+        employees: activeEmployees,
+        period: {
+          month,
+          year,
+          monthName: monthNames[month - 1]
+        },
+        totals: {
+          totalEmployees: activeEmployees.length,
+          totalFoodVoucher,
+          totalTransportVoucher,
+          totalAdjustments,
+          totalDiscounts
+        }
+      };
+    } catch (error: any) {
+      console.error('❌ PayrollService - Erro ao gerar folha:', error);
+      console.error('❌ PayrollService - Erro name:', error?.name);
+      console.error('❌ PayrollService - Erro code:', error?.code);
+      console.error('❌ PayrollService - Erro message:', error?.message);
+      console.error('❌ PayrollService - Erro completo:', JSON.stringify(error, null, 2));
+      throw error;
+    }
   }
 
   /**
