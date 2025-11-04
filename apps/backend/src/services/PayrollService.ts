@@ -332,34 +332,7 @@ export class PayrollService {
     let searchNumbers = '';
     let shouldFilterManually = false;
     
-    if (search) {
-      searchNumbers = search.replace(/\D/g, ''); // Remove tudo que não é número
-      // Se o termo de busca contém números, vamos filtrar manualmente para considerar CPF sem formatação
-      shouldFilterManually = searchNumbers.length > 0;
-      
-      if (!shouldFilterManually) {
-        // Se não tem números, usar busca normal do Prisma
-        where.OR = [
-          { user: { name: { contains: search, mode: 'insensitive' } } },
-          { user: { cpf: { contains: search, mode: 'insensitive' } } },
-          { user: { email: { contains: search, mode: 'insensitive' } } },
-          { employeeId: { contains: search, mode: 'insensitive' } },
-          { department: { contains: search, mode: 'insensitive' } },
-          { position: { contains: search, mode: 'insensitive' } },
-          { company: { contains: search, mode: 'insensitive' } },
-          { costCenter: { contains: search, mode: 'insensitive' } },
-          { client: { contains: search, mode: 'insensitive' } },
-          { modality: { contains: search, mode: 'insensitive' } },
-          { bank: { contains: search, mode: 'insensitive' } },
-          { accountType: { contains: search, mode: 'insensitive' } },
-          { agency: { contains: search, mode: 'insensitive' } },
-          { account: { contains: search, mode: 'insensitive' } },
-          { pixKeyType: { contains: search, mode: 'insensitive' } },
-          { pixKey: { contains: search, mode: 'insensitive' } }
-        ];
-      }
-    }
-
+    // Aplicar filtros específicos primeiro (igual ao banco de horas)
     if (company) {
       where.company = { contains: company, mode: 'insensitive' };
     }
@@ -394,6 +367,40 @@ export class PayrollService {
 
     if (polo) {
       where.polo = { contains: polo, mode: 'insensitive' };
+    }
+
+    // Aplicar busca geral (igual ao banco de horas - usando AND com OR dentro)
+    if (search) {
+      searchNumbers = search.replace(/\D/g, ''); // Remove tudo que não é número
+      // Se o termo de busca contém números, vamos filtrar manualmente para considerar CPF sem formatação
+      shouldFilterManually = searchNumbers.length > 0;
+      
+      if (!shouldFilterManually) {
+        // Se não tem números, usar busca normal do Prisma (igual ao banco de horas)
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { user: { name: { contains: search, mode: 'insensitive' } } },
+              { user: { cpf: { contains: search, mode: 'insensitive' } } },
+              { user: { email: { contains: search, mode: 'insensitive' } } },
+              { employeeId: { contains: search, mode: 'insensitive' } },
+              { department: { contains: search, mode: 'insensitive' } },
+              { position: { contains: search, mode: 'insensitive' } },
+              { company: { contains: search, mode: 'insensitive' } },
+              { costCenter: { contains: search, mode: 'insensitive' } },
+              { client: { contains: search, mode: 'insensitive' } },
+              { modality: { contains: search, mode: 'insensitive' } },
+              { bank: { contains: search, mode: 'insensitive' } },
+              { accountType: { contains: search, mode: 'insensitive' } },
+              { agency: { contains: search, mode: 'insensitive' } },
+              { account: { contains: search, mode: 'insensitive' } },
+              { pixKeyType: { contains: search, mode: 'insensitive' } },
+              { pixKey: { contains: search, mode: 'insensitive' } }
+            ]
+          }
+        ];
+      }
     }
 
     // Construir where clause para busca manual (aplicar filtros específicos)
