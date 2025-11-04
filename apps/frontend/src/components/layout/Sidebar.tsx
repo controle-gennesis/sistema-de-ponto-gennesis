@@ -26,7 +26,8 @@ import {
   Settings,
   BarChart3,
   FileText,
-  Search
+  Search,
+  MoreVertical
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -50,11 +51,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [showButtonText, setShowButtonText] = useState(!isCollapsed);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const { permissions, isLoading, userPosition, user } = usePermissions();
 
   const isEmployee = userRole === 'EMPLOYEE';
+
+  // Função para extrair iniciais do nome do usuário
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  };
 
   // Menu items agrupados por categoria
   const getMenuItems = () => {
@@ -84,7 +95,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Home,
         description: 'Visão geral do sistema',
         permission: permissions.canViewDashboard
-      }
+          }
         ]
       },
       {
@@ -396,13 +407,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const isSingleItem = visibleItems.length === 1;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
+            // Detectar se é o primeiro item (Registros de Ponto)
+            const isFirstItem = index === 0;
+            
             // Se tiver apenas um item, renderizar como link direto
+            // Mas quando a sidebar estiver fechada, não mostrar páginas individuais, exceto Dashboard e Registros de Ponto
             if (isSingleItem && singleItem) {
+              // Se a sidebar estiver fechada, apenas mostrar Dashboard e Registros de Ponto
+              if (isCollapsed && category.id !== 'main' && category.id !== 'time-control') {
+                return null;
+              }
+              
               const active = isActive(singleItem.href);
               const SingleItemIcon = singleItem.icon || CategoryIcon;
               
               return (
                 <div key={category.id}>
+                  {/* Título "Principal" acima de Registros de Ponto */}
+                  {isFirstItem && category.id === 'time-control' && !isCollapsed && (
+                    <div className="px-3 pt-2 pb-2">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Principal</p>
+                    </div>
+                  )}
                   <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
                     {isCollapsed ? (
                       <div className="flex justify-center">
@@ -432,7 +458,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                         <div className="rounded-xl transition-all duration-200 p-3">
                           <SingleItemIcon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-red-600' : 'text-gray-600'}`} />
                         </div>
-                        <div className={`flex-1 min-w-0 text-left transition-all duration-300 ease-in-out ${isCollapsed ? 'opacity-0 w-0 overflow-hidden max-w-0' : 'opacity-100 max-w-full'}`}>
+                        <div className="flex-1 min-w-0 text-left">
                           <p className={`text-sm font-medium whitespace-nowrap ${active ? 'text-red-700' : ''}`}>{singleItem.name}</p>
                         </div>
                       </Link>
@@ -446,8 +472,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               );
             }
             
+            // Verificar se é o primeiro grupo (não single item)
+            const previousCategories = menuItems.slice(0, index);
+            const isFirstGroup = !previousCategories.some(cat => {
+              const catVisibleItems = cat.items.filter(item => item.permission);
+              return catVisibleItems.length > 1;
+            });
+            
             return (
               <div key={category.id} className="overflow-hidden">
+                {/* Título "Menu" acima do primeiro grupo */}
+                {isFirstGroup && !isCollapsed && (
+                  <div className="px-3 pt-2 pb-2">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Menu</p>
+                  </div>
+                )}
                 {/* Separador entre grupos */}
                 
                 <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'} overflow-hidden`}>
@@ -526,89 +565,140 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       })}
                   </div>
                 )}
-                {isExpanded && isCollapsed && (
-                  <div className="space-y-2">
-                    {category.items
-                      .filter(item => item.permission)
-                      .map((item) => {
-                        const ItemIcon = item.icon;
-                        const active = isActive(item.href);
-            
-                        return (
-                          <div key={item.href} className="flex justify-center">
-                            <button
-                              onClick={() => {
-                                // Abrir a sidebar e expandir o grupo
-                                setIsCollapsed(false);
-                                setExpandedMenus(prev => {
-                                  const newSet = new Set(prev);
-                                  newSet.add(category.id);
-                                  return newSet;
-                                });
-                              }}
-                              className={`w-8 h-8 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                                active 
-                                  ? 'text-red-600 hover:bg-red-50' 
-                                  : 'hover:bg-gray-50 text-gray-600'
-                              }`}
-                              title={item.name}
-                            >
-                              <ItemIcon className="w-4 h-4" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
                 </div>
               </div>
             );
           })}
         </nav>
 
-        {/* Botões de ação - sempre visíveis na parte inferior */}
-        <div className="flex-shrink-0 overflow-hidden">
-          {/* Alterar Senha */}
-          <div className={`${isCollapsed ? 'px-2 pt-2 pb-1' : 'px-4 pt-4 pb-1'} overflow-hidden`}>
-            <button
-              onClick={() => {
-                // Emitir evento customizado para abrir modal de alterar senha
-                window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
-              }}
-              className={`flex items-center text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors duration-200 overflow-hidden ${
-                isCollapsed 
-                  ? 'justify-center w-12 h-12 mx-auto' 
-                  : 'w-full space-x-3 px-4 py-3'
-              }`}
-              title={isCollapsed ? 'Alterar Senha' : undefined}
-            >
-              <Lock className="w-5 h-5 flex-shrink-0 text-blue-700" />
-              {showButtonText && (
-                <span className="text-sm font-medium text-blue-700 whitespace-nowrap overflow-hidden">
-                  Alterar Senha
-                </span>
-              )}
-            </button>
+        {/* Perfil do usuário */}
+        <div className="flex-shrink-0 relative overflow-hidden">
+          {/* Linha separadora acima do perfil */}
+          <div className="mx-4 my-2">
+            <div className="h-px bg-gray-200"></div>
           </div>
-
-          {/* Logout */}
-          <div className={`${isCollapsed ? 'px-2 pt-1 pb-2' : 'px-4 pt-1 pb-4'} overflow-hidden`}>
-            <button
-              onClick={onLogout}
-              className={`flex items-center text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition-colors overflow-hidden ${
-                isCollapsed 
-                  ? 'justify-center w-12 h-12 mx-auto' 
-                  : 'w-full space-x-3 px-4 py-3'
-              }`}
-              title={isCollapsed ? 'Sair' : undefined}
-            >
-              <LogOut className="w-5 h-5 flex-shrink-0 text-red-700" />
-              {showButtonText && (
-                <span className="text-sm font-medium text-red-700 whitespace-nowrap overflow-hidden">
-                  Sair
-                </span>
-              )}
-            </button>
+          
+          <div className="relative">
+            {/* Seção de perfil - sempre visível quando expandida */}
+            <div className="bg-white">
+              <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
+                {isCollapsed ? (
+                  /* Quando colapsada: apenas a foto */
+                  <div className="flex justify-center">
+                    <button
+                      onClick={() => {
+                        setIsCollapsed(false);
+                        setShowUserMenu(true);
+                      }}
+                      className="rounded-full hover:opacity-80 transition-opacity"
+                      title={user?.name || userName}
+                    >
+                      {user?.photo ? (
+                        <img 
+                          src={user.photo} 
+                          alt={user?.name || userName} 
+                          className="w-10 h-10 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center">
+                          <span className="text-sm font-semibold text-white">
+                            {getInitials(user?.name || userName)}
+                          </span>
+                        </div>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  /* Quando expandida: foto, nome, cargo e botão de menu */
+                  <div className="flex items-center space-x-3">
+                    {/* Foto do perfil */}
+                    <div className="flex-shrink-0 relative">
+                      {user?.photo ? (
+                        <img 
+                          src={user.photo} 
+                          alt={user?.name || userName} 
+                          className="w-10 h-10 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center">
+                          <span className="text-sm font-semibold text-white">
+                            {getInitials(user?.name || userName)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Informações do usuário */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">
+                        {user?.name || userName}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {user?.position || userPosition}
+                      </p>
+                    </div>
+                    
+                    {/* Botão de menu (3 pontos) */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowUserMenu(!showUserMenu)}
+                        className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                        title="Menu do usuário"
+                      >
+                        <MoreVertical className="w-5 h-5 text-gray-600" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Menu de botões que desliza de baixo para cima - só aparece quando a sidebar está expandida */}
+            {!isCollapsed && (
+              <div 
+                className={`bg-white transition-all duration-300 ease-in-out overflow-hidden ${
+                  showUserMenu ? 'max-h-[200px] opacity-100' : 'max-h-0 opacity-0'
+                }`}
+              >
+                {/* Linha separadora superior */}
+                <div className="mx-4 my-2">
+                  <div className="h-px bg-gray-200"></div>
+                </div>
+                
+                <div className="p-2">
+                  <button
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
+                      setShowUserMenu(false);
+                    }}
+                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl"
+                  >
+                    <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 group-hover:text-blue-700" />
+                    <span className="text-sm font-medium text-gray-700 group-hover:text-blue-700">Alterar Senha</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      onLogout();
+                    }}
+                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl"
+                  >
+                    <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 group-hover:text-red-700" />
+                    <span className="text-sm font-medium text-gray-700 group-hover:text-red-700">Sair</span>
+                  </button>
+                </div>
+                
+                {/* Linha separadora acima do footer */}
+                <div className="mx-4 my-2">
+                  <div className="h-px bg-gray-200"></div>
+                </div>
+                
+                {/* Footer com logo e versão */}
+                <div className="px-4 py-3 flex items-center justify-center space-x-2">
+                  <span className="text-xs text-gray-600">© 2025 Gennesis Engenharia</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
