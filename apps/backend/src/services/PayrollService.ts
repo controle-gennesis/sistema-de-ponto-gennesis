@@ -328,120 +328,109 @@ export class PayrollService {
       }
     };
 
-      // Construir busca considerando CPF sem formatação
-      let searchNumbers = '';
-      let shouldFilterManually = false;
+    // Construir busca considerando CPF sem formatação
+    let searchNumbers = '';
+    let shouldFilterManually = false;
+    
+    if (search) {
+      searchNumbers = search.replace(/\D/g, ''); // Remove tudo que não é número
+      // Se o termo de busca contém números, vamos filtrar manualmente para considerar CPF sem formatação
+      shouldFilterManually = searchNumbers.length > 0;
       
-      // Aplicar filtros específicos primeiro (igual ao banco de horas)
-      if (company) {
-        where.company = { contains: company, mode: 'insensitive' };
+      if (!shouldFilterManually) {
+        // Se não tem números, usar busca normal do Prisma
+        where.OR = [
+          { user: { name: { contains: search, mode: 'insensitive' } } },
+          { user: { cpf: { contains: search, mode: 'insensitive' } } },
+          { user: { email: { contains: search, mode: 'insensitive' } } },
+          { employeeId: { contains: search, mode: 'insensitive' } },
+          { department: { contains: search, mode: 'insensitive' } },
+          { position: { contains: search, mode: 'insensitive' } },
+          { company: { contains: search, mode: 'insensitive' } },
+          { costCenter: { contains: search, mode: 'insensitive' } },
+          { client: { contains: search, mode: 'insensitive' } },
+          { modality: { contains: search, mode: 'insensitive' } },
+          { bank: { contains: search, mode: 'insensitive' } },
+          { accountType: { contains: search, mode: 'insensitive' } },
+          { agency: { contains: search, mode: 'insensitive' } },
+          { account: { contains: search, mode: 'insensitive' } },
+          { pixKeyType: { contains: search, mode: 'insensitive' } },
+          { pixKey: { contains: search, mode: 'insensitive' } }
+        ];
       }
+    }
 
-      if (department) {
-        where.department = { contains: department, mode: 'insensitive' };
+    if (company) {
+      where.company = { contains: company, mode: 'insensitive' };
+    }
+
+    if (department) {
+      where.department = { contains: department, mode: 'insensitive' };
+    }
+
+    if (position) {
+      where.position = { contains: position, mode: 'insensitive' };
+    }
+
+    if (costCenter) {
+      where.costCenter = { contains: costCenter, mode: 'insensitive' };
+    }
+
+    if (client) {
+      where.client = { contains: client, mode: 'insensitive' };
+    }
+
+    if (modality) {
+      where.modality = { contains: modality, mode: 'insensitive' };
+    }
+
+    if (bank) {
+      where.bank = { contains: bank, mode: 'insensitive' };
+    }
+
+    if (accountType) {
+      where.accountType = { contains: accountType, mode: 'insensitive' };
+    }
+
+    if (polo) {
+      where.polo = { contains: polo, mode: 'insensitive' };
+    }
+
+    // Construir where clause para busca manual (aplicar filtros específicos)
+    let manualWhere: any = {
+      user: {
+        isActive: true
       }
+    };
+    
+    if (company) manualWhere.company = { contains: company, mode: 'insensitive' };
+    if (department) manualWhere.department = { contains: department, mode: 'insensitive' };
+    if (position) manualWhere.position = { contains: position, mode: 'insensitive' };
+    if (costCenter) manualWhere.costCenter = { contains: costCenter, mode: 'insensitive' };
+    if (client) manualWhere.client = { contains: client, mode: 'insensitive' };
+    if (modality) manualWhere.modality = { contains: modality, mode: 'insensitive' };
+    if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
+    if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
+    if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
 
-      if (position) {
-        where.position = { contains: position, mode: 'insensitive' };
-      }
-
-      if (costCenter) {
-        where.costCenter = { contains: costCenter, mode: 'insensitive' };
-      }
-
-      if (client) {
-        where.client = { contains: client, mode: 'insensitive' };
-      }
-
-      if (modality) {
-        where.modality = { contains: modality, mode: 'insensitive' };
-      }
-
-      if (bank) {
-        where.bank = { contains: bank, mode: 'insensitive' };
-      }
-
-      if (accountType) {
-        where.accountType = { contains: accountType, mode: 'insensitive' };
-      }
-
-      if (polo) {
-        where.polo = { contains: polo, mode: 'insensitive' };
-      }
-
-      // Aplicar busca geral (igual ao banco de horas - usando AND com OR dentro)
-      if (search) {
-        searchNumbers = search.replace(/\D/g, ''); // Remove tudo que não é número
-        // Se o termo de busca contém números, vamos filtrar manualmente para considerar CPF sem formatação
-        shouldFilterManually = searchNumbers.length > 0;
-        
-        if (!shouldFilterManually) {
-          // Se não tem números, usar busca normal do Prisma (igual ao banco de horas)
-          where.AND = [
-            ...(where.AND || []),
-            {
-              OR: [
-                { user: { name: { contains: search, mode: 'insensitive' } } },
-                { user: { cpf: { contains: search, mode: 'insensitive' } } },
-                { user: { email: { contains: search, mode: 'insensitive' } } },
-                { employeeId: { contains: search, mode: 'insensitive' } },
-                { department: { contains: search, mode: 'insensitive' } },
-                { position: { contains: search, mode: 'insensitive' } },
-                { company: { contains: search, mode: 'insensitive' } },
-                { costCenter: { contains: search, mode: 'insensitive' } },
-                { client: { contains: search, mode: 'insensitive' } },
-                { modality: { contains: search, mode: 'insensitive' } },
-                { bank: { contains: search, mode: 'insensitive' } },
-                { accountType: { contains: search, mode: 'insensitive' } },
-                { agency: { contains: search, mode: 'insensitive' } },
-                { account: { contains: search, mode: 'insensitive' } },
-                { pixKeyType: { contains: search, mode: 'insensitive' } },
-                { pixKey: { contains: search, mode: 'insensitive' } }
-              ]
-            }
-          ];
-        }
-      }
-
-      // Construir where clause para busca manual (aplicar filtros específicos)
-      let manualWhere: any = {
+    // Buscar funcionários
+    let employees = await prisma.employee.findMany({
+      where: shouldFilterManually ? manualWhere : where,
+      include: {
         user: {
-          isActive: true
-        }
-      };
-      
-      if (company) manualWhere.company = { contains: company, mode: 'insensitive' };
-      if (department) manualWhere.department = { contains: department, mode: 'insensitive' };
-      if (position) manualWhere.position = { contains: position, mode: 'insensitive' };
-      if (costCenter) manualWhere.costCenter = { contains: costCenter, mode: 'insensitive' };
-      if (client) manualWhere.client = { contains: client, mode: 'insensitive' };
-      if (modality) manualWhere.modality = { contains: modality, mode: 'insensitive' };
-      if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
-      if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
-      if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
-
-      // Buscar funcionários
-      console.log('🔍 PayrollService - where clause:', JSON.stringify(shouldFilterManually ? manualWhere : where, null, 2));
-      
-      let employees = await prisma.employee.findMany({
-        where: shouldFilterManually ? manualWhere : where,
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              cpf: true
-            }
-          }
-        },
-        orderBy: {
-          user: {
-            name: 'asc'
+          select: {
+            id: true,
+            name: true,
+            cpf: true
           }
         }
-      });
-      
-      console.log('✅ PayrollService - Funcionários encontrados:', employees.length);
+      },
+      orderBy: {
+        user: {
+          name: 'asc'
+        }
+      }
+    });
 
     // Filtrar manualmente se necessário (quando há números na busca)
     if (shouldFilterManually && search) {
