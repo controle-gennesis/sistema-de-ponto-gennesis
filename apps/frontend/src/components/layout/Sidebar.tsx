@@ -370,23 +370,23 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
         {/* Search Bar */}
         {!isCollapsed ? (
-          <div className="px-4 overflow-hidden">
-            <div className="relative flex items-center overflow-hidden">
-              <div className="relative flex-1 overflow-hidden">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <div className="px-4">
+            <div className="relative flex items-center">
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Search"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="mt-2 mb-2 text-sm w-full pl-10 pr-12 py-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
+                  className="mt-2 mb-2 text-sm w-full pl-10 pr-4 py-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
                 />
               </div>
             </div>
           </div>
         ) : (
-          <div className="px-4 overflow-hidden">
-            <div className="flex justify-center overflow-hidden">
+          <div className="px-4">
+            <div className="flex justify-center">
               <button
                 onClick={() => setIsCollapsed(false)}
                 className="w-10 h-10 rounded-xl bg-white border border-gray-200 text-gray-400 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
