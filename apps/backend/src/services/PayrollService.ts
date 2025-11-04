@@ -360,40 +360,86 @@ export class PayrollService {
       }
     }
 
-    if (company) {
-      where.company = { contains: company, mode: 'insensitive' };
-    }
+    // Aplicar filtros adicionais apenas se não houver busca com OR (para evitar conflito)
+    if (!where.OR) {
+      if (company) {
+        where.company = { contains: company, mode: 'insensitive' };
+      }
 
-    if (department) {
-      where.department = { contains: department, mode: 'insensitive' };
-    }
+      if (department) {
+        where.department = { contains: department, mode: 'insensitive' };
+      }
 
-    if (position) {
-      where.position = { contains: position, mode: 'insensitive' };
-    }
+      if (position) {
+        where.position = { contains: position, mode: 'insensitive' };
+      }
 
-    if (costCenter) {
-      where.costCenter = { contains: costCenter, mode: 'insensitive' };
-    }
+      if (costCenter) {
+        where.costCenter = { contains: costCenter, mode: 'insensitive' };
+      }
 
-    if (client) {
-      where.client = { contains: client, mode: 'insensitive' };
-    }
+      if (client) {
+        where.client = { contains: client, mode: 'insensitive' };
+      }
 
-    if (modality) {
-      where.modality = { contains: modality, mode: 'insensitive' };
-    }
+      if (modality) {
+        where.modality = { contains: modality, mode: 'insensitive' };
+      }
 
-    if (bank) {
-      where.bank = { contains: bank, mode: 'insensitive' };
-    }
+      if (bank) {
+        where.bank = { contains: bank, mode: 'insensitive' };
+      }
 
-    if (accountType) {
-      where.accountType = { contains: accountType, mode: 'insensitive' };
-    }
+      if (accountType) {
+        where.accountType = { contains: accountType, mode: 'insensitive' };
+      }
 
-    if (polo) {
-      where.polo = { contains: polo, mode: 'insensitive' };
+      if (polo) {
+        where.polo = { contains: polo, mode: 'insensitive' };
+      }
+    } else {
+      // Se houver OR, aplicar filtros adicionais dentro de AND
+      const andConditions: any[] = [];
+      
+      if (company) {
+        andConditions.push({ company: { contains: company, mode: 'insensitive' } });
+      }
+
+      if (department) {
+        andConditions.push({ department: { contains: department, mode: 'insensitive' } });
+      }
+
+      if (position) {
+        andConditions.push({ position: { contains: position, mode: 'insensitive' } });
+      }
+
+      if (costCenter) {
+        andConditions.push({ costCenter: { contains: costCenter, mode: 'insensitive' } });
+      }
+
+      if (client) {
+        andConditions.push({ client: { contains: client, mode: 'insensitive' } });
+      }
+
+      if (modality) {
+        andConditions.push({ modality: { contains: modality, mode: 'insensitive' } });
+      }
+
+      if (bank) {
+        andConditions.push({ bank: { contains: bank, mode: 'insensitive' } });
+      }
+
+      if (accountType) {
+        andConditions.push({ accountType: { contains: accountType, mode: 'insensitive' } });
+      }
+
+      if (polo) {
+        andConditions.push({ polo: { contains: polo, mode: 'insensitive' } });
+      }
+
+      if (andConditions.length > 0) {
+        where.AND = andConditions;
+      }
     }
 
     // Construir where clause para busca manual (aplicar filtros específicos)
