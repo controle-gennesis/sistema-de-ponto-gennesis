@@ -208,13 +208,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Users,
         description: 'Alocação de funcionários',
         permission: permissions.canAccessPayroll
-      },
-      {
-        name: 'Alocação (TESTE)',
-        href: '/relatorios/alocacao-teste',
-        icon: Users,
-        description: 'Alocação de funcionários - Página de teste',
-        permission: permissions.canAccessPayroll
       }
         ]
       }

@@ -215,7 +215,7 @@ export class PayrollController {
   /**
    * Salva valores manuais de INSS
    */
-  async saveManualInssValues(req: AuthRequest, res: Response, next: NextFunction) {
+  async saveManualInssValues(req: Authgit statusest, res: Response, next: NextFunction) {
     try {
       const { employeeId, month, year, inssRescisao, inss13 } = req.body;
 
