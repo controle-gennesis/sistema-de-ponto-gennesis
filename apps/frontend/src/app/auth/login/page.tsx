@@ -187,19 +187,24 @@ export default function LoginPage() {
       <div className="w-full lg:w-1/2 flex items-center justify-center bg-white p-8">
           <div className="w-full max-w-md">
             <div>
-              {/* <div className="flex justify-center mb-6">
-                <LogIn className="w-16 h-16 text-gray-900" />
-              </div> */}
+              <div className="flex justify-center mb-6">
+                <img 
+                  src="/logopv.png" 
+                  alt="Logo Gennesis Engenharia" 
+                  className="h-32 w-auto object-contain"
+                />
+              </div>
               <h2 className="text-3xl font-bold text-gray-900 mb-2 text-center">
-               Bem-vindo(a) de volta!
+               Entrar na sua conta
               </h2>
               <p className="text-gray-600 mb-8 text-center">
-                Por favor, insira seu email e senha para acessar o sistema.
+                Digite suas credenciais para acessar o sistema
               </p>
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type="email"
                     name="email"
@@ -207,13 +212,14 @@ export default function LoginPage() {
                     onChange={handleChange}
                     required
                     placeholder="Email"
-                    className="w-full px-4 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                    className="w-full pl-12 pr-4 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                   />
                 </div>
               </div>
 
               <div>
                 <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     name="password"
@@ -221,7 +227,7 @@ export default function LoginPage() {
                     onChange={handleChange}
                     required
                     placeholder="Senha"
-                    className="w-full px-4 pr-12 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                    className="w-full pl-12 pr-12 py-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                   />
                   <button
                     type="button"
@@ -248,7 +254,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gray-900 hover:bg-gray-800 text-white py-4 text-base font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-red-600 hover:bg-red-700 text-white py-4 text-base font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Entrando...' : 'Entrar'}
               </button>
