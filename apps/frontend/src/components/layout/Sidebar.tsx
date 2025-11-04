@@ -27,7 +27,8 @@ import {
   BarChart3,
   FileText,
   Search,
-  MoreVertical
+  MoreVertical,
+  LayoutDashboard
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -78,7 +79,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           {
             name: 'Registros de Ponto',
             href: '/ponto',
-            icon: Clock,
+            icon: FolderClock,
             description: 'Gerencie seus registros',
             permission: permissions.canRegisterTime
           }
@@ -92,7 +93,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         name: 'Dashboard',
         href: '/ponto/dashboard',
-        icon: Home,
+        icon: LayoutDashboard,
         description: 'Visão geral do sistema',
         permission: permissions.canViewDashboard
           }
@@ -398,7 +399,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         )}
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-4 p-4 overflow-y-auto overflow-x-hidden`}>
+        <nav className={`flex-1 space-y-2 p-4 overflow-y-auto overflow-x-hidden`}>
           {menuItems.map((category, index) => {
             const CategoryIcon = category.icon;
             const hasActiveItem = category.items.some(item => isActive(item.href));
