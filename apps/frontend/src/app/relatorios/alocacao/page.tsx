@@ -62,52 +62,26 @@ export default function AlocacaoPage() {
     }
   });
 
-  const { data: employeesResponse, isLoading: loadingEmployees, error: employeesError } = useQuery({
+  const { data: employeesResponse, isLoading: loadingEmployees } = useQuery({
     queryKey: ['employees-alocacao', filters],
     queryFn: async () => {
-      try {
-        const params = new URLSearchParams();
-        if (filters.search) params.append('search', filters.search);
-        if (filters.department) params.append('department', filters.department);
-        if (filters.company) params.append('company', filters.company);
-        if (filters.position) params.append('position', filters.position);
-        if (filters.costCenter) params.append('costCenter', filters.costCenter);
-        if (filters.client) params.append('client', filters.client);
-        if (filters.modality) params.append('modality', filters.modality);
-        if (filters.bank) params.append('bank', filters.bank);
-        if (filters.accountType) params.append('accountType', filters.accountType);
-        if (filters.polo) params.append('polo', filters.polo);
-        params.append('month', filters.month.toString());
-        params.append('year', filters.year.toString());
-        
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-        console.log('🔍 Alocação - API URL:', apiUrl);
-        console.log('🔍 Alocação - Endpoint completo:', `${apiUrl}/payroll/employees?${params.toString()}`);
-        
-        const res = await api.get(`/payroll/employees?${params.toString()}`);
-        console.log('✅ Alocação - Resposta da API:', res);
-        console.log('✅ Alocação - res.data:', res.data);
-        console.log('✅ Alocação - res.data.data:', res.data?.data);
-        console.log('✅ Alocação - res.data.data.employees:', res.data?.data?.employees);
-        console.log('✅ Alocação - Quantidade de funcionários:', res.data?.data?.employees?.length || 0);
-        
-        return res.data;
-      } catch (error: any) {
-        console.error('❌ Alocação - Erro ao buscar funcionários:', error);
-        console.error('❌ Alocação - Erro completo:', error.response || error);
-        console.error('❌ Alocação - Status:', error.response?.status);
-        console.error('❌ Alocação - Mensagem:', error.response?.data || error.message);
-        console.error('❌ Alocação - Data completa:', JSON.stringify(error.response?.data, null, 2));
-        
-        // Se for erro 409, logar mais detalhes
-        if (error.response?.status === 409) {
-          console.error('❌ Alocação - Erro 409 (Conflict):', error.response?.data);
-        }
-        
-        throw error;
-      }
-    },
-    retry: 1
+      const params = new URLSearchParams();
+      if (filters.search) params.append('search', filters.search);
+      if (filters.department) params.append('department', filters.department);
+      if (filters.company) params.append('company', filters.company);
+      if (filters.position) params.append('position', filters.position);
+      if (filters.costCenter) params.append('costCenter', filters.costCenter);
+      if (filters.client) params.append('client', filters.client);
+      if (filters.modality) params.append('modality', filters.modality);
+      if (filters.bank) params.append('bank', filters.bank);
+      if (filters.accountType) params.append('accountType', filters.accountType);
+      if (filters.polo) params.append('polo', filters.polo);
+      params.append('month', filters.month.toString());
+      params.append('year', filters.year.toString());
+      
+      const res = await api.get(`/payroll/employees?${params.toString()}`);
+      return res.data;
+    }
   });
 
   // Query para buscar dados do funcionário selecionado
@@ -486,17 +460,6 @@ export default function AlocacaoPage() {
   };
 
   const employees = employeesResponse?.data?.employees || [];
-  
-  // Debug logs
-  useEffect(() => {
-    console.log('🔍 DEBUG Alocação - employeesResponse:', employeesResponse);
-    console.log('🔍 DEBUG Alocação - employeesResponse?.data:', employeesResponse?.data);
-    console.log('🔍 DEBUG Alocação - employeesResponse?.data?.employees:', employeesResponse?.data?.employees);
-    console.log('🔍 DEBUG Alocação - employees (array final):', employees);
-    console.log('🔍 DEBUG Alocação - employees.length:', employees.length);
-    console.log('🔍 DEBUG Alocação - employeesError:', employeesError);
-    console.log('🔍 DEBUG Alocação - loadingEmployees:', loadingEmployees);
-  }, [employeesResponse, employees, employeesError, loadingEmployees]);
 
     // Limpar e buscar dados dos funcionários quando o mês/ano mudar ou quando a lista de funcionários carregar
     useEffect(() => {
@@ -935,26 +898,6 @@ export default function AlocacaoPage() {
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
                             <span className="text-gray-600">Carregando...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : employeesError ? (
-                    <tr>
-                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1) + 2} className="px-3 sm:px-6 py-8 text-center">
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-2xl mx-auto">
-                          <p className="text-red-800 font-medium text-lg mb-2">Erro ao carregar funcionários</p>
-                          <p className="text-red-600 text-sm">
-                            {employeesError?.response?.data?.error || employeesError?.message || 'Erro desconhecido'}
-                          </p>
-                          {employeesError?.response?.status === 409 && (
-                            <p className="text-red-500 text-xs mt-2">
-                              Erro 409: Conflito de dados. Verifique os logs do backend.
-                            </p>
-                          )}
-                          <p className="text-gray-500 text-xs mt-3">
-                            Status: {employeesError?.response?.status || 'N/A'} | 
-                            Verifique o console (F12) para mais detalhes
-                          </p>
                         </div>
                       </td>
                     </tr>
