@@ -4,7 +4,12 @@ import { Platform } from 'react-native';
 const getApiBaseUrl = () => {
   // Default to localhost for web development
   if (Platform.OS === 'web') {
-    return 'http://localhost:5000';
+    // Usa a API do Railway em produção e localhost em desenvolvimento
+    if (__DEV__) {
+      return 'http://localhost:5000';
+    } else {
+      return 'https://sistema-pontobackend-production.up.railway.app';
+    }
   }
 
   // For Android emulator - usar Railway em produção

@@ -124,22 +124,18 @@ export default function AlocacaoPage() {
   };
 
   // Função para buscar dados reais de um funcionário
-  const fetchEmployeeData = async (employeeId: string, month?: number, year?: number) => {
-    const searchMonth = month || filters.month;
-    const searchYear = year || filters.year;
-    const cacheKey = `${employeeId}-${searchMonth}-${searchYear}`;
-    
-    if (employeeDataMap[cacheKey]) {
-      return employeeDataMap[cacheKey];
+  const fetchEmployeeData = async (employeeId: string) => {
+    if (employeeDataMap[employeeId]) {
+      return employeeDataMap[employeeId];
     }
     
     try {
-      const response = await api.get(`/time-records/employee/${employeeId}/cost-center?month=${searchMonth}&year=${searchYear}`);
+      const response = await api.get(`/time-records/employee/${employeeId}/cost-center?month=${filters.month}&year=${filters.year}`);
       const data = response.data;
       
       setEmployeeDataMap(prev => ({
         ...prev,
-        [cacheKey]: data
+        [employeeId]: data
       }));
       
       return data;
@@ -460,24 +456,6 @@ export default function AlocacaoPage() {
   };
 
   const employees = employeesResponse?.data?.employees || [];
-
-  // Limpar e buscar dados dos funcionários quando o mês/ano mudar ou quando a lista de funcionários carregar
-  useEffect(() => {
-    // Limpar o cache quando o mês/ano mudar
-    setEmployeeDataMap({});
-  }, [filters.month, filters.year]);
-
-  // Buscar dados de todos os funcionários quando a lista estiver disponível
-  useEffect(() => {
-    if (employees.length > 0 && !loadingEmployees) {
-      employees.forEach((employee: PayrollEmployee) => {
-        if (employee.id) {
-          // Buscar dados do funcionário (a função já verifica se já existe no cache)
-          fetchEmployeeData(employee.id);
-        }
-      });
-    }
-  }, [employees.length, loadingEmployees, filters.month, filters.year]);
 
   // Opções de mês e ano
   const monthOptions = [
@@ -962,9 +940,8 @@ export default function AlocacaoPage() {
                           }
                           // Para dias úteis, usar dados reais baseados no funcionário
                           else {
-                            // Buscar dados reais do funcionário usando chave composta (id-mês-ano)
-                            const cacheKey = `${employee.id}-${filters.month}-${filters.year}`;
-                            const employeeData = employeeDataMap[cacheKey];
+                            // Buscar dados reais do funcionário
+                            const employeeData = employeeDataMap[employee.id];
                             
                             // Verificar se funcionário estava admitido na data
                             const admissionDate = employeeData?.data?.employee?.admissionDate ? 
