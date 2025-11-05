@@ -94,11 +94,11 @@ export const optionalAuth = async (
       }
     }
 
-    next();
+    return next();
   } catch (error: any) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
       return res.status(401).json({ message: 'Token inválido ou expirado' });
     }
-    next(error);
+    return next(error);
   }
 };
