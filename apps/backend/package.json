@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "npx prisma generate && tsc",
-    "start": "npx prisma migrate deploy && npx prisma db seed && node dist/index.js",
-    "start:production": "npx prisma migrate deploy && node dist/index.js",
+    "start": "node scripts/resolve-migrations.js && npx prisma migrate deploy && npx prisma db seed && node dist/index.js",
+    "start:production": "node scripts/resolve-migrations.js && npx prisma migrate deploy && node dist/index.js",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "db:generate": "prisma generate",
