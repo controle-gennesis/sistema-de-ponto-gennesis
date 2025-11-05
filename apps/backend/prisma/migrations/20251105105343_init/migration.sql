@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'HR', 'MANAGER', 'EMPLOYEE');
+CREATE TYPE "UserRole" AS ENUM ('EMPLOYEE');
 
 -- CreateEnum
 CREATE TYPE "TimeRecordType" AS ENUM ('ENTRY', 'EXIT', 'LUNCH_START', 'LUNCH_END', 'BREAK_START', 'BREAK_END', 'ABSENCE_JUSTIFIED');
@@ -46,6 +46,9 @@ CREATE TYPE "AdjustmentType" AS ENUM ('BONUS', 'OVERTIME', 'COMMISSION', 'OTHER'
 -- CreateEnum
 CREATE TYPE "DiscountType" AS ENUM ('FINE', 'CONSIGNED', 'OTHER');
 
+-- CreateEnum
+CREATE TYPE "RequestStatus" AS ENUM ('PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'CANCELLED');
+
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
@@ -80,7 +83,6 @@ CREATE TABLE "employees" (
     "dailyFoodVoucher" DOUBLE PRECISION DEFAULT 33.40,
     "dailyTransportVoucher" DOUBLE PRECISION DEFAULT 11.00,
     "company" TEXT,
-    "currentContract" TEXT,
     "bank" TEXT,
     "accountType" TEXT,
     "agency" TEXT,
@@ -93,6 +95,8 @@ CREATE TABLE "employees" (
     "familySalary" DECIMAL(10,2),
     "dangerPay" DECIMAL(10,2),
     "unhealthyPay" DECIMAL(10,2),
+    "polo" TEXT,
+    "categoriaFinanceira" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -117,6 +121,7 @@ CREATE TABLE "time_records" (
     "approvedAt" TIMESTAMP(3),
     "foodVoucherAmount" DOUBLE PRECISION DEFAULT 0,
     "transportVoucherAmount" DOUBLE PRECISION DEFAULT 0,
+    "costCenter" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -255,6 +260,7 @@ CREATE TABLE "salary_adjustments" (
     "type" "AdjustmentType" NOT NULL,
     "description" TEXT NOT NULL,
     "amount" DECIMAL(10,2) NOT NULL,
+    "isFixed" BOOLEAN NOT NULL DEFAULT false,
     "createdBy" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -276,6 +282,55 @@ CREATE TABLE "salary_discounts" (
     CONSTRAINT "salary_discounts_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "point_correction_requests" (
+    "id" TEXT NOT NULL,
+    "employeeId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "justification" TEXT NOT NULL,
+    "originalDate" TIMESTAMP(3) NOT NULL,
+    "originalTime" TEXT NOT NULL,
+    "originalType" "TimeRecordType" NOT NULL,
+    "correctedDate" TIMESTAMP(3) NOT NULL,
+    "correctedTime" TEXT NOT NULL,
+    "correctedType" "TimeRecordType" NOT NULL,
+    "status" "RequestStatus" NOT NULL DEFAULT 'PENDING',
+    "approvedBy" TEXT,
+    "approvedAt" TIMESTAMP(3),
+    "rejectionReason" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "point_correction_requests_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "point_correction_comments" (
+    "id" TEXT NOT NULL,
+    "requestId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "comment" TEXT NOT NULL,
+    "isInternal" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "point_correction_comments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "manual_inss_values" (
+    "id" TEXT NOT NULL,
+    "employeeId" TEXT NOT NULL,
+    "month" INTEGER NOT NULL,
+    "year" INTEGER NOT NULL,
+    "inssRescisao" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "inss13" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "manual_inss_values_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
@@ -290,6 +345,9 @@ CREATE UNIQUE INDEX "employees_employeeId_key" ON "employees"("employeeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "company_settings_cnpj_key" ON "company_settings"("cnpj");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "manual_inss_values_employeeId_month_year_key" ON "manual_inss_values"("employeeId", "month", "year");
 
 -- AddForeignKey
 ALTER TABLE "employees" ADD CONSTRAINT "employees_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -335,3 +393,18 @@ ALTER TABLE "salary_discounts" ADD CONSTRAINT "salary_discounts_employeeId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "salary_discounts" ADD CONSTRAINT "salary_discounts_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "point_correction_requests" ADD CONSTRAINT "point_correction_requests_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "employees"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "point_correction_requests" ADD CONSTRAINT "point_correction_requests_approvedBy_fkey" FOREIGN KEY ("approvedBy") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "point_correction_comments" ADD CONSTRAINT "point_correction_comments_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "point_correction_requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "point_correction_comments" ADD CONSTRAINT "point_correction_comments_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "manual_inss_values" ADD CONSTRAINT "manual_inss_values_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "employees"("id") ON DELETE CASCADE ON UPDATE CASCADE;
