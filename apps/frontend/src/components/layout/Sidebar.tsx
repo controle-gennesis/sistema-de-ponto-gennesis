@@ -332,7 +332,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       >
         {/* Header */}
         <div className={`${isCollapsed ? 'p-4' : 'p-4'} overflow-hidden`}>
-          <div className="flex items-center justify-between overflow-hidden">
+          <div className={`flex items-center overflow-hidden ${
+            isCollapsed ? 'justify-center' : 'justify-between'
+          }`}>
             {!isCollapsed && (
                 <div className="flex items-center space-x-3 transition-opacity duration-500 ease-in-out">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
@@ -344,15 +346,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 </div>
               </div>
             )}
-            {isCollapsed && (
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center mx-auto overflow-hidden">
-              </div>
-            )}
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
-                className={`hidden lg:flex items-center rounded-lg transition-colors duration-200 hover:bg-gray-100 ${
-                  isCollapsed ? 'justify-center w-12 h-12 mx-auto' : 'justify-center w-12 h-12 mx-auto'
+                className={`hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 hover:text-gray-700 ${
+                  isCollapsed ? 'w-8 h-8' : 'w-8 h-8'
                 }`}
                 title={isCollapsed ? 'Expandir menu' : 'Colapsar menu'}
               >
