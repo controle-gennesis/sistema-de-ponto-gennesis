@@ -158,10 +158,10 @@ export default function VacationsPage() {
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando...</p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
         </div>
       </div>
     );
@@ -189,8 +189,8 @@ export default function VacationsPage() {
       <div className="space-y-6">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Minhas Férias</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Minhas Férias</h1>
+          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
             Solicite e acompanhe suas férias
           </p>
         </div>
@@ -201,12 +201,12 @@ export default function VacationsPage() {
             <Card>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0">
-                    <CalendarDays className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                    <CalendarDays className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total</p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900">{balance.totalDays}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Total</p>
+                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{balance.totalDays}</p>
                   </div>
                 </div>
               </CardContent>
@@ -215,12 +215,12 @@ export default function VacationsPage() {
             <Card>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-green-100 rounded-lg flex-shrink-0">
-                    <CalendarCheck className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
+                    <CalendarCheck className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600">Disponível</p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900">{balance.availableDays}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Disponível</p>
+                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{balance.availableDays}</p>
                   </div>
                 </div>
               </CardContent>
@@ -229,12 +229,12 @@ export default function VacationsPage() {
             <Card>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-yellow-100 rounded-lg flex-shrink-0">
-                    <CalendarX className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+                  <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex-shrink-0">
+                    <CalendarX className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600">Usado</p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900">{balance.usedDays}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Usado</p>
+                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{balance.usedDays}</p>
                   </div>
                 </div>
               </CardContent>
@@ -243,12 +243,12 @@ export default function VacationsPage() {
             <Card>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-orange-100 rounded-lg flex-shrink-0">
-                    <CalendarClock className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600" />
+                  <div className="p-2 sm:p-3 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex-shrink-0">
+                    <CalendarClock className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 dark:text-orange-400" />
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600">Pendente</p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900">{balance.pendingDays}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Pendente</p>
+                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{balance.pendingDays}</p>
                   </div>
                 </div>
               </CardContent>
@@ -263,11 +263,11 @@ export default function VacationsPage() {
               <Card>
                 <CardContent className="p-4 sm:p-6">
                   <div className="flex items-center">
-                    <div className="p-2 sm:p-3 bg-yellow-100 rounded-lg flex-shrink-0">
-                      <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+                    <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex-shrink-0">
+                      <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
                     </div>
                     <div className="ml-3 sm:ml-4 min-w-0">
-                      <p className="text-xs sm:text-sm font-medium text-yellow-800">
+                      <p className="text-xs sm:text-sm font-medium text-yellow-800 dark:text-yellow-300">
                         <strong>Atenção:</strong> Suas férias vencem em{' '}
                         {new Date(balance.expiresAt).toLocaleDateString('pt-BR')}
                       </p>
@@ -281,11 +281,11 @@ export default function VacationsPage() {
               <Card>
                 <CardContent className="p-4 sm:p-6">
                   <div className="flex items-center">
-                    <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0">
-                      <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+                    <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                      <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
                     </div>
                     <div className="ml-3 sm:ml-4 min-w-0">
-                      <p className="text-xs sm:text-sm font-medium text-blue-800">
+                      <p className="text-xs sm:text-sm font-medium text-blue-800 dark:text-blue-300">
                         <strong>Informação:</strong> Você ainda não tem direito a férias. 
                         É necessário trabalhar pelo menos 12 meses completos.
                       </p>
@@ -311,14 +311,14 @@ export default function VacationsPage() {
         {/* Formulário de solicitação */}
         {showForm && (
           <Card>
-            <CardHeader className="px-6 py-4 border-b">
+            <CardHeader className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center space-x-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Calendar className="w-5 h-5 text-blue-600" />
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                  <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Nova Solicitação de Férias</h3>
-                  <p className="text-sm text-gray-600">Preencha os dados para solicitar suas férias</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Nova Solicitação de Férias</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Preencha os dados para solicitar suas férias</p>
                 </div>
               </div>
             </CardHeader>
@@ -326,7 +326,7 @@ export default function VacationsPage() {
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Data de Início *
                     </label>
                     <input
@@ -335,11 +335,11 @@ export default function VacationsPage() {
                       onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
                       required
                       min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 cursor-pointer relative"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Data de Fim *
                     </label>
                     <input
@@ -348,20 +348,20 @@ export default function VacationsPage() {
                       onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
                       required
                       min={formData.startDate || new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 cursor-pointer relative"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Tipo de Férias *
                     </label>
                     <select
                       value={formData.type}
                       onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                     >
                       <option value="ANNUAL">Anual</option>
                       <option value="FRACTIONED_1">1º Período Fracionado</option>
@@ -372,7 +372,7 @@ export default function VacationsPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Período Fracionado (se aplicável)
                     </label>
                     <select
@@ -381,7 +381,7 @@ export default function VacationsPage() {
                         ...formData, 
                         fraction: e.target.value ? Number(e.target.value) : undefined 
                       })}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                     >
                       <option value="">Não fracionado</option>
                       <option value="1">1º Período</option>
@@ -392,19 +392,19 @@ export default function VacationsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Motivo (opcional)
                   </label>
                   <textarea
                     value={formData.reason || ''}
                     onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
                     rows={3}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     placeholder="Descreva o motivo da solicitação..."
                   />
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-4 border-t">
+                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                   <Button
                     type="button"
                     variant="outline"
@@ -428,14 +428,14 @@ export default function VacationsPage() {
 
         {/* Lista de Férias */}
         <Card>
-          <CardHeader className="px-6 py-4 border-b">
+          <CardHeader className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Calendar className="w-5 h-5 text-blue-600" />
+              <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Histórico de Férias</h3>
-                <p className="text-sm text-gray-600">Acompanhe suas solicitações de férias</p>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Histórico de Férias</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Acompanhe suas solicitações de férias</p>
               </div>
             </div>
           </CardHeader>
@@ -443,28 +443,28 @@ export default function VacationsPage() {
             {loadingVacations ? (
               <div className="text-center py-8">
                 <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-                <p className="text-gray-600">Carregando férias...</p>
+                <p className="text-gray-600 dark:text-gray-400">Carregando férias...</p>
               </div>
             ) : vacations.length === 0 ? (
               <div className="text-center py-8">
-                <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">Nenhuma solicitação de férias encontrada</p>
+                <Calendar className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                <p className="text-gray-600 dark:text-gray-400">Nenhuma solicitação de férias encontrada</p>
               </div>
             ) : (
               <div className="space-y-4">
                 {vacations.map((vacation) => (
                   <div
                     key={vacation.id}
-                    className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                    className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
                         {getStatusIcon(vacation.status)}
                         <div>
-                          <h3 className="font-medium text-gray-900">
+                          <h3 className="font-medium text-gray-900 dark:text-gray-100">
                             {getTypeText(vacation.type)}
                           </h3>
-                          <p className="text-sm text-gray-600">
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
                             {new Date(vacation.startDate).toLocaleDateString('pt-BR')} -{' '}
                             {new Date(vacation.endDate).toLocaleDateString('pt-BR')} ({vacation.days} dias)
                           </p>
@@ -472,10 +472,10 @@ export default function VacationsPage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <span className={`px-2 py-1 text-xs rounded-full ${
-                          vacation.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                          vacation.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                          vacation.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
+                          vacation.status === 'PENDING' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300' :
+                          vacation.status === 'APPROVED' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
+                          vacation.status === 'REJECTED' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' :
+                          'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
                         }`}>
                           {getStatusText(vacation.status)}
                         </span>
@@ -484,7 +484,7 @@ export default function VacationsPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleCancel(vacation.id)}
-                            className="text-red-600 hover:text-red-700"
+                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -492,7 +492,7 @@ export default function VacationsPage() {
                       </div>
                     </div>
                     {vacation.reason && (
-                      <p className="mt-2 text-sm text-gray-600">
+                      <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
                         <strong>Motivo:</strong> {vacation.reason}
                       </p>
                     )}

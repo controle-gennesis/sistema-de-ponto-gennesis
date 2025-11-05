@@ -47,10 +47,10 @@ export default function EmployeesPage() {
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando...</p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
         </div>
       </div>
     );
@@ -71,8 +71,8 @@ export default function EmployeesPage() {
       <div className="space-y-6">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Gerenciar Funcionários</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600">Cadastre e gerencie os funcionários da empresa</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Funcionários</h1>
+          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Cadastre e gerencie os funcionários da empresa</p>
         </div>
 
         {/* Card de criação de funcionários */}
@@ -80,17 +80,17 @@ export default function EmployeesPage() {
           <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-green-100 rounded-lg flex-shrink-0">
-                  <UserPlus className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+                <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
+                  <UserPlus className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
                 </div>
                 <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900">Cadastrar Funcionários</h3>
-                  <p className="text-sm text-gray-600">Adicionar novos funcionários ao sistema</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Cadastrar Funcionários</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Adicionar novos funcionários ao sistema</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsCreateEmployeeOpen(true)}
-                className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 flex items-center space-x-2 text-sm sm:text-base"
+                className="px-3 sm:px-4 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-500 flex items-center space-x-2 text-sm sm:text-base"
               >
                 <UserPlus className="w-4 h-4" />
                 <span className="hidden sm:inline">Novo Funcionário</span>

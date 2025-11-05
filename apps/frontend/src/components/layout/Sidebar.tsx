@@ -30,9 +30,12 @@ import {
   MoreVertical,
   LayoutDashboard,
   CalendarX2,
-  MailPlus
+  MailPlus,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useTheme } from '@/context/ThemeContext';
 
 interface SidebarProps {
   userRole: 'EMPLOYEE';
@@ -58,6 +61,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const pathname = usePathname();
   const router = useRouter();
   const { permissions, isLoading, userPosition, user } = usePermissions();
+  const { theme, toggleTheme, isDark } = useTheme();
 
   const isEmployee = userRole === 'EMPLOYEE';
 
@@ -311,7 +315,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {/* Botão de menu mobile */}
       <button
         onClick={() => setIsOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-md hover:bg-gray-50"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white dark:bg-gray-900 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100"
       >
         <Menu className="w-6 h-6" />
       </button>
@@ -326,9 +330,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
       {/* Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-full bg-white border-r border-gray-200 transform transition-all duration-500 ease-in-out z-50 ${
+        className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transform transition-all duration-500 ease-in-out z-50 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0 lg:fixed lg:border-gray-200 ${
+        } lg:translate-x-0 lg:fixed ${
           isCollapsed ? 'w-20' : 'w-72'
         } flex flex-col overflow-hidden`}
       >
@@ -343,15 +347,15 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
                 <div className="transition-all duration-500 ease-in-out">
-                  <h1 className="text-base font-semibold text-gray-900 transition-all duration-500">Attendance</h1>
-                  <p className="text-sm text-gray-500 transition-all duration-500">v1.0.2</p>
+                  <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Attendance</h1>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 transition-all duration-500">v1.0.2</p>
                 </div>
               </div>
             )}
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
-                className={`hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 hover:text-gray-700 ${
+                className={`hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 ${
                   isCollapsed ? 'w-8 h-8' : 'w-8 h-8'
                 }`}
                 title={isCollapsed ? 'Expandir menu' : 'Colapsar menu'}
@@ -360,7 +364,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               </button>
               <button
                 onClick={() => setIsOpen(false)}
-                className="lg:hidden w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded"
+                className="lg:hidden w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-300"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -373,13 +377,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           <div className="px-4">
             <div className="relative flex items-center">
               <div className="relative flex-1 min-w-0">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Search"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="mt-2 mb-2 text-sm w-full pl-10 pr-4 py-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
+                  className="mt-2 mb-2 text-sm w-full pl-10 pr-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
                 />
               </div>
             </div>
@@ -389,7 +393,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             <div className="flex justify-center">
               <button
                 onClick={() => setIsCollapsed(false)}
-                className="w-10 h-10 rounded-xl bg-white border border-gray-200 text-gray-400 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
+                className="w-10 h-10 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-500 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
                 title="Buscar"
               >
                 <Search className="w-5 h-5" />
@@ -427,7 +431,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   {/* Título "Principal" acima do Dashboard */}
                   {isFirstItem && category.id === 'main' && !isCollapsed && (
                     <div className="px-3 pt-2 pb-2">
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Principal</p>
+                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Principal</p>
                     </div>
                   )}
                   <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
@@ -438,8 +442,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                           onClick={() => setIsOpen(false)}
                           className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
                             active 
-                              ? 'text-red-600 hover:bg-red-50' 
-                              : 'text-gray-600 hover:bg-gray-50'
+                              ? 'text-red-600 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
+                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                           }`}
                           title={singleItem.name}
                         >
@@ -452,22 +456,22 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                         onClick={() => setIsOpen(false)}
                         className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 overflow-hidden ${
                           active 
-                            ? 'text-red-700 hover:bg-red-50' 
-                            : 'text-gray-700 hover:bg-gray-50'
+                            ? 'text-red-700 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
+                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}
                       >
                         <div className="rounded-xl transition-all duration-200 p-3">
-                          <SingleItemIcon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-red-600' : 'text-gray-600'}`} />
+                          <SingleItemIcon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
                         </div>
                         <div className="flex-1 min-w-0 text-left">
-                          <p className={`text-sm font-medium whitespace-nowrap ${active ? 'text-red-700' : ''}`}>{singleItem.name}</p>
+                          <p className={`text-sm font-medium whitespace-nowrap ${active ? 'text-red-700 dark:text-red-500' : 'text-gray-700 dark:text-gray-300'}`}>{singleItem.name}</p>
                         </div>
                       </Link>
                     )}
                   </div>
                   {/* Linha separadora embaixo dos Registros de Ponto */}
                   {category.id === 'time-control' && (
-                    <div className="my-4 border-t border-gray-200"></div>
+                    <div className="my-4 border-t border-gray-200 dark:border-gray-700"></div>
                   )}
                 </div>
               );
@@ -485,7 +489,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 {/* Título "Menu" acima do primeiro grupo */}
                 {isFirstGroup && !isCollapsed && (
                   <div className="px-3 pt-2 pb-2">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Menu</p>
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
                   </div>
                 )}
                 {/* Separador entre grupos */}
@@ -506,8 +510,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       }}
                         className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
                           hasActiveItem 
-                            ? 'text-red-600 hover:bg-red-50' 
-                            : 'text-gray-600 hover:bg-gray-50'
+                            ? 'text-red-600 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
+                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}
                       title={category.name}
                     >
@@ -519,22 +523,22 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     onClick={() => toggleMenu(category.id)}
                     className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 overflow-hidden ${
                       hasActiveItem 
-                        ? 'text-red-700 hover:bg-red-50' 
-                        : 'text-gray-700 hover:bg-gray-50'
+                        ? 'text-red-700 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                     }`}
                   >
                     <div className="rounded-xl transition-all duration-200 p-3">
-                      <CategoryIcon className={`w-5 h-5 flex-shrink-0 ${hasActiveItem ? 'text-red-600' : 'text-gray-600'}`} />
+                      <CategoryIcon className={`w-5 h-5 flex-shrink-0 ${hasActiveItem ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
                     </div>
                     <div className="flex-1 min-w-0 text-left overflow-hidden">
-                      <p className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${hasActiveItem ? 'text-red-700' : ''}`}>{category.name}</p>
+                        <p className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${hasActiveItem ? 'text-red-700 dark:text-red-500' : 'text-gray-700 dark:text-gray-300'}`}>{category.name}</p>
                     </div>
                     {category.items.filter(item => item.permission).length > 0 && (
                       <div className="flex-shrink-0 pr-3">
                         {isExpanded ? (
-                          <ChevronUp className={`w-4 h-4 ${hasActiveItem ? 'text-red-600' : ''}`} />
+                          <ChevronUp className={`w-4 h-4 ${hasActiveItem ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
                         ) : (
-                          <ChevronDown className={`w-4 h-4 ${hasActiveItem ? 'text-red-600' : ''}`} />
+                          <ChevronDown className={`w-4 h-4 ${hasActiveItem ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
                         )}
                       </div>
                     )}
@@ -543,7 +547,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
                 {/* Submenu Items */}
                 {isExpanded && !isCollapsed && (
-                  <div className="relative ml-6 pl-4 border-l border-gray-300 space-y-2">
+                  <div className="relative ml-6 pl-4 border-l border-gray-300 dark:border-gray-700 space-y-2">
                     {category.items
                       .filter(item => item.permission)
                       .map((item) => {
@@ -556,11 +560,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 onClick={() => setIsOpen(false)}
                             className={`flex items-center px-3 py-2 rounded-xl transition-all duration-200 overflow-hidden ${
                               active
-                                ? 'text-red-700 hover:bg-red-50'
-                                : 'text-gray-700 hover:bg-gray-50'
+                                ? 'text-red-700 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
+                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                             }`}
                           >
-                            <p className="text-sm font-medium">{item.name}</p>
+                            <p className={`text-sm font-medium ${active ? '' : 'text-gray-700 dark:text-gray-300'}`}>{item.name}</p>
               </Link>
                         );
                       })}
@@ -575,13 +579,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         {/* Perfil do usuário */}
         <div className="flex-shrink-0 relative overflow-hidden">
           {/* Linha separadora acima do perfil */}
-          <div className="mx-4 my-2">
-            <div className="h-px bg-gray-200"></div>
+          <div className="mx-4">
+            <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
           </div>
           
           <div className="relative">
             {/* Seção de perfil - sempre visível quando expandida */}
-            <div className="bg-white">
+            <div className="bg-white dark:bg-gray-900">
               <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
                 {isCollapsed ? (
                   /* Quando colapsada: apenas a foto */
@@ -631,10 +635,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     
                     {/* Informações do usuário */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
                         {user?.name || userName}
                       </p>
-                      <p className="text-xs text-gray-500 truncate">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                         {user?.position || userPosition}
                       </p>
                     </div>
@@ -643,10 +647,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <div className="relative">
                       <button
                         onClick={() => setShowUserMenu(!showUserMenu)}
-                        className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                         title="Menu do usuário"
                       >
-                        <MoreVertical className="w-5 h-5 text-gray-600" />
+                        <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                       </button>
                     </div>
                   </div>
@@ -657,46 +661,61 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             {/* Menu de botões que desliza de baixo para cima - só aparece quando a sidebar está expandida */}
             {!isCollapsed && (
               <div 
-                className={`bg-white transition-all duration-300 ease-in-out overflow-hidden ${
-                  showUserMenu ? 'max-h-[200px] opacity-100' : 'max-h-0 opacity-0'
+                className={`bg-white dark:bg-gray-900 transition-all duration-300 ease-in-out overflow-hidden ${
+                  showUserMenu ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'
                 }`}
               >
                 {/* Linha separadora superior */}
-                <div className="mx-4 my-2">
-                  <div className="h-px bg-gray-200"></div>
+                <div className="mx-4">
+                  <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
                 </div>
                 
                 <div className="p-2">
                   <button
                     onClick={() => {
+                      toggleTheme();
+                    }}
+                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    {isDark ? (
+                      <Sun className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-500" />
+                    ) : (
+                      <Moon className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
+                    )}
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">
+                      {isDark ? 'Modo Claro' : 'Modo Escuro'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => {
                       window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
                       setShowUserMenu(false);
                     }}
-                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl"
+                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
-                    <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 group-hover:text-blue-700" />
-                    <span className="text-sm font-medium text-gray-700 group-hover:text-blue-700">Alterar Senha</span>
+                    <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Alterar Senha</span>
                   </button>
                   <button
                     onClick={() => {
                       setShowUserMenu(false);
                       onLogout();
                     }}
-                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl"
+                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
-                    <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 group-hover:text-red-700" />
-                    <span className="text-sm font-medium text-gray-700 group-hover:text-red-700">Sair</span>
+                    <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Sair</span>
                   </button>
                 </div>
                 
                 {/* Linha separadora acima do footer */}
-                <div className="mx-4 my-2">
-                  <div className="h-px bg-gray-200"></div>
+                <div className="mx-4">
+                  <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
                 </div>
                 
                 {/* Footer com logo e versão */}
-                <div className="px-4 py-3 flex items-center justify-center space-x-2">
-                  <span className="text-xs text-gray-600">© 2025 Gennesis Engenharia</span>
+                <div className="px-4 pb-3 pt-3 flex items-center justify-center space-x-2">
+                  <span className="text-xs text-gray-600 dark:text-gray-400">© 2025 Gennesis Engenharia</span>
                 </div>
               </div>
             )}

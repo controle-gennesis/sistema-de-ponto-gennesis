@@ -163,10 +163,10 @@ export default function FeriasPage() {
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando...</p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
         </div>
       </div>
     );
@@ -194,8 +194,8 @@ export default function FeriasPage() {
       <div className="space-y-6">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Gestão de Férias</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gestão de Férias</h1>
+          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
             Gerencie as solicitações de férias dos funcionários
           </p>
         </div>
@@ -205,12 +205,12 @@ export default function FeriasPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
-                <div className="p-2 bg-yellow-100 rounded-lg">
-                  <Clock className="w-6 h-6 text-yellow-600" />
+                <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+                  <Clock className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600">Pendentes</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Pendentes</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                     {loadingPending ? '...' : pendingVacationsList.length}
                   </p>
                 </div>
@@ -221,12 +221,12 @@ export default function FeriasPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <CheckCircle className="w-6 h-6 text-green-600" />
+                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                  <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600">Aprovadas</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Aprovadas</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                     {loadingAll ? '...' : allVacationsList.filter(v => v.status === 'APPROVED').length}
                   </p>
                 </div>
@@ -237,12 +237,12 @@ export default function FeriasPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
-                <div className="p-2 bg-red-100 rounded-lg">
-                  <AlertTriangle className="w-6 h-6 text-red-600" />
+                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                  <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600">Vencendo</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Vencendo</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                     {expiringList.length}
                   </p>
                 </div>
@@ -253,12 +253,12 @@ export default function FeriasPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <TrendingUp className="w-6 h-6 text-blue-600" />
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                  <TrendingUp className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600">Conformidade</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Conformidade</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                     {loadingCompliance ? '...' : `${compliance?.complianceRate.toFixed(1)}%`}
                   </p>
                 </div>
@@ -268,14 +268,14 @@ export default function FeriasPage() {
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-gray-200">
+        <div className="border-b border-gray-200 dark:border-gray-700">
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setSelectedTab('pending')}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 selectedTab === 'pending'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
               }`}
             >
               Pendentes ({pendingVacationsList.length})
@@ -284,8 +284,8 @@ export default function FeriasPage() {
               onClick={() => setSelectedTab('all')}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 selectedTab === 'all'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
               }`}
             >
               Todas ({allVacationsList.length})
@@ -294,8 +294,8 @@ export default function FeriasPage() {
               onClick={() => setSelectedTab('compliance')}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 selectedTab === 'compliance'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
               }`}
             >
               Conformidade
@@ -307,40 +307,40 @@ export default function FeriasPage() {
         {selectedTab === 'pending' && (
           <Card>
             <CardHeader>
-              <h2 className="text-lg font-semibold text-gray-900">Solicitações Pendentes</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações Pendentes</h2>
             </CardHeader>
             <CardContent>
               {loadingPending ? (
                 <div className="text-center py-8">
                   <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-                  <p className="text-gray-600">Carregando solicitações...</p>
+                  <p className="text-gray-600 dark:text-gray-400">Carregando solicitações...</p>
                 </div>
               ) : pendingVacationsList.length === 0 ? (
                 <div className="text-center py-8">
-                  <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
-                  <p className="text-gray-600">Nenhuma solicitação pendente</p>
+                  <CheckCircle className="w-12 h-12 text-green-400 dark:text-green-500 mx-auto mb-4" />
+                  <p className="text-gray-600 dark:text-gray-400">Nenhuma solicitação pendente</p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {pendingVacationsList.map((vacation) => (
                     <div
                       key={vacation.id}
-                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           {getStatusIcon(vacation.status)}
                           <div>
-                            <h3 className="font-medium text-gray-900">
+                            <h3 className="font-medium text-gray-900 dark:text-gray-100">
                               {vacation.user.name} - {vacation.employee.department}
                             </h3>
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
                               {getTypeText(vacation.type)} • {vacation.days} dias •{' '}
                               {new Date(vacation.startDate).toLocaleDateString('pt-BR')} -{' '}
                               {new Date(vacation.endDate).toLocaleDateString('pt-BR')}
                             </p>
                             {vacation.reason && (
-                              <p className="text-sm text-gray-500 mt-1">
+                              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                                 <strong>Motivo:</strong> {vacation.reason}
                               </p>
                             )}
@@ -351,7 +351,7 @@ export default function FeriasPage() {
                             size="sm"
                             onClick={() => handleApprove(vacation.id)}
                             disabled={approveVacationMutation.isPending}
-                            className="bg-green-600 hover:bg-green-700"
+                            className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800"
                           >
                             <Check className="w-4 h-4 mr-1" />
                             Aprovar
@@ -361,7 +361,7 @@ export default function FeriasPage() {
                             variant="outline"
                             onClick={() => handleReject(vacation.id)}
                             disabled={rejectVacationMutation.isPending}
-                            className="text-red-600 hover:text-red-700"
+                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500"
                           >
                             <X className="w-4 h-4 mr-1" />
                             Rejeitar
@@ -379,49 +379,49 @@ export default function FeriasPage() {
         {selectedTab === 'all' && (
           <Card>
             <CardHeader>
-              <h2 className="text-lg font-semibold text-gray-900">Todas as Férias</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Todas as Férias</h2>
             </CardHeader>
             <CardContent>
               {loadingAll ? (
                 <div className="text-center py-8">
                   <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-                  <p className="text-gray-600">Carregando férias...</p>
+                  <p className="text-gray-600 dark:text-gray-400">Carregando férias...</p>
                 </div>
               ) : allVacationsList.length === 0 ? (
                 <div className="text-center py-8">
-                  <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600">Nenhuma férias encontrada</p>
+                  <Calendar className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                  <p className="text-gray-600 dark:text-gray-400">Nenhuma férias encontrada</p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {allVacationsList.map((vacation) => (
                     <div
                       key={vacation.id}
-                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           {getStatusIcon(vacation.status)}
                           <div>
-                            <h3 className="font-medium text-gray-900">
+                            <h3 className="font-medium text-gray-900 dark:text-gray-100">
                               {vacation.user.name} - {vacation.employee.department}
                             </h3>
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
                               {getTypeText(vacation.type)} • {vacation.days} dias •{' '}
                               {new Date(vacation.startDate).toLocaleDateString('pt-BR')} -{' '}
                               {new Date(vacation.endDate).toLocaleDateString('pt-BR')}
                             </p>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
                               Solicitado em: {new Date(vacation.createdAt).toLocaleDateString('pt-BR')}
                             </p>
                           </div>
                         </div>
                         <div className="flex items-center space-x-2">
                           <span className={`px-2 py-1 text-xs rounded-full ${
-                            vacation.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                            vacation.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                            vacation.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                            'bg-gray-100 text-gray-800'
+                            vacation.status === 'PENDING' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300' :
+                            vacation.status === 'APPROVED' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
+                            vacation.status === 'REJECTED' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' :
+                            'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
                           }`}>
                             {getStatusText(vacation.status)}
                           </span>
@@ -440,31 +440,31 @@ export default function FeriasPage() {
             {/* Relatório de Conformidade */}
             <Card>
               <CardHeader>
-                <h2 className="text-lg font-semibold text-gray-900">Relatório de Conformidade</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Relatório de Conformidade</h2>
               </CardHeader>
               <CardContent>
                 {loadingCompliance ? (
                   <div className="text-center py-8">
                     <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-                    <p className="text-gray-600">Carregando relatório...</p>
+                    <p className="text-gray-600 dark:text-gray-400">Carregando relatório...</p>
                   </div>
                 ) : compliance ? (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="text-center p-4 bg-blue-50 rounded-lg">
-                      <p className="text-3xl font-bold text-blue-600">{compliance.complianceRate.toFixed(1)}%</p>
-                      <p className="text-sm text-gray-600">Taxa de Conformidade</p>
+                    <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+                      <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{compliance.complianceRate.toFixed(1)}%</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Taxa de Conformidade</p>
                     </div>
-                    <div className="text-center p-4 bg-red-50 rounded-lg">
-                      <p className="text-3xl font-bold text-red-600">{compliance.expiredVacations.length}</p>
-                      <p className="text-sm text-gray-600">Férias Vencidas</p>
+                    <div className="text-center p-4 bg-red-50 dark:bg-red-900/30 rounded-lg">
+                      <p className="text-3xl font-bold text-red-600 dark:text-red-400">{compliance.expiredVacations.length}</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Férias Vencidas</p>
                     </div>
-                    <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                      <p className="text-3xl font-bold text-yellow-600">{compliance.upcomingExpirations}</p>
-                      <p className="text-sm text-gray-600">Vencendo em 30 dias</p>
+                    <div className="text-center p-4 bg-yellow-50 dark:bg-yellow-900/30 rounded-lg">
+                      <p className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{compliance.upcomingExpirations}</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Vencendo em 30 dias</p>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-gray-600">Nenhum dado de conformidade disponível</p>
+                  <p className="text-gray-600 dark:text-gray-400">Nenhum dado de conformidade disponível</p>
                 )}
               </CardContent>
             </Card>
@@ -473,26 +473,26 @@ export default function FeriasPage() {
             {expiringList.length > 0 && (
               <Card>
                 <CardHeader>
-                  <h2 className="text-lg font-semibold text-gray-900">Férias Vencendo</h2>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Férias Vencendo</h2>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
                     {expiringList.map((item: any) => (
                       <div
                         key={item.userId}
-                        className="border border-red-200 bg-red-50 rounded-lg p-4"
+                        className="border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 rounded-lg p-4"
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <h3 className="font-medium text-red-900">{item.employeeName}</h3>
-                            <p className="text-sm text-red-700">
+                            <h3 className="font-medium text-red-900 dark:text-red-300">{item.employeeName}</h3>
+                            <p className="text-sm text-red-700 dark:text-red-300">
                               {item.department} • {item.availableDays} dias disponíveis
                             </p>
-                            <p className="text-sm text-red-600">
+                            <p className="text-sm text-red-600 dark:text-red-400">
                               Vence em: {new Date(item.expiresAt).toLocaleDateString('pt-BR')}
                             </p>
                           </div>
-                          <AlertTriangle className="w-6 h-6 text-red-500" />
+                          <AlertTriangle className="w-6 h-6 text-red-500 dark:text-red-400" />
                         </div>
                       </div>
                     ))}

@@ -212,10 +212,10 @@ export default function GerenciarSolicitacoesPage() {
 
   if (loadingUser || loadingRequests) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando...</p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
         </div>
       </div>
     );
@@ -242,8 +242,8 @@ export default function GerenciarSolicitacoesPage() {
       <div className="space-y-6 w-full px-4">
         {/* Header */}
         <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">Gerenciar Solicitações</h1>
-          <p className="mt-1 text-gray-600">Aprove ou rejeite solicitações de correção de ponto</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Solicitações</h1>
+          <p className="mt-1 text-gray-600 dark:text-gray-400">Aprove ou rejeite solicitações de correção de ponto</p>
         </div>
 
         {/* Filtros */}
@@ -251,13 +251,13 @@ export default function GerenciarSolicitacoesPage() {
           <CardContent className="p-4">
             <div className="flex flex-wrap gap-4 items-end">
               <div className="flex-1 min-w-48">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Status
                 </label>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                 >
                   <option value="">Pendentes</option>
                   <option value="all">Todos os status</option>
@@ -276,9 +276,9 @@ export default function GerenciarSolicitacoesPage() {
           {requests.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center">
-                <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">Nenhuma solicitação encontrada</p>
-                <p className="text-sm text-gray-500">Ajuste os filtros ou aguarde novas solicitações</p>
+                <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                <p className="text-gray-600 dark:text-gray-400">Nenhuma solicitação encontrada</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Ajuste os filtros ou aguarde novas solicitações</p>
               </CardContent>
             </Card>
           ) : (
@@ -292,7 +292,7 @@ export default function GerenciarSolicitacoesPage() {
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-3">
-                          <h3 className="font-semibold text-gray-900">{request.title}</h3>
+                          <h3 className="font-semibold text-gray-900 dark:text-gray-100">{request.title}</h3>
                           <Badge className={statusInfo.color}>
                             <StatusIcon className="w-3 h-3 mr-1" />
                             {statusInfo.label}
@@ -301,40 +301,40 @@ export default function GerenciarSolicitacoesPage() {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
                           <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                               <User className="w-4 h-4" />
                               <span className="font-medium">{request.employee.user.name}</span>
-                              <span className="text-gray-400">•</span>
+                              <span className="text-gray-400 dark:text-gray-500">•</span>
                               <span>{request.employee.department}</span>
                             </div>
                             
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                               <Calendar className="w-4 h-4" />
                               <span>Criado em {formatDate(request.createdAt)}</span>
                             </div>
                           </div>
 
                           <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <XCircle className="w-4 h-4 text-red-500" />
+                            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                              <XCircle className="w-4 h-4 text-red-500 dark:text-red-400" />
                               <span className="font-medium">Original:</span>
                               <span>{formatDate(request.originalDate)} às {formatTime(request.originalTime)}</span>
                             </div>
                             
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <CheckCircle className="w-4 h-4 text-green-500" />
+                            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                              <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400" />
                               <span className="font-medium">Corrigido:</span>
                               <span>{formatDate(request.correctedDate)} às {formatTime(request.correctedTime)}</span>
                             </div>
                           </div>
                         </div>
 
-                        <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
                           {request.description}
                         </p>
 
                         {request.comments.length > 0 && (
-                          <div className="flex items-center gap-2 text-sm text-gray-500">
+                          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                             <MessageSquare className="w-4 h-4" />
                             <span>{request.comments.length} comentário(s)</span>
                           </div>
@@ -391,14 +391,14 @@ export default function GerenciarSolicitacoesPage() {
         {selectedRequest && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedRequest(null)} />
-            <div className="relative w-full max-w-3xl bg-white rounded-lg shadow-2xl overflow-hidden max-h-[90vh]">
-              <div className="px-6 py-4 border-b flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900">
+            <div className="relative w-full max-w-3xl bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden max-h-[90vh]">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   Detalhes da Solicitação
                 </h3>
                 <button
                   onClick={() => setSelectedRequest(null)}
-                  className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                  className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
                 >
                   <XCircle className="w-5 h-5" />
                 </button>
@@ -406,34 +406,34 @@ export default function GerenciarSolicitacoesPage() {
               
               <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6 space-y-6">
                 <div>
-                  <h4 className="font-medium text-gray-900 mb-2">{selectedRequest.title}</h4>
-                  <p className="text-sm text-gray-600">{selectedRequest.description}</p>
+                  <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">{selectedRequest.title}</h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{selectedRequest.description}</p>
                 </div>
 
                 <div>
-                  <h5 className="font-medium text-gray-900 mb-2">Justificativa:</h5>
-                  <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded">
+                  <h5 className="font-medium text-gray-900 dark:text-gray-100 mb-2">Justificativa:</h5>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 p-3 rounded">
                     {selectedRequest.justification}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-red-50 rounded">
-                    <h6 className="font-medium text-red-800 mb-2">Dados Originais</h6>
-                    <p className="text-sm text-red-700">
+                  <div className="p-3 bg-red-50 dark:bg-red-900/30 rounded">
+                    <h6 className="font-medium text-red-800 dark:text-red-300 mb-2">Dados Originais</h6>
+                    <p className="text-sm text-red-700 dark:text-red-300">
                       {formatDate(selectedRequest.originalDate)} às {formatTime(selectedRequest.originalTime)}
                     </p>
-                    <p className="text-xs text-red-600">
+                    <p className="text-xs text-red-600 dark:text-red-400">
                       {getTypeLabel(selectedRequest.originalType)}
                     </p>
                   </div>
 
-                  <div className="p-3 bg-green-50 rounded">
-                    <h6 className="font-medium text-green-800 mb-2">Dados Corrigidos</h6>
-                    <p className="text-sm text-green-700">
+                  <div className="p-3 bg-green-50 dark:bg-green-900/30 rounded">
+                    <h6 className="font-medium text-green-800 dark:text-green-300 mb-2">Dados Corrigidos</h6>
+                    <p className="text-sm text-green-700 dark:text-green-300">
                       {formatDate(selectedRequest.correctedDate)} às {formatTime(selectedRequest.correctedTime)}
                     </p>
-                    <p className="text-xs text-green-600">
+                    <p className="text-xs text-green-600 dark:text-green-400">
                       {getTypeLabel(selectedRequest.correctedType)}
                     </p>
                   </div>
@@ -441,20 +441,20 @@ export default function GerenciarSolicitacoesPage() {
 
                 {selectedRequest.comments.length > 0 && (
                   <div>
-                    <h6 className="font-medium text-gray-900 mb-3">Comentários:</h6>
+                    <h6 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Comentários:</h6>
                     <div className="space-y-2">
                       {selectedRequest.comments.map((comment) => (
-                        <div key={comment.id} className="p-3 bg-gray-50 rounded">
+                        <div key={comment.id} className="p-3 bg-gray-50 dark:bg-gray-700 rounded">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-medium text-gray-900">{comment.user.name}</span>
-                            <span className="text-xs text-gray-500">{formatDate(comment.createdAt)}</span>
+                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{comment.user.name}</span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{formatDate(comment.createdAt)}</span>
                             {comment.isInternal && (
-                              <Badge size="sm" className="bg-blue-100 text-blue-800">
+                              <Badge size="sm" className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
                                 Interno
                               </Badge>
                             )}
                           </div>
-                          <p className="text-sm text-gray-600">{comment.comment}</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">{comment.comment}</p>
                         </div>
                       ))}
                     </div>
@@ -469,27 +469,27 @@ export default function GerenciarSolicitacoesPage() {
         {showApprovalModal && selectedRequest && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={() => setShowApprovalModal(false)} />
-            <div className="relative w-full max-w-md bg-white rounded-lg shadow-2xl">
-              <div className="px-6 py-4 border-b">
-                <h3 className="text-lg font-semibold text-gray-900">Aprovar Solicitação</h3>
+            <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Aprovar Solicitação</h3>
               </div>
               
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Comentário de Aprovação *
                   </label>
                   <textarea
                     value={approvalComment}
                     onChange={(e) => setApprovalComment(e.target.value)}
                     placeholder="Digite um comentário sobre a aprovação..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     rows={3}
                   />
                 </div>
               </div>
               
-              <div className="px-6 py-4 border-t flex justify-end gap-3">
+              <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
                 <Button
                   variant="outline"
                   onClick={() => setShowApprovalModal(false)}
@@ -499,7 +499,7 @@ export default function GerenciarSolicitacoesPage() {
                 <Button
                   onClick={handleApprove}
                   disabled={approveMutation.isPending || !approvalComment.trim()}
-                  className="bg-green-600 hover:bg-green-700"
+                  className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800"
                 >
                   {approveMutation.isPending ? 'Aprovando...' : 'Aprovar'}
                 </Button>
@@ -512,14 +512,14 @@ export default function GerenciarSolicitacoesPage() {
         {showRejectionModal && selectedRequest && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={() => setShowRejectionModal(false)} />
-            <div className="relative w-full max-w-md bg-white rounded-lg shadow-2xl">
-              <div className="px-6 py-4 border-b">
-                <h3 className="text-lg font-semibold text-gray-900">Rejeitar Solicitação</h3>
+            <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Rejeitar Solicitação</h3>
               </div>
               
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Motivo da Rejeição *
                   </label>
                   <Input
@@ -530,20 +530,20 @@ export default function GerenciarSolicitacoesPage() {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Comentário *
                   </label>
                   <textarea
                     value={rejectionComment}
                     onChange={(e) => setRejectionComment(e.target.value)}
                     placeholder="Explique o motivo da rejeição..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     rows={3}
                   />
                 </div>
               </div>
               
-              <div className="px-6 py-4 border-t flex justify-end gap-3">
+              <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
                 <Button
                   variant="outline"
                   onClick={() => setShowRejectionModal(false)}
@@ -553,7 +553,7 @@ export default function GerenciarSolicitacoesPage() {
                 <Button
                   onClick={handleReject}
                   disabled={rejectMutation.isPending || !rejectionReason.trim() || !rejectionComment.trim()}
-                  className="bg-red-600 hover:bg-red-700"
+                  className="bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800"
                 >
                   {rejectMutation.isPending ? 'Rejeitando...' : 'Rejeitar'}
                 </Button>

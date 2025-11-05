@@ -45,10 +45,10 @@ export default function AtestadosPage() {
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando...</p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
         </div>
       </div>
     );
@@ -68,8 +68,8 @@ export default function AtestadosPage() {
       <div className="space-y-6">
         {/* Cabeçalho */}
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Registros de Ausência</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600">Gerencie todas as ausências da empresa</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Registros de Ausência</h1>
+          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Gerencie todas as ausências da empresa</p>
         </div>
 
         {/* Estatísticas */}
@@ -77,12 +77,12 @@ export default function AtestadosPage() {
           <Card>
             <CardContent className="p-4 sm:p-6">
               <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
+                  <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600">Total Registros</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.total}</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Total Registros</p>
+                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.total}</p>
                 </div>
               </div>
             </CardContent>
@@ -91,12 +91,12 @@ export default function AtestadosPage() {
           <Card>
             <CardContent className="p-4 sm:p-6">
               <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-                  <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex items-center justify-center">
+                  <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
                 </div>
                 <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600">Pendentes</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.pending}</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Pendentes</p>
+                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.pending}</p>
                 </div>
               </div>
             </CardContent>
@@ -105,12 +105,12 @@ export default function AtestadosPage() {
           <Card>
             <CardContent className="p-4 sm:p-6">
               <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
                 </div>
                 <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600">Aprovados</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.approved}</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Aprovados</p>
+                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.approved}</p>
                 </div>
               </div>
             </CardContent>
@@ -119,12 +119,12 @@ export default function AtestadosPage() {
           <Card>
             <CardContent className="p-4 sm:p-6">
               <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 rounded-lg flex items-center justify-center">
-                  <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600" />
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
+                  <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
                 </div>
                 <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600">Rejeitados</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.rejected}</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Rejeitados</p>
+                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.rejected}</p>
                 </div>
               </div>
             </CardContent>

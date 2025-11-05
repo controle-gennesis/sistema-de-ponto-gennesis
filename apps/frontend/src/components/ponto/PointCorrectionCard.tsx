@@ -94,7 +94,7 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
           {/* Informações básicas */}
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Título da Solicitação *
               </label>
               <Input
@@ -107,47 +107,47 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Descrição do Problema *
               </label>
               <textarea
                 value={formData.description}
                 onChange={(e) => handleInputChange('description', e.target.value)}
                 placeholder="Descreva o que aconteceu..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                 rows={3}
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Justificativa Detalhada * (mínimo 20 caracteres)
               </label>
               <textarea
                 value={formData.justification}
                 onChange={(e) => handleInputChange('justification', e.target.value)}
                 placeholder="Explique detalhadamente por que a correção é necessária..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                 rows={4}
                 required
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {formData.justification.length}/20 caracteres mínimos
               </p>
             </div>
           </div>
 
           {/* Dados originais (incorretos) */}
-          <div className="border-t pt-6">
-            <h4 className="text-md font-medium text-gray-900 mb-4 flex items-center gap-2">
-              <XCircle className="w-4 h-4 text-red-500" />
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+            <h4 className="text-md font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+              <XCircle className="w-4 h-4 text-red-500 dark:text-red-400" />
               Dados Originais (Incorretos)
             </h4>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Data *
                 </label>
                 <Input
@@ -159,7 +159,7 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Horário *
                 </label>
                 <Input
@@ -171,13 +171,13 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tipo de Ponto *
                 </label>
                 <select
                   value={formData.originalType}
                   onChange={(e) => handleInputChange('originalType', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   required
                 >
                   {pointTypes.map(type => (
@@ -191,15 +191,15 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
           </div>
 
           {/* Dados corrigidos */}
-          <div className="border-t pt-6">
-            <h4 className="text-md font-medium text-gray-900 mb-4 flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-green-500" />
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+            <h4 className="text-md font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400" />
               Dados Corrigidos (Solicitados)
             </h4>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Data *
                 </label>
                 <Input
@@ -211,7 +211,7 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Horário *
                 </label>
                 <Input
@@ -223,13 +223,13 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tipo de Ponto *
                 </label>
                 <select
                   value={formData.correctedType}
                   onChange={(e) => handleInputChange('correctedType', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   required
                 >
                   {pointTypes.map(type => (
@@ -243,7 +243,7 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
           </div>
 
           {/* Botões */}
-          <div className="flex justify-end space-x-3 pt-6 border-t">
+          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 dark:border-gray-700">
             <Button
               type="button"
               variant="outline"

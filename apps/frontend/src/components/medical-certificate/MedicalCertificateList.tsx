@@ -223,8 +223,8 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
       <Card>
         <CardContent className="p-6">
           <div className="flex items-center justify-center">
-            <Clock className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-            <span>Carregando registros de ausências...</span>
+            <Clock className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-400 mr-2" />
+            <span className="text-gray-900 dark:text-gray-100">Carregando registros de ausências...</span>
           </div>
         </CardContent>
       </Card>
@@ -238,10 +238,10 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
         <Card>
           <CardContent className="p-0 pt-0">
             {/* Cabeçalho dos Filtros */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+                <Filter className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
               </div>
             </div>
             
@@ -250,22 +250,22 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
               <div className="flex flex-col sm:flex-row gap-4">
                 <div className="flex-1">
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                     <input
                       type="text"
                       placeholder="Buscar funcionários por nome, email ou CPF..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     />
                   </div>
                 </div>
                 <div className="flex items-center gap-2 sm:w-48">
-                  <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Status:</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">Status:</label>
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-700"
                   >
                     <option value="all">Todos</option>
                     <option value="PENDING">Pendente</option>
@@ -285,11 +285,11 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
         {filteredCertificates.length === 0 ? (
           <Card>
             <CardContent className="p-6 text-center">
-              <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
+              <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
                 Nenhum registro de ausência encontrado
               </h3>
-              <p className="text-gray-500">
+              <p className="text-gray-500 dark:text-gray-400">
                 {!permissions.canManageAbsences 
                   ? 'Você ainda não enviou nenhum registro de ausência.'
                   : 'Não há registros de ausência que correspondam aos filtros selecionados.'
@@ -306,11 +306,11 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                     <div className="flex items-center gap-3 mb-2">
                       {getStatusIcon(certificate.status)}
                       <div>
-                        <h3 className="font-medium text-gray-900 text-sm sm:text-base">
+                        <h3 className="font-medium text-gray-900 dark:text-gray-100 text-sm sm:text-base">
                           {certificateTypeLabels[certificate.type]}
                         </h3>
                         {permissions.canManageAbsences && (
-                          <p className="text-xs sm:text-sm text-gray-600">
+                          <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                             <User className="w-3 h-3 inline mr-1" />
                             {certificate.user.name} ({certificate.employee.department})
                           </p>
@@ -318,7 +318,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                       </div>
                     </div>
                     
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                       <div className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {formatDate(certificate.startDate)} - {formatDate(certificate.endDate)}
@@ -333,14 +333,14 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                     </div>
 
                     {certificate.description && (
-                      <p className="text-xs sm:text-sm text-gray-600 mt-2">
+                      <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-2">
                         {certificate.description}
                       </p>
                     )}
 
                     {certificate.reason && certificate.status === 'REJECTED' && (
-                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
-                        <p className="text-xs sm:text-sm text-red-800">
+                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded">
+                        <p className="text-xs sm:text-sm text-red-800 dark:text-red-300">
                           <strong>Motivo da rejeição:</strong> {certificate.reason}
                         </p>
                       </div>
@@ -400,13 +400,13 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Tipo</label>
-                <p className="text-sm text-gray-900">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo</label>
+                <p className="text-sm text-gray-900 dark:text-gray-100">
                   {certificateTypeLabels[selectedCertificate.type]}
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Status</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
                 <div className="flex items-center gap-2">
                   {getStatusIcon(selectedCertificate.status)}
                   {getStatusBadge(selectedCertificate.status)}
@@ -416,40 +416,40 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Data de Início</label>
-                <p className="text-sm text-gray-900">{formatDate(selectedCertificate.startDate)}</p>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Data de Início</label>
+                <p className="text-sm text-gray-900 dark:text-gray-100">{formatDate(selectedCertificate.startDate)}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Data de Fim</label>
-                <p className="text-sm text-gray-900">{formatDate(selectedCertificate.endDate)}</p>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Data de Fim</label>
+                <p className="text-sm text-gray-900 dark:text-gray-100">{formatDate(selectedCertificate.endDate)}</p>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">Duração</label>
-              <p className="text-sm text-gray-900">{selectedCertificate.days} dias</p>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Duração</label>
+              <p className="text-sm text-gray-900 dark:text-gray-100">{selectedCertificate.days} dias</p>
             </div>
 
             {selectedCertificate.description && (
               <div>
-                <label className="block text-sm font-medium text-gray-700">Observações</label>
-                <p className="text-sm text-gray-900">{selectedCertificate.description}</p>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Observações</label>
+                <p className="text-sm text-gray-900 dark:text-gray-100">{selectedCertificate.description}</p>
               </div>
             )}
 
             {selectedCertificate.reason && selectedCertificate.status === 'REJECTED' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700">Motivo da Rejeição</label>
-                <p className="text-sm text-red-800">{selectedCertificate.reason}</p>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Motivo da Rejeição</label>
+                <p className="text-sm text-red-800 dark:text-red-300">{selectedCertificate.reason}</p>
               </div>
             )}
 
             {selectedCertificate.approver && (
               <div>
-                <label className="block text-sm font-medium text-gray-700">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   {selectedCertificate.status === 'APPROVED' ? 'Aprovado por' : 'Rejeitado por'}
                 </label>
-                <p className="text-sm text-gray-900">
+                <p className="text-sm text-gray-900 dark:text-gray-100">
                   {selectedCertificate.approver.name} em {formatDate(selectedCertificate.approvedAt!)}
                 </p>
               </div>
@@ -457,24 +457,24 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
 
             {/* Ações para RH/Admin */}
             {permissions.canManageAbsences && selectedCertificate.status === 'PENDING' && (
-              <div className="border-t pt-4 space-y-3">
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
                 <Button
                   onClick={handleApprove}
                   disabled={approveMutation.isPending}
-                  className="w-full bg-green-600 hover:bg-green-700"
+                  className="w-full bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800"
                 >
                   <CheckCircle className="w-4 h-4 mr-2" />
                   Aprovar Ausência
                 </Button>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Motivo da Rejeição
                   </label>
                   <textarea
                     value={rejectReason}
                     onChange={(e) => setRejectReason(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     rows={3}
                     placeholder="Digite o motivo da rejeição..."
                   />
@@ -482,7 +482,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                     onClick={handleReject}
                     disabled={rejectMutation.isPending || !rejectReason.trim()}
                     variant="outline"
-                    className="w-full border-red-300 text-red-700 hover:bg-red-50"
+                    className="w-full border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                   >
                     <XCircle className="w-4 h-4 mr-2" />
                     Rejeitar Ausência

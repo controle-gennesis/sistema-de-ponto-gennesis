@@ -755,15 +755,15 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         <CardHeader className="border-b-0 pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Filter className="w-5 h-5 text-gray-900" />
-              <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+              <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
             </div>
             <div className="flex items-center space-x-4">
               {!isFiltersMinimized && (
                 <>
                   <button
                     onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                    className="flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                    className="flex items-center justify-center w-8 h-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                     title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
@@ -779,7 +779,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               )}
               <button
                 onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
               >
                 {isFiltersMinimized ? (
@@ -797,11 +797,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               {/* Filtro Principal - Busca Geral e Status */}
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
                 <div className="space-y-2 sm:col-span-10">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Buscar Funcionário
                   </label>
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                     <input
                       type="text"
                       value={searchTerm}
@@ -810,19 +810,19 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         setCurrentPage(1);
                       }}
                       placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-2 sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Status
                   </label>
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
-                    className="w-full px-3 pr-8 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white text-sm"
+                    className="w-full px-3 pr-8 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 text-sm"
                   >
                     <option value="active">Ativos</option>
                     <option value="inactive">Inativos</option>
@@ -835,21 +835,21 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               {showAdvancedFilters && (
                 <div className="border-t pt-4 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-medium text-gray-700">Filtros Específicos</h4>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros Específicos</h4>
                   </div>
                   
                   {/* Grupo 1: Informações Básicas */}
                   <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Básicas</h5>
+                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Informações Básicas</h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Setor
                         </label>
                         <select
                           value={departmentFilter}
                           onChange={(e) => setDepartmentFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todos</option>
                           {departments.filter(d => d !== 'Todos').map((dept) => (
@@ -859,13 +859,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Cargo
                         </label>
                         <select
                           value={positionFilter}
                           onChange={(e) => setPositionFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todos</option>
                           {positions.filter(p => p !== 'Todos').map((pos) => (
@@ -875,13 +875,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Empresa
                         </label>
                         <select
                           value={companyFilter}
                           onChange={(e) => setCompanyFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todas</option>
                           {companies.filter(c => c !== 'Todos').map((c) => (
@@ -891,13 +891,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Polo
                         </label>
                         <select
                           value={poloFilter}
                           onChange={(e) => setPoloFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todos</option>
                           {polos.filter(p => p !== 'Todos').map((p) => (
@@ -910,16 +910,16 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
 
                   {/* Grupo 2: Informações Financeiras */}
                   <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Financeiras</h5>
+                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Informações Financeiras</h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Centro de Custo
                         </label>
                         <select
                           value={costCenterFilter}
                           onChange={(e) => setCostCenterFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todos</option>
                           {costCenters.filter(cc => cc !== 'Todos').map((center) => (
@@ -929,13 +929,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Tomador
                         </label>
                         <select
                           value={clientFilter}
                           onChange={(e) => setClientFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todos</option>
                           {clients.filter(c => c !== 'Todos').map((tomador) => (
@@ -945,13 +945,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Categoria Financeira
                         </label>
                         <select
                           value={categoriaFinanceiraFilter}
                           onChange={(e) => setCategoriaFinanceiraFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todas</option>
                           {categoriasFinanceiras.filter(c => c !== 'Todos').map((c) => (
@@ -961,13 +961,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Modalidade
                         </label>
                         <select
                           value={modalityFilter}
                           onChange={(e) => setModalityFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                         >
                           <option value="all">Todas</option>
                           {modalities.filter(m => m !== 'Todos').map((m) => (
@@ -988,14 +988,14 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <div className="p-2 sm:p-3 bg-red-100 rounded-lg">
-              <Users className="w-5 h-5 sm:w-6 sm:h-6 text-red-600" />
+            <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+              <Users className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 {canManageEmployees ? 'Gerenciar Funcionários' : 'Lista de Funcionários'}
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 {canManageEmployees 
                   ? 'Visualizar e gerenciar funcionários cadastrados' 
                   : 'Visualizar funcionários cadastrados'
@@ -1017,7 +1017,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               </div>
               <button
                 onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
               >
                 {isFiltersMinimized ? (
@@ -1040,15 +1040,15 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     placeholder="Buscar funcionários por nome, email ou CPF..."
                     value={searchTerm}
                     onChange={(e) => handleSearch(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
                 </div>
                 <div className="flex items-center space-x-2 sm:w-48">
-                  <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Status:</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">Status:</label>
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
-                    className="w-full px-3 pr-8 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                    className="w-full px-3 pr-8 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                   >
                     <option value="active">Ativos</option>
                     <option value="inactive">Inativos</option>
@@ -1060,11 +1060,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               {/* Filtros adicionais */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-700">Setor:</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Setor:</label>
                   <select
                     value={departmentFilter}
                     onChange={(e) => setDepartmentFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   >
                     <option value="all">Todos</option>
                     {departments.filter(d => d !== 'Todos').map((dept) => (
@@ -1074,11 +1074,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-700">Cargo:</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cargo:</label>
                   <select
                     value={positionFilter}
                     onChange={(e) => setPositionFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   >
                     <option value="all">Todos</option>
                     {positions.filter(p => p !== 'Todos').map((pos) => (
@@ -1088,11 +1088,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-700">Centro de Custo:</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Centro de Custo:</label>
                   <select
                     value={costCenterFilter}
                     onChange={(e) => setCostCenterFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   >
                     <option value="all">Todos</option>
                     {costCenters.filter(cc => cc !== 'Todos').map((center) => (
@@ -1102,11 +1102,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-700">Tomador:</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tomador:</label>
                   <select
                     value={clientFilter}
                     onChange={(e) => setClientFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   >
                     <option value="all">Todos</option>
                     {clients.filter(c => c !== 'Todos').map((tomador) => (
@@ -1123,17 +1123,17 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {isLoading ? (
           <div className="text-center py-8">
             <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-            <p className="text-gray-600">Carregando funcionários...</p>
+            <p className="text-gray-600 dark:text-gray-400">Carregando funcionários...</p>
           </div>
         ) : filteredEmployees.length === 0 ? (
           <div className="text-center py-8">
-            <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600">Nenhum funcionário encontrado</p>
+            <Users className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Nenhum funcionário encontrado</p>
           </div>
         ) : (
           <>
             {/* Informações de paginação */}
-            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
+            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600 dark:text-gray-400">
               <span>
                 Mostrando {startItem} a {endItem} de {totalFiltered} funcionários
               </span>
@@ -1147,23 +1147,23 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               <div
                 key={employee.id}
                 onClick={() => { setSelectedEmployee(employee); setDetailsTab('info'); }}
-                  className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-lg hover:border-gray-200 cursor-pointer transition-all duration-300 transform hover:-translate-y-1"
+                  className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-lg hover:border-gray-200 dark:hover:border-gray-600 cursor-pointer transition-all duration-300 transform hover:-translate-y-1"
                 >
                   {/* Avatar com iniciais - Centralizado */}
                   <div className="flex flex-col items-center text-center mb-6 relative">
-                    <div className="w-16 h-16 bg-white border-2 border-blue-500 rounded-full flex items-center justify-center mb-3 shadow-sm">
-                      <span className="text-blue-600 font-bold text-lg">
+                    <div className="w-16 h-16 bg-white dark:bg-gray-700 border-2 border-blue-500 dark:border-blue-400 rounded-full flex items-center justify-center mb-3 shadow-sm">
+                      <span className="text-blue-600 dark:text-blue-400 font-bold text-lg">
                         {employee.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                       </span>
                     </div>
                     {/* Status indicator no canto superior direito */}
-                    <div className={`absolute top-0 right-0 w-4 h-4 rounded-full border-2 border-white ${
+                    <div className={`absolute top-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 ${
                       employee.isActive ? 'bg-green-500' : 'bg-red-500'
                     }`} title={employee.isActive ? 'Ativo' : 'Inativo'} />
-                    <span className="text-base font-semibold text-gray-900 mb-2">{employee.name}</span>
+                    <span className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">{employee.name}</span>
                         {employee.employee && (
                           <>
-                        <p className="text-xs text-gray-500 bg-gray-50 px-3 py-1 rounded-full">{employee.employee.position} de {employee.employee.department}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 px-3 py-1 rounded-full">{employee.employee.position} de {employee.employee.department}</p>
                       </>
                     )}
                   </div>
@@ -1173,48 +1173,48 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <>
 
                       {/* Informações organizadas */}
-                      <div className="space-y-3 text-xs bg-gray-50 rounded-xl p-4 mb-4">
+                      <div className="space-y-3 text-xs bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-4">
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 font-medium">Matrícula:</span>
-                          <span className="text-gray-800 font-semibold">{employee.employee.employeeId}</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Matrícula:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.employeeId}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 font-medium">CPF:</span>
-                          <span className="text-gray-800 font-semibold">{employee.cpf}</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">CPF:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.cpf}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 font-medium">Empresa:</span>
-                          <span className="text-gray-800 font-semibold">{employee.employee.company}</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Empresa:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.company}</span>
                         </div>
                         {employee.employee.polo && (
                           <div className="flex justify-between items-center">
-                            <span className="text-gray-500 font-medium">Polo:</span>
-                            <span className="text-gray-800 font-semibold">{employee.employee.polo}</span>
+                            <span className="text-gray-500 dark:text-gray-400 font-medium">Polo:</span>
+                            <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.polo}</span>
                           </div>
                         )}
                         {employee.employee.categoriaFinanceira && (
                           <div className="flex justify-between items-center">
-                            <span className="text-gray-500 font-medium">Categoria Financeira:</span>
-                            <span className="text-gray-800 font-semibold">{employee.employee.categoriaFinanceira}</span>
+                            <span className="text-gray-500 dark:text-gray-400 font-medium">Categoria Financeira:</span>
+                            <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.categoriaFinanceira}</span>
                           </div>
                         )}
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 font-medium">Modalidade:</span>
-                          <span className="text-gray-800 font-semibold">{employee.employee.modality}</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Modalidade:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.modality}</span>
                         </div>
                             {employee.employee.costCenter && (
                           <div className="flex justify-between items-center">
-                            <span className="text-gray-500 font-medium">Centro de Custo:</span>
-                            <span className="text-gray-800 font-semibold">{employee.employee.costCenter}</span>
+                            <span className="text-gray-500 dark:text-gray-400 font-medium">Centro de Custo:</span>
+                            <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.costCenter}</span>
                           </div>
                         )}
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 font-medium">Tomador:</span>
-                          <span className="text-gray-800 font-semibold">{employee.employee.client}</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Tomador:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.client}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 font-medium">Admissão:</span>
-                          <span className="text-gray-800 font-semibold">{formatDate(employee.employee.hireDate)}</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Admissão:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{formatDate(employee.employee.hireDate)}</span>
                         </div>
                       </div>
                 
@@ -1231,7 +1231,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 <button
                   onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1}
-                  className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Anterior
                 </button>
@@ -1248,7 +1248,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       className={`px-3 py-2 text-sm font-medium rounded-md ${
                         isActive
                           ? 'bg-blue-600 text-white'
-                          : 'text-gray-500 bg-white border border-gray-300 hover:bg-gray-50'
+                          : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
                       }`}
                     >
                       {pageNumber}
@@ -1259,7 +1259,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 <button
                   onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                   disabled={currentPage === totalPages}
-                  className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Próxima
                 </button>
@@ -1272,33 +1272,33 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {deleteConfirm && (
           <div className="fixed inset-0 z-[1000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setDeleteConfirm(null)} />
-            <div className="relative bg-white rounded-lg shadow-2xl max-w-md w-full mx-4">
+            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-2xl max-w-md w-full mx-4">
               <div className="p-6">
                 <div className="flex items-center space-x-3 mb-4">
-                  <div className="p-2 bg-red-100 rounded-full">
-                    <AlertTriangle className="w-6 h-6 text-red-600" />
+                  <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+                    <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Confirmar Desligamento</h3>
-                    <p className="text-sm text-gray-600">Esta ação não pode ser desfeita</p>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirmar Desligamento</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Esta ação não pode ser desfeita</p>
                   </div>
                 </div>
                 
-                <p className="text-gray-700 mb-6">
+                <p className="text-gray-700 dark:text-gray-300 mb-6">
                   Tem certeza que deseja desligar este funcionário? O funcionário será desativado e não poderá mais acessar o sistema.
                 </p>
                 
                 <div className="flex justify-end space-x-3">
                   <button
                     onClick={() => setDeleteConfirm(null)}
-                    className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={() => handleDelete(deleteConfirm)}
                     disabled={deleteEmployeeMutation.isPending}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                    className="px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
                   >
                     {deleteEmployeeMutation.isPending ? (
                       <>
@@ -1322,31 +1322,31 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {reactivateConfirm && (
           <div className="fixed inset-0 z-[1000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setReactivateConfirm(null)} />
-            <div className="relative bg-white rounded-lg shadow-2xl max-w-md w-full mx-4">
+            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-2xl max-w-md w-full mx-4">
               <div className="p-6">
                 <div className="flex items-center space-x-3 mb-4">
-                  <div className="p-2 bg-green-100 rounded-full">
-                    <CheckCircle className="w-6 h-6 text-green-600" />
+                  <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-full">
+                    <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Confirmar Reativação</h3>
-                    <p className="text-sm text-gray-600">Deseja reativar este funcionário?</p>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirmar Reativação</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Deseja reativar este funcionário?</p>
                   </div>
                 </div>
-                <p className="text-gray-700 mb-6">
+                <p className="text-gray-700 dark:text-gray-300 mb-6">
                   O funcionário voltará a ficar ativo e poderá acessar o sistema normalmente.
                 </p>
                 <div className="flex justify-end space-x-3">
                   <button
                     onClick={() => setReactivateConfirm(null)}
-                    className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={() => reactivateEmployeeMutation.mutate(reactivateConfirm)}
                     disabled={reactivateEmployeeMutation.isPending}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                    className="px-4 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
                   >
                     {reactivateEmployeeMutation.isPending ? (
                       <>
@@ -1370,18 +1370,18 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {selectedEmployee && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedEmployee(null)} />
-            <div className="relative w-full max-w-5xl mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden h-[85vh] overflow-y-auto">
+            <div className="relative w-full max-w-5xl mx-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden h-[85vh] overflow-y-auto">
               {/* Header + Abas fixos */}
-              <div className="sticky top-0 z-20 bg-white">
+              <div className="sticky top-0 z-20 bg-white dark:bg-gray-800">
                 <div className="px-6 pt-6">
-                  <div className="rounded-xl border border-gray-200 bg-white px-5 py-4 flex items-center justify-between">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-5 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4 min-w-0">
-                      <div className="w-14 h-14 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                      <div className="w-14 h-14 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center font-bold">
                         {selectedEmployee.name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase()}
                   </div>
                       <div className="min-w-0">
-                        <h3 className="text-lg font-semibold text-gray-900 truncate">{selectedEmployee.name}</h3>
-                        <p className="text-sm text-gray-600 truncate">{selectedEmployee.employee?.position} de {selectedEmployee.employee?.department}</p>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">{selectedEmployee.name}</h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 truncate">{selectedEmployee.employee?.position} de {selectedEmployee.employee?.department}</p>
                   </div>
                 </div>
                     <div className="flex items-center gap-2">
@@ -1389,7 +1389,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         selectedEmployee.isActive ? (
                           <button
                             onClick={() => setDeleteConfirm(selectedEmployee.id)}
-                            className="px-3 py-1.5 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                            className="px-3 py-1.5 text-sm rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                             title="Desligar funcionário"
                           >
                             Desligar
@@ -1397,7 +1397,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         ) : (
                           <button
                             onClick={() => setReactivateConfirm(selectedEmployee.id)}
-                            className="px-3 py-1.5 text-sm rounded-lg border border-green-200 text-green-600 hover:bg-green-50"
+                            className="px-3 py-1.5 text-sm rounded-lg border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30"
                             title="Reativar funcionário"
                           >
                             Reativar
@@ -1406,7 +1406,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       )}
                 <button
                   onClick={() => setSelectedEmployee(null)}
-                        className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
                   aria-label="Fechar"
                 >
                   <X className="w-5 h-5" />
@@ -1416,13 +1416,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               </div>
 
                 <div className="px-6 pt-4">
-                  <div className="flex items-center gap-6 border-b border-gray-200">
+                  <div className="flex items-center gap-6 border-b border-gray-200 dark:border-gray-700">
                     <button
                       onClick={() => setDetailsTab('info')}
                       className={`pb-2 -mb-px text-sm transition-colors border-b-2 ${
                         detailsTab === 'info'
-                          ? 'border-blue-500 text-blue-600'
-                          : 'border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300'
+                          ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                          : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
                       }`}
                     >
                       Informações
@@ -1431,8 +1431,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       onClick={() => setDetailsTab('remuneration')}
                       className={`pb-2 -mb-px text-sm transition-colors border-b-2 ${
                         detailsTab === 'remuneration'
-                          ? 'border-blue-500 text-blue-600'
-                          : 'border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300'
+                          ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                          : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
                       }`}
                     >
                       Proventos e Descontos
@@ -1441,8 +1441,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       onClick={() => setDetailsTab('records')}
                       className={`pb-2 -mb-px text-sm transition-colors border-b-2 ${
                         detailsTab === 'records'
-                          ? 'border-blue-500 text-blue-600'
-                          : 'border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300'
+                          ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                          : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
                       }`}
                     >
                       Registros de Ponto
@@ -1457,9 +1457,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Card - Informações Pessoais */}
-                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-semibold text-gray-900">Dados Pessoais</h4>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dados Pessoais</h4>
                       {canManageEmployees && (
                         <button
                           onClick={() => {
@@ -1467,7 +1467,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                             setEditVisibleSections(['personal']);
                             setShowEditForm(true);
                           }}
-                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
                         >
                           Editar
                         </button>
@@ -1475,36 +1475,36 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
                     <div className="grid grid-cols-1 gap-4">
                       <div>
-                        <div className="text-xs text-gray-500">Nome</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.name}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Nome</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.name}</div>
                       </div>
                       <div>
-                        <div className="text-xs text-gray-500">CPF</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.cpf}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">CPF</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.cpf}</div>
                       </div>
                       <div>
-                        <div className="text-xs text-gray-500">Email</div>
-                        <div className="text-sm font-medium text-gray-900 break-all">{selectedEmployee.email}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Email</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 break-all">{selectedEmployee.email}</div>
                       </div>
                       {selectedEmployee.employee?.employeeId && (
                         <div>
-                          <div className="text-xs text-gray-500">Matrícula</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.employeeId}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Matrícula</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.employeeId}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.birthDate && (
                         <div>
-                          <div className="text-xs text-gray-500">Nascimento</div>
-                          <div className="text-sm font-medium text-gray-900">{formatDate(selectedEmployee.employee.birthDate)}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Nascimento</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{formatDate(selectedEmployee.employee.birthDate)}</div>
                         </div>
                       )}
                     </div>
                   </div>
 
                   {/* Card - Informações Profissionais */}
-                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-semibold text-gray-900">Dados Profissionais</h4>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dados Profissionais</h4>
                       {canManageEmployees && (
                         <button
                           onClick={() => {
@@ -1512,7 +1512,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                             setEditVisibleSections(['professional']);
                             setShowEditForm(true);
                           }}
-                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
                         >
                           Editar
                         </button>
@@ -1520,55 +1520,55 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <div className="text-xs text-gray-500">Cargo</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.position || '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Cargo</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.position || '—'}</div>
                       </div>
                       <div>
-                        <div className="text-xs text-gray-500">Setor</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.department || '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Setor</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.department || '—'}</div>
                       </div>
                       {selectedEmployee.employee?.modality && (
                         <div>
-                          <div className="text-xs text-gray-500">Modalidade</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.modality}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Modalidade</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.modality}</div>
                         </div>
                       )}
                       <div>
-                        <div className="text-xs text-gray-500">Admissão</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.hireDate ? formatDate(selectedEmployee.employee.hireDate) : '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Admissão</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.hireDate ? formatDate(selectedEmployee.employee.hireDate) : '—'}</div>
                       </div>
                       <div>
-                        <div className="text-xs text-gray-500">Regime</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.isRemote ? 'Remoto' : 'Presencial'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Regime</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.isRemote ? 'Remoto' : 'Presencial'}</div>
                       </div>
                       {selectedEmployee.employee?.costCenter && (
                         <div>
-                          <div className="text-xs text-gray-500">Centro de Custo</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.costCenter}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Centro de Custo</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.costCenter}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.client && (
                         <div>
-                          <div className="text-xs text-gray-500">Tomador</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.client}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Tomador</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.client}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.company && (
                         <div>
-                          <div className="text-xs text-gray-500">Empresa</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.company}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Empresa</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.company}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.polo && (
                         <div>
-                          <div className="text-xs text-gray-500">Polo</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.polo}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Polo</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.polo}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.categoriaFinanceira && (
                         <div>
-                          <div className="text-xs text-gray-500">Categoria Financeira</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.categoriaFinanceira}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Categoria Financeira</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.categoriaFinanceira}</div>
                         </div>
                       )}
                     </div>
@@ -1577,9 +1577,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Card - Dados Bancários */}
-                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-semibold text-gray-900">Dados Bancários</h4>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dados Bancários</h4>
                       {canManageEmployees && (
                         <button
                           onClick={() => {
@@ -1587,7 +1587,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                             setEditVisibleSections(['bank']);
                             setShowEditForm(true);
                           }}
-                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
                         >
                           Editar
                         </button>
@@ -1596,59 +1596,59 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {selectedEmployee.employee?.bank && (
                         <div>
-                          <div className="text-xs text-gray-500">Banco</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.bank}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Banco</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.bank}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.accountType && (
                         <div>
-                          <div className="text-xs text-gray-500">Tipo de Conta</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.accountType}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Tipo de Conta</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.accountType}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.agency && (
                         <div>
-                          <div className="text-xs text-gray-500">Agência</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.agency}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Agência</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.agency}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.operation && (
                         <div>
-                          <div className="text-xs text-gray-500">Operação</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.operation}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Operação</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.operation}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.account && (
                         <div>
-                          <div className="text-xs text-gray-500">Conta</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.account}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Conta</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.account}</div>
                         </div>
                       )}
                       {selectedEmployee.employee?.digit && (
                         <div>
-                          <div className="text-xs text-gray-500">Dígito</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.digit}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Dígito</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.digit}</div>
                         </div>
                       )}
                         {selectedEmployee.employee?.pixKeyType && (
                         <div>
-                          <div className="text-xs text-gray-500">Tipo de Chave</div>
-                          <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee.pixKeyType}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Tipo de Chave</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee.pixKeyType}</div>
                           </div>
                         )}
                         {selectedEmployee.employee?.pixKey && (
                         <div>
-                          <div className="text-xs text-gray-500">Chave PIX</div>
-                          <div className="text-sm font-medium text-gray-900 break-all">{selectedEmployee.employee.pixKey}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Chave PIX</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 break-all">{selectedEmployee.employee.pixKey}</div>
                           </div>
                         )}
                       </div>
                     </div>
 
                   {/* Card - Remuneração e Benefícios */}
-                  <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                   <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-semibold text-gray-900">Valores e Adicionais</h4>
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Valores e Adicionais</h4>
                     {canManageEmployees && (
                       <button
                         onClick={() => {
@@ -1656,7 +1656,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           setEditVisibleSections(['remuneration']);
                           setShowEditForm(true);
                         }}
-                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
                       >
                         Editar
                       </button>
@@ -1665,32 +1665,32 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Linha 1: Salário | Periculosidade */}
                       <div>
-                        <div className="text-xs text-gray-500">Salário</div>
-                        <div className="text-sm font-semibold text-gray-900">{selectedEmployee.employee?.salary != null ? `R$ ${Number(selectedEmployee.employee.salary).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Salário</div>
+                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.salary != null ? `R$ ${Number(selectedEmployee.employee.salary).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
                       </div>
                       <div>
-                        <div className="text-xs text-gray-500">Periculosidade</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.dangerPay != null ? `${Number(selectedEmployee.employee.dangerPay)}%` : '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Periculosidade</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.dangerPay != null ? `${Number(selectedEmployee.employee.dangerPay)}%` : '—'}</div>
                       </div>
                       {/* Linha 2: VA Diário | Insalubridade */}
                       <div>
-                        <div className="text-xs text-gray-500">VA Diário</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.dailyFoodVoucher != null ? `R$ ${Number(selectedEmployee.employee.dailyFoodVoucher).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">VA Diário</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.dailyFoodVoucher != null ? `R$ ${Number(selectedEmployee.employee.dailyFoodVoucher).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
                       </div>
                       <div>
-                        <div className="text-xs text-gray-500">Insalubridade</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.unhealthyPay != null ? `${Number(selectedEmployee.employee.unhealthyPay)}%` : '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Insalubridade</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.unhealthyPay != null ? `${Number(selectedEmployee.employee.unhealthyPay)}%` : '—'}</div>
                       </div>
                       {/* Linha 3: VT Diário | vazio */}
                       <div>
-                        <div className="text-xs text-gray-500">VT Diário</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.dailyTransportVoucher != null ? `R$ ${Number(selectedEmployee.employee.dailyTransportVoucher).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">VT Diário</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.dailyTransportVoucher != null ? `R$ ${Number(selectedEmployee.employee.dailyTransportVoucher).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
                       </div>
                       <div className="hidden sm:block" />
                       {/* Linha 4: Salário Família | vazio */}
                       <div>
-                        <div className="text-xs text-gray-500">Salário Família</div>
-                        <div className="text-sm font-medium text-gray-900">{selectedEmployee.employee?.familySalary != null ? `R$ ${Number(selectedEmployee.employee.familySalary).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Salário Família</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.employee?.familySalary != null ? `R$ ${Number(selectedEmployee.employee.familySalary).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</div>
                       </div>
                       <div className="hidden sm:block" />
                     </div>
@@ -1705,25 +1705,25 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 {detailsTab === 'remuneration' && (
                   <>
                 {/* Seção de Acréscimos Salariais */}
-                <div className="rounded-xl border border-gray-200 bg-white mb-4">
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 mb-4">
                   <div className="flex items-center justify-between px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-semibold text-gray-900">Acréscimos</h4>
-                      <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Acréscimos</h4>
+                      <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800">
                             {adjustments.length}
                           </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => { setShowAddAdjustmentForm(true); setIsAdjustmentsMinimized(false); }}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                       >
                         <Plus className="w-4 h-4" />
                         <span>Adicionar</span>
                       </button>
                       <button
                         onClick={() => setIsAdjustmentsMinimized(!isAdjustmentsMinimized)}
-                        className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"
+                        className="p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
                         title={isAdjustmentsMinimized ? "Expandir seção" : "Minimizar seção"}
                       >
                         {isAdjustmentsMinimized ? (
@@ -1743,7 +1743,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         <AdjustmentForm employeeId={selectedEmployee.employee.id} adjustment={editingAdjustment} onSave={handleUpdateAdjustment} onCancel={() => setEditingAdjustment(null)} />
                       )}
                       {adjustments.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500 bg-gray-50">Nenhum acréscimo cadastrado.</div>
+                        <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 p-6 text-center text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50">Nenhum acréscimo cadastrado.</div>
                       ) : (
                         <AdjustmentsList adjustments={adjustments} onEdit={handleEditAdjustment} onDelete={handleDeleteAdjustment} />
                       )}
@@ -1752,25 +1752,25 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 </div>
 
                 {/* Seção de Descontos Salariais */}
-                <div className="rounded-xl border border-gray-200 bg-white mb-6">
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 mb-6">
                   <div className="flex items-center justify-between px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-semibold text-gray-900">Descontos</h4>
-                      <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-red-50 text-red-600 border border-red-100">
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Descontos</h4>
+                      <span className="px-1.5 py-0.5 text-[11px] rounded-full bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800">
                             {discounts.length}
                           </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => { setShowAddDiscountForm(true); setIsDiscountsMinimized(false); }}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                       >
                         <Plus className="w-4 h-4" />
                         <span>Adicionar</span>
                       </button>
                       <button
                         onClick={() => setIsDiscountsMinimized(!isDiscountsMinimized)}
-                        className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"
+                        className="p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
                         title={isDiscountsMinimized ? "Expandir seção" : "Minimizar seção"}
                       >
                         {isDiscountsMinimized ? (
@@ -1790,7 +1790,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                         <DiscountForm employeeId={selectedEmployee.employee.id} discount={editingDiscount} onSave={handleUpdateDiscount} onCancel={() => setEditingDiscount(null)} />
                       )}
                       {discounts.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500 bg-gray-50">Nenhum desconto cadastrado.</div>
+                        <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 p-6 text-center text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50">Nenhum desconto cadastrado.</div>
                       ) : (
                         <DiscountsList discounts={discounts} onEdit={handleEditDiscount} onDelete={handleDeleteDiscount} />
                       )}
@@ -1803,13 +1803,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 {detailsTab === 'records' && (
                   <>
                 {/* Seletor de mês/ano */}
-                <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                   <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-semibold text-gray-900">Registros de Ponto</h4>
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Registros de Ponto</h4>
                     {employeeRecordsData?.data && employeeRecordsData.data.length > 0 && (
                       <button
                         onClick={exportToExcel}
-                        className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                        className="flex items-center space-x-2 px-4 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 transition-colors"
                       >
                         <Download className="w-4 h-4" />
                         <span>Exportar XLSX</span>
@@ -1818,11 +1818,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   </div>
                   <div className="flex items-center space-x-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Mês</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mês</label>
                       <select
                         value={selectedMonth}
                         onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                       >
                         <option value={1}>Janeiro</option>
                         <option value={2}>Fevereiro</option>
@@ -1839,11 +1839,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Ano</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ano</label>
                       <select
                         value={selectedYear}
                         onChange={(e) => setSelectedYear(Number(e.target.value))}
-                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                       >
                         {Array.from({ length: 5 }, (_, i) => {
                           const year = new Date().getFullYear() - 2 + i;
@@ -1862,42 +1862,42 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 {loadingRecords ? (
                   <div className="text-center py-8">
                     <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-                    <p className="text-gray-600">Carregando registros...</p>
+                    <p className="text-gray-600 dark:text-gray-400">Carregando registros...</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <h4 className="text-md font-semibold text-gray-900">
+                    <h4 className="text-md font-semibold text-gray-900 dark:text-gray-100">
                       Registros de {selectedMonth.toString().padStart(2, '0')}/{selectedYear}
                     </h4>
                     
                     {employeeRecordsData?.data?.length === 0 ? (
                       <div className="text-center py-8">
-                        <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-gray-600">Nenhum registro encontrado para este período</p>
+                        <Clock className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                        <p className="text-gray-600 dark:text-gray-400">Nenhum registro encontrado para este período</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
                         {Object.entries(groupRecordsByDay(employeeRecordsData?.data || []))
                           .sort(([a], [b]) => new Date(a.split('/').reverse().join('-')).getTime() - new Date(b.split('/').reverse().join('-')).getTime())
                           .map(([date, records]: [string, any[]]) => (
-                          <div key={date} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                          <div key={date} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700/50">
                             <div className="flex items-center justify-between mb-3">
                               <div className="flex items-center space-x-2">
-                                <Calendar className="w-4 h-4 text-gray-500" />
-                                <span className="font-semibold text-gray-900">{date}</span>
+                                <Calendar className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                <span className="font-semibold text-gray-900 dark:text-gray-100">{date}</span>
                               </div>
-                              <span className="text-sm text-gray-600">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">
                                 {records.length} registro{records.length !== 1 ? 's' : ''}
                               </span>
                             </div>
                             
                             <div className="flex flex-wrap gap-2">
                               {records.map((record: any, index: number) => (
-                                <div key={index} className="px-3 py-2 bg-white rounded-md border">
+                                <div key={index} className="px-3 py-2 bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
                                   <div className="flex items-center space-x-2">
-                                    <Clock className="w-3 h-3 text-gray-500" />
+                                    <Clock className="w-3 h-3 text-gray-500 dark:text-gray-400" />
                                     {record.type !== 'ABSENCE_JUSTIFIED' && (
-                                      <span className="text-sm font-medium text-gray-900">
+                                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                                         {(() => {
                                           const date = new Date(record.timestamp);
                                           const hours = date.getUTCHours().toString().padStart(2, '0');
@@ -1907,7 +1907,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                         })()}
                                       </span>
                                     )}
-                                    <span className="text-xs text-gray-600">
+                                    <span className="text-xs text-gray-600 dark:text-gray-400">
                                       {record.type === 'ENTRY' ? 'Entrada' :
                                        record.type === 'EXIT' ? 'Saída' :
                                        record.type === 'LUNCH_START' ? 'Almoço' :
@@ -1921,7 +1921,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                         {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && (
                                           <button
                                             onClick={() => setViewingCertificate(viewingCertificate === `${date}-${index}` ? null : `${date}-${index}`)}
-                                            className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                                            className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                                             title="Ver detalhes do atestado"
                                           >
                                             <Eye className="w-3 h-3" />
@@ -1930,7 +1930,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                         {record.photoUrl && (
                                           <button
                                             onClick={() => window.open(record.photoUrl, '_blank')}
-                                            className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                                            className="p-1 text-gray-400 dark:text-gray-500 hover:text-green-600 dark:hover:text-green-400 transition-colors"
                                             title="Ver foto"
                                           >
                                             <Camera className="w-3 h-3" />
@@ -1938,7 +1938,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                         )}
                                         <button
                                           onClick={() => handleEditRecord(record)}
-                                          className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                                           title="Editar registro"
                                         >
                                           <Edit className="w-3 h-3" />
@@ -1951,10 +1951,10 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                   {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && viewingCertificate === `${date}-${index}` && (
                                     <div className="mt-2 p-2">
                                       <div className="flex items-center space-x-2 mb-1">
-                                        <FileCheck className="w-3 h-3 text-600" />
-                                        <span className="text-xs font-medium text-800">Detalhes do Atestado</span>
+                                        <FileCheck className="w-3 h-3 text-gray-600 dark:text-gray-400" />
+                                        <span className="text-xs font-medium text-gray-800 dark:text-gray-200">Detalhes do Atestado</span>
                                       </div>
-                                      <div className="space-y-1 text-xs text-gray-700">
+                                      <div className="space-y-1 text-xs text-gray-700 dark:text-gray-300">
                                         <div className="flex items-center space-x-2">
                                           <Calendar className="w-3 h-3" />
                                           <span>
@@ -1970,7 +1970,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                           <span>Enviado em {new Date(record.medicalCertificateDetails.submittedAt).toLocaleDateString('pt-BR')}</span>
                                         </div>
                                         {record.medicalCertificateDetails.description && (
-                                          <div className="text-xs text-600 mt-1">
+                                          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                             <strong>Obs:</strong> {record.medicalCertificateDetails.description}
                                           </div>
                                         )}
@@ -1979,7 +1979,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                   )}
                                   
                                   {record.observation && (
-                                    <div className="mt-1 text-xs text-gray-500 italic">
+                                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 italic">
                                       <strong>Obs:</strong> {record.observation}
                                     </div>
                                   )}
@@ -1989,15 +1989,15 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                             
                             {/* Mostrar motivo de alterações apenas se houver */}
                             {records.some((record: any) => record.reason && !record.reason.includes('Localização registrada')) && (
-                              <div className="mt-3 pt-3 border-t border-gray-200">
-                                <div className="text-sm text-gray-600">
+                              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                <div className="text-sm text-gray-600 dark:text-gray-400">
                                   <strong>Motivo de Alterações:</strong>
                                   <ul className="mt-1 space-y-1">
                                     {records
                                       .filter((record: any) => record.reason && !record.reason.includes('Localização registrada'))
                                       .map((record: any, index: number) => (
                                         <li key={index} className="flex items-start space-x-2">
-                                          <span className="text-gray-500">•</span>
+                                          <span className="text-gray-500 dark:text-gray-400">•</span>
                                           <span>{record.reason}</span>
                                         </li>
                                       ))}
@@ -2022,12 +2022,12 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {editingRecord && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={handleCancelEdit} />
-            <div className="relative w-full max-w-md mx-4 bg-white rounded-lg shadow-2xl">
-              <div className="px-6 py-4 border-b flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900">Editar Registro</h3>
+            <div className="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Editar Registro</h3>
                 <button
                   onClick={handleCancelEdit}
-                  className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                  className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
                   aria-label="Fechar"
                 >
                   <X className="w-5 h-5" />
@@ -2036,13 +2036,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
 
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Tipo de Registro
                   </label>
                   <select
                     value={editForm.type}
                     onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   >
                     <option value="ENTRY">Entrada</option>
                     <option value="LUNCH_START">Almoço</option>
@@ -2052,39 +2052,39 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Data e Hora
                   </label>
                   <input
                     type="datetime-local"
                     value={editForm.timestamp}
                     onChange={(e) => setEditForm({ ...editForm, timestamp: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Observação do Funcionário
                   </label>
                   <textarea
                     value={editForm.observation}
                     onChange={(e) => setEditForm({ ...editForm, observation: e.target.value })}
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     placeholder="Observação do funcionário..."
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Motivo da Alteração
                   </label>
                   <textarea
                     value={editForm.reason}
                     onChange={(e) => setEditForm({ ...editForm, reason: e.target.value })}
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     placeholder="Motivo da alteração..."
                   />
                 </div>
@@ -2093,14 +2093,14 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   <button
                     onClick={handleSaveEdit}
                     disabled={updateRecordMutation.isPending}
-                    className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Save className="w-4 h-4" />
                     <span>{updateRecordMutation.isPending ? 'Salvando...' : 'Salvar'}</span>
                   </button>
                   <button
                     onClick={handleCancelEdit}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-700"
                   >
                     Cancelar
                   </button>

@@ -787,15 +787,15 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-4xl mx-4 bg-white rounded-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-        <div className="px-8 py-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex items-center justify-between">
+      <div className="relative w-full max-w-4xl mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
+        <div className="px-8 py-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-between">
           <div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">Cadastrar Novo Funcionário</h3>
-            <p className="text-sm text-gray-500">Preencha os dados abaixo para cadastrar um novo funcionário no sistema</p>
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">Cadastrar Novo Funcionário</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Preencha os dados abaixo para cadastrar um novo funcionário no sistema</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             aria-label="Fechar"
           >
             <X className="w-5 h-5" />
@@ -804,12 +804,12 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
         {/* Mensagem de aviso */}
         {warningMessage && (
-          <div className="mx-6 mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <div className="mx-6 mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
             <div className="flex items-start space-x-3">
-              <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+              <AlertCircle className="w-5 h-5 text-yellow-500 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
               <div>
-                <p className="text-sm font-medium text-yellow-800">Atenção</p>
-                <p className="text-sm text-yellow-700 mt-1">{warningMessage}</p>
+                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">Atenção</p>
+                <p className="text-sm text-yellow-700 dark:text-yellow-400 mt-1">{warningMessage}</p>
               </div>
             </div>
           </div>
@@ -830,10 +830,10 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
                           isActive
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                            ? 'bg-blue-600 dark:bg-blue-500 border-blue-600 dark:border-blue-500 text-white shadow-sm'
                             : isCompleted
-                            ? 'bg-green-500 border-green-500 text-white'
-                            : 'bg-white border-gray-300 text-gray-400'
+                            ? 'bg-green-500 dark:bg-green-600 border-green-500 dark:border-green-600 text-white'
+                            : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
                         }`}
                       >
                         {isCompleted ? (
@@ -843,7 +843,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                         )}
                       </div>
                       <span className={`mt-1.5 text-xs font-medium transition-colors duration-200 ${
-                        isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'
+                        isActive ? 'text-blue-600 dark:text-blue-400' : isCompleted ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'
                       }`}>
                         {step.title}
                       </span>
@@ -852,8 +852,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   {index < steps.length - 1 && (
                     <div className={`flex-1 h-px mx-3 transition-all duration-200 ${
                       isCompleted 
-                        ? 'bg-gradient-to-r from-green-500 to-green-400' 
-                        : 'bg-gray-200'
+                        ? 'bg-gradient-to-r from-green-500 to-green-400 dark:from-green-600 dark:to-green-500' 
+                        : 'bg-gray-200 dark:bg-gray-700'
                     }`} />
                   )}
                 </React.Fragment>
@@ -872,62 +872,62 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           {/* Etapa 1: Dados Pessoais */}
           {currentStep === 1 && (
           <div className="space-y-6">
-            <div className="border-l-4 border-blue-500 pl-4">
-              <h4 className="text-xl font-bold text-gray-900">Dados Pessoais</h4>
-              <p className="text-sm text-gray-500 mt-0.5">Informações básicas do funcionário</p>
+            <div className="border-l-4 border-blue-500 dark:border-blue-400 pl-4">
+              <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Dados Pessoais</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Informações básicas do funcionário</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Nome Completo *
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => handleInputChange('name', e.target.value)}
-                  className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.name ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    errors.name ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="Nome completo do funcionário"
                 />
-                {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
+                {errors.name && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.name}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Email *
                 </label>
                 <input
                   type="email"
                   value={formData.email}
                   onChange={(e) => handleInputChange('email', e.target.value)}
-                  className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.email ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    errors.email ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="email@empresa.com"
                 />
-                {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+                {errors.email && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.email}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   CPF *
                 </label>
                 <input
                   type="text"
                   value={formData.cpf}
                   onChange={(e) => handleCPFChange(e.target.value)}
-                  className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.cpf ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    errors.cpf ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="000.000.000-00"
                   maxLength={14}
                 />
-                {errors.cpf && <p className="text-red-500 text-xs mt-1">{errors.cpf}</p>}
+                {errors.cpf && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.cpf}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Data de Nascimento *
                 </label>
                 <input
@@ -955,15 +955,15 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   }}
                   placeholder="dd/mm/aaaa"
                   maxLength={10}
-                  className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.birthDate ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    errors.birthDate ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 />
-                {errors.birthDate && <p className="text-red-500 text-xs mt-1">{errors.birthDate}</p>}
+                {errors.birthDate && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.birthDate}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Senha Temporária *
                 </label>
                 <div className="relative">
@@ -971,15 +971,15 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     type={showPassword ? 'text' : 'password'}
                     value={formData.password}
                     onChange={(e) => handleInputChange('password', e.target.value)}
-                    className={`w-full px-3 py-2.5 pr-10 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.password ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 pr-10 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.password ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="Mínimo 6 caracteres"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -988,11 +988,11 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     )}
                   </button>
                 </div>
-                {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+                {errors.password && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.password}</p>}
               </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Confirmar Senha *
                   </label>
                 <div className="relative">
@@ -1005,15 +1005,15 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                         setErrors(prev => ({ ...prev, confirmPassword: '' }));
                       }
                     }}
-                    className={`w-full px-3 py-2.5 pr-10 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.confirmPassword ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 pr-10 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.confirmPassword ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="Confirme a senha"
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
                   >
                     {showConfirmPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -1022,7 +1022,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     )}
                   </button>
                 </div>
-                {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
+                {errors.confirmPassword && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.confirmPassword}</p>}
               </div>
             </div>
           </div>
@@ -1031,15 +1031,15 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           {/* Etapa 2: Dados Profissionais */}
           {currentStep === 2 && (
           <div className="space-y-6">
-            <div className="border-l-4 border-blue-500 pl-4">
-              <h4 className="text-xl font-bold text-gray-900">Dados Profissionais</h4>
-              <p className="text-sm text-gray-500 mt-0.5">Informações profissionais e contratuais</p>
+            <div className="border-l-4 border-blue-500 dark:border-blue-400 pl-4">
+              <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Dados Profissionais</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Informações profissionais e contratuais</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Linha 1: Empresa | Polo */}
               {/* Campo Empresa */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Empresa *
                   </label>
 
@@ -1058,26 +1058,26 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     onFocus={() => setShowCompanyDropdown(true)}
                     onBlur={() => setTimeout(() => setShowCompanyDropdown(false), 200)}
                     placeholder="Digite para buscar a empresa..."
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.company ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.company ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                   />
                   
                   {/* Dropdown com resultados */}
                   {showCompanyDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
                       {filteredCompanies.length > 0 ? (
                         filteredCompanies.map((company) => (
                           <div
                             key={company}
                             onClick={() => selectCompany(company)}
-                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
                           >
                             {company}
                           </div>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-gray-500 text-sm">
+                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
                           Nenhuma empresa encontrada
                         </div>
                       )}
@@ -1086,20 +1086,20 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
               </div>
 
                 {errors.company && (
-                  <p className="text-red-500 text-xs mt-1">{errors.company}</p>
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.company}</p>
                 )}
             </div>
 
               {/* Campo Polo */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Polo *
                 </label>
                 <select
                   value={formData.polo}
                   onChange={(e) => handleInputChange('polo', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.polo ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
+                    errors.polo ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 >
                   <option value="">Selecione o polo</option>
@@ -1107,7 +1107,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   <option value="GOIÁS">GOIÁS</option>
                 </select>
                 {errors.polo && (
-                  <p className="text-red-500 text-xs mt-1 flex items-center">
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                     <AlertCircle className="w-3 h-3 mr-1" />
                     {errors.polo}
                   </p>
@@ -1116,7 +1116,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               {/* Linha 2: Setor | Cargo */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Setor *
                 </label>
 
@@ -1135,24 +1135,24 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     onFocus={() => setShowSectorDropdown(true)}
                     onBlur={() => setTimeout(() => setShowSectorDropdown(false), 200)}
                     placeholder="Digite para buscar o setor..."
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
 
                   {/* Dropdown com resultados */}
                   {showSectorDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
                       {filteredSectors.length > 0 ? (
                         filteredSectors.map((sector) => (
                           <div
                             key={sector}
                             onClick={() => selectSector(sector)}
-                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
                           >
                             {sector}
                           </div>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-gray-500 text-sm">
+                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
                           Nenhum setor encontrado
                         </div>
                       )}
@@ -1161,12 +1161,12 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 {errors.sector && (
-                  <p className="text-red-500 text-xs mt-1">{errors.sector}</p>
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.sector}</p>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Cargo *
                 </label>
 
@@ -1185,24 +1185,24 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     onFocus={() => setShowPositionDropdown(true)}
                     onBlur={() => setTimeout(() => setShowPositionDropdown(false), 200)}
                     placeholder="Digite para buscar o cargo..."
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
 
                   {/* Dropdown com resultados */}
                   {showPositionDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
                       {filteredPositions.length > 0 ? (
                         filteredPositions.map((position) => (
                           <div
                             key={position}
                             onClick={() => selectPosition(position)}
-                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
                           >
                             {position}
                           </div>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-gray-500 text-sm">
+                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
                           Nenhum cargo encontrado
                         </div>
                       )}
@@ -1211,13 +1211,13 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 {errors.position && (
-                  <p className="text-red-500 text-xs mt-1">{errors.position}</p>
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.position}</p>
                 )}
               </div>
 
               {/* Linha 3: Centro de Custo | Tomador */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Centro de Custo *
                 </label>
 
@@ -1236,24 +1236,24 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     onFocus={() => setShowCostCenterDropdown(true)}
                     onBlur={() => setTimeout(() => setShowCostCenterDropdown(false), 200)}
                     placeholder="Digite para buscar o centro de custo..."
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
 
                   {/* Dropdown com resultados */}
                   {showCostCenterDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
                       {filteredCostCenters.length > 0 ? (
                         filteredCostCenters.map((costCenter) => (
                           <div
                             key={costCenter}
                             onClick={() => selectCostCenter(costCenter)}
-                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
                           >
                             {costCenter}
                           </div>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-gray-500 text-sm">
+                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
                           Nenhum centro de custo encontrado
                         </div>
                       )}
@@ -1262,12 +1262,12 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 {errors.costCenter && (
-                  <p className="text-red-500 text-xs mt-1">{errors.costCenter}</p>
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.costCenter}</p>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tomador *
                 </label>
 
@@ -1290,24 +1290,24 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                       setTimeout(() => setShowTomadorDropdown(false), 200);
                     }}
                     placeholder="Digite para buscar o tomador..."
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
 
                   {/* Dropdown com resultados */}
                   {showTomadorDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
                       {filteredTomadores.length > 0 ? (
                         filteredTomadores.map((tomador) => (
                           <div
                             key={tomador}
                             onClick={() => selectTomador(tomador)}
-                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
                           >
                             {tomador}
                           </div>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-gray-500 text-sm">
+                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
                           Nenhum tomador encontrado
                         </div>
                       )}
@@ -1316,20 +1316,20 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 {errors.client && (
-                  <p className="text-red-500 text-xs mt-1">{errors.client}</p>
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.client}</p>
                 )}
               </div>
 
               {/* Linha 4: Modalidade | Categoria Financeira */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Modalidade *
                 </label>
                 <select
                   value={formData.modality}
                   onChange={(e) => handleInputChange('modality', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.modality ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
+                    errors.modality ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 >
                   <option value="">Selecione a modalidade</option>
@@ -1338,7 +1338,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   <option value="ESTAGIARIO">ESTAGIÁRIO</option>
                 </select>
                 {errors.modality && (
-                  <p className="text-red-500 text-xs mt-1 flex items-center">
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                     <AlertCircle className="w-3 h-3 mr-1" />
                     {errors.modality}
                   </p>
@@ -1346,14 +1346,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Categoria Financeira *
                 </label>
                 <select
                   value={formData.categoriaFinanceira}
                   onChange={(e) => handleInputChange('categoriaFinanceira', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.categoriaFinanceira ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
+                    errors.categoriaFinanceira ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 >
                   <option value="">Selecione a categoria</option>
@@ -1361,7 +1361,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   <option value="DESPESA">DESPESA</option>
                 </select>
                 {errors.categoriaFinanceira && (
-                  <p className="text-red-500 text-xs mt-1 flex items-center">
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                     <AlertCircle className="w-3 h-3 mr-1" />
                     {errors.categoriaFinanceira}
                   </p>
@@ -1370,19 +1370,19 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
               {/* Linha 5: Data de Admissão | Trabalho Remoto */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Data de Admissão *
                 </label>
                 <input
                   type="date"
                   value={formData.hireDate}
                   onChange={(e) => handleInputChange('hireDate', e.target.value)}
-                  className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.hireDate ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    errors.hireDate ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 />
                 {errors.hireDate && (
-                  <p className="text-red-500 text-sm mt-1">{errors.hireDate}</p>
+                  <p className="text-red-500 dark:text-red-400 text-sm mt-1">{errors.hireDate}</p>
                 )}
               </div>
 
@@ -1392,9 +1392,9 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   id="isRemote"
                   checked={formData.isRemote}
                   onChange={(e) => handleInputChange('isRemote', e.target.checked)}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
                 />
-                <label htmlFor="isRemote" className="text-sm font-medium text-gray-700">
+                <label htmlFor="isRemote" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Trabalho Remoto
                 </label>
               </div>
@@ -1405,13 +1405,13 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           {/* Etapa 3: Valores e Adicionais */}
           {currentStep === 3 && (
           <div className="space-y-6">
-            <div className="border-l-4 border-blue-500 pl-4">
-              <h4 className="text-xl font-bold text-gray-900">Valores e Adicionais</h4>
-              <p className="text-sm text-gray-500 mt-0.5">Valores salariais e benefícios</p>
+            <div className="border-l-4 border-blue-500 dark:border-blue-400 pl-4">
+              <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Valores e Adicionais</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Valores salariais e benefícios</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Salário (R$) *
                   </label>
                   <input
@@ -1420,13 +1420,13 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     min="0"
                     value={formData.salary}
                     onChange={(e) => handleInputChange('salary', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.salary ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.salary ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="0.00"
                   />
                   {errors.salary && (
-                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                    <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
                       {errors.salary}
                     </p>
@@ -1434,7 +1434,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Salário Família (R$)
                   </label>
                   <input
@@ -1443,13 +1443,13 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     min="0"
                     value={formData.familySalary}
                     onChange={(e) => handleInputChange('familySalary', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.familySalary ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.familySalary ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="0.00"
                   />
                   {errors.familySalary && (
-                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                    <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
                       {errors.familySalary}
                     </p>
@@ -1457,7 +1457,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Vale Alimentação Diário (R$) *
                 </label>
                 <input
@@ -1466,13 +1466,13 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     min="0"
                     value={formData.dailyFoodVoucher}
                     onChange={(e) => handleInputChange('dailyFoodVoucher', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.dailyFoodVoucher ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.dailyFoodVoucher ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="33.40"
                   />
                   {errors.dailyFoodVoucher && (
-                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                    <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
                       {errors.dailyFoodVoucher}
                     </p>
@@ -1480,7 +1480,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Vale Transporte Diário (R$) *
                   </label>
                   <input
@@ -1489,13 +1489,13 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     min="0"
                     value={formData.dailyTransportVoucher}
                     onChange={(e) => handleInputChange('dailyTransportVoucher', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.dailyTransportVoucher ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.dailyTransportVoucher ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="11.00"
                   />
                   {errors.dailyTransportVoucher && (
-                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                    <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
                       {errors.dailyTransportVoucher}
                     </p>
@@ -1503,7 +1503,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Acréscimos Fixos (R$)
                 </label>
                 <input
@@ -1512,28 +1512,28 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   min="0"
                   value={formData.fixedAdjustments}
                   onChange={(e) => handleInputChange('fixedAdjustments', e.target.value)}
-                  className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.fixedAdjustments ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    errors.fixedAdjustments ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="0.00"
                 />
-                {errors.fixedAdjustments && (
-                  <p className="text-red-500 text-xs mt-1 flex items-center">
-                    <AlertCircle className="w-3 h-3 mr-1" />
-                    {errors.fixedAdjustments}
-                  </p>
-                )}
+                  {errors.fixedAdjustments && (
+                    <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
+                      <AlertCircle className="w-3 h-3 mr-1" />
+                      {errors.fixedAdjustments}
+                    </p>
+                  )}
               </div>
 
               <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Periculosidade
                   </label>
                   <select
                     value={formData.dangerPay}
                     onChange={(e) => handleInputChange('dangerPay', e.target.value)}
-                    className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                      errors.dangerPay ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
+                      errors.dangerPay ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                   >
                     <option value="">Selecione a porcentagem</option>
@@ -1560,7 +1560,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     <option value="100">100%</option>
                   </select>
                   {errors.dangerPay && (
-                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                    <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
                       {errors.dangerPay}
                     </p>
@@ -1568,14 +1568,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Insalubridade
                   </label>
                   <select
                     value={formData.unhealthyPay}
                     onChange={(e) => handleInputChange('unhealthyPay', e.target.value)}
-                    className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                      errors.unhealthyPay ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
+                      errors.unhealthyPay ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                   >
                     <option value="">Selecione a porcentagem</option>
@@ -1602,7 +1602,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     <option value="100">100%</option>
                   </select>
                   {errors.unhealthyPay && (
-                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                    <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
                       {errors.unhealthyPay}
                     </p>
@@ -1615,13 +1615,13 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           {/* Etapa 4: Dados Bancários */}
           {currentStep === 4 && (
           <div className="space-y-6">
-            <div className="border-l-4 border-blue-500 pl-4">
-              <h4 className="text-xl font-bold text-gray-900">Dados Bancários</h4>
-              <p className="text-sm text-gray-500 mt-0.5">Informações bancárias</p>
+            <div className="border-l-4 border-blue-500 dark:border-blue-400 pl-4">
+              <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Dados Bancários</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Informações bancárias</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Banco *
                 </label>
 
@@ -1640,24 +1640,24 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     onFocus={() => setShowBankDropdown(true)}
                     onBlur={() => setTimeout(() => setShowBankDropdown(false), 200)}
                     placeholder="Digite para buscar o banco..."
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
 
                   {/* Dropdown com resultados */}
                   {showBankDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
                       {filteredBanks.length > 0 ? (
                         filteredBanks.map((bank) => (
                           <div
                             key={bank}
                             onClick={() => selectBank(bank)}
-                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
                           >
                             {bank}
                           </div>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-gray-500 text-sm">
+                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
                           Nenhum banco encontrado
                         </div>
                       )}
@@ -1666,19 +1666,19 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
 
                 {errors.bank && (
-                  <p className="text-red-500 text-xs mt-1">{errors.bank}</p>
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.bank}</p>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tipo de Conta *
                 </label>
                 <select
                   value={formData.accountType}
                   onChange={(e) => handleInputChange('accountType', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.accountType ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
+                    errors.accountType ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 >
                   <option value="">Selecione o tipo</option>
@@ -1688,93 +1688,93 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     </option>
                   ))}
                 </select>
-                {errors.accountType && <p className="text-red-500 text-xs mt-1">{errors.accountType}</p>}
+                {errors.accountType && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.accountType}</p>}
               </div>
 
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Agência *
                   </label>
                   <input
                     type="text"
                     value={formData.agency}
                     onChange={(e) => handleInputChange('agency', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.agency ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.agency ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="1234"
                   />
-                  {errors.agency && <p className="text-red-500 text-xs mt-1">{errors.agency}</p>}
+                  {errors.agency && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.agency}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Operação *
                   </label>
                   <input
                     type="text"
                     value={formData.operation}
                     onChange={(e) => handleInputChange('operation', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.operation ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.operation ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="01"
                   />
-                  {errors.operation && <p className="text-red-500 text-xs mt-1">{errors.operation}</p>}
+                  {errors.operation && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.operation}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Conta *
                   </label>
                   <input
                     type="text"
                     value={formData.account}
                     onChange={(e) => handleInputChange('account', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.account ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.account ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="12345"
                   />
-                  {errors.account && <p className="text-red-500 text-xs mt-1">{errors.account}</p>}
+                  {errors.account && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.account}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Dígito *
                   </label>
                   <input
                     type="text"
                     value={formData.digit}
                     onChange={(e) => handleInputChange('digit', e.target.value)}
-                    className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.digit ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.digit ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="6"
                     maxLength={2}
                   />
-                  {errors.digit && <p className="text-red-500 text-xs mt-1">{errors.digit}</p>}
+                  {errors.digit && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.digit}</p>}
                 </div>
               </div>
             </div>
 
             {/* Dados PIX (continuação da Etapa 4) */}
             <div className="space-y-4 mt-6">
-            <div className="border-l-4 border-blue-500 pl-4 mt-6">
-              <h4 className="text-xl font-bold text-gray-900">Dados PIX</h4>
-              <p className="text-sm text-gray-500 mt-0.5">Configure a chave PIX</p>
+            <div className="border-l-4 border-blue-500 dark:border-blue-400 pl-4 mt-6">
+              <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Dados PIX</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Configure a chave PIX</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tipo de Chave *
                 </label>
                 <select
                   value={formData.pixKeyType}
                   onChange={(e) => handleInputChange('pixKeyType', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white ${
-                    errors.pixKeyType ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
+                    errors.pixKeyType ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 >
                   <option value="">Selecione o tipo</option>
@@ -1784,23 +1784,23 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     </option>
                   ))}
                 </select>
-                {errors.pixKeyType && <p className="text-red-500 text-xs mt-1">{errors.pixKeyType}</p>}
+                {errors.pixKeyType && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.pixKeyType}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Chave PIX *
                 </label>
                 <input
                   type="text"
                   value={formData.pixKey}
                   onChange={(e) => handleInputChange('pixKey', e.target.value)}
-                  className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.pixKey ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    errors.pixKey ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="Digite a chave PIX"
                 />
-                {errors.pixKey && <p className="text-red-500 text-xs mt-1">{errors.pixKey}</p>}
+                {errors.pixKey && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.pixKey}</p>}
               </div>
             </div>
           </div>
@@ -1810,56 +1810,56 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           {/* Etapa 5: Horário de Trabalho */}
           {currentStep === 5 && (
           <div className="space-y-6">
-            <div className="border-l-4 border-blue-500 pl-4">
-              <h4 className="text-xl font-bold text-gray-900">Horário de Trabalho</h4>
-              <p className="text-sm text-gray-500 mt-0.5">Defina os horários de trabalho do funcionário</p>
+            <div className="border-l-4 border-blue-500 dark:border-blue-400 pl-4">
+              <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Horário de Trabalho</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Defina os horários de trabalho do funcionário</p>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Início *
                 </label>
                 <input
                   type="time"
                   value={formData.workStartTime}
                   onChange={(e) => handleInputChange('workStartTime', e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Fim *
                 </label>
                 <input
                   type="time"
                   value={formData.workEndTime}
                   onChange={(e) => handleInputChange('workEndTime', e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Início Almoço *
                 </label>
                 <input
                   type="time"
                   value={formData.lunchStartTime}
                   onChange={(e) => handleInputChange('lunchStartTime', e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Fim Almoço *
                 </label>
                 <input
                   type="time"
                   value={formData.lunchEndTime}
                   onChange={(e) => handleInputChange('lunchEndTime', e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
             </div>
@@ -1881,11 +1881,11 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           )}
 
           {/* Botões de Navegação */}
-          <div className="flex justify-between items-center pt-6 border-t mt-6">
+          <div className="flex justify-between items-center pt-6 border-t dark:border-gray-700 mt-6">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+              className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
             >
               Cancelar
             </button>
@@ -1895,7 +1895,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
             <button
                   type="button"
                   onClick={prevStep}
-                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors flex items-center space-x-2"
+                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors flex items-center space-x-2"
                 >
                   <ChevronLeft className="w-4 h-4" />
                   <span>Anterior</span>
@@ -1906,7 +1906,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <button
                   type="button"
                   onClick={nextStep}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors flex items-center space-x-2"
+                  className="px-6 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors flex items-center space-x-2"
                 >
                   <span>Próximo</span>
                   <ChevronRight className="w-4 h-4" />
@@ -1924,7 +1924,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     }
                   }}
               disabled={isSubmitting}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
+                  className="px-6 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
             >
               {isSubmitting ? (
                 <>

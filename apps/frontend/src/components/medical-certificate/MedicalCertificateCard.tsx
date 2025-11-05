@@ -132,23 +132,23 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
     <Card className="w-full">
       <CardHeader>
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-50 rounded-lg">
-            <FileText className="w-5 h-5 text-blue-600" />
+          <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+            <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900">Registrar Ausência</h3>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Registrar Ausência</h3>
         </div>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Tipo de Atestado */}
           <div>
-            <label className="block text-sm font-semibold text-gray-900 mb-2">
+            <label className="block text-sm font-semibold text-gray-900 dark:text-gray-300 mb-2">
               Tipo de Ausência
             </label>
             <select
               value={formData.type}
               onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-              className="input w-full"
+              className="input w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
               required
             >
               {certificateTypes.map((type) => (
@@ -162,9 +162,9 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
           {/* Datas */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-semibold text-gray-900 mb-2">
+              <label className="block text-sm font-semibold text-gray-900 dark:text-gray-300 mb-2">
                 <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-gray-600" />
+                  <Calendar className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                   Data de Início
                 </div>
               </label>
@@ -177,9 +177,9 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-900 mb-2">
+              <label className="block text-sm font-semibold text-gray-900 dark:text-gray-300 mb-2">
                 <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-gray-600" />
+                  <Calendar className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                   Data de Fim
                 </div>
               </label>
@@ -195,22 +195,22 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
 
           {/* Descrição */}
           <div>
-            <label className="block text-sm font-semibold text-gray-900 mb-2">
+            <label className="block text-sm font-semibold text-gray-900 dark:text-gray-300 mb-2">
               Observações (Opcional)
             </label>
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="input w-full min-h-[100px] resize-none"
+              className="input w-full min-h-[100px] resize-none bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
               placeholder="Adicione observações sobre a ausência..."
             />
           </div>
 
           {/* Upload de Arquivo */}
           <div>
-            <label className="block text-sm font-semibold text-gray-900 mb-2">
+            <label className="block text-sm font-semibold text-gray-900 dark:text-gray-300 mb-2">
               <div className="flex items-center gap-2">
-                <Upload className="w-4 h-4 text-gray-600" />
+                <Upload className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                 Anexar Arquivo *
               </div>
             </label>
@@ -218,15 +218,15 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
               type="file"
               onChange={handleFileChange}
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-900/30 file:text-blue-700 dark:file:text-blue-400 hover:file:bg-blue-100 dark:hover:file:bg-blue-900/50"
             />
             {file && (
-              <div className="flex items-center gap-2 mt-2 text-sm text-green-600">
+              <div className="flex items-center gap-2 mt-2 text-sm text-green-600 dark:text-green-400">
                 <CheckCircle className="w-4 h-4" />
                 <span>Arquivo selecionado: {file.name}</span>
               </div>
             )}
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
               Formatos aceitos: PDF, JPG, PNG, DOC, DOCX (Obrigatório)
             </p>
           </div>

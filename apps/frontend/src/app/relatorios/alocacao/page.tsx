@@ -190,19 +190,19 @@ export default function AlocacaoPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'FINAL_DE_SEMANA':
-        return 'bg-gray-400';
+        return 'bg-gray-400 dark:bg-gray-600';
       case 'FALTA':
-        return 'bg-red-500';
+        return 'bg-red-500 dark:bg-red-600';
       case 'ATESTADO':
-        return 'bg-yellow-500';
+        return 'bg-yellow-500 dark:bg-yellow-600';
       case 'FERIAS':
-        return 'bg-green-500';
+        return 'bg-green-500 dark:bg-green-600';
       case 'NAO_ADMITIDO':
-        return 'bg-gray-300';
+        return 'bg-gray-300 dark:bg-gray-700';
       case 'FUTURO':
-        return 'bg-gray-200';
+        return 'bg-gray-200 dark:bg-gray-800';
       default:
-        return 'bg-gray-200';
+        return 'bg-gray-200 dark:bg-gray-800';
     }
   };
 
@@ -228,24 +228,24 @@ export default function AlocacaoPage() {
   const getTextColor = (status: string) => {
     // Se for um centro de custo específico (não um status especial)
     if (status && !['FINAL_DE_SEMANA', 'FALTA', 'ATESTADO', 'FERIAS', 'NAO_ADMITIDO', 'FUTURO'].includes(status)) {
-      return 'text-blue-600 font-semibold'; // Cor padrão para centros de custo
+      return 'text-blue-600 dark:text-blue-400 font-semibold'; // Cor padrão para centros de custo
     }
     
     switch (status) {
       case 'FINAL_DE_SEMANA':
-        return 'text-gray-400';
+        return 'text-gray-400 dark:text-gray-500';
       case 'FALTA':
-        return 'text-red-600 font-semibold';
+        return 'text-red-600 dark:text-red-400 font-semibold';
       case 'ATESTADO':
-        return 'text-yellow-600 font-semibold';
+        return 'text-yellow-600 dark:text-yellow-400 font-semibold';
       case 'FERIAS':
-        return 'text-green-600 font-semibold';
+        return 'text-green-600 dark:text-green-400 font-semibold';
       case 'NAO_ADMITIDO':
-        return 'text-gray-400';
+        return 'text-gray-400 dark:text-gray-500';
       case 'FUTURO':
-        return 'text-gray-300';
+        return 'text-gray-300 dark:text-gray-600';
       default:
-        return 'text-blue-600 font-semibold'; // Cor padrão para centros de custo
+        return 'text-blue-600 dark:text-blue-400 font-semibold'; // Cor padrão para centros de custo
     }
   };
 
@@ -444,10 +444,10 @@ export default function AlocacaoPage() {
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando...</p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
         </div>
       </div>
     );
@@ -508,9 +508,9 @@ export default function AlocacaoPage() {
         {/* Header */}
         <div className="text-center">
           <div className="flex items-center justify-center space-x-3 mb-2">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Alocação de Funcionários</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Alocação de Funcionários</h1>
           </div>
-          <p className="text-sm sm:text-base text-gray-600">Visualize a alocação de todos os funcionários</p>
+          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">Visualize a alocação de todos os funcionários</p>
         </div>
 
         {/* Filtros */}
@@ -518,22 +518,22 @@ export default function AlocacaoPage() {
           <CardHeader className="border-b-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-900" />
-                <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+                <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
               </div>
               <div className="flex items-center space-x-4">
                 {!isFiltersMinimized && (
                   <>
                     <button
                       onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                      className="flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      className="flex items-center justify-center w-8 h-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                       title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
                     </button>
                     <button
                       onClick={clearFilters}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                       title="Limpar todos os filtros"
                     >
                       <RotateCcw className="w-5 h-5" />
@@ -542,7 +542,7 @@ export default function AlocacaoPage() {
                 )}
                 <button
                   onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                  className="flex items-center justify-center w-8 h-8 text-gray-900 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                   title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
                 >
                   {isFiltersMinimized ? (
@@ -559,17 +559,17 @@ export default function AlocacaoPage() {
               <div className="space-y-4">
               {/* Filtro Principal - Busca Geral */}
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Buscar Funcionário
                 </label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                   <input
                     type="text"
                     value={filters.search}
                     onChange={handleSearchChange}
                     placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
                 </div>
               </div>
@@ -577,15 +577,15 @@ export default function AlocacaoPage() {
               {/* Filtros de Período - Sempre Visíveis */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Mês
                   </label>
                   <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                     <select
                       value={filters.month}
                       onChange={handleMonthChange}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                     >
                       {monthOptions.map(month => (
                         <option key={month.value} value={month.value}>
@@ -597,15 +597,15 @@ export default function AlocacaoPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Ano
                   </label>
                   <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                     <select
                       value={filters.year}
                       onChange={handleYearChange}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                     >
                       {yearOptions.map(year => (
                         <option key={year} value={year}>
@@ -619,25 +619,25 @@ export default function AlocacaoPage() {
 
               {/* Filtros Avançados - Condicionais */}
               {showAdvancedFilters && (
-                <div className="border-t pt-4 space-y-4">
+                <div className="border-t dark:border-gray-700 pt-4 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-medium text-gray-700">Filtros Específicos</h4>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros Específicos</h4>
                   </div>
                   
                   {/* Grupo 1: Informações Básicas */}
                   <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Básicas</h5>
+                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Informações Básicas</h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Setor
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.department}
                             onChange={handleDepartmentChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os setores</option>
                             {DEPARTMENTS_LIST.map(dept => (
@@ -650,15 +650,15 @@ export default function AlocacaoPage() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Cargo
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.position}
                             onChange={handlePositionChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os cargos</option>
                             {CARGOS_LIST.map(cargo => (
@@ -671,15 +671,15 @@ export default function AlocacaoPage() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Empresa
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.company}
                             onChange={handleCompanyChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todas as empresas</option>
                             {COMPANIES_LIST.map(company => (
@@ -695,18 +695,18 @@ export default function AlocacaoPage() {
 
                   {/* Grupo 2: Informações Financeiras */}
                   <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Financeiras</h5>
+                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Informações Financeiras</h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Centro de Custo
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.costCenter}
                             onChange={handleCostCenterChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os centros</option>
                             {COST_CENTERS_LIST.map(center => (
@@ -719,15 +719,15 @@ export default function AlocacaoPage() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Tomador
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.client}
                             onChange={handleClientChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os tomadores</option>
                             {CLIENTS_LIST.map(client => (
@@ -740,15 +740,15 @@ export default function AlocacaoPage() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Polo
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.polo}
                             onChange={handlePoloChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os polos</option>
                             {POLOS_LIST.map(polo => (
@@ -761,15 +761,15 @@ export default function AlocacaoPage() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Modalidade
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.modality}
                             onChange={handleModalityChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todas as modalidades</option>
                             {MODALITIES_LIST.map(modality => (
@@ -785,18 +785,18 @@ export default function AlocacaoPage() {
 
                   {/* Grupo 3: Informações Bancárias */}
                   <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Informações Bancárias</h5>
+                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Informações Bancárias</h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Banco
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.bank}
                             onChange={handleBankChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os bancos</option>
                             {BANKS_LIST.map(bank => (
@@ -809,15 +809,15 @@ export default function AlocacaoPage() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Tipo de Conta
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                           <select
                             value={filters.accountType}
                             onChange={handleAccountTypeChange}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os tipos</option>
                             {ACCOUNT_TYPES_LIST.map(type => (
@@ -842,12 +842,12 @@ export default function AlocacaoPage() {
           <CardHeader>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0">
-                  <Users className="w-6 h-6 text-blue-600" />
+                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                  <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900">Alocação de Funcionários</h3>
-                  <p className="text-sm text-gray-600">Dados de alocação dos funcionários</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Alocação de Funcionários</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Dados de alocação dos funcionários</p>
                 </div>
               </div>
             </div>
@@ -855,9 +855,9 @@ export default function AlocacaoPage() {
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="border-b border-gray-200">
+                <thead className="border-b border-gray-200 dark:border-gray-700">
                   <tr>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-white z-10 border-r border-gray-200">
+                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
                       Funcionário
                     </th>
                     {/* Colunas dos dias do mês */}
@@ -868,55 +868,55 @@ export default function AlocacaoPage() {
                       const dayName = dayNames[date.getDay()];
                       
                       return (
-                        <th key={day} className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-16">
+                        <th key={day} className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-16">
                           <div>{dayName}</div>
                           <div>({day}/{filters.month})</div>
                         </th>
                       );
                     })}
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-white z-10 border-l border-gray-200">
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider sticky right-0 bg-white dark:bg-gray-800 z-10 border-l border-gray-200 dark:border-gray-700">
                       Ações
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {loadingEmployees ? (
                     <tr>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-gray-200">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
-                            <span className="text-gray-600">Carregando...</span>
+                            <span className="text-gray-600 dark:text-gray-400">Carregando...</span>
                         </div>
                       </td>
                       <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-3 sm:px-6 py-4 text-center">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
-                            <span className="text-gray-600">Carregando...</span>
+                            <span className="text-gray-600 dark:text-gray-400">Carregando...</span>
                         </div>
                       </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white dark:bg-gray-800 z-10 border-l border-gray-200 dark:border-gray-700">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
-                            <span className="text-gray-600">Carregando...</span>
+                            <span className="text-gray-600 dark:text-gray-400">Carregando...</span>
                         </div>
                       </td>
                     </tr>
                   ) : employees.length === 0 ? (
                     <tr>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-gray-200">
-                        <div className="text-gray-500">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
+                        <div className="text-gray-500 dark:text-gray-400">
                           <p>Nenhum funcionário encontrado.</p>
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
                         </div>
                       </td>
                       <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-3 sm:px-6 py-4 text-center">
-                        <div className="text-gray-500">
+                        <div className="text-gray-500 dark:text-gray-400">
                           <p>Nenhum funcionário encontrado.</p>
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
                         </div>
                       </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
-                        <div className="text-gray-500">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white dark:bg-gray-800 z-10 border-l border-gray-200 dark:border-gray-700">
+                        <div className="text-gray-500 dark:text-gray-400">
                           <p>Nenhum funcionário encontrado.</p>
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
                         </div>
@@ -924,16 +924,16 @@ export default function AlocacaoPage() {
                     </tr>
                   ) : (
                     employees.map((employee: PayrollEmployee) => (
-                      <tr key={employee.id} className="hover:transition-colors">
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-gray-200">
+                      <tr key={employee.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
                           <div>
-                            <div className="text-sm font-medium text-gray-900">
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                               {employee.name}
                             </div>
-                            <div className="text-xs sm:text-sm text-gray-500">
+                            <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                               {employee.department || 'N/A'}
                             </div>
-                            <div className="text-xs text-gray-400">
+                            <div className="text-xs text-gray-400 dark:text-gray-500">
                               {employee.polo || 'N/A'}
                             </div>
                           </div>
@@ -952,12 +952,12 @@ export default function AlocacaoPage() {
                           
                           // Verificar se é futuro
                           if (date > today) {
-                            cellClass += 'text-gray-400';
+                            cellClass += 'text-gray-400 dark:text-gray-600';
                             cellContent = '-';
                           }
                           // Verificar se é final de semana
                           else if (date.getDay() === 0 || date.getDay() === 6) {
-                            cellClass += 'text-gray-400';
+                            cellClass += 'text-gray-400 dark:text-gray-500';
                             cellContent = 'FDS';
                           }
                           // Para dias úteis, usar dados reais baseados no funcionário
@@ -976,7 +976,7 @@ export default function AlocacaoPage() {
                               
                               // Se é antes da admissão
                               if (dateString < admissionDateString) {
-                                cellClass += 'text-gray-400';
+                                cellClass += 'text-gray-400 dark:text-gray-500';
                                 cellContent = 'N/A';
                               }
                               // Se é dia da admissão ou depois
@@ -988,33 +988,33 @@ export default function AlocacaoPage() {
                                   if (dayData) {
                                     // Verificar se está em férias
                                     if (dayData.isOnVacation) {
-                                      cellClass += 'text-green-600';
+                                      cellClass += 'text-green-600 dark:text-green-400';
                                       cellContent = 'FÉRIAS';
                                     }
                                     // Verificar se está com atestado médico
                                     else if (dayData.hasMedicalCertificate) {
-                                      cellClass += 'text-yellow-600';
+                                      cellClass += 'text-yellow-600 dark:text-yellow-400';
                                       cellContent = 'ATESTADO';
                                     }
                                     // Se tem pontos, usar o centro de custo do primeiro ponto
                                     else if (dayData.points && dayData.points.length > 0) {
                                       const costCenter = dayData.points[0].costCenter;
-                                      cellClass += 'text-blue-600';
+                                      cellClass += 'text-blue-600 dark:text-blue-400';
                                       cellContent = costCenter || 'N/A';
                                     }
                                     // Se não tem pontos mas deveria ter (dia útil após admissão)
                                     else {
-                                      cellClass += 'text-red-600';
+                                      cellClass += 'text-red-600 dark:text-red-400';
                                       cellContent = 'Falta';
                                     }
                                   } else {
                                     // Se não encontrou dados para o dia, mostrar falta
-                                    cellClass += 'text-red-600';
+                                    cellClass += 'text-red-600 dark:text-red-400';
                                     cellContent = 'Falta';
                                   }
                                 } else {
                                   // Se não tem dados do funcionário ainda, mostrar indicador de carregamento
-                                  cellClass += 'text-gray-400';
+                                  cellClass += 'text-gray-400 dark:text-gray-500';
                                   cellContent = '...';
                                   
                                   // Buscar dados do funcionário em background
@@ -1028,26 +1028,26 @@ export default function AlocacaoPage() {
                                 
                                 if (dayData) {
                                   if (dayData.isOnVacation) {
-                                    cellClass += 'text-green-600';
+                                    cellClass += 'text-green-600 dark:text-green-400';
                                     cellContent = 'FÉRIAS';
                                   } else if (dayData.hasMedicalCertificate) {
-                                    cellClass += 'text-yellow-600';
+                                    cellClass += 'text-yellow-600 dark:text-yellow-400';
                                     cellContent = 'ATESTADO';
                                   } else if (dayData.points && dayData.points.length > 0) {
                                     const costCenter = dayData.points[0].costCenter;
-                                    cellClass += 'text-blue-600';
+                                    cellClass += 'text-blue-600 dark:text-blue-400';
                                     cellContent = costCenter || 'N/A';
                                   } else {
-                                    cellClass += 'text-red-600';
+                                    cellClass += 'text-red-600 dark:text-red-400';
                                     cellContent = 'Falta';
                                   }
                                 } else {
-                                  cellClass += 'text-red-600';
+                                  cellClass += 'text-red-600 dark:text-red-400';
                                   cellContent = 'Falta';
                                 }
                               } else {
                                 // Se não tem dados do funcionário ainda, mostrar indicador de carregamento
-                                cellClass += 'text-gray-400';
+                                cellClass += 'text-gray-400 dark:text-gray-500';
                                 cellContent = '...';
                                 fetchEmployeeData(employee.id);
                               }
@@ -1060,10 +1060,10 @@ export default function AlocacaoPage() {
                             </td>
                           );
                         })}
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white z-10 border-l border-gray-200">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white dark:bg-gray-800 z-10 border-l border-gray-200 dark:border-gray-700">
                           <button
                             onClick={() => handleViewDetails(employee)}
-                            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-yellow-600 hover:text-yellow-600 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors"
+                            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-yellow-600 dark:text-yellow-500 hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors"
                             title="Ver detalhes"
                           >
                             <FileText className="w-4 h-4" />
@@ -1078,8 +1078,8 @@ export default function AlocacaoPage() {
 
             {/* Estatísticas */}
             {employees.length > 0 && (
-              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 rounded-b-lg">
-                <div className="flex items-center justify-between text-sm text-gray-600">
+              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 rounded-b-lg">
+                <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
                   <div className="flex items-center space-x-6">
                     <span>
                       <strong>Período:</strong> {getMonthName(filters.month)} de {filters.year}
@@ -1108,19 +1108,19 @@ export default function AlocacaoPage() {
         {isModalOpen && selectedEmployee && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={handleCloseModal} />
-            <div className="relative w-full max-w-4xl rounded-lg bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto">
+            <div className="relative w-full max-w-4xl rounded-lg bg-white dark:bg-gray-800 p-6 shadow-lg max-h-[90vh] overflow-y-auto">
               <button
                 onClick={handleCloseModal}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                className="absolute top-3 right-3 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 <X className="h-6 w-6" />
               </button>
               
               <div className="mb-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
                   Centro de Custo - {selectedEmployee.name}
                 </h3>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
                   CPF: {selectedEmployee.cpf} | Setor: {selectedEmployee.department}
                 </p>
               </div>
@@ -1129,32 +1129,32 @@ export default function AlocacaoPage() {
               <div className="flex items-center justify-between mb-6">
                 <button
                   onClick={handlePreviousMonth}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
-                  <ChevronLeft className="w-5 h-5" />
+                  <ChevronLeft className="w-5 h-5 text-gray-900 dark:text-gray-100" />
                 </button>
-                <h4 className="text-lg font-semibold text-gray-900">
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   {getModalMonthName(modalCurrentMonth)} de {modalCurrentYear}
                 </h4>
                 <button
                   onClick={handleNextMonth}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
-                  <ChevronRight className="w-5 h-5" />
+                  <ChevronRight className="w-5 h-5 text-gray-900 dark:text-gray-100" />
                 </button>
               </div>
 
               {/* Calendário */}
               {loadingEmployeeData ? (
                 <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <span className="ml-2 text-gray-600">Carregando dados...</span>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400"></div>
+                  <span className="ml-2 text-gray-600 dark:text-gray-400">Carregando dados...</span>
                 </div>
               ) : (
                 <div className="grid grid-cols-7 gap-1 mb-6">
                 {/* Cabeçalho dos dias da semana */}
                 {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day) => (
-                  <div key={day} className="p-2 text-center text-sm font-medium text-gray-500 bg-gray-50">
+                  <div key={day} className="p-2 text-center text-sm font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900">
                     {day}
                   </div>
                 ))}
@@ -1177,14 +1177,14 @@ export default function AlocacaoPage() {
                   return (
                     <div
                       key={day}
-                      className={`p-1 h-16 border border-gray-200 rounded-lg flex flex-col items-center justify-center text-xs font-medium cursor-pointer hover:bg-gray-50 ${
-                        dayStatus.status === 'NAO_ADMITIDO' ? 'bg-gray-100 border-gray-300' : ''
+                      className={`p-1 h-16 border border-gray-200 dark:border-gray-700 rounded-lg flex flex-col items-center justify-center text-xs font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                        dayStatus.status === 'NAO_ADMITIDO' ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600' : ''
                       } ${
-                        dayStatus.status === 'FINAL_DE_SEMANA' ? 'bg-gray-100 border-gray-300' : ''
+                        dayStatus.status === 'FINAL_DE_SEMANA' ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600' : ''
                       }`}
                       title={`${day} - ${getStatusLabel(dayStatus.status)}${dayStatus.costCenter ? ` (${dayStatus.costCenter})` : ''}`}
                     >
-                      <div className="text-gray-600 mb-1">{day}</div>
+                      <div className="text-gray-600 dark:text-gray-400 mb-1">{day}</div>
                       <div className={`text-xs text-center leading-tight ${getTextColor(dayStatus.costCenter || dayStatus.status)}`}>
                         {dayStatus.status === 'NAO_ADMITIDO' ? 'Não Admitido' : (dayStatus.costCenter || getStatusLabel(dayStatus.status))}
                       </div>

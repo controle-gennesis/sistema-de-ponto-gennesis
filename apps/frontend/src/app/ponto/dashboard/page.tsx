@@ -68,10 +68,10 @@ export default function DashboardPage() {
 
   if (loadingUser || !userData) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600">Carregando...</p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
         </div>
       </div>
     );
@@ -105,8 +105,8 @@ export default function DashboardPage() {
       <div className="space-y-8">
       {/* Header */}
       <div className="text-center">
-        <h1 className="text-3xl font-bold text-gray-900">Painel de Funcionários</h1>
-        <p className="mt-2 text-gray-600">Visão geral do sistema de controle de ponto</p>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Painel de Funcionários</h1>
+        <p className="mt-2 text-gray-600 dark:text-gray-400">Visão geral do sistema de controle de ponto</p>
       </div>
 
       {/* Métricas principais */}
@@ -114,12 +114,12 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center">
-              <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0">
-                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+              <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
               </div>
               <div className="ml-3 sm:ml-4 min-w-0">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Total Funcionários</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.totalEmployees}</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Total Funcionários</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.totalEmployees}</p>
               </div>
             </div>
           </CardContent>
@@ -128,12 +128,12 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center">
-              <div className="p-2 sm:p-3 bg-green-100 rounded-lg flex-shrink-0">
-                <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+              <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
+                <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
               </div>
               <div className="ml-3 sm:ml-4 min-w-0">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Presentes Hoje</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.presentToday}</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Presentes Hoje</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.presentToday}</p>
               </div>
             </div>
           </CardContent>
@@ -142,12 +142,12 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center">
-              <div className="p-2 sm:p-3 bg-red-100 rounded-lg flex-shrink-0">
-                <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600" />
+              <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
+                <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
               </div>
               <div className="ml-3 sm:ml-4 min-w-0">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Ausentes Hoje</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.absentToday}</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Ausentes Hoje</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.absentToday}</p>
               </div>
             </div>
           </CardContent>
@@ -156,12 +156,12 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center">
-              <div className="p-2 sm:p-3 bg-yellow-100 rounded-lg flex-shrink-0">
-                <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+              <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex-shrink-0">
+                <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
               </div>
               <div className="ml-3 sm:ml-4 min-w-0">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Pendentes</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.pendingToday}</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Pendentes</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.pendingToday}</p>
               </div>
             </div>
           </CardContent>
@@ -171,21 +171,21 @@ export default function DashboardPage() {
       {/* Gráfico de frequência */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">Taxa de Frequência</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Taxa de Frequência</h2>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-600">Frequência Geral</span>
-              <span className="text-sm font-bold text-gray-900">{stats.attendanceRate}%</span>
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Frequência Geral</span>
+              <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{stats.attendanceRate}%</span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
               <div 
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${widthPercent}%` }}
               />
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
               {stats.presentToday} de {stats.totalEmployees} funcionários presentes hoje
             </div>
           </div>
