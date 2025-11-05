@@ -74,20 +74,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const getMenuItems = () => {
     const menuCategories = [
       {
-        id: 'time-control',
-        name: 'Registros de Ponto',
-        icon: Clock,
-        items: [
-          {
-            name: 'Registros de Ponto',
-            href: '/ponto',
-            icon: FolderClock,
-            description: 'Gerencie seus registros',
-            permission: permissions.canRegisterTime
-          }
-        ]
-      },
-      {
         id: 'main',
         name: 'Principal',
         icon: Home,
@@ -98,6 +84,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: LayoutDashboard,
         description: 'Visão geral do sistema',
         permission: permissions.canViewDashboard
+          }
+        ]
+      },
+      {
+        id: 'time-control',
+        name: 'Registros de Ponto',
+        icon: Clock,
+        items: [
+          {
+            name: 'Registros de Ponto',
+            href: '/ponto',
+            icon: FolderClock,
+            description: 'Gerencie seus registros',
+            permission: permissions.canRegisterTime
           }
         ]
       },
@@ -408,7 +408,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const isSingleItem = visibleItems.length === 1;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
-            // Detectar se é o primeiro item (Registros de Ponto)
+            // Detectar se é o primeiro item (Dashboard)
             const isFirstItem = index === 0;
             
             // Se tiver apenas um item, renderizar como link direto
@@ -424,8 +424,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               
               return (
                 <div key={category.id}>
-                  {/* Título "Principal" acima de Registros de Ponto */}
-                  {isFirstItem && category.id === 'time-control' && !isCollapsed && (
+                  {/* Título "Principal" acima do Dashboard */}
+                  {isFirstItem && category.id === 'main' && !isCollapsed && (
                     <div className="px-3 pt-2 pb-2">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Principal</p>
                     </div>
@@ -465,8 +465,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       </Link>
                     )}
                   </div>
-                  {/* Linha separadora embaixo do Dashboard */}
-                  {category.id === 'main' && (
+                  {/* Linha separadora embaixo dos Registros de Ponto */}
+                  {category.id === 'time-control' && (
                     <div className="my-4 border-t border-gray-200"></div>
                   )}
                 </div>
