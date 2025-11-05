@@ -49,9 +49,9 @@ async function createManualInssTable() {
   try {
     console.log('📝 Criando tabela manual_inss_values...');
     
-    // 1. Criar a tabela
+    // 1. Criar a tabela (sem IF NOT EXISTS para ver erro se já existir)
     const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS "manual_inss_values" (
+      CREATE TABLE "manual_inss_values" (
         "id" TEXT NOT NULL,
         "employeeId" TEXT NOT NULL,
         "month" INTEGER NOT NULL,
@@ -63,8 +63,18 @@ async function createManualInssTable() {
         CONSTRAINT "manual_inss_values_pkey" PRIMARY KEY ("id")
       )
     `;
-    await prisma.$executeRawUnsafe(createTableSQL);
-    console.log('✅ Tabela criada');
+    
+    try {
+      await prisma.$executeRawUnsafe(createTableSQL);
+      console.log('✅ Tabela criada');
+    } catch (tableError) {
+      // Se a tabela já existe, continua
+      if (tableError.message.includes('already exists') || tableError.code === '42P07') {
+        console.log('✅ Tabela já existe');
+      } else {
+        throw tableError;
+      }
+    }
     
     // 2. Criar índice único (se não existir)
     try {
@@ -77,6 +87,7 @@ async function createManualInssTable() {
     } catch (indexError) {
       // Índice pode já existir, não é crítico
       console.log('⚠️  Índice pode já existir, continuando...');
+      console.log('   Detalhes:', indexError.message);
     }
     
     // 3. Adicionar foreign key (se não existir)
@@ -84,6 +95,7 @@ async function createManualInssTable() {
       const checkConstraintSQL = `
         SELECT 1 FROM pg_constraint 
         WHERE conname = 'manual_inss_values_employeeId_fkey'
+        LIMIT 1
       `;
       const constraintExists = await prisma.$queryRawUnsafe(checkConstraintSQL);
       
@@ -102,12 +114,23 @@ async function createManualInssTable() {
     } catch (constraintError) {
       // Constraint pode já existir, não é crítico
       console.log('⚠️  Foreign key pode já existir, continuando...');
+      console.log('   Detalhes:', constraintError.message);
     }
     
-    console.log('✅ Tabela manual_inss_values criada com sucesso!');
-    return true;
+    // Verifica se a tabela realmente foi criada
+    const tableExists = await checkTableExists('manual_inss_values');
+    if (tableExists) {
+      console.log('✅ Tabela manual_inss_values criada e verificada com sucesso!');
+      return true;
+    } else {
+      console.error('❌ Tabela não foi criada mesmo após tentativa');
+      return false;
+    }
   } catch (error) {
-    console.error('❌ Erro ao criar tabela manual_inss_values:', error.message);
+    console.error('❌ Erro ao criar tabela manual_inss_values:');
+    console.error('   Mensagem:', error.message);
+    console.error('   Código:', error.code);
+    console.error('   Stack:', error.stack);
     return false;
   }
 }
