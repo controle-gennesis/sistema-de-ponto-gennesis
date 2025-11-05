@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { 
@@ -62,6 +62,24 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const router = useRouter();
   const { permissions, isLoading, userPosition, user } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Fechar menu quando clicar fora dele
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+
+    if (showUserMenu && isCollapsed) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showUserMenu, isCollapsed]);
 
   const isEmployee = userRole === 'EMPLOYEE';
 
@@ -334,7 +352,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0 lg:fixed ${
           isCollapsed ? 'w-20' : 'w-72'
-        } flex flex-col overflow-hidden`}
+        } flex flex-col ${isCollapsed ? 'overflow-visible' : 'overflow-hidden'}`}
       >
         {/* Header */}
         <div className={`${isCollapsed ? 'p-4' : 'p-4'} overflow-hidden`}>
@@ -393,7 +411,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             <div className="flex justify-center">
               <button
                 onClick={() => setIsCollapsed(false)}
-                className="w-10 h-10 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-500 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
+                className="w-10 h-10 rounded-xl bg-white hover:bg-gray-200 hover:text-gray-400 dark:bg-gray-900 dark:hover:bg-gray-800 dark:hover:text-gray-300 border border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-500 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
                 title="Buscar"
               >
                 <Search className="w-5 h-5" />
@@ -403,7 +421,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         )}
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-2 p-4 overflow-y-auto overflow-x-hidden`}>
+        <nav className={`flex-1 space-y-2 p-4 ${isCollapsed ? 'overflow-visible' : 'overflow-y-auto overflow-x-hidden'}`}>
           {menuItems.map((category, index) => {
             const CategoryIcon = category.icon;
             const hasActiveItem = category.items.some(item => isActive(item.href));
@@ -577,7 +595,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         </nav>
 
         {/* Perfil do usuário */}
-        <div className="flex-shrink-0 relative overflow-hidden">
+        <div className={`flex-shrink-0 relative ${isCollapsed ? 'overflow-visible' : 'overflow-hidden'}`}>
           {/* Linha separadora acima do perfil */}
           <div className="mx-4">
             <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
@@ -588,29 +606,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             <div className="bg-white dark:bg-gray-900">
               <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
                 {isCollapsed ? (
-                  /* Quando colapsada: apenas a foto */
+                  /* Quando colapsada: apenas os 3 pontos */
                   <div className="flex justify-center">
                     <button
-                      onClick={() => {
-                        setIsCollapsed(false);
-                        setShowUserMenu(true);
-                      }}
-                      className="rounded-full hover:opacity-80 transition-opacity"
-                      title={user?.name || userName}
+                      onClick={() => setShowUserMenu(!showUserMenu)}
+                      className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      title="Menu do usuário"
                     >
-                      {user?.photo ? (
-                        <img 
-                          src={user.photo} 
-                          alt={user?.name || userName} 
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center">
-                          <span className="text-sm font-semibold text-white">
-                            {getInitials(user?.name || userName)}
-                          </span>
-                        </div>
-                      )}
+                      <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                     </button>
                   </div>
                 ) : (
@@ -647,7 +650,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <div className="relative">
                       <button
                         onClick={() => setShowUserMenu(!showUserMenu)}
-                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                         title="Menu do usuário"
                       >
                         <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -658,8 +661,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               </div>
             </div>
             
-            {/* Menu de botões que desliza de baixo para cima - só aparece quando a sidebar está expandida */}
-            {!isCollapsed && (
+            {/* Menu de botões que desliza de baixo para cima */}
+            {showUserMenu && (
               <div 
                 className={`bg-white dark:bg-gray-900 transition-all duration-300 ease-in-out overflow-hidden ${
                   showUserMenu ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'
@@ -670,53 +673,83 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
                 </div>
                 
-                <div className="p-2">
-                  <button
-                    onClick={() => {
-                      toggleTheme();
-                    }}
-                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    {isDark ? (
-                      <Sun className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-500" />
-                    ) : (
-                      <Moon className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
-                    )}
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">
-                      {isDark ? 'Modo Claro' : 'Modo Escuro'}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
-                      setShowUserMenu(false);
-                    }}
-                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Alterar Senha</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowUserMenu(false);
-                      onLogout();
-                    }}
-                    className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Sair</span>
-                  </button>
-                </div>
-                
-                {/* Linha separadora acima do footer */}
-                <div className="mx-4">
-                  <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
-                </div>
-                
-                {/* Footer com logo e versão */}
-                <div className="px-4 pb-3 pt-3 flex items-center justify-center space-x-2">
-                  <span className="text-xs text-gray-600 dark:text-gray-400">© 2025 Gennesis Engenharia</span>
-                </div>
+                {isCollapsed ? (
+                  /* Quando colapsada: apenas ícones */
+                  <div className="p-2 flex flex-col items-center space-y-2">
+                    <button
+                      onClick={() => {
+                        toggleTheme();
+                      }}
+                      className="w-10 h-10 flex items-center justify-center group transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                      title={isDark ? 'Modo Claro' : 'Modo Escuro'}
+                    >
+                      {isDark ? (
+                        <Sun className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-500" />
+                      ) : (
+                        <Moon className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
+                        setShowUserMenu(false);
+                      }}
+                      className="w-10 h-10 flex items-center justify-center group transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                      title="Alterar Senha"
+                    >
+                      <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        onLogout();
+                      }}
+                      className="w-10 h-10 flex items-center justify-center group transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                      title="Sair"
+                    >
+                      <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
+                    </button>
+                  </div>
+                ) : (
+                  /* Quando expandida: ícones com texto */
+                  <div className="p-2">
+                    <button
+                      onClick={() => {
+                        toggleTheme();
+                      }}
+                      className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      {isDark ? (
+                        <Sun className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-500" />
+                      ) : (
+                        <Moon className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
+                      )}
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">
+                        {isDark ? 'Modo Claro' : 'Modo Escuro'}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
+                        setShowUserMenu(false);
+                      }}
+                      className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Alterar Senha</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        onLogout();
+                      }}
+                      className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Sair</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
