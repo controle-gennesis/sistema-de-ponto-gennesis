@@ -43,8 +43,9 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
 // Configurar trust proxy para funcionar corretamente com Railway/proxy reverso
-// Isso permite que o Express confie no header X-Forwarded-For para obter o IP real do cliente
-app.set('trust proxy', true);
+// Confia apenas no primeiro proxy (Railway), não em todos os proxies
+// Isso permite obter o IP real do cliente via X-Forwarded-For de forma segura
+app.set('trust proxy', 1);
 
 // Middleware de segurança
 app.use(helmet());
