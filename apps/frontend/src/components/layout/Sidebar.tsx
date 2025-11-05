@@ -724,7 +724,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       ) : (
                         <Moon className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
                       )}
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">
+                      <span className="text-sm font-medium whitespace-nowrap text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">
                         {isDark ? 'Modo Claro' : 'Modo Escuro'}
                       </span>
                     </button>
@@ -736,7 +736,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Alterar Senha</span>
+                      <span className="text-sm font-medium whitespace-nowrap text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Alterar Senha</span>
                     </button>
                     <button
                       onClick={() => {
@@ -746,7 +746,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Sair</span>
+                      <span className="text-sm font-medium whitespace-nowrap text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Sair</span>
                     </button>
                   </div>
                 )}
