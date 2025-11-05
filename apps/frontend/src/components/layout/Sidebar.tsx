@@ -28,7 +28,9 @@ import {
   FileText,
   Search,
   MoreVertical,
-  LayoutDashboard
+  LayoutDashboard,
+  CalendarX2,
+  MailPlus
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -123,7 +125,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         id: 'attendance',
         name: 'Ausências',
-        icon: BookText,
+        icon: CalendarX2,
         items: [
       {
         name: 'Registrar Ausência',
@@ -144,7 +146,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         id: 'requests',
         name: 'Solicitações',
-        icon: FileText,
+        icon: MailPlus,
         items: [
           {
             name: 'Solicitações de Correção',
