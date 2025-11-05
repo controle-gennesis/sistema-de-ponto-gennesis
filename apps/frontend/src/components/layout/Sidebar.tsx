@@ -661,13 +661,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               </div>
             </div>
             
-            {/* Menu de botões que desliza de baixo para cima */}
-            {showUserMenu && (
-              <div 
-                className={`bg-white dark:bg-gray-900 transition-all duration-300 ease-in-out overflow-hidden ${
-                  showUserMenu ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'
-                }`}
-              >
+            {/* Menu de botões que desliza de baixo para cima com animação */}
+            <div 
+              className={`bg-white dark:bg-gray-900 transition-all duration-300 ease-in-out overflow-hidden ${
+                showUserMenu 
+                  ? 'max-h-[300px] opacity-100 translate-y-0' 
+                  : 'max-h-0 opacity-0 -translate-y-2 pointer-events-none'
+              }`}
+            >
                 {/* Linha separadora superior */}
                 <div className="mx-4">
                   <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
@@ -751,7 +752,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   </div>
                 )}
               </div>
-            )}
           </div>
         </div>
       </div>
