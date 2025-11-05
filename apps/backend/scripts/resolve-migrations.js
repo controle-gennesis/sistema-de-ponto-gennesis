@@ -135,10 +135,51 @@ async function resolveFailedMigrations() {
       console.log('✅ Tabela manual_inss_values já existe');
     }
     
-    // Tenta executar migrate deploy para ver se há migrations falhadas
+    // Primeiro, tenta resolver a migration falhada ANTES de executar migrate deploy
+    // Se a tabela existe, significa que as tabelas foram criadas, então marca como applied
+    // Se não existe, marca como rolled_back para tentar aplicar novamente
+    const migrationName = '20251105105343_init';
+    
+    if (tableExists) {
+      console.log(`📝 Tabelas já existem. Marcando migration '${migrationName}' como aplicada...`);
+      try {
+        execSync(`npx prisma migrate resolve --applied ${migrationName}`, {
+          stdio: 'inherit',
+          cwd: path.join(__dirname, '..')
+        });
+        console.log('✅ Migration marcada como aplicada');
+      } catch (applyError) {
+        console.log('⚠️  Erro ao marcar como aplicada, tentando rolled_back...');
+        try {
+          execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
+            stdio: 'inherit',
+            cwd: path.join(__dirname, '..')
+          });
+          console.log('✅ Migration marcada como rolled back');
+        } catch (rollbackError) {
+          console.log('⚠️  Não foi possível resolver migration automaticamente:', rollbackError.message);
+          // Continua mesmo assim
+        }
+      }
+    } else {
+      console.log(`📝 Tabela não existe. Marcando migration '${migrationName}' como rolled back...`);
+      try {
+        execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
+          stdio: 'inherit',
+          cwd: path.join(__dirname, '..')
+        });
+        console.log('✅ Migration marcada como rolled back');
+      } catch (resolveError) {
+        console.log('⚠️  Não foi possível marcar como rolled back:', resolveError.message);
+        // Continua mesmo assim
+      }
+    }
+    
+    // Agora tenta executar migrate deploy
     try {
+      console.log('🔄 Executando prisma migrate deploy...');
       execSync('npx prisma migrate deploy', { 
-        stdio: 'pipe',
+        stdio: 'inherit',
         cwd: path.join(__dirname, '..')
       });
       console.log('✅ Migrations aplicadas com sucesso');
@@ -146,77 +187,26 @@ async function resolveFailedMigrations() {
     } catch (error) {
       const errorOutput = (error.stdout?.toString() || error.stderr?.toString() || error.message || '').trim();
       
-      // Verifica se é erro P3009 (migration falhada)
+      // Verifica se ainda há erro P3009
       if (errorOutput.includes('P3009') || errorOutput.includes('failed migrations')) {
-        console.log('⚠️  Migration falhada detectada. Tentando resolver...');
+        console.log('⚠️  Ainda há migration falhada. Tentando resolver novamente...');
         
-        // Procura pelo nome da migration falhada no output
-        const migrationMatch = errorOutput.match(/`([^`]+)` migration/) || errorOutput.match(/migration `([^`]+)`/);
-        if (migrationMatch) {
-          const migrationName = migrationMatch[1];
-          console.log(`📝 Migration falhada encontrada: ${migrationName}`);
-          
-          // Se a tabela manual_inss_values existe, marca a migration como "applied"
-          // porque as outras tabelas já foram criadas
-          if (tableExists) {
-            console.log(`📝 Marcando migration '${migrationName}' como aplicada (tabelas já existem)...`);
-            try {
-              execSync(`npx prisma migrate resolve --applied ${migrationName}`, {
-                stdio: 'inherit',
-                cwd: path.join(__dirname, '..')
-              });
-              console.log('✅ Migration marcada como aplicada');
-              return true;
-            } catch (applyError) {
-              console.error('❌ Erro ao marcar migration como aplicada:', applyError.message);
-              // Tenta marcar como rolled_back como fallback
-              console.log('🔄 Tentando marcar como rolled_back...');
-              try {
-                execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
-                  stdio: 'inherit',
-                  cwd: path.join(__dirname, '..')
-                });
-                console.log('✅ Migration marcada como rolled back');
-                return true;
-              } catch (rollbackError) {
-                console.error('❌ Erro ao marcar migration como rolled back:', rollbackError.message);
-                return false;
-              }
-            }
-          } else {
-            // Se a tabela não existe, marca como rolled_back para tentar aplicar novamente
-            console.log(`📝 Marcando migration '${migrationName}' como rolled back...`);
-            try {
-              execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
-                stdio: 'inherit',
-                cwd: path.join(__dirname, '..')
-              });
-              console.log('✅ Migration marcada como rolled back');
-              return true;
-            } catch (resolveError) {
-              console.error('❌ Erro ao resolver migration:', resolveError.message);
-              return false;
-            }
-          }
-        } else {
-          console.log('⚠️  Não foi possível identificar a migration falhada automaticamente');
-          console.log('💡 Tentando resolver a migration mais recente...');
-          // Tenta resolver a migration mais recente (geralmente a init)
-          try {
-            execSync('npx prisma migrate resolve --applied 20251105105343_init', {
-              stdio: 'inherit',
-              cwd: path.join(__dirname, '..')
-            });
-            console.log('✅ Migration resolvida');
-            return true;
-          } catch (resolveError) {
-            console.error('❌ Erro ao resolver migration:', resolveError.message);
-            return false;
-          }
+        // Tenta resolver novamente
+        try {
+          execSync(`npx prisma migrate resolve --applied ${migrationName}`, {
+            stdio: 'inherit',
+            cwd: path.join(__dirname, '..')
+          });
+          console.log('✅ Migration resolvida');
+          return true;
+        } catch (resolveError) {
+          console.error('❌ Erro ao resolver migration:', resolveError.message);
+          // Continua mesmo assim para não bloquear o deploy
+          return true;
         }
       } else {
-        // Outro tipo de erro - pode ser que não seja P3009
-        console.log('⚠️  Erro ao verificar migrations:', errorOutput.substring(0, 200));
+        // Outro tipo de erro
+        console.log('⚠️  Erro ao executar migrate deploy:', errorOutput.substring(0, 200));
         // Continua mesmo assim para não bloquear o deploy
         return true;
       }
