@@ -321,8 +321,11 @@ export function EditEmployeeForm({ employee, onClose, visibleSections }: EditEmp
 
     if (!formData.salary.trim()) {
       newErrors.salary = 'Salário é obrigatório';
-    } else if (isNaN(parseFloat(formData.salary)) || parseFloat(formData.salary) <= 0) {
-      newErrors.salary = 'Salário deve ser um valor válido';
+    } else {
+      const salaryValue = parseCurrencyBRToNumber(formData.salary);
+      if (isNaN(salaryValue) || salaryValue <= 0) {
+        newErrors.salary = 'Salário deve ser um valor válido';
+      }
     }
 
     // Validação dos novos campos
@@ -352,48 +355,56 @@ export function EditEmployeeForm({ employee, onClose, visibleSections }: EditEmp
   // Mutation para atualizar funcionário
   const updateEmployeeMutation = useMutation({
     mutationFn: async (data: EmployeeFormData) => {
+      // Preparar employeeData com apenas campos preenchidos
+      const employeeData: any = {
+        department: data.sector || undefined,
+        position: data.position || undefined,
+        hireDate: data.hireDate || undefined,
+        birthDate: data.birthDate || undefined,
+        salary: data.salary ? parseCurrencyBRToNumber(data.salary as any) : undefined,
+        isRemote: data.isRemote,
+        workSchedule: {
+          startTime: data.workStartTime,
+          endTime: data.workEndTime,
+          lunchStartTime: data.lunchStartTime,
+          lunchEndTime: data.lunchEndTime,
+          toleranceMinutes: parseInt(data.toleranceMinutes),
+          workDays: [1, 2, 3, 4, 5]
+        },
+        costCenter: data.costCenter || undefined,
+        client: data.client || undefined,
+        dailyFoodVoucher: data.dailyFoodVoucher ? parseCurrencyBRToNumber(data.dailyFoodVoucher as any) : undefined,
+        dailyTransportVoucher: data.dailyTransportVoucher ? parseCurrencyBRToNumber(data.dailyTransportVoucher as any) : undefined,
+        company: data.company || undefined,
+        bank: data.bank || undefined,
+        accountType: data.accountType || undefined,
+        agency: data.agency || undefined,
+        operation: data.operation || undefined,
+        account: data.account || undefined,
+        digit: data.digit || undefined,
+        pixKeyType: data.pixKeyType || undefined,
+        pixKey: data.pixKey || undefined,
+        modality: data.modality || undefined,
+        familySalary: data.familySalary ? parseCurrencyBRToNumber(data.familySalary as any) : undefined,
+        dangerPay: data.dangerPay ? parsePercentToNumber(data.dangerPay as any) : undefined,
+        unhealthyPay: data.unhealthyPay ? parsePercentToNumber(data.unhealthyPay as any) : undefined,
+        polo: data.polo || undefined,
+        categoriaFinanceira: data.categoriaFinanceira || undefined
+      };
+
+      // Remover campos undefined ou vazios (exceto workSchedule e isRemote)
+      Object.keys(employeeData).forEach(key => {
+        if (key !== 'workSchedule' && key !== 'isRemote' && (employeeData[key] === undefined || employeeData[key] === '')) {
+          delete employeeData[key];
+        }
+      });
+
       const response = await api.put(`/users/${employee.id}`, {
         name: data.name,
         email: data.email,
         cpf: data.cpf,
         isActive: data.isActive,
-        employeeData: {
-          department: data.sector,
-          position: data.position,
-          hireDate: data.hireDate,
-          birthDate: data.birthDate,
-          salary: parseCurrencyBRToNumber(data.salary as any),
-          isRemote: data.isRemote,
-          workSchedule: {
-            startTime: data.workStartTime,
-            endTime: data.workEndTime,
-            lunchStartTime: data.lunchStartTime,
-            lunchEndTime: data.lunchEndTime,
-            toleranceMinutes: parseInt(data.toleranceMinutes),
-            workDays: [1, 2, 3, 4, 5]
-          },
-          costCenter: data.costCenter,
-          client: data.client,
-          dailyFoodVoucher: parseCurrencyBRToNumber(data.dailyFoodVoucher as any),
-          dailyTransportVoucher: parseCurrencyBRToNumber(data.dailyTransportVoucher as any),
-          company: data.company,
-          bank: data.bank,
-          accountType: data.accountType,
-          agency: data.agency,
-          operation: data.operation,
-          account: data.account,
-          digit: data.digit,
-          pixKeyType: data.pixKeyType,
-          pixKey: data.pixKey,
-          modality: data.modality,
-          familySalary: parseCurrencyBRToNumber(data.familySalary as any),
-          dangerPay: parsePercentToNumber(data.dangerPay as any),
-          unhealthyPay: parsePercentToNumber(data.unhealthyPay as any),
-          
-          // Novos campos - Polo e Categoria Financeira
-          polo: data.polo,
-          categoriaFinanceira: data.categoriaFinanceira
-        }
+        employeeData
       });
       return response.data;
     },
