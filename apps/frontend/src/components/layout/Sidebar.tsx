@@ -32,7 +32,8 @@ import {
   CalendarX2,
   MailPlus,
   Moon,
-  Sun
+  Sun,
+  AlertCircle
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTheme } from '@/context/ThemeContext';
@@ -58,11 +59,26 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [searchTerm, setSearchTerm] = useState('');
   const [showButtonText, setShowButtonText] = useState(!isCollapsed);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const { permissions, isLoading, userPosition, user } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleLogout = () => {
+    setShowUserMenu(false);
+    setShowLogoutConfirm(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutConfirm(false);
+    onLogout();
+  };
+
+  const handleCancelLogout = () => {
+    setShowLogoutConfirm(false);
+  };
 
   // Fechar menu quando clicar fora dele
   useEffect(() => {
@@ -701,10 +717,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
                     </button>
                     <button
-                      onClick={() => {
-                        setShowUserMenu(false);
-                        onLogout();
-                      }}
+                      onClick={handleLogout}
                       className="w-10 h-10 flex items-center justify-center group transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                       title="Sair"
                     >
@@ -740,10 +753,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       <span className="text-sm font-medium whitespace-nowrap text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Alterar Senha</span>
                     </button>
                     <button
-                      onClick={() => {
-                        setShowUserMenu(false);
-                        onLogout();
-                      }}
+                      onClick={handleLogout}
                       className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
@@ -755,6 +765,40 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           </div>
         </div>
       </div>
+
+      {/* Modal de Confirmação de Logout */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={handleCancelLogout} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">
+              <AlertCircle className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 text-center mb-2">
+              Deseja sair?
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
+              Tem certeza que deseja sair do sistema? Você precisará fazer login novamente para acessar.
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={handleCancelLogout}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmLogout}
+                className="px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+              >
+                Sair
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

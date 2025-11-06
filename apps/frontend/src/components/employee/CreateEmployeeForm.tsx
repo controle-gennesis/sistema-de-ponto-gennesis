@@ -67,6 +67,18 @@ interface CreateEmployeeFormProps {
 }
 
 export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
+  const handleCancel = () => {
+    setShowCancelConfirm(true);
+  };
+
+  const handleConfirmCancel = () => {
+    setShowCancelConfirm(false);
+    onClose();
+  };
+
+  const handleCancelCancel = () => {
+    setShowCancelConfirm(false);
+  };
   // Lista de setores disponíveis
   const sectors = [
     'Projetos',
@@ -204,6 +216,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [warningMessage, setWarningMessage] = useState<string>('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   // Estado para controlar a etapa atual do formulário
   const [currentStep, setCurrentStep] = useState(1);
@@ -825,7 +838,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={handleCancel} />
       <div className="relative w-full max-w-4xl mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
         <div className="px-8 py-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-between">
           <div>
@@ -833,7 +846,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
             <p className="text-sm text-gray-500 dark:text-gray-400">Preencha os dados abaixo para cadastrar um novo funcionário no sistema</p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             aria-label="Fechar"
           >
@@ -1919,7 +1932,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           <div className="flex justify-between items-center pt-6 border-t dark:border-gray-700 mt-6">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleCancel}
               className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
             >
               Cancelar
@@ -1978,6 +1991,40 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           </div>
         </form>
       </div>
+
+      {/* Modal de Confirmação de Cancelamento */}
+      {showCancelConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={handleCancelCancel} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">
+              <AlertCircle className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 text-center mb-2">
+              Cancelar Cadastro?
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
+              Tem certeza que deseja cancelar o cadastro? Todos os dados preenchidos serão perdidos.
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={handleCancelCancel}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancel}
+                className="px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
