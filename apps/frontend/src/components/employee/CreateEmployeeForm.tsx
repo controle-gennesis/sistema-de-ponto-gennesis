@@ -139,6 +139,21 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     return `${currentYear}${randomNumber}`; // Ex: 24001, 24002, etc.
   };
 
+  // Formatação de moeda
+  const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const parseCurrencyBRToNumber = (raw: string) => {
+    if (!raw) return 0;
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return 0;
+    return parseInt(digits, 10) / 100;
+  };
+
+  const maskCurrencyInput = (raw: string) => {
+    const digits = raw.replace(/\D/g, '');
+    const asNumber = digits ? parseInt(digits, 10) / 100 : 0;
+    return currencyFormatter.format(asNumber);
+  };
+
   const [formData, setFormData] = useState<EmployeeFormData>({
     name: '',
     email: '',
@@ -159,8 +174,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     toleranceMinutes: '10',
     costCenter: '',
     client: '',
-    dailyFoodVoucher: '33.40',
-    dailyTransportVoucher: '11.00',
+    dailyFoodVoucher: currencyFormatter.format(33.40),
+    dailyTransportVoucher: currencyFormatter.format(11.00),
     // Novos campos
     company: '',
     bank: '',
@@ -173,7 +188,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     pixKey: '',
     // Novos campos - Modalidade e Adicionais
     modality: '',
-    familySalary: '0.00',
+    familySalary: currencyFormatter.format(0),
     dangerPay: '0', // 0% por padrão
     unhealthyPay: '0', // 0% por padrão
     fixedAdjustments: '0.00', // Acréscimos fixos
@@ -338,7 +353,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         position: data.position,
         hireDate: `${data.hireDate}T${data.hireTime}:00`,
         birthDate: birthDateISO || null,
-        salary: parseFloat(data.salary),
+        salary: parseCurrencyBRToNumber(data.salary),
         isRemote: data.isRemote,
         workSchedule: {
           startTime: data.workStartTime,
@@ -365,7 +380,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         pixKey: data.pixKey,
         // Novos campos - Modalidade e Adicionais
         modality: data.modality || null,
-        familySalary: data.familySalary ? parseFloat(data.familySalary) : 0,
+        familySalary: data.familySalary ? parseCurrencyBRToNumber(data.familySalary) : 0,
         dangerPay: data.dangerPay ? parseFloat(data.dangerPay) : 0,
         unhealthyPay: data.unhealthyPay ? parseFloat(data.unhealthyPay) : 0,
         fixedAdjustments: data.fixedAdjustments ? parseFloat(data.fixedAdjustments) : 0,
@@ -511,23 +526,35 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     } else if (step === 3) {
       // Validação dos Valores e Adicionais
       if (!formData.salary.trim()) newErrors.salary = 'Salário é obrigatório';
-      else if (isNaN(parseFloat(formData.salary)) || parseFloat(formData.salary) <= 0) {
-        newErrors.salary = 'Salário deve ser um valor válido';
+      else {
+        const salaryValue = parseCurrencyBRToNumber(formData.salary);
+        if (isNaN(salaryValue) || salaryValue <= 0) {
+          newErrors.salary = 'Salário deve ser um valor válido';
+        }
       }
       
       if (!formData.dailyFoodVoucher.trim()) newErrors.dailyFoodVoucher = 'Vale Alimentação é obrigatório';
-      else if (isNaN(parseFloat(formData.dailyFoodVoucher)) || parseFloat(formData.dailyFoodVoucher) < 0) {
-        newErrors.dailyFoodVoucher = 'Vale Alimentação deve ser um valor válido';
+      else {
+        const vaValue = parseCurrencyBRToNumber(formData.dailyFoodVoucher);
+        if (isNaN(vaValue) || vaValue < 0) {
+          newErrors.dailyFoodVoucher = 'Vale Alimentação deve ser um valor válido';
+        }
       }
       
       if (!formData.dailyTransportVoucher.trim()) newErrors.dailyTransportVoucher = 'Vale Transporte é obrigatório';
-      else if (isNaN(parseFloat(formData.dailyTransportVoucher)) || parseFloat(formData.dailyTransportVoucher) < 0) {
-        newErrors.dailyTransportVoucher = 'Vale Transporte deve ser um valor válido';
+      else {
+        const vtValue = parseCurrencyBRToNumber(formData.dailyTransportVoucher);
+        if (isNaN(vtValue) || vtValue < 0) {
+          newErrors.dailyTransportVoucher = 'Vale Transporte deve ser um valor válido';
+        }
       }
       
       if (!formData.familySalary.trim()) newErrors.familySalary = 'Salário Família é obrigatório';
-      else if (isNaN(parseFloat(formData.familySalary)) || parseFloat(formData.familySalary) < 0) {
-        newErrors.familySalary = 'Salário Família deve ser um valor válido';
+      else {
+        const familySalaryValue = parseCurrencyBRToNumber(formData.familySalary);
+        if (isNaN(familySalaryValue) || familySalaryValue < 0) {
+          newErrors.familySalary = 'Salário Família deve ser um valor válido';
+        }
       }
       
       if (!formData.dangerPay.trim()) newErrors.dangerPay = 'Periculosidade é obrigatória';
@@ -631,19 +658,28 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       newErrors.hireDate = 'Data de contratação inválida';
     }
     if (!formData.salary.trim()) newErrors.salary = 'Salário é obrigatório';
-    else if (isNaN(parseFloat(formData.salary)) || parseFloat(formData.salary) <= 0) {
-      newErrors.salary = 'Salário deve ser um valor válido';
+    else {
+      const salaryValue = parseCurrencyBRToNumber(formData.salary);
+      if (isNaN(salaryValue) || salaryValue <= 0) {
+        newErrors.salary = 'Salário deve ser um valor válido';
+      }
     }
 
     // Validação dos campos VA e VT
     if (!formData.dailyFoodVoucher.trim()) newErrors.dailyFoodVoucher = 'Vale Alimentação é obrigatório';
-    else if (isNaN(parseFloat(formData.dailyFoodVoucher)) || parseFloat(formData.dailyFoodVoucher) < 0) {
-      newErrors.dailyFoodVoucher = 'Vale Alimentação deve ser um valor válido';
+    else {
+      const vaValue = parseCurrencyBRToNumber(formData.dailyFoodVoucher);
+      if (isNaN(vaValue) || vaValue < 0) {
+        newErrors.dailyFoodVoucher = 'Vale Alimentação deve ser um valor válido';
+      }
     }
 
     if (!formData.dailyTransportVoucher.trim()) newErrors.dailyTransportVoucher = 'Vale Transporte é obrigatório';
-    else if (isNaN(parseFloat(formData.dailyTransportVoucher)) || parseFloat(formData.dailyTransportVoucher) < 0) {
-      newErrors.dailyTransportVoucher = 'Vale Transporte deve ser um valor válido';
+    else {
+      const vtValue = parseCurrencyBRToNumber(formData.dailyTransportVoucher);
+      if (isNaN(vtValue) || vtValue < 0) {
+        newErrors.dailyTransportVoucher = 'Vale Transporte deve ser um valor válido';
+      }
     }
 
     // Validação dos novos campos
@@ -652,8 +688,11 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     if (!formData.categoriaFinanceira.trim()) newErrors.categoriaFinanceira = 'Categoria Financeira é obrigatória';
 
     if (!formData.familySalary.trim()) newErrors.familySalary = 'Salário Família é obrigatório';
-    else if (isNaN(parseFloat(formData.familySalary)) || parseFloat(formData.familySalary) < 0) {
-      newErrors.familySalary = 'Salário Família deve ser um valor válido';
+    else {
+      const familySalaryValue = parseCurrencyBRToNumber(formData.familySalary);
+      if (isNaN(familySalaryValue) || familySalaryValue < 0) {
+        newErrors.familySalary = 'Salário Família deve ser um valor válido';
+      }
     }
 
     if (!formData.dangerPay.trim()) newErrors.dangerPay = 'Periculosidade é obrigatória';
@@ -1415,15 +1454,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     Salário (R$) *
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
                     value={formData.salary}
-                    onChange={(e) => handleInputChange('salary', e.target.value)}
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    onChange={(e) => setFormData(prev => ({ ...prev, salary: maskCurrencyInput(e.target.value) }))}
+                    inputMode="numeric"
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.salary ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
-                    placeholder="0.00"
+                    placeholder="R$ 0,00"
                   />
                   {errors.salary && (
                     <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
@@ -1438,15 +1476,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     Salário Família (R$)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
                     value={formData.familySalary}
-                    onChange={(e) => handleInputChange('familySalary', e.target.value)}
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    onChange={(e) => setFormData(prev => ({ ...prev, familySalary: maskCurrencyInput(e.target.value) }))}
+                    inputMode="numeric"
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.familySalary ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
-                    placeholder="0.00"
+                    placeholder="R$ 0,00"
                   />
                   {errors.familySalary && (
                     <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
@@ -1461,15 +1498,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Vale Alimentação Diário (R$) *
                 </label>
                 <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
                     value={formData.dailyFoodVoucher}
-                    onChange={(e) => handleInputChange('dailyFoodVoucher', e.target.value)}
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    onChange={(e) => setFormData(prev => ({ ...prev, dailyFoodVoucher: maskCurrencyInput(e.target.value) }))}
+                    inputMode="numeric"
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.dailyFoodVoucher ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
-                    placeholder="33.40"
+                    placeholder="R$ 0,00"
                   />
                   {errors.dailyFoodVoucher && (
                     <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
@@ -1484,15 +1520,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     Vale Transporte Diário (R$) *
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
                     value={formData.dailyTransportVoucher}
-                    onChange={(e) => handleInputChange('dailyTransportVoucher', e.target.value)}
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    onChange={(e) => setFormData(prev => ({ ...prev, dailyTransportVoucher: maskCurrencyInput(e.target.value) }))}
+                    inputMode="numeric"
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.dailyTransportVoucher ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
-                    placeholder="11.00"
+                    placeholder="R$ 0,00"
                   />
                   {errors.dailyTransportVoucher && (
                     <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
@@ -1865,14 +1900,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
             </div>
 
             <div className="max-w-xs">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Tolerância (minutos) *
               </label>
               <input
                 type="number"
                 value={formData.toleranceMinutes}
                 onChange={(e) => handleInputChange('toleranceMinutes', e.target.value)}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100"
                 min="0"
                 max="60"
               />
