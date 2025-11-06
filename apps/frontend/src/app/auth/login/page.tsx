@@ -198,7 +198,7 @@ export default function LoginPage() {
       <footer className="w-full bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 py-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <p className="text-center text-base text-gray-600 dark:text-gray-400">
-            Ao entrar na sua conta, você reconhece que leu e entendeu, e concorda com os{' '}
+            Ao acessar sua conta, você reconhece que leu, entendeu e concorda integralmente com os{' '}
             <a 
               href="https://gennesisattendance.blogspot.com/p/termos-e-condicoes-gennesis-attendance.html" 
               className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500 underline"
