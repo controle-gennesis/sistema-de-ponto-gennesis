@@ -203,7 +203,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     familySalary: currencyFormatter.format(0),
     dangerPay: '0', // 0% por padrão
     unhealthyPay: '0', // 0% por padrão
-    fixedAdjustments: '0.00', // Acréscimos fixos
+    fixedAdjustments: currencyFormatter.format(0), // Acréscimos fixos
 
     // Novos campos - Polo e Categoria Financeira
     polo: '',
@@ -396,7 +396,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         familySalary: data.familySalary ? parseCurrencyBRToNumber(data.familySalary) : 0,
         dangerPay: data.dangerPay ? parseFloat(data.dangerPay) : 0,
         unhealthyPay: data.unhealthyPay ? parseFloat(data.unhealthyPay) : 0,
-        fixedAdjustments: data.fixedAdjustments ? parseFloat(data.fixedAdjustments) : 0,
+        fixedAdjustments: data.fixedAdjustments ? parseCurrencyBRToNumber(data.fixedAdjustments) : 0,
 
         // Novos campos - Polo e Categoria Financeira
         polo: data.polo || null,
@@ -1555,15 +1555,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Acréscimos Fixos (R$)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="text"
                   value={formData.fixedAdjustments}
-                  onChange={(e) => handleInputChange('fixedAdjustments', e.target.value)}
-                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                  onChange={(e) => setFormData(prev => ({ ...prev, fixedAdjustments: maskCurrencyInput(e.target.value) }))}
+                  inputMode="numeric"
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                     errors.fixedAdjustments ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
-                  placeholder="0.00"
+                  placeholder="R$ 0,00"
                 />
                   {errors.fixedAdjustments && (
                     <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
