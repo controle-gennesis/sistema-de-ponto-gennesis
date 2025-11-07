@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Users, CheckCircle, XCircle, AlertCircle, X, Eye } from 'lucide-react';
+import { Users, CheckCircle, XCircle, AlertCircle, X, Eye, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -49,6 +49,11 @@ export default function DashboardPage() {
   const [showPresentModal, setShowPresentModal] = useState(false);
   const [showAbsentModal, setShowAbsentModal] = useState(false);
   const [showPendingModal, setShowPendingModal] = useState(false);
+  
+  // Estados de pesquisa para cada modal
+  const [searchPresent, setSearchPresent] = useState('');
+  const [searchAbsent, setSearchAbsent] = useState('');
+  const [searchPending, setSearchPending] = useState('');
 
   // Verificar se é o primeiro login
   const isFirstLogin = userData?.data?.isFirstLogin || false;
@@ -241,23 +246,54 @@ export default function DashboardPage() {
       {/* Modal de Funcionários Presentes */}
       {showPresentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowPresentModal(false)} />
+          <div className="absolute inset-0 bg-black/50" onClick={() => {
+            setShowPresentModal(false);
+            setSearchPresent('');
+          }} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 Funcionários Presentes Hoje ({stats.presentEmployees?.length || 0})
               </h3>
               <button
-                onClick={() => setShowPresentModal(false)}
+                onClick={() => {
+                  setShowPresentModal(false);
+                  setSearchPresent('');
+                }}
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {/* Barra de pesquisa */}
+            <div className="px-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar por nome, email, departamento ou cargo..."
+                  value={searchPresent}
+                  onChange={(e) => setSearchPresent(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                />
+              </div>
+            </div>
             <div className="overflow-y-auto p-6">
-              {stats.presentEmployees && stats.presentEmployees.length > 0 ? (
-                <div className="space-y-3">
-                  {stats.presentEmployees.map((emp: any) => (
+              {(() => {
+                const filtered = stats.presentEmployees?.filter((emp: any) => {
+                  if (!searchPresent.trim()) return true;
+                  const searchLower = searchPresent.toLowerCase();
+                  return (
+                    emp.name?.toLowerCase().includes(searchLower) ||
+                    emp.email?.toLowerCase().includes(searchLower) ||
+                    emp.department?.toLowerCase().includes(searchLower) ||
+                    emp.position?.toLowerCase().includes(searchLower)
+                  );
+                }) || [];
+                
+                return filtered.length > 0 ? (
+                  <div className="space-y-3">
+                    {filtered.map((emp: any) => (
                     <div
                       key={emp.id}
                       className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
@@ -272,13 +308,16 @@ export default function DashboardPage() {
                         </p>
                       )}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                  Nenhum funcionário presente hoje
-                </p>
-              )}
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    {searchPresent.trim() 
+                      ? 'Nenhum funcionário encontrado com o termo pesquisado'
+                      : 'Nenhum funcionário presente hoje'}
+                  </p>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -287,23 +326,54 @@ export default function DashboardPage() {
       {/* Modal de Funcionários Ausentes */}
       {showAbsentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowAbsentModal(false)} />
+          <div className="absolute inset-0 bg-black/50" onClick={() => {
+            setShowAbsentModal(false);
+            setSearchAbsent('');
+          }} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 Funcionários Ausentes Hoje ({stats.absentEmployees?.length || 0})
               </h3>
               <button
-                onClick={() => setShowAbsentModal(false)}
+                onClick={() => {
+                  setShowAbsentModal(false);
+                  setSearchAbsent('');
+                }}
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {/* Barra de pesquisa */}
+            <div className="px-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar por nome, email, departamento ou cargo..."
+                  value={searchAbsent}
+                  onChange={(e) => setSearchAbsent(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                />
+              </div>
+            </div>
             <div className="overflow-y-auto p-6">
-              {stats.absentEmployees && stats.absentEmployees.length > 0 ? (
-                <div className="space-y-3">
-                  {stats.absentEmployees.map((emp: any) => (
+              {(() => {
+                const filtered = stats.absentEmployees?.filter((emp: any) => {
+                  if (!searchAbsent.trim()) return true;
+                  const searchLower = searchAbsent.toLowerCase();
+                  return (
+                    emp.name?.toLowerCase().includes(searchLower) ||
+                    emp.email?.toLowerCase().includes(searchLower) ||
+                    emp.department?.toLowerCase().includes(searchLower) ||
+                    emp.position?.toLowerCase().includes(searchLower)
+                  );
+                }) || [];
+                
+                return filtered.length > 0 ? (
+                  <div className="space-y-3">
+                    {filtered.map((emp: any) => (
                     <div
                       key={emp.id}
                       className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
@@ -318,13 +388,16 @@ export default function DashboardPage() {
                         </p>
                       )}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                  Nenhum funcionário ausente hoje
-                </p>
-              )}
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    {searchAbsent.trim() 
+                      ? 'Nenhum funcionário encontrado com o termo pesquisado'
+                      : 'Nenhum funcionário ausente hoje'}
+                  </p>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -333,23 +406,54 @@ export default function DashboardPage() {
       {/* Modal de Funcionários Pendentes */}
       {showPendingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowPendingModal(false)} />
+          <div className="absolute inset-0 bg-black/50" onClick={() => {
+            setShowPendingModal(false);
+            setSearchPending('');
+          }} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 Funcionários Pendentes ({stats.pendingEmployees?.length || 0})
               </h3>
               <button
-                onClick={() => setShowPendingModal(false)}
+                onClick={() => {
+                  setShowPendingModal(false);
+                  setSearchPending('');
+                }}
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {/* Barra de pesquisa */}
+            <div className="px-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar por nome, email, departamento ou cargo..."
+                  value={searchPending}
+                  onChange={(e) => setSearchPending(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                />
+              </div>
+            </div>
             <div className="overflow-y-auto p-6">
-              {stats.pendingEmployees && stats.pendingEmployees.length > 0 ? (
-                <div className="space-y-3">
-                  {stats.pendingEmployees.map((emp: any) => (
+              {(() => {
+                const filtered = stats.pendingEmployees?.filter((emp: any) => {
+                  if (!searchPending.trim()) return true;
+                  const searchLower = searchPending.toLowerCase();
+                  return (
+                    emp.name?.toLowerCase().includes(searchLower) ||
+                    emp.email?.toLowerCase().includes(searchLower) ||
+                    emp.department?.toLowerCase().includes(searchLower) ||
+                    emp.position?.toLowerCase().includes(searchLower)
+                  );
+                }) || [];
+                
+                return filtered.length > 0 ? (
+                  <div className="space-y-3">
+                    {filtered.map((emp: any) => (
                     <div
                       key={emp.id}
                       className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
@@ -364,13 +468,16 @@ export default function DashboardPage() {
                         </p>
                       )}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                  Nenhum funcionário pendente hoje
-                </p>
-              )}
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    {searchPending.trim() 
+                      ? 'Nenhum funcionário encontrado com o termo pesquisado'
+                      : 'Nenhum funcionário pendente hoje'}
+                  </p>
+                );
+              })()}
             </div>
           </div>
         </div>
