@@ -65,6 +65,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const { permissions, isLoading, userPosition, user } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const handleLogout = () => {
     setShowUserMenu(false);
@@ -413,6 +414,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               <div className="relative flex-1 min-w-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none" />
                 <input
+                  ref={searchInputRef}
                   type="text"
                   placeholder="Search"
                   value={searchTerm}
@@ -426,7 +428,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           <div className="px-4">
             <div className="flex justify-center">
               <button
-                onClick={() => setIsCollapsed(false)}
+                onClick={() => {
+                  setIsCollapsed(false);
+                  // Focar no input após a sidebar abrir (aguardar a transição)
+                  setTimeout(() => {
+                    searchInputRef.current?.focus();
+                  }, 300);
+                }}
                 className="w-10 h-10 rounded-xl bg-white hover:bg-gray-200 hover:text-gray-400 dark:bg-gray-900 dark:hover:bg-gray-800 dark:hover:text-gray-300 border border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-500 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
                 title="Buscar"
               >
