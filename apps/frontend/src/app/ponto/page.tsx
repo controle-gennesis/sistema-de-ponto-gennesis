@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TimeRecordsList } from '@/components/ponto/TimeRecordsList';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
+import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 
 export default function PontoPage() {
@@ -169,12 +170,11 @@ export default function PontoPage() {
 
   if (loadingUser || loadingToday) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
-        </div>
-      </div>
+      <Loading 
+        message="Carregando dados..."
+        fullScreen
+        size="lg"
+      />
     );
   }
 

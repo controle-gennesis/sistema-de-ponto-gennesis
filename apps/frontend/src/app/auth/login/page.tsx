@@ -10,6 +10,7 @@ import { authService } from '@/lib/auth';
 import { toast } from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '@/context/ThemeContext';
+import { Loading } from '@/components/ui/Loading';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,7 +34,10 @@ export default function LoginPage() {
       // Limpar cache do React Query
       queryClient.clear();
       toast.success('Login realizado com sucesso!');
-      router.push('/ponto');
+      // Pequeno delay para o toast aparecer antes do redirecionamento
+      setTimeout(() => {
+        router.push('/ponto');
+      }, 500);
     } catch (error: any) {
       // Verificar se é erro de credenciais inválidas
       if (error.message?.includes('Credenciais inválidas') || 
@@ -110,13 +114,13 @@ export default function LoginPage() {
 
       {/* Overlay de carregamento */}
       {loading && (
-        <div className="absolute inset-0 bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 flex flex-col items-center justify-center z-50">
+        <div className="absolute inset-0 bg-white dark:bg-gray-900 bg-opacity-95 dark:bg-opacity-95 flex flex-col items-center justify-center z-50">
           <div className="text-center">
-            <div className="animate-spin w-12 h-12 border-4 border-blue-500 dark:border-blue-400 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Processando login...
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
+            <Loading 
+              message="Processando login..."
+              size="lg"
+            />
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">
               Aguarde enquanto validamos suas credenciais
             </p>
           </div>
