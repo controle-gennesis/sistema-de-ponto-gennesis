@@ -93,6 +93,57 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
     ]);
 
     const presentToday = presentUsers.length;
+    const presentUserIds = new Set(presentUsers.map((u: any) => u.userId));
+    
+    // Buscar dados dos funcionários presentes
+    const presentEmployeesData = await prisma.user.findMany({
+      where: {
+        id: { in: Array.from(presentUserIds) },
+        role: 'EMPLOYEE',
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        employee: {
+          select: {
+            department: true,
+            position: true
+          }
+        }
+      }
+    });
+
+    // Buscar todos os funcionários ativos
+    const allEmployees = await prisma.user.findMany({
+      where: userIds.length > 0 ? {
+        role: 'EMPLOYEE',
+        isActive: true,
+        id: { in: userIds }
+      } : {
+        role: 'EMPLOYEE',
+        isActive: true,
+        employee: {
+          isNot: null
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        employee: {
+          select: {
+            department: true,
+            position: true
+          }
+        }
+      }
+    });
+
+    // Funcionários ausentes (todos menos os presentes)
+    const absentEmployeesData = allEmployees.filter(emp => !presentUserIds.has(emp.id));
+
     const absentToday = Math.max(totalEmployees - presentToday, 0);
     const attendanceRate = totalEmployees > 0 ? Math.min(100, Math.max(0, Math.round((presentToday / totalEmployees) * 100))) : 0;
 
@@ -105,8 +156,8 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
       recordsByUser.get(record.userId)!.add(record.type);
     });
 
-    let pendingToday = 0;
-    recordsByUser.forEach((userRecords) => {
+    const pendingUserIds: string[] = [];
+    recordsByUser.forEach((userRecords, userId) => {
       const hasEntry = userRecords.has('ENTRY');
       const hasLunchStart = userRecords.has('LUNCH_START');
       const hasLunchEnd = userRecords.has('LUNCH_END');
@@ -114,9 +165,31 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
       
       // Se não tem todos os 4 pontos, está pendente
       if (!(hasEntry && hasLunchStart && hasLunchEnd && hasExit)) {
-        pendingToday++;
+        pendingUserIds.push(userId);
       }
     });
+
+    // Buscar dados dos funcionários pendentes
+    const pendingEmployeesData = await prisma.user.findMany({
+      where: {
+        id: { in: pendingUserIds },
+        role: 'EMPLOYEE',
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        employee: {
+          select: {
+            department: true,
+            position: true
+          }
+        }
+      }
+    });
+
+    const pendingToday = pendingUserIds.length;
 
     res.json({
       success: true,
@@ -129,6 +202,27 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
         pendingOvertime: 0,
         averageAttendance: attendanceRate,
         attendanceRate,
+        presentEmployees: presentEmployeesData.map(emp => ({
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          department: emp.employee?.department || '',
+          position: emp.employee?.position || ''
+        })),
+        absentEmployees: absentEmployeesData.map(emp => ({
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          department: emp.employee?.department || '',
+          position: emp.employee?.position || ''
+        })),
+        pendingEmployees: pendingEmployeesData.map(emp => ({
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          department: emp.employee?.department || '',
+          position: emp.employee?.position || ''
+        }))
       },
     });
   } catch (error) {
@@ -223,6 +317,57 @@ router.get('/', async (req: AuthRequest, res, next) => {
     ]);
 
     const presentToday = presentUsers.length;
+    const presentUserIds = new Set(presentUsers.map((u: any) => u.userId));
+    
+    // Buscar dados dos funcionários presentes
+    const presentEmployeesData = await prisma.user.findMany({
+      where: {
+        id: { in: Array.from(presentUserIds) },
+        role: 'EMPLOYEE',
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        employee: {
+          select: {
+            department: true,
+            position: true
+          }
+        }
+      }
+    });
+
+    // Buscar todos os funcionários ativos
+    const allEmployees = await prisma.user.findMany({
+      where: userIds.length > 0 ? {
+        role: 'EMPLOYEE',
+        isActive: true,
+        id: { in: userIds }
+      } : {
+        role: 'EMPLOYEE',
+        isActive: true,
+        employee: {
+          isNot: null
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        employee: {
+          select: {
+            department: true,
+            position: true
+          }
+        }
+      }
+    });
+
+    // Funcionários ausentes (todos menos os presentes)
+    const absentEmployeesData = allEmployees.filter(emp => !presentUserIds.has(emp.id));
+
     const absentToday = Math.max(totalEmployees - presentToday, 0);
     const attendanceRate = totalEmployees > 0 ? Math.min(100, Math.max(0, Math.round((presentToday / totalEmployees) * 100))) : 0;
 
@@ -235,8 +380,8 @@ router.get('/', async (req: AuthRequest, res, next) => {
       recordsByUser.get(record.userId)!.add(record.type);
     });
 
-    let pendingToday = 0;
-    recordsByUser.forEach((userRecords) => {
+    const pendingUserIds: string[] = [];
+    recordsByUser.forEach((userRecords, userId) => {
       const hasEntry = userRecords.has('ENTRY');
       const hasLunchStart = userRecords.has('LUNCH_START');
       const hasLunchEnd = userRecords.has('LUNCH_END');
@@ -244,9 +389,31 @@ router.get('/', async (req: AuthRequest, res, next) => {
       
       // Se não tem todos os 4 pontos, está pendente
       if (!(hasEntry && hasLunchStart && hasLunchEnd && hasExit)) {
-        pendingToday++;
+        pendingUserIds.push(userId);
       }
     });
+
+    // Buscar dados dos funcionários pendentes
+    const pendingEmployeesData = await prisma.user.findMany({
+      where: {
+        id: { in: pendingUserIds },
+        role: 'EMPLOYEE',
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        employee: {
+          select: {
+            department: true,
+            position: true
+          }
+        }
+      }
+    });
+
+    const pendingToday = pendingUserIds.length;
 
     res.json({
       success: true,
@@ -259,6 +426,27 @@ router.get('/', async (req: AuthRequest, res, next) => {
         pendingOvertime: 0,
         averageAttendance: attendanceRate,
         attendanceRate,
+        presentEmployees: presentEmployeesData.map(emp => ({
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          department: emp.employee?.department || '',
+          position: emp.employee?.position || ''
+        })),
+        absentEmployees: absentEmployeesData.map(emp => ({
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          department: emp.employee?.department || '',
+          position: emp.employee?.position || ''
+        })),
+        pendingEmployees: pendingEmployeesData.map(emp => ({
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          department: emp.employee?.department || '',
+          position: emp.employee?.position || ''
+        }))
       },
     });
   } catch (error) {
