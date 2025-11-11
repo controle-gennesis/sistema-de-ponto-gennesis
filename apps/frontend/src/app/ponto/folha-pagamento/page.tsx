@@ -629,8 +629,7 @@ export default function FolhaPagamentoPage() {
                   title="Exportar para Excel"
                 >
                   <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Exportar</span>
-                  <span className="sm:hidden">Exportar</span>
+                  <span>Exportar</span>
                 </button>
               </div>
             </div>
@@ -757,13 +756,15 @@ export default function FolhaPagamentoPage() {
                           </span>
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
-                          <button
-                            onClick={() => handleViewDetails(employee)}
-                            className="p-2 text-yellow-600 dark:text-yellow-500 hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 rounded-lg transition-colors"
-                            title="Folha de Pagamento"
-                          >
-                            <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
-                          </button>
+                          <div className="flex justify-center">
+                            <button
+                              onClick={() => handleViewDetails(employee)}
+                              className="inline-flex items-center justify-center h-8 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none"
+                              title="Ver detalhes"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))

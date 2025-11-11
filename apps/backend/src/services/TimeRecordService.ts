@@ -1,7 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import moment from 'moment-timezone';
+import { HolidayService } from './HolidayService';
 
 const prisma = new PrismaClient();
+const holidayService = new HolidayService();
 
 export interface WorkHoursCalculation {
   totalHours: number;
@@ -39,7 +41,24 @@ export interface PeriodSummary {
 }
 
 export class TimeRecordService {
-  private getExpectedWorkHoursByRule(date: Date): number {
+  /**
+   * Converte polo para estado (UF)
+   */
+  private poloToState(polo?: string | null): string | undefined {
+    if (!polo) return undefined;
+    const poloUpper = polo.toUpperCase();
+    if (poloUpper.includes('BRASÍLIA') || poloUpper.includes('BRASILIA')) return 'DF';
+    if (poloUpper.includes('GOIÁS') || poloUpper.includes('GOIAS')) return 'GO';
+    return undefined;
+  }
+
+  private async getExpectedWorkHoursByRule(date: Date, state?: string): Promise<number> {
+    // Verificar se é feriado primeiro
+    const isHoliday = await holidayService.isHoliday(date, state);
+    if (isHoliday) {
+      return 0; // Feriado: não há horas esperadas
+    }
+
     const dow = moment(date).day(); // 0 dom, 1 seg ... 6 sáb
     if (dow >= 1 && dow <= 4) return 9; // seg-qui: 9h (7-17 com 1h almoço)
     if (dow === 5) return 8; // sexta: 8h (7-16 com 1h almoço)
@@ -69,6 +88,10 @@ export class TimeRecordService {
   async calculateWorkHours(userId: string, date: Date): Promise<WorkHoursCalculation> {
     const startOfDay = moment(date).startOf('day').toDate();
     const endOfDay = moment(date).endOf('day').toDate();
+
+    // Buscar funcionário para obter o estado (polo)
+    const employee = await prisma.employee.findFirst({ where: { userId } });
+    const employeeState = this.poloToState(employee?.polo);
 
     const records = await prisma.timeRecord.findMany({
       where: {
@@ -124,8 +147,8 @@ export class TimeRecordService {
     // Calcular horas efetivas de trabalho
     const effectiveHours = totalHours - lunchHours;
 
-    // Buscar horas esperadas baseado no dia da semana
-    const expectedWorkHours = this.getExpectedWorkHoursByRule(date);
+    // Buscar horas esperadas baseado no dia da semana e feriados
+    const expectedWorkHours = await this.getExpectedWorkHoursByRule(date, employeeState);
 
     if (effectiveHours > expectedWorkHours) {
       regularHours = expectedWorkHours;
@@ -189,6 +212,10 @@ export class TimeRecordService {
   }
 
   async calculatePeriodSummary(userId: string, startDate: Date, endDate: Date): Promise<PeriodSummary> {
+    // Buscar funcionário uma única vez para obter o estado (polo)
+    const employee = await prisma.employee.findFirst({ where: { userId } });
+    const employeeState = this.poloToState(employee?.polo);
+
     const records = await prisma.timeRecord.findMany({
       where: {
         userId,
@@ -278,7 +305,7 @@ export class TimeRecordService {
         // Dia com ausência justificada - não conta como ausência nem presença
         // Não incrementa presentDays nem absentDays
         // Mas pode contar como horas regulares se configurado
-        const expectedHours = this.getExpectedWorkHoursByRule(currentDate.toDate());
+        const expectedHours = await this.getExpectedWorkHoursByRule(currentDate.toDate(), employeeState);
         if (expectedHours > 0) {
           regularHours += expectedHours; // Considerar como horas regulares trabalhadas
         }
@@ -328,6 +355,9 @@ export class TimeRecordService {
     const today = moment().endOf('day');
     const end = moment.min(moment(endDate).endOf('day'), today);
 
+    // Converter polo para estado (para verificação de feriados)
+    const employeeState = this.poloToState(employee?.polo);
+
     const days: Array<{
       date: Date;
       expectedHours: number;
@@ -340,7 +370,7 @@ export class TimeRecordService {
     }> = [];
 
     while (cursor.isSameOrBefore(end, 'day')) {
-      const expected = this.getExpectedWorkHoursByRule(cursor.toDate());
+      const expected = await this.getExpectedWorkHoursByRule(cursor.toDate(), employeeState);
       let worked = 0;
       let overtime = 0;
       let overtime15 = 0; // 1.5x
@@ -348,13 +378,21 @@ export class TimeRecordService {
       let owed = 0;
       const notes: string[] = [];
 
+      // Verificar se é feriado para adicionar nota
+      const isHoliday = await holidayService.isHoliday(cursor.toDate(), employeeState);
+      if (isHoliday) {
+        notes.push('Feriado');
+      }
+
+      // Buscar registros de ponto sempre (mesmo em feriados/finais de semana)
+      const dayStart = cursor.clone().startOf('day').toDate();
+      const dayEnd = cursor.clone().endOf('day').toDate();
+      const dayRecords = await prisma.timeRecord.findMany({
+        where: { userId, timestamp: { gte: dayStart, lte: dayEnd } },
+        orderBy: { timestamp: 'asc' },
+      });
+
       if (expected > 0) {
-        const dayStart = cursor.clone().startOf('day').toDate();
-        const dayEnd = cursor.clone().endOf('day').toDate();
-        const dayRecords = await prisma.timeRecord.findMany({
-          where: { userId, timestamp: { gte: dayStart, lte: dayEnd } },
-          orderBy: { timestamp: 'asc' },
-        });
 
         // Verificar se há ausência justificada para este dia
         const hasAbsenceJustified = dayRecords.some((r: any) => r.type === 'ABSENCE_JUSTIFIED');
@@ -441,9 +479,9 @@ export class TimeRecordService {
               owed = expected - worked;
               }
             } else {
-              // Dias sem horas esperadas (sábado/domingo): tudo é extra
-              if (dayOfWeek === 0) {
-                // Domingo: todas as horas são 2x
+              // Dias sem horas esperadas (sábado/domingo/feriado): tudo é extra
+              if (dayOfWeek === 0 || isHoliday) {
+                // Domingo ou Feriado: todas as horas são 2x
                 overtime20 = worked * 2.0;
                 overtime15 = 0;
               } else {
@@ -455,6 +493,79 @@ export class TimeRecordService {
             }
           } else {
             owed = expected;
+          }
+        }
+      } else {
+        // Quando expected = 0 (feriado ou final de semana), ainda precisa processar se houver registros
+        if (dayRecords.length > 0) {
+          const entry = dayRecords.find((r: any) => r.type === 'ENTRY');
+          const exit = [...dayRecords].reverse().find((r: any) => r.type === 'EXIT');
+          const lunchStart = dayRecords.find((r: any) => r.type === 'LUNCH_START');
+          const lunchEnd = dayRecords.find((r: any) => r.type === 'LUNCH_END');
+
+          if (entry && exit) {
+            const TZ = 'America/Sao_Paulo';
+            const toLocal = (d: Date) => moment(d);
+            const entryMoment = toLocal(entry.timestamp);
+            const exitMoment = toLocal(exit.timestamp);
+
+            const total = exitMoment.diff(entryMoment, 'hours', true);
+            let lunch = 0;
+
+            if (lunchStart && lunchEnd) {
+              const lunchStartMoment = toLocal(lunchStart.timestamp);
+              const lunchEndMoment = toLocal(lunchEnd.timestamp);
+              lunch = lunchEndMoment.diff(lunchStartMoment, 'hours', true);
+            } else {
+              lunch = 1; // assume 1h
+            }
+
+            worked = Math.max(0, total - lunch);
+
+            // Calcular horas trabalhadas após as 22:00
+            const localDayStr = entryMoment.format('YYYY-MM-DD');
+            const boundary22Local = moment(`${localDayStr} 22:00`, 'YYYY-MM-DD HH:mm');
+            const endOfLocalDayLocal = boundary22Local.clone().endOf('day');
+
+            const overlapAfter22Local = (startLocal: moment.Moment, endLocal: moment.Moment) => {
+              const s = moment.max(startLocal, boundary22Local);
+              const e = moment.min(endLocal, endOfLocalDayLocal);
+              if (e.isAfter(s)) return e.diff(s, 'hours', true);
+              return 0;
+            };
+
+            let firstIntervalStart = entryMoment.clone();
+            let firstIntervalEnd = exitMoment.clone();
+            let secondIntervalStart: moment.Moment | null = null;
+            let secondIntervalEnd: moment.Moment | null = null;
+
+            if (lunchStart && lunchEnd) {
+              const lunchStartMoment = toLocal(lunchStart.timestamp);
+              const lunchEndMoment = toLocal(lunchEnd.timestamp);
+              firstIntervalEnd = lunchStartMoment.clone();
+              secondIntervalStart = lunchEndMoment.clone();
+              secondIntervalEnd = exitMoment.clone();
+            }
+
+            let workedAfter22 = 0;
+            workedAfter22 += overlapAfter22Local(firstIntervalStart, firstIntervalEnd);
+            if (secondIntervalStart && secondIntervalEnd) {
+              workedAfter22 += overlapAfter22Local(secondIntervalStart, secondIntervalEnd);
+            }
+            const workedBefore22 = Math.max(0, worked - workedAfter22);
+
+            const dayOfWeek = cursor.day();
+
+            // Feriado ou domingo: todas as horas são 2x
+            if (dayOfWeek === 0 || isHoliday) {
+              overtime20 = worked * 2.0;
+              overtime15 = 0;
+            } else {
+              // Sábado: 1.5x antes de 22h, 2x depois de 22h
+              overtime15 = workedBefore22 * 1.5;
+              overtime20 = workedAfter22 * 2.0;
+            }
+            overtime = overtime15 + overtime20;
           }
         }
       }

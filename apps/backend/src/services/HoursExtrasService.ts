@@ -1,7 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
+import { HolidayService } from './HolidayService';
 
 const prisma = new PrismaClient();
+const holidayService = new HolidayService();
 
 export interface HoursExtrasCalculation {
   he50Hours: number;
@@ -32,27 +34,12 @@ export class HoursExtrasService {
   }
 
   /**
-   * Verifica se é feriado (implementação básica - pode ser expandida)
+   * Verifica se é feriado usando o HolidayService
+   * @param date Data a verificar
+   * @param state Estado do funcionário (opcional)
    */
-  private isHoliday(date: Date): boolean {
-    const momentDate = moment(date);
-    const year = momentDate.year();
-    
-    // Feriados fixos
-    const fixedHolidays = [
-      { month: 0, day: 1 },   // 1º de Janeiro
-      { month: 3, day: 21 },  // Tiradentes
-      { month: 4, day: 1 },   // Dia do Trabalhador
-      { month: 8, day: 7 },   // Independência
-      { month: 9, day: 12 },  // Nossa Senhora Aparecida
-      { month: 10, day: 2 },  // Finados
-      { month: 10, day: 15 }, // Proclamação da República
-      { month: 11, day: 25 }, // Natal
-    ];
-
-    return fixedHolidays.some(holiday => 
-      momentDate.month() === holiday.month && momentDate.date() === holiday.day
-    );
+  private async isHoliday(date: Date, state?: string): Promise<boolean> {
+    return await holidayService.isHoliday(date, state);
   }
 
   /**
@@ -121,7 +108,7 @@ export class HoursExtrasService {
   /**
    * Calcula horas extras 100% para um dia específico
    */
-  private async calculateHE100ForDay(userId: string, date: Date, dayOfWeek: number): Promise<number> {
+  private async calculateHE100ForDay(userId: string, date: Date, dayOfWeek: number, state?: string): Promise<number> {
     const startOfDay = moment(date).startOf('day').toDate();
     const endOfDay = moment(date).endOf('day').toDate();
 
@@ -131,7 +118,7 @@ export class HoursExtrasService {
     }
 
     // Feriado: todas as horas são extras 100%
-    if (this.isHoliday(date)) {
+    if (await this.isHoliday(date, state)) {
       return await this.calculateDayHours(userId, date);
     }
 
@@ -177,6 +164,17 @@ export class HoursExtrasService {
   }
 
   /**
+   * Converte polo para estado (UF)
+   */
+  private poloToState(polo?: string | null): string | undefined {
+    if (!polo) return undefined;
+    const poloUpper = polo.toUpperCase();
+    if (poloUpper.includes('BRASÍLIA') || poloUpper.includes('BRASILIA')) return 'DF';
+    if (poloUpper.includes('GOIÁS') || poloUpper.includes('GOIAS')) return 'GO';
+    return undefined;
+  }
+
+  /**
    * Calcula horas extras para um funcionário em um mês específico
    */
   async calculateHoursExtrasForMonth(
@@ -187,6 +185,14 @@ export class HoursExtrasService {
     dangerPay: number,
     unhealthyPay: number
   ): Promise<HoursExtrasCalculation> {
+    // Buscar dados do funcionário para obter o polo
+    const employee = await prisma.employee.findUnique({
+      where: { userId },
+      select: { polo: true },
+    });
+
+    const state = this.poloToState(employee?.polo);
+
     const startDate = moment([year, month - 1, 1]).startOf('day').toDate();
     const endDate = moment([year, month - 1]).endOf('month').toDate();
     
@@ -198,12 +204,12 @@ export class HoursExtrasService {
     while (cursor.isSameOrBefore(endDate, 'day')) {
       const date = cursor.toDate();
       const dayOfWeek = cursor.day();
-      const isHoliday = this.isHoliday(date);
+      const isHoliday = await this.isHoliday(date, state);
       const totalHours = await this.calculateDayHours(userId, date);
       
       if (totalHours > 0) {
         const he50Hours = this.calculateHE50ForDay(totalHours, dayOfWeek, isHoliday);
-        const he100Hours = await this.calculateHE100ForDay(userId, date, dayOfWeek);
+        const he100Hours = await this.calculateHE100ForDay(userId, date, dayOfWeek, state);
         
         totalHE50Hours += he50Hours;
         totalHE100Hours += he100Hours;
@@ -229,6 +235,14 @@ export class HoursExtrasService {
     year: number, 
     month: number
   ): Promise<DayHoursExtras[]> {
+    // Buscar dados do funcionário para obter o polo
+    const employee = await prisma.employee.findUnique({
+      where: { userId },
+      select: { polo: true },
+    });
+
+    const state = this.poloToState(employee?.polo);
+
     const startDate = moment([year, month - 1, 1]).startOf('day').toDate();
     const endDate = moment([year, month - 1]).endOf('month').toDate();
     
@@ -238,12 +252,12 @@ export class HoursExtrasService {
     while (cursor.isSameOrBefore(endDate, 'day')) {
       const date = cursor.toDate();
       const dayOfWeek = cursor.day();
-      const isHoliday = this.isHoliday(date);
+      const isHoliday = await this.isHoliday(date, state);
       const totalHours = await this.calculateDayHours(userId, date);
       
       if (totalHours > 0) {
         const he50Hours = this.calculateHE50ForDay(totalHours, dayOfWeek, isHoliday);
-        const he100Hours = await this.calculateHE100ForDay(userId, date, dayOfWeek);
+        const he100Hours = await this.calculateHE100ForDay(userId, date, dayOfWeek, state);
         
         days.push({
           date,

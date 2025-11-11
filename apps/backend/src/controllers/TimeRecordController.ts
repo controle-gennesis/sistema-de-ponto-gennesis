@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth';
 import { TimeRecordService } from '../services/TimeRecordService';
 import { LocationService } from '../services/LocationService';
 import { PhotoService } from '../services/PhotoService';
+import { HolidayService } from '../services/HolidayService';
 import { uploadPhoto, handleUploadError } from '../middleware/upload';
 import moment from 'moment-timezone';
 
@@ -12,6 +13,7 @@ const prisma = new PrismaClient();
 const timeRecordService = new TimeRecordService();
 const locationService = new LocationService();
 const photoService = new PhotoService();
+const holidayService = new HolidayService();
 
 export class TimeRecordController {
   async punchInOut(req: AuthRequest, res: Response, next: NextFunction) {
@@ -832,6 +834,17 @@ export class TimeRecordController {
         throw createError('Funcionário não encontrado', 404);
       }
 
+      // Converter polo para estado (para verificação de feriados)
+      const poloToState = (polo?: string | null): string | undefined => {
+        if (!polo) return undefined;
+        const poloUpper = polo.toUpperCase();
+        if (poloUpper.includes('BRASÍLIA') || poloUpper.includes('BRASILIA')) return 'DF';
+        if (poloUpper.includes('GOIÁS') || poloUpper.includes('GOIAS')) return 'GO';
+        return undefined;
+      };
+
+      const employeeState = poloToState(employee.polo);
+
       // Calcular início e fim do mês
       const startDate = new Date(yearNum, monthNum - 1, 1);
       const endDate = new Date(yearNum, monthNum, 0, 23, 59, 59);
@@ -882,6 +895,14 @@ export class TimeRecordController {
         }
       });
 
+      // Buscar todos os feriados do mês de uma vez (otimização)
+      const holidays = await holidayService.getHolidaysByPeriod(
+        moment(startDate).format('YYYY-MM-DD'),
+        moment(endDate).format('YYYY-MM-DD'),
+        employeeState
+      );
+      const holidaysSet = new Set(holidays.map(h => moment(h.date).format('YYYY-MM-DD')));
+
       // Agrupar registros por dia
       const daysMap = new Map<string, any[]>();
       
@@ -921,6 +942,9 @@ export class TimeRecordController {
           const certEnd = moment(cert.endDate).format('YYYY-MM-DD');
           return dateKey >= certStart && dateKey <= certEnd;
         });
+
+        // Verificar se é feriado (usando o Set para verificação rápida)
+        const isHoliday = holidaysSet.has(dateKey);
         
         daysInMonth.push({
           date: dateKey,
@@ -928,7 +952,8 @@ export class TimeRecordController {
           points: dayRecords,
           costCenter: dayRecords.length > 0 ? dayRecords[0].costCenter : null,
           isOnVacation,
-          hasMedicalCertificate
+          hasMedicalCertificate,
+          isHoliday
         });
       }
 

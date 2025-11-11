@@ -528,3 +528,33 @@ enum RequestStatus {
   REJECTED    // Rejeitada
   CANCELLED   // Cancelada
 }
+
+// Modelo de Feriados
+model Holiday {
+  id          String      @id @default(cuid())
+  name        String      // Nome do feriado
+  date        DateTime    // Data do feriado
+  type        HolidayType @default(NATIONAL) // Tipo de feriado
+  isRecurring Boolean     @default(false) // Se é recorrente (todos os anos)
+  state       String?     // Estado (para feriados estaduais)
+  city        String?     // Cidade (para feriados municipais)
+  description String?     // Descrição adicional
+  isActive    Boolean     @default(true) // Se está ativo
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  createdBy   String?     // ID do usuário que criou
+
+  @@unique([date, name]) // Evita duplicatas
+  @@index([date])
+  @@index([type])
+  @@index([isRecurring])
+  @@map("holidays")
+}
+
+enum HolidayType {
+  NATIONAL   // Feriado nacional
+  STATE      // Feriado estadual
+  MUNICIPAL  // Feriado municipal
+  OPTIONAL   // Ponto facultativo
+  COMPANY    // Feriado da empresa
+}

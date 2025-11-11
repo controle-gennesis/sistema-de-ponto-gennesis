@@ -191,6 +191,8 @@ export default function AlocacaoPage() {
     switch (status) {
       case 'FINAL_DE_SEMANA':
         return 'bg-gray-400 dark:bg-gray-600';
+      case 'FERIADO':
+        return 'bg-purple-500 dark:bg-purple-600';
       case 'FALTA':
         return 'bg-red-500 dark:bg-red-600';
       case 'ATESTADO':
@@ -210,6 +212,8 @@ export default function AlocacaoPage() {
     switch (status) {
       case 'FINAL_DE_SEMANA':
         return 'Final de Semana';
+      case 'FERIADO':
+        return 'Feriado';
       case 'FALTA':
         return 'Falta';
       case 'ATESTADO':
@@ -227,13 +231,15 @@ export default function AlocacaoPage() {
 
   const getTextColor = (status: string) => {
     // Se for um centro de custo específico (não um status especial)
-    if (status && !['FINAL_DE_SEMANA', 'FALTA', 'ATESTADO', 'FERIAS', 'NAO_ADMITIDO', 'FUTURO'].includes(status)) {
+    if (status && !['FINAL_DE_SEMANA', 'FERIADO', 'FALTA', 'ATESTADO', 'FERIAS', 'NAO_ADMITIDO', 'FUTURO'].includes(status)) {
       return 'text-blue-600 dark:text-blue-400 font-semibold'; // Cor padrão para centros de custo
     }
     
     switch (status) {
       case 'FINAL_DE_SEMANA':
-        return 'text-gray-400 dark:text-gray-500';
+        return 'text-gray-400 dark:text-gray-500 font-semibold';
+      case 'FERIADO':
+        return 'text-purple-600 dark:text-purple-400 font-semibold';
       case 'FALTA':
         return 'text-red-600 dark:text-red-400 font-semibold';
       case 'ATESTADO':
@@ -309,15 +315,20 @@ export default function AlocacaoPage() {
       }
     }
 
-    // Verificar se é final de semana após admissão
-    if (date.getDay() === 0 || date.getDay() === 6) {
-      return { status: 'FINAL_DE_SEMANA', costCenter: null };
-    }
-
     // Buscar dados do dia específico
     const dayData = employeeData.data.days?.find((d: any) => d.date === dateString);
     
     if (dayData) {
+      // Verificar se é feriado (prioridade sobre final de semana)
+      if (dayData.isHoliday) {
+        return { status: 'FERIADO', costCenter: null };
+      }
+
+      // Verificar se é final de semana após admissão
+      if (date.getDay() === 0 || date.getDay() === 6) {
+        return { status: 'FINAL_DE_SEMANA', costCenter: null };
+      }
+      
       // Verificar se está em férias
       if (dayData.isOnVacation) {
         return { status: 'FERIAS', costCenter: null };
@@ -955,12 +966,7 @@ export default function AlocacaoPage() {
                             cellClass += 'text-gray-400 dark:text-gray-600';
                             cellContent = '-';
                           }
-                          // Verificar se é final de semana
-                          else if (date.getDay() === 0 || date.getDay() === 6) {
-                            cellClass += 'text-gray-400 dark:text-gray-500';
-                            cellContent = 'FDS';
-                          }
-                          // Para dias úteis, usar dados reais baseados no funcionário
+                          // Para todos os dias, usar dados reais baseados no funcionário
                           else {
                             // Buscar dados reais do funcionário usando chave composta (id-mês-ano)
                             const cacheKey = `${employee.id}-${filters.month}-${filters.year}`;
@@ -976,8 +982,14 @@ export default function AlocacaoPage() {
                               
                               // Se é antes da admissão
                               if (dateString < admissionDateString) {
-                                cellClass += 'text-gray-400 dark:text-gray-500';
-                                cellContent = 'N/A';
+                                // Se é final de semana antes da admissão, mostrar como final de semana
+                                if (date.getDay() === 0 || date.getDay() === 6) {
+                                  cellClass += 'text-gray-400 dark:text-gray-500 font-semibold';
+                                  cellContent = 'Final de Semana';
+                                } else {
+                                  cellClass += 'text-gray-400 dark:text-gray-500';
+                                  cellContent = 'N/A';
+                                }
                               }
                               // Se é dia da admissão ou depois
                               else {
@@ -986,8 +998,18 @@ export default function AlocacaoPage() {
                                   const dayData = employeeData.data.days.find((d: any) => d.date === dateString);
                                   
                                   if (dayData) {
+                                    // Verificar se é feriado (prioridade sobre final de semana)
+                                    if (dayData.isHoliday) {
+                                      cellClass += 'text-purple-600 dark:text-purple-400 font-semibold';
+                                      cellContent = 'Feriado';
+                                    }
+                                    // Verificar se é final de semana
+                                    else if (date.getDay() === 0 || date.getDay() === 6) {
+                                      cellClass += 'text-gray-400 dark:text-gray-500 font-semibold';
+                                      cellContent = 'Final de Semana';
+                                    }
                                     // Verificar se está em férias
-                                    if (dayData.isOnVacation) {
+                                    else if (dayData.isOnVacation) {
                                       cellClass += 'text-green-600 dark:text-green-400';
                                       cellContent = 'FÉRIAS';
                                     }
@@ -1004,13 +1026,18 @@ export default function AlocacaoPage() {
                                     }
                                     // Se não tem pontos mas deveria ter (dia útil após admissão)
                                     else {
-                                      cellClass += 'text-red-600 dark:text-red-400';
+                                      cellClass += 'text-red-600 dark:text-red-400 font-semibold';
                                       cellContent = 'Falta';
                                     }
                                   } else {
-                                    // Se não encontrou dados para o dia, mostrar falta
-                                    cellClass += 'text-red-600 dark:text-red-400';
-                                    cellContent = 'Falta';
+                                    // Se não encontrou dados para o dia
+                                    if (date.getDay() === 0 || date.getDay() === 6) {
+                                      cellClass += 'text-gray-400 dark:text-gray-500 font-semibold';
+                                      cellContent = 'Final de Semana';
+                                    } else {
+                                      cellClass += 'text-red-600 dark:text-red-400 font-semibold';
+                                      cellContent = 'Falta';
+                                    }
                                   }
                                 } else {
                                   // Se não tem dados do funcionário ainda, mostrar indicador de carregamento
@@ -1027,7 +1054,17 @@ export default function AlocacaoPage() {
                                 const dayData = employeeData.data.days.find((d: any) => d.date === dateString);
                                 
                                 if (dayData) {
-                                  if (dayData.isOnVacation) {
+                                  // Verificar se é feriado
+                                  if (dayData.isHoliday) {
+                                    cellClass += 'text-purple-600 dark:text-purple-400 font-semibold';
+                                    cellContent = 'Feriado';
+                                  }
+                                  // Verificar se é final de semana
+                                  else if (date.getDay() === 0 || date.getDay() === 6) {
+                                    cellClass += 'text-gray-400 dark:text-gray-500 font-semibold';
+                                    cellContent = 'Final de Semana';
+                                  }
+                                  else if (dayData.isOnVacation) {
                                     cellClass += 'text-green-600 dark:text-green-400';
                                     cellContent = 'FÉRIAS';
                                   } else if (dayData.hasMedicalCertificate) {
@@ -1038,12 +1075,18 @@ export default function AlocacaoPage() {
                                     cellClass += 'text-blue-600 dark:text-blue-400';
                                     cellContent = costCenter || 'N/A';
                                   } else {
-                                    cellClass += 'text-red-600 dark:text-red-400';
+                                    cellClass += 'text-red-600 dark:text-red-400 font-semibold';
                                     cellContent = 'Falta';
                                   }
                                 } else {
-                                  cellClass += 'text-red-600 dark:text-red-400';
-                                  cellContent = 'Falta';
+                                  // Se não encontrou dados para o dia
+                                  if (date.getDay() === 0 || date.getDay() === 6) {
+                                    cellClass += 'text-gray-400 dark:text-gray-500 font-semibold';
+                                    cellContent = 'Final de Semana';
+                                  } else {
+                                    cellClass += 'text-red-600 dark:text-red-400 font-semibold';
+                                    cellContent = 'Falta';
+                                  }
                                 }
                               } else {
                                 // Se não tem dados do funcionário ainda, mostrar indicador de carregamento
@@ -1061,13 +1104,15 @@ export default function AlocacaoPage() {
                           );
                         })}
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center sticky right-0 bg-white dark:bg-gray-800 z-10 border-l border-gray-200 dark:border-gray-700">
-                          <button
-                            onClick={() => handleViewDetails(employee)}
-                            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-yellow-600 dark:text-yellow-500 hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors"
-                            title="Ver detalhes"
-                          >
-                            <FileText className="w-4 h-4" />
-                          </button>
+                          <div className="flex justify-center">
+                            <button
+                              onClick={() => handleViewDetails(employee)}
+                              className="inline-flex items-center justify-center h-8 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none"
+                              title="Ver detalhes"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))

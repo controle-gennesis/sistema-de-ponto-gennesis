@@ -221,6 +221,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BookImage,
             description: 'Gerenciar férias dos funcionários',
             permission: permissions.canManageVacations
+          },
+          {
+            name: 'Gerenciar Feriados',
+            href: '/ponto/gerenciar-feriados',
+            icon: CalendarDays,
+            description: 'Gerenciar calendário de feriados',
+            permission: permissions.canManageVacations
           }
         ]
       },
