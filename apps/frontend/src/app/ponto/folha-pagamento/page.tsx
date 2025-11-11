@@ -737,11 +737,28 @@ export default function FolhaPagamentoPage() {
                               const salarioFamilia = employee.familySalary || 0;
                               const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
                               
-                              // Calcular número de dias do mês
+                              // Calcular número de dias do mês para desconto de faltas
+                              // Usa 30 como padrão, ou 31 apenas se for o mês de admissão E o mês de admissão tiver 31 dias
+                              let diasParaDesconto = 30; // Padrão
+                              if (employee.admissionDate) {
+                                const admissionDate = new Date(employee.admissionDate);
+                                const mesAdmissao = admissionDate.getMonth() + 1; // getMonth() retorna 0-11
+                                const anoAdmissao = admissionDate.getFullYear();
+                                
+                                // Só usa 31 dias se for o mês de admissão e o mês tiver 31 dias
+                                if (filters.month === mesAdmissao && filters.year === anoAdmissao) {
+                                  const diasMesAdmissao = new Date(anoAdmissao, mesAdmissao, 0).getDate();
+                                  if (diasMesAdmissao === 31) {
+                                    diasParaDesconto = 31;
+                                  }
+                                }
+                              }
+                              
+                              // Calcular número de dias do mês atual (para outros cálculos)
                               const diasDoMes = new Date(filters.year, filters.month, 0).getDate();
                               
-                              const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
-                              const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
+                              const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas;
+                              const dsrPorFalta = (salarioBase / diasParaDesconto) * faltas;
                               
                               // Cálculos de %VA e %VT baseados no polo
                               const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
