@@ -195,8 +195,8 @@ export default function AlocacaoPage() {
         return 'bg-purple-500 dark:bg-purple-600';
       case 'FALTA':
         return 'bg-red-500 dark:bg-red-600';
-      case 'ATESTADO':
-        return 'bg-yellow-500 dark:bg-yellow-600';
+      case 'AUSENCIA_JUSTIFICADA':
+        return 'bg-orange-500 dark:bg-orange-600';
       case 'FERIAS':
         return 'bg-green-500 dark:bg-green-600';
       case 'NAO_ADMITIDO':
@@ -208,7 +208,37 @@ export default function AlocacaoPage() {
     }
   };
 
+  const getAbsenceTypeLabel = (type: string | null, customType?: string | null) => {
+    if (!type) return 'Ausência Justificada';
+    
+    // Se for "Outros" e tiver tipo personalizado, usar o personalizado
+    if (type === 'OTHER' && customType) {
+      return customType;
+    }
+    
+    const typeMap: Record<string, string> = {
+      'MEDICAL': 'Atestado Médico',
+      'DENTAL': 'Atestado Odontológico',
+      'PREVENTIVE': 'Exame Preventivo',
+      'ACCIDENT': 'Acidente de Trabalho',
+      'COVID': 'COVID-19',
+      'MATERNITY': 'Maternidade',
+      'PATERNITY': 'Paternidade',
+      'OTHER': 'Outros'
+    };
+    
+    return typeMap[type] || 'Ausência Justificada';
+  };
+
   const getStatusLabel = (status: string) => {
+    // Lista de tipos de ausência específicos
+    const absenceTypes = ['Atestado Médico', 'Atestado Odontológico', 'Exame Preventivo', 'Acidente de Trabalho', 'COVID-19', 'Maternidade', 'Paternidade', 'Outros', 'Ausência Justificada'];
+    
+    // Se for um tipo de ausência específico, retornar diretamente
+    if (status && absenceTypes.includes(status)) {
+      return status;
+    }
+    
     switch (status) {
       case 'FINAL_DE_SEMANA':
         return 'Final de Semana';
@@ -216,8 +246,8 @@ export default function AlocacaoPage() {
         return 'Feriado';
       case 'FALTA':
         return 'Falta';
-      case 'ATESTADO':
-        return 'Atestado';
+      case 'AUSENCIA_JUSTIFICADA':
+        return 'Ausência Justificada';
       case 'FERIAS':
         return 'Férias';
       case 'NAO_ADMITIDO':
@@ -225,13 +255,21 @@ export default function AlocacaoPage() {
       case 'FUTURO':
         return '-';
       default:
-        return 'N/A';
+        return status || 'N/A'; // Retornar o status diretamente se não for um caso especial
     }
   };
 
   const getTextColor = (status: string) => {
+    // Lista de tipos de ausência que devem aparecer em laranja
+    const absenceTypes = ['Atestado Médico', 'Atestado Odontológico', 'Exame Preventivo', 'Acidente de Trabalho', 'COVID-19', 'Maternidade', 'Paternidade', 'Outros', 'Ausência Justificada'];
+    
+    // Se for um tipo de ausência, retornar laranja
+    if (status && absenceTypes.includes(status)) {
+      return 'text-orange-600 dark:text-orange-400 font-semibold';
+    }
+    
     // Se for um centro de custo específico (não um status especial)
-    if (status && !['FINAL_DE_SEMANA', 'FERIADO', 'FALTA', 'ATESTADO', 'FERIAS', 'NAO_ADMITIDO', 'FUTURO'].includes(status)) {
+    if (status && !['FINAL_DE_SEMANA', 'FERIADO', 'FALTA', 'AUSENCIA_JUSTIFICADA', 'FERIAS', 'NAO_ADMITIDO', 'FUTURO'].includes(status)) {
       return 'text-blue-600 dark:text-blue-400 font-semibold'; // Cor padrão para centros de custo
     }
     
@@ -242,8 +280,8 @@ export default function AlocacaoPage() {
         return 'text-purple-600 dark:text-purple-400 font-semibold';
       case 'FALTA':
         return 'text-red-600 dark:text-red-400 font-semibold';
-      case 'ATESTADO':
-        return 'text-yellow-600 dark:text-yellow-400 font-semibold';
+      case 'AUSENCIA_JUSTIFICADA':
+        return 'text-orange-600 dark:text-orange-400 font-semibold';
       case 'FERIAS':
         return 'text-green-600 dark:text-green-400 font-semibold';
       case 'NAO_ADMITIDO':
@@ -319,9 +357,14 @@ export default function AlocacaoPage() {
     const dayData = employeeData.data.days?.find((d: any) => d.date === dateString);
     
     if (dayData) {
-      // Verificar se é feriado (prioridade sobre final de semana)
+      // Verificar se é feriado (prioridade sobre tudo)
       if (dayData.isHoliday) {
         return { status: 'FERIADO', costCenter: null };
+      }
+      
+      // Verificar se está em férias (prioridade sobre final de semana)
+      if (dayData.isOnVacation) {
+        return { status: 'FERIAS', costCenter: null };
       }
 
       // Verificar se é final de semana após admissão
@@ -329,14 +372,13 @@ export default function AlocacaoPage() {
         return { status: 'FINAL_DE_SEMANA', costCenter: null };
       }
       
-      // Verificar se está em férias
-      if (dayData.isOnVacation) {
-        return { status: 'FERIAS', costCenter: null };
-      }
-      
-      // Verificar se está com atestado médico
-      if (dayData.hasMedicalCertificate) {
-        return { status: 'ATESTADO', costCenter: null };
+      // Verificar se há ausência justificada (inclui atestado médico aprovado)
+      if (dayData.hasAbsenceJustified || dayData.hasMedicalCertificate) {
+        // Retornar o tipo da ausência se disponível, senão retornar status genérico
+        const absenceType = dayData.absenceType;
+        const customAbsenceType = dayData.customAbsenceType;
+        const absenceLabel = absenceType ? getAbsenceTypeLabel(absenceType, customAbsenceType) : 'AUSENCIA_JUSTIFICADA';
+        return { status: absenceLabel, costCenter: null };
       }
       
       // Se tem pontos, usar o centro de custo do primeiro ponto
@@ -998,25 +1040,25 @@ export default function AlocacaoPage() {
                                   const dayData = employeeData.data.days.find((d: any) => d.date === dateString);
                                   
                                   if (dayData) {
-                                    // Verificar se é feriado (prioridade sobre final de semana)
+                                    // Verificar se é feriado (prioridade sobre tudo)
                                     if (dayData.isHoliday) {
                                       cellClass += 'text-purple-600 dark:text-purple-400 font-semibold';
                                       cellContent = 'Feriado';
+                                    }
+                                    // Verificar se está em férias (prioridade sobre final de semana)
+                                    else if (dayData.isOnVacation) {
+                                      cellClass += 'text-green-600 dark:text-green-400';
+                                      cellContent = 'FÉRIAS';
                                     }
                                     // Verificar se é final de semana
                                     else if (date.getDay() === 0 || date.getDay() === 6) {
                                       cellClass += 'text-gray-400 dark:text-gray-500 font-semibold';
                                       cellContent = 'Final de Semana';
                                     }
-                                    // Verificar se está em férias
-                                    else if (dayData.isOnVacation) {
-                                      cellClass += 'text-green-600 dark:text-green-400';
-                                      cellContent = 'FÉRIAS';
-                                    }
-                                    // Verificar se está com atestado médico
-                                    else if (dayData.hasMedicalCertificate) {
-                                      cellClass += 'text-yellow-600 dark:text-yellow-400';
-                                      cellContent = 'ATESTADO';
+                                    // Verificar se há ausência justificada (inclui atestado médico aprovado)
+                                    else if (dayData.hasAbsenceJustified || dayData.hasMedicalCertificate) {
+                                      cellClass += 'text-orange-600 dark:text-orange-400 font-semibold';
+                                      cellContent = getAbsenceTypeLabel(dayData.absenceType, dayData.customAbsenceType);
                                     }
                                     // Se tem pontos, usar o centro de custo do primeiro ponto
                                     else if (dayData.points && dayData.points.length > 0) {
@@ -1054,22 +1096,25 @@ export default function AlocacaoPage() {
                                 const dayData = employeeData.data.days.find((d: any) => d.date === dateString);
                                 
                                 if (dayData) {
-                                  // Verificar se é feriado
+                                  // Verificar se é feriado (prioridade sobre tudo)
                                   if (dayData.isHoliday) {
                                     cellClass += 'text-purple-600 dark:text-purple-400 font-semibold';
                                     cellContent = 'Feriado';
+                                  }
+                                  // Verificar se está em férias (prioridade sobre final de semana)
+                                  else if (dayData.isOnVacation) {
+                                    cellClass += 'text-green-600 dark:text-green-400';
+                                    cellContent = 'FÉRIAS';
                                   }
                                   // Verificar se é final de semana
                                   else if (date.getDay() === 0 || date.getDay() === 6) {
                                     cellClass += 'text-gray-400 dark:text-gray-500 font-semibold';
                                     cellContent = 'Final de Semana';
                                   }
-                                  else if (dayData.isOnVacation) {
-                                    cellClass += 'text-green-600 dark:text-green-400';
-                                    cellContent = 'FÉRIAS';
-                                  } else if (dayData.hasMedicalCertificate) {
-                                    cellClass += 'text-yellow-600 dark:text-yellow-400';
-                                    cellContent = 'ATESTADO';
+                                  // Verificar se há ausência justificada (inclui atestado médico aprovado)
+                                  else if (dayData.hasAbsenceJustified || dayData.hasMedicalCertificate) {
+                                    cellClass += 'text-orange-600 dark:text-orange-400 font-semibold';
+                                    cellContent = getAbsenceTypeLabel(dayData.absenceType, dayData.customAbsenceType);
                                   } else if (dayData.points && dayData.points.length > 0) {
                                     const costCenter = dayData.points[0].costCenter;
                                     cellClass += 'text-blue-600 dark:text-blue-400';
@@ -1231,7 +1276,8 @@ export default function AlocacaoPage() {
                     >
                       <div className="text-gray-600 dark:text-gray-400 mb-1">{day}</div>
                       <div className={`text-xs text-center leading-tight ${getTextColor(dayStatus.costCenter || dayStatus.status)}`}>
-                        {dayStatus.status === 'NAO_ADMITIDO' ? 'Não Admitido' : (dayStatus.costCenter || getStatusLabel(dayStatus.status))}
+                        {dayStatus.status === 'NAO_ADMITIDO' ? 'Não Admitido' : 
+                         (dayStatus.costCenter || getStatusLabel(dayStatus.status))}
                       </div>
                     </div>
                   );

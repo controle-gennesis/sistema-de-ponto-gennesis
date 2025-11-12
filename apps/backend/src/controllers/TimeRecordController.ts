@@ -916,7 +916,8 @@ export class TimeRecordController {
           type: record.type,
           timestamp: record.timestamp,
           costCenter: record.costCenter || 'SEDE',
-          isValid: record.isValid
+          isValid: record.isValid,
+          reason: record.reason // Incluir reason para extrair o tipo da ausência
         });
       });
 
@@ -936,15 +937,65 @@ export class TimeRecordController {
           return dateKey >= vacationStart && dateKey <= vacationEnd;
         });
 
-        // Verificar se está com atestado médico
-        const hasMedicalCertificate = medicalCertificates.some(cert => {
+        // Verificar se está com atestado médico e extrair o tipo
+        const medicalCertificate = medicalCertificates.find(cert => {
           const certStart = moment(cert.startDate).format('YYYY-MM-DD');
           const certEnd = moment(cert.endDate).format('YYYY-MM-DD');
           return dateKey >= certStart && dateKey <= certEnd;
         });
+        const hasMedicalCertificate = !!medicalCertificate;
 
         // Verificar se é feriado (usando o Set para verificação rápida)
         const isHoliday = holidaysSet.has(dateKey);
+        
+        // Verificar se há ausência justificada (registro do tipo ABSENCE_JUSTIFIED)
+        const absenceRecord = dayRecords.find((r: any) => r.type === 'ABSENCE_JUSTIFIED');
+        const hasAbsenceJustified = !!absenceRecord;
+        
+        // Extrair o tipo da ausência do campo reason ou do atestado médico
+        let absenceType = null;
+        let customAbsenceType = null; // Tipo personalizado quando for "Outros"
+        
+        // Primeiro, tentar pegar do atestado médico se existir
+        if (medicalCertificate?.type) {
+          absenceType = medicalCertificate.type;
+          // Se for "Outros", extrair o tipo personalizado da descrição
+          if (medicalCertificate.type === 'OTHER' && medicalCertificate.description) {
+            // O tipo personalizado está no início da descrição (antes do " - ")
+            const descParts = medicalCertificate.description.split(' - ');
+            customAbsenceType = descParts[0] || null;
+          }
+        }
+        // Se não tiver, tentar extrair do reason do registro
+        else if (absenceRecord?.reason) {
+          // Formato: "Ausência justificada por atestado médico - medical"
+          // ou "Ausência justificada - {tipo personalizado}" para "Outros"
+          const reasonLower = absenceRecord.reason.toLowerCase();
+          if (reasonLower.includes('ausência justificada - ')) {
+            // Formato para "Outros": "Ausência justificada - {tipo personalizado}"
+            const customMatch = absenceRecord.reason.match(/ausência justificada - (.+)/i);
+            if (customMatch && customMatch[1]) {
+              absenceType = 'OTHER';
+              customAbsenceType = customMatch[1].trim();
+            }
+          } else if (reasonLower.includes('medical') || reasonLower.includes('médico')) {
+            absenceType = 'MEDICAL';
+          } else if (reasonLower.includes('dental') || reasonLower.includes('odontológico')) {
+            absenceType = 'DENTAL';
+          } else if (reasonLower.includes('preventive') || reasonLower.includes('preventivo')) {
+            absenceType = 'PREVENTIVE';
+          } else if (reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+            absenceType = 'ACCIDENT';
+          } else if (reasonLower.includes('covid')) {
+            absenceType = 'COVID';
+          } else if (reasonLower.includes('maternity') || reasonLower.includes('maternidade')) {
+            absenceType = 'MATERNITY';
+          } else if (reasonLower.includes('paternity') || reasonLower.includes('paternidade')) {
+            absenceType = 'PATERNITY';
+          } else if (reasonLower.includes('other') || reasonLower.includes('outros')) {
+            absenceType = 'OTHER';
+          }
+        }
         
         daysInMonth.push({
           date: dateKey,
@@ -953,7 +1004,10 @@ export class TimeRecordController {
           costCenter: dayRecords.length > 0 ? dayRecords[0].costCenter : null,
           isOnVacation,
           hasMedicalCertificate,
-          isHoliday
+          isHoliday,
+          hasAbsenceJustified,
+          absenceType, // Tipo da ausência extraído do reason
+          customAbsenceType // Tipo personalizado quando for "Outros"
         });
       }
 

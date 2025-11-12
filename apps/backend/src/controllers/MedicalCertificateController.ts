@@ -13,7 +13,7 @@ export class MedicalCertificateController {
   async submitCertificate(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { type, startDate, endDate, description } = req.body;
+      const { type, startDate, endDate, description, otherType } = req.body;
       const file = req.file; // Arquivo enviado via multer
 
       // Validar dados obrigatórios
@@ -26,9 +26,30 @@ export class MedicalCertificateController {
         throw createError('Tipo de atestado inválido', 400);
       }
 
-      // Validar datas
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      // Validar se tipo "Outros" tem o campo otherType preenchido
+      if (type === 'OTHER' && (!otherType || !otherType.trim())) {
+        throw createError('Por favor, especifique o tipo de ausência', 400);
+      }
+
+      // Validar datas - tratar como data local para evitar problemas de timezone
+      let start: Date;
+      let end: Date;
+      
+      // Se a data já vem com horário, usar diretamente, senão adicionar horário do Brasil
+      if (startDate.includes('T')) {
+        start = new Date(startDate);
+      } else {
+        // Adicionar horário do Brasil (04:00) para evitar conversão de timezone
+        // Isso garante que a data seja interpretada como meia-noite no horário do Brasil
+        start = new Date(startDate + 'T04:00:00');
+      }
+      
+      if (endDate.includes('T')) {
+        end = new Date(endDate);
+      } else {
+        // Adicionar horário do Brasil (04:00) para evitar conversão de timezone
+        end = new Date(endDate + 'T04:00:00');
+      }
       
       if (start > end) {
         throw createError('Data de início não pode ser posterior à data de fim', 400);
@@ -64,6 +85,12 @@ export class MedicalCertificateController {
         fileName = file.originalname;
       }
 
+      // Se for tipo "Outros", incluir o tipo personalizado na descrição
+      let finalDescription = description;
+      if (type === 'OTHER' && otherType && otherType.trim()) {
+        finalDescription = otherType.trim() + (description ? ` - ${description}` : '');
+      }
+
       // Criar atestado
       const certificate = await prisma.medicalCertificate.create({
         data: {
@@ -73,7 +100,7 @@ export class MedicalCertificateController {
           startDate: start,
           endDate: end,
           days,
-          description,
+          description: finalDescription, // Inclui o tipo personalizado se for "Outros"
           fileName,
           fileUrl,
           fileKey,
@@ -301,11 +328,16 @@ export class MedicalCertificateController {
         });
 
         // Criar registros de ausência justificada para cada dia do atestado
+        // Garantir que as datas sejam tratadas como local (sem conversão de timezone)
         const startDate = new Date(certificate.startDate);
         const endDate = new Date(certificate.endDate);
         
+        // Normalizar para meia-noite local
+        const startDateLocal = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 0, 0, 0);
+        const endDateLocal = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 23, 59, 59);
+        
         // Iterar por cada dia do período do atestado
-        for (let currentDate = new Date(startDate); currentDate <= endDate; currentDate.setDate(currentDate.getDate() + 1)) {
+        for (let currentDate = new Date(startDateLocal); currentDate <= endDateLocal; currentDate.setDate(currentDate.getDate() + 1)) {
           // Verificar se já existe um registro para este dia
           const dayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 0, 0, 0);
           const dayEnd = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 23, 59, 59);
@@ -324,6 +356,14 @@ export class MedicalCertificateController {
 
           // Se não existe registro para este dia, criar um
           if (!existingRecord) {
+            // Se for tipo "Outros", usar a descrição (que contém o tipo personalizado)
+            let reasonText = `Ausência justificada por atestado médico - ${certificate.type.toLowerCase()}`;
+            if (certificate.type === 'OTHER' && certificate.description) {
+              // Extrair o tipo personalizado da descrição (está no início antes do " - ")
+              const customType = certificate.description.split(' - ')[0];
+              reasonText = `Ausência justificada - ${customType}`;
+            }
+
             await tx.timeRecord.create({
               data: {
                 userId: certificate.userId,
@@ -331,7 +371,7 @@ export class MedicalCertificateController {
                 type: 'ABSENCE_JUSTIFIED',
                 timestamp: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 8, 0, 0), // 8h da manhã
                 isValid: true,
-                reason: `Ausência justificada por atestado médico - ${certificate.type.toLowerCase()}`,
+                reason: reasonText,
                 approvedBy: approvedBy,
                 approvedAt: new Date()
               }

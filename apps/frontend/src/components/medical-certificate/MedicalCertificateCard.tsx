@@ -29,7 +29,8 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
     type: 'MEDICAL',
     startDate: '',
     endDate: '',
-    description: ''
+    description: '',
+    otherType: '' // Campo para especificar o tipo quando for "Outros"
   });
   const [file, setFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -51,7 +52,8 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
         type: 'MEDICAL',
         startDate: '',
         endDate: '',
-        description: ''
+        description: '',
+        otherType: ''
       });
       setFile(null);
       onSuccess?.();
@@ -76,6 +78,12 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
       return;
     }
 
+    // Validar se tipo "Outros" foi preenchido
+    if (formData.type === 'OTHER' && !formData.otherType.trim()) {
+      alert('Por favor, especifique o tipo de ausência');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -84,6 +92,10 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
       submitData.append('startDate', formData.startDate);
       submitData.append('endDate', formData.endDate);
       submitData.append('description', formData.description);
+      // Se for "Outros", incluir o tipo personalizado na descrição
+      if (formData.type === 'OTHER' && formData.otherType.trim()) {
+        submitData.append('otherType', formData.otherType.trim());
+      }
       submitData.append('file', file!);
 
       await submitMutation.mutateAsync(submitData);
@@ -158,6 +170,23 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
               ))}
             </select>
           </div>
+
+          {/* Campo para especificar tipo quando for "Outros" */}
+          {formData.type === 'OTHER' && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-900 dark:text-gray-300 mb-2">
+                Especifique o tipo de ausência *
+              </label>
+              <Input
+                type="text"
+                value={formData.otherType}
+                onChange={(e) => setFormData({ ...formData, otherType: e.target.value })}
+                placeholder="Ex: Consulta particular, Licença sem vencimento, etc."
+                fullWidth
+                required
+              />
+            </div>
+          )}
 
           {/* Datas */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
