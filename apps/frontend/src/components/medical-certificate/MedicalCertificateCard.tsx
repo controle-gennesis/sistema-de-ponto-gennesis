@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { Calendar, Upload, FileText, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import api from '@/lib/api';
@@ -141,16 +140,7 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
   };
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-            <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          </div>
-          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Registrar Ausência</h3>
-        </div>
-      </CardHeader>
-      <CardContent>
+    <div className="w-full">
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Tipo de Atestado */}
           <div>
@@ -279,7 +269,6 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
             )}
           </Button>
         </form>
-      </CardContent>
-    </Card>
+    </div>
   );
 };

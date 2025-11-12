@@ -11,13 +11,11 @@ import {
   Trash2,
   FileText,
   User,
-  Search,
-  Filter
+  AlertTriangle
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
@@ -25,6 +23,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 interface MedicalCertificate {
   id: string;
+  userId: string;
   type: string;
   startDate: string;
   endDate: string;
@@ -43,6 +42,7 @@ interface MedicalCertificate {
     employeeId: string;
     department: string;
     position: string;
+    company?: string;
   };
   approver?: {
     name: string;
@@ -52,6 +52,15 @@ interface MedicalCertificate {
 
 interface MedicalCertificateListProps {
   showActions?: boolean;
+  filters?: {
+    search?: string;
+    type?: string;
+    department?: string;
+    position?: string;
+    company?: string;
+    month?: number;
+    year?: number;
+  };
 }
 
 const certificateTypeLabels: Record<string, string> = {
@@ -65,6 +74,26 @@ const certificateTypeLabels: Record<string, string> = {
   'OTHER': 'Outros'
 };
 
+// Função para obter o label do tipo, extraindo o tipo personalizado se for "Outros"
+const getCertificateTypeLabel = (certificate: MedicalCertificate): string => {
+  if (certificate.type === 'OTHER' && certificate.description) {
+    // O tipo personalizado está no início da descrição (antes do " - ")
+    const customType = certificate.description.split(' - ')[0];
+    return customType || 'Outros';
+  }
+  return certificateTypeLabels[certificate.type] || certificate.type;
+};
+
+// Função para obter apenas a descrição (sem o tipo personalizado quando for "Outros")
+const getCertificateDescription = (certificate: MedicalCertificate): string | undefined => {
+  if (certificate.type === 'OTHER' && certificate.description) {
+    // Se tiver " - ", pegar apenas a parte após o " - " (a descrição real)
+    const parts = certificate.description.split(' - ');
+    return parts.length > 1 ? parts.slice(1).join(' - ') : undefined;
+  }
+  return certificate.description;
+};
+
 const statusLabels: Record<string, string> = {
   'PENDING': 'Pendente',
   'APPROVED': 'Aprovado',
@@ -73,16 +102,33 @@ const statusLabels: Record<string, string> = {
 };
 
 export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({ 
-  showActions = false 
+  showActions = false,
+  filters = {}
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedCertificate, setSelectedCertificate] = useState<MedicalCertificate | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [certificateToReject, setCertificateToReject] = useState<MedicalCertificate | null>(null);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [certificateToApprove, setCertificateToApprove] = useState<MedicalCertificate | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [certificateToCancel, setCertificateToCancel] = useState<MedicalCertificate | null>(null);
+  const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
 
   const queryClient = useQueryClient();
   const { permissions, isLoading: permissionsLoading } = usePermissions();
+
+  // Buscar dados do usuário logado
+  const { data: userData } = useQuery({
+    queryKey: ['user'],
+    queryFn: async () => {
+      const res = await api.get('/auth/me');
+      return res.data;
+    }
+  });
+
+  const currentUserId = userData?.data?.id;
 
   // Buscar atestados
   const { data: certificatesData, isLoading } = useQuery({
@@ -103,6 +149,8 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medical-certificates'] });
       setShowModal(false);
+      setShowApproveModal(false);
+      setCertificateToApprove(null);
     }
   });
 
@@ -115,7 +163,9 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medical-certificates'] });
       setShowModal(false);
+      setShowRejectModal(false);
       setRejectReason('');
+      setCertificateToReject(null);
     }
   });
 
@@ -127,21 +177,71 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medical-certificates'] });
+      setShowCancelModal(false);
+      setCertificateToCancel(null);
     }
   });
 
   const certificates: MedicalCertificate[] = certificatesData?.data?.certificates || [];
 
-  // Filtrar atestados
+  // Filtrar certificados
   const filteredCertificates = certificates.filter(cert => {
-    const matchesSearch = !permissions.canManageAbsences || 
-      cert.user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      cert.user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = statusFilter === 'all' || cert.status === statusFilter;
-    
-    return matchesSearch && matchesStatus;
+    // Filtro de busca
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
+      const matchesSearch = 
+        cert.user.name.toLowerCase().includes(searchLower) ||
+        cert.user.email.toLowerCase().includes(searchLower) ||
+        cert.employee.employeeId.toLowerCase().includes(searchLower);
+      if (!matchesSearch) return false;
+    }
+
+    // Filtro de status (da tab ativa)
+    if (activeStatusTab !== 'all') {
+      if (cert.status !== activeStatusTab) return false;
+    }
+
+    // Filtro de tipo
+    if (filters.type && filters.type !== 'all') {
+      if (cert.type !== filters.type) return false;
+    }
+
+    // Filtro de setor
+    if (filters.department) {
+      if (cert.employee.department !== filters.department) return false;
+    }
+
+    // Filtro de cargo
+    if (filters.position) {
+      if (cert.employee.position !== filters.position) return false;
+    }
+
+    // Filtro de empresa
+    if (filters.company) {
+      if (cert.employee.company !== filters.company) return false;
+    }
+
+    // Filtro de mês e ano
+    if (filters.month || filters.year) {
+      const startDate = new Date(cert.startDate);
+      const certMonth = startDate.getMonth() + 1;
+      const certYear = startDate.getFullYear();
+      
+      if (filters.month && certMonth !== filters.month) return false;
+      if (filters.year && certYear !== filters.year) return false;
+    }
+
+    return true;
   });
+
+  // Contar certificados por status
+  const statusCounts = {
+    all: certificates.length,
+    PENDING: certificates.filter(c => c.status === 'PENDING').length,
+    APPROVED: certificates.filter(c => c.status === 'APPROVED').length,
+    REJECTED: certificates.filter(c => c.status === 'REJECTED').length,
+    CANCELLED: certificates.filter(c => c.status === 'CANCELLED').length,
+  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -174,13 +274,33 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
     setShowModal(true);
   };
 
+  const handleApproveClick = (certificate: MedicalCertificate) => {
+    setCertificateToApprove(certificate);
+    setShowApproveModal(true);
+  };
+
   const handleApprove = () => {
-    if (selectedCertificate) {
-      approveMutation.mutate(selectedCertificate.id);
+    if (certificateToApprove) {
+      approveMutation.mutate(certificateToApprove.id);
     }
   };
 
+  const handleRejectClick = (certificate: MedicalCertificate) => {
+    setCertificateToReject(certificate);
+    setShowRejectModal(true);
+    setRejectReason('');
+  };
+
   const handleReject = () => {
+    if (certificateToReject && rejectReason.trim()) {
+      rejectMutation.mutate({
+        id: certificateToReject.id,
+        reason: rejectReason.trim()
+      });
+    }
+  };
+
+  const handleRejectFromModal = () => {
     if (selectedCertificate && rejectReason.trim()) {
       rejectMutation.mutate({
         id: selectedCertificate.id,
@@ -189,9 +309,14 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
     }
   };
 
-  const handleCancel = (certificate: MedicalCertificate) => {
-    if (window.confirm('Tem certeza que deseja cancelar esta ausência?')) {
-      cancelMutation.mutate(certificate.id);
+  const handleCancelClick = (certificate: MedicalCertificate) => {
+    setCertificateToCancel(certificate);
+    setShowCancelModal(true);
+  };
+
+  const handleCancel = () => {
+    if (certificateToCancel) {
+      cancelMutation.mutate(certificateToCancel.id);
     }
   };
 
@@ -201,6 +326,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
         responseType: 'blob'
       });
       
+      // Criar URL do blob e fazer download
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -211,6 +337,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Erro ao baixar arquivo:', error);
+      alert('Erro ao baixar arquivo. Tente novamente.');
     }
   };
 
@@ -233,52 +360,61 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Filtros */}
-      {permissions.canManageAbsences && (
-        <Card>
-          <CardContent className="p-0 pt-0">
-            {/* Cabeçalho dos Filtros */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
-              </div>
-            </div>
-            
-            {/* Conteúdo dos Filtros */}
-            <div className="p-4">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                    <input
-                      type="text"
-                      placeholder="Buscar funcionários por nome, email ou CPF..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 sm:w-48">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">Status:</label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-700"
-                  >
-                    <option value="all">Todos</option>
-                    <option value="PENDING">Pendente</option>
-                    <option value="APPROVED">Aprovado</option>
-                    <option value="REJECTED">Rejeitado</option>
-                    <option value="CANCELLED">Cancelado</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Tabs de Status */}
+      <div className="border-b border-gray-200 dark:border-gray-700">
+        <nav className="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto">
+          <button
+            onClick={() => setActiveStatusTab('PENDING')}
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+              activeStatusTab === 'PENDING'
+                ? 'border-yellow-500 dark:border-yellow-400 text-yellow-600 dark:text-yellow-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Pendentes ({statusCounts.PENDING})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('APPROVED')}
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+              activeStatusTab === 'APPROVED'
+                ? 'border-green-500 dark:border-green-400 text-green-600 dark:text-green-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Aprovados ({statusCounts.APPROVED})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('REJECTED')}
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+              activeStatusTab === 'REJECTED'
+                ? 'border-red-500 dark:border-red-400 text-red-600 dark:text-red-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Rejeitados ({statusCounts.REJECTED})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('CANCELLED')}
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+              activeStatusTab === 'CANCELLED'
+                ? 'border-gray-500 dark:border-gray-400 text-gray-600 dark:text-gray-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Cancelados ({statusCounts.CANCELLED})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('all')}
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+              activeStatusTab === 'all'
+                ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Todas ({statusCounts.all})
+          </button>
+        </nav>
+      </div>
 
       {/* Lista de Atestados */}
       <div className="space-y-3">
@@ -290,98 +426,126 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
                 Nenhum registro de ausência encontrado
               </h3>
               <p className="text-gray-500 dark:text-gray-400">
-                {!permissions.canManageAbsences 
-                  ? 'Você ainda não enviou nenhum registro de ausência.'
-                  : 'Não há registros de ausência que correspondam aos filtros selecionados.'
-                }
+                {activeStatusTab !== 'all' 
+                  ? `Não há ausências ${statusLabels[activeStatusTab]?.toLowerCase()} no momento.`
+                  : (filters.search || (filters.type && filters.type !== 'all') || filters.department || filters.position || filters.company)
+                    ? 'Nenhum registro encontrado com os filtros selecionados.'
+                    : certificates.length === 0
+                      ? 'Você ainda não enviou nenhum registro de ausência.'
+                      : 'Nenhum registro encontrado.'}
               </p>
             </CardContent>
           </Card>
         ) : (
           filteredCertificates.map((certificate) => (
-            <Card key={certificate.id}>
+            <Card key={certificate.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      {getStatusIcon(certificate.status)}
-                      <div>
-                        <h3 className="font-medium text-gray-900 dark:text-gray-100 text-sm sm:text-base">
-                          {certificateTypeLabels[certificate.type]}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    {getStatusIcon(certificate.status)}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                          {getCertificateTypeLabel(certificate)}
                         </h3>
-                        {permissions.canManageAbsences && (
-                          <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
-                            <User className="w-3 h-3 inline mr-1" />
-                            {certificate.user.name} ({certificate.employee.department})
-                          </p>
-                        )}
+                        {getStatusBadge(certificate.status)}
                       </div>
-                    </div>
-                    
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600 dark:text-gray-400">
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {formatDate(certificate.startDate)} - {formatDate(certificate.endDate)}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {certificate.days} dias
-                      </div>
-                      <div>
-                        Enviado em {formatDate(certificate.submittedAt)}
-                      </div>
-                    </div>
-
-                    {certificate.description && (
-                      <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-2">
-                        {certificate.description}
-                      </p>
-                    )}
-
-                    {certificate.reason && certificate.status === 'REJECTED' && (
-                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded">
-                        <p className="text-xs sm:text-sm text-red-800 dark:text-red-300">
-                          <strong>Motivo da rejeição:</strong> {certificate.reason}
+                      
+                      {permissions.canManageAbsences && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                          <User className="w-3.5 h-3.5 inline mr-1" />
+                          {certificate.user.name} - {certificate.employee.position} de {certificate.employee.department}
                         </p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5" />
+                          {formatDate(certificate.startDate)} - {formatDate(certificate.endDate)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5" />
+                          {certificate.days} {certificate.days === 1 ? 'dia' : 'dias'}
+                        </span>
+                        <span>
+                          Enviado em {formatDate(certificate.submittedAt)}
+                        </span>
                       </div>
-                    )}
+
+                      {getCertificateDescription(certificate) && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                          {getCertificateDescription(certificate)}
+                        </p>
+                      )}
+
+                      {certificate.reason && certificate.status === 'REJECTED' && (
+                        <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm">
+                          <p className="text-red-800 dark:text-red-300">
+                            <strong>Motivo da rejeição:</strong> {certificate.reason}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-2 sm:ml-4">
-                    {getStatusBadge(certificate.status)}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {showActions && permissions.canManageAbsences && certificate.status === 'PENDING' && certificate.userId !== currentUserId && (
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={() => handleApproveClick(certificate)}
+                          disabled={approveMutation.isPending}
+                          className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800 text-white px-3"
+                          title="Aprovar"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRejectClick(certificate)}
+                          disabled={rejectMutation.isPending}
+                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500 border-red-300 dark:border-red-600 px-3"
+                          title="Rejeitar"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </Button>
+                      </>
+                    )}
                     
-                    <div className="flex gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleViewDetails(certificate)}
+                      className="p-2"
+                      title="Ver detalhes"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                    
+                    {certificate.fileName && (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleViewDetails(certificate)}
+                        onClick={() => handleDownload(certificate)}
                         className="p-2"
+                        title="Download"
                       >
-                        <Eye className="w-3 h-3" />
+                        <Download className="w-4 h-4" />
                       </Button>
-                      
-                      {certificate.fileName && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDownload(certificate)}
-                          className="p-2"
-                        >
-                          <Download className="w-3 h-3" />
-                        </Button>
-                      )}
-                      
-                      {!permissions.canManageAbsences && certificate.status === 'PENDING' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCancel(certificate)}
-                          className="p-2"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      )}
-                    </div>
+                    )}
+                    
+                    {certificate.userId === currentUserId && certificate.status === 'PENDING' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCancelClick(certificate)}
+                        className="p-2 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500"
+                        title="Cancelar"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -402,7 +566,7 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo</label>
                 <p className="text-sm text-gray-900 dark:text-gray-100">
-                  {certificateTypeLabels[selectedCertificate.type]}
+                  {getCertificateTypeLabel(selectedCertificate)}
                 </p>
               </div>
               <div>
@@ -430,10 +594,10 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
               <p className="text-sm text-gray-900 dark:text-gray-100">{selectedCertificate.days} dias</p>
             </div>
 
-            {selectedCertificate.description && (
+            {getCertificateDescription(selectedCertificate) && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Observações</label>
-                <p className="text-sm text-gray-900 dark:text-gray-100">{selectedCertificate.description}</p>
+                <p className="text-sm text-gray-900 dark:text-gray-100">{getCertificateDescription(selectedCertificate)}</p>
               </div>
             )}
 
@@ -455,41 +619,156 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
               </div>
             )}
 
-            {/* Ações para RH/Admin */}
-            {permissions.canManageAbsences && selectedCertificate.status === 'PENDING' && (
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
-                <Button
-                  onClick={handleApprove}
-                  disabled={approveMutation.isPending}
-                  className="w-full bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800"
-                >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Aprovar Ausência
-                </Button>
+          </div>
+        )}
+      </Modal>
 
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Motivo da Rejeição
-                  </label>
-                  <textarea
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                    rows={3}
-                    placeholder="Digite o motivo da rejeição..."
-                  />
-                  <Button
-                    onClick={handleReject}
-                    disabled={rejectMutation.isPending || !rejectReason.trim()}
-                    variant="outline"
-                    className="w-full border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    Rejeitar Ausência
-                  </Button>
-                </div>
+      {/* Modal de Confirmação de Aprovação */}
+      <Modal
+        isOpen={showApproveModal}
+        onClose={() => {
+          setShowApproveModal(false);
+          setCertificateToApprove(null);
+        }}
+        title="Confirmar Aprovação"
+      >
+        {certificateToApprove && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
               </div>
-            )}
+            </div>
+            <div className="text-center">
+              <p className="text-base text-gray-700 dark:text-gray-300 mb-2">
+                Tem certeza que deseja aprovar a ausência de
+              </p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                {certificateToApprove.user.name}?
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowApproveModal(false);
+                  setCertificateToApprove(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleApprove}
+                disabled={approveMutation.isPending}
+                className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800 text-white"
+              >
+                {approveMutation.isPending ? 'Aprovando...' : 'Confirmar Aprovação'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal de Rejeição Rápida */}
+      <Modal
+        isOpen={showRejectModal}
+        onClose={() => {
+          setShowRejectModal(false);
+          setCertificateToReject(null);
+          setRejectReason('');
+        }}
+        title="Rejeitar Ausência"
+      >
+        {certificateToReject && (
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Você está rejeitando a ausência de <strong>{certificateToReject.user.name}</strong>
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Motivo da Rejeição *
+              </label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                rows={3}
+                placeholder="Digite o motivo da rejeição..."
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowRejectModal(false);
+                  setCertificateToReject(null);
+                  setRejectReason('');
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleReject}
+                disabled={rejectMutation.isPending || !rejectReason.trim()}
+                className="bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800 text-white"
+              >
+                {rejectMutation.isPending ? 'Rejeitando...' : 'Rejeitar'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal de Cancelamento */}
+      <Modal
+        isOpen={showCancelModal}
+        onClose={() => {
+          setShowCancelModal(false);
+          setCertificateToCancel(null);
+        }}
+        title="Confirmar Cancelamento"
+      >
+        {certificateToCancel && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-16 h-16 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center">
+                <AlertTriangle className="w-8 h-8 text-orange-600 dark:text-orange-400" />
+              </div>
+            </div>
+            <div className="text-center">
+              <p className="text-base text-gray-700 dark:text-gray-300 mb-2">
+                Tem certeza que deseja cancelar sua ausência de
+              </p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                {getCertificateTypeLabel(certificateToCancel)}
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                {formatDate(certificateToCancel.startDate)} - {formatDate(certificateToCancel.endDate)}
+              </p>
+              <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">
+                Esta ação não pode ser desfeita.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCancelModal(false);
+                  setCertificateToCancel(null);
+                }}
+              >
+                Não, manter
+              </Button>
+              <Button
+                onClick={handleCancel}
+                disabled={cancelMutation.isPending}
+                className="bg-orange-600 dark:bg-orange-700 hover:bg-orange-700 dark:hover:bg-orange-800 text-white"
+              >
+                {cancelMutation.isPending ? 'Cancelando...' : 'Sim, cancelar'}
+              </Button>
+            </div>
           </div>
         )}
       </Modal>

@@ -4,6 +4,9 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { MedicalCertificateService } from '../services/MedicalCertificateService';
 import { PhotoService } from '../services/PhotoService';
+import path from 'path';
+import fs from 'fs';
+import AWS from 'aws-sdk';
 
 const prisma = new PrismaClient();
 const medicalCertificateService = new MedicalCertificateService();
@@ -146,7 +149,7 @@ export class MedicalCertificateController {
             select: { name: true, email: true }
           },
           employee: {
-            select: { employeeId: true, department: true, position: true }
+            select: { employeeId: true, department: true, position: true, company: true }
           },
           approver: {
             select: { name: true, email: true }
@@ -225,7 +228,7 @@ export class MedicalCertificateController {
             select: { name: true, email: true }
           },
           employee: {
-            select: { employeeId: true, department: true, position: true }
+            select: { employeeId: true, department: true, position: true, company: true }
           },
           approver: {
             select: { name: true, email: true }
@@ -271,7 +274,7 @@ export class MedicalCertificateController {
             select: { name: true, email: true }
           },
           employee: {
-            select: { employeeId: true, department: true, position: true }
+            select: { employeeId: true, department: true, position: true, company: true }
           },
           approver: {
             select: { name: true, email: true }
@@ -390,7 +393,7 @@ export class MedicalCertificateController {
             select: { name: true, email: true }
           },
           employee: {
-            select: { employeeId: true, department: true, position: true }
+            select: { employeeId: true, department: true, position: true, company: true }
           },
           approver: {
             select: { name: true, email: true }
@@ -444,7 +447,7 @@ export class MedicalCertificateController {
             select: { name: true, email: true }
           },
           employee: {
-            select: { employeeId: true, department: true, position: true }
+            select: { employeeId: true, department: true, position: true, company: true }
           },
           approver: {
             select: { name: true, email: true }
@@ -533,11 +536,64 @@ export class MedicalCertificateController {
         throw createError('Arquivo não encontrado', 404);
       }
 
-      // Redirecionar para o arquivo no S3
+      // Baixar arquivo do S3 e enviar como stream
       const photoService = new PhotoService();
-      const fileUrl = await photoService.getSignedUrl(certificate.fileKey);
       
-      return res.redirect(fileUrl);
+      // Verificar se está usando S3 ou local
+      const useLocal = (process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local'
+        || !process.env.AWS_ACCESS_KEY_ID
+        || !process.env.AWS_SECRET_ACCESS_KEY;
+
+      if (useLocal) {
+        // Modo local: enviar arquivo diretamente
+        const filePath = path.join(process.cwd(), 'apps', 'backend', certificate.fileKey);
+        if (!fs.existsSync(filePath)) {
+          throw createError('Arquivo não encontrado', 404);
+        }
+        
+        const ext = path.extname(certificate.fileKey || '').toLowerCase();
+        const contentType = {
+          '.pdf': 'application/pdf',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.png': 'image/png',
+          '.doc': 'application/msword',
+          '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }[ext] || 'application/octet-stream';
+        
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${certificate.fileName || 'atestado' + ext}"`);
+        return res.sendFile(filePath);
+      } else {
+        // Modo S3: baixar e enviar como stream
+        const s3 = new AWS.S3({
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+          region: process.env.AWS_REGION || 'us-east-1'
+        });
+        const bucketName = process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos';
+        
+        const params = {
+          Bucket: bucketName,
+          Key: certificate.fileKey
+        };
+        
+        const s3Object = await s3.getObject(params).promise();
+        
+        const ext = path.extname(certificate.fileName || '').toLowerCase();
+        const contentType = {
+          '.pdf': 'application/pdf',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.png': 'image/png',
+          '.doc': 'application/msword',
+          '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }[ext] || s3Object.ContentType || 'application/octet-stream';
+        
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${certificate.fileName || 'atestado' + ext}"`);
+        return res.send(s3Object.Body);
+      }
     } catch (error) {
       return next(error);
     }
