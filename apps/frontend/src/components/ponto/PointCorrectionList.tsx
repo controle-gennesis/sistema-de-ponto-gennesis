@@ -76,6 +76,7 @@ const formatTime = (timeString: string) => {
 
 export const PointCorrectionList: React.FC = () => {
   const [selectedRequest, setSelectedRequest] = useState<PointCorrectionRequest | null>(null);
+  const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
 
   const { data: requestsData, isLoading, error } = useQuery({
     queryKey: ['point-corrections'],
@@ -85,7 +86,35 @@ export const PointCorrectionList: React.FC = () => {
     }
   });
 
-  const requests = requestsData || [];
+  const allRequests = requestsData || [];
+
+  // Calcular estatísticas
+  const stats = {
+    total: allRequests.length,
+    pending: allRequests.filter((r: PointCorrectionRequest) => r.status === 'PENDING').length,
+    approved: allRequests.filter((r: PointCorrectionRequest) => r.status === 'APPROVED').length,
+    rejected: allRequests.filter((r: PointCorrectionRequest) => r.status === 'REJECTED').length,
+    cancelled: allRequests.filter((r: PointCorrectionRequest) => r.status === 'CANCELLED').length,
+    inReview: allRequests.filter((r: PointCorrectionRequest) => r.status === 'IN_REVIEW').length
+  };
+
+  // Filtrar solicitações por status
+  const filteredRequests = allRequests.filter((request: PointCorrectionRequest) => {
+    if (activeStatusTab !== 'all') {
+      if (request.status !== activeStatusTab) return false;
+    }
+    return true;
+  });
+
+  // Contar solicitações por status
+  const statusCounts = {
+    all: allRequests.length,
+    PENDING: stats.pending,
+    IN_REVIEW: stats.inReview,
+    APPROVED: stats.approved,
+    REJECTED: stats.rejected,
+    CANCELLED: stats.cancelled
+  };
 
   if (isLoading) {
     return (
@@ -107,7 +136,7 @@ export const PointCorrectionList: React.FC = () => {
     );
   }
 
-  if (!requests || requests.length === 0) {
+  if (!allRequests || allRequests.length === 0) {
     return (
       <div className="text-center py-8">
         <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
@@ -119,100 +148,168 @@ export const PointCorrectionList: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-          Minhas Solicitações ({requests.length})
-        </h3>
+      {/* Tabs de Status */}
+      <div className="mb-6">
+        <nav className="flex space-x-1 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+          <button
+            onClick={() => setActiveStatusTab('PENDING')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeStatusTab === 'PENDING'
+                ? 'border-yellow-500 dark:border-yellow-400 text-yellow-600 dark:text-yellow-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Pendentes ({statusCounts.PENDING})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('APPROVED')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeStatusTab === 'APPROVED'
+                ? 'border-green-500 dark:border-green-400 text-green-600 dark:text-green-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Aprovados ({statusCounts.APPROVED})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('REJECTED')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeStatusTab === 'REJECTED'
+                ? 'border-red-500 dark:border-red-400 text-red-600 dark:text-red-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Rejeitados ({statusCounts.REJECTED})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('CANCELLED')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeStatusTab === 'CANCELLED'
+                ? 'border-gray-500 dark:border-gray-400 text-gray-600 dark:text-gray-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Cancelados ({statusCounts.CANCELLED})
+          </button>
+          <button
+            onClick={() => setActiveStatusTab('all')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeStatusTab === 'all'
+                ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            Todas ({statusCounts.all})
+          </button>
+        </nav>
       </div>
 
       <div className="space-y-3">
-        {requests.map((request: PointCorrectionRequest) => {
+        {filteredRequests.length === 0 ? (
+          <div className="text-center py-8">
+            <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">
+              {activeStatusTab !== 'all' 
+                ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
+                : 'Nenhuma solicitação encontrada.'}
+            </p>
+          </div>
+        ) : (
+          filteredRequests.map((request: PointCorrectionRequest) => {
           const statusInfo = getStatusInfo(request.status);
           const StatusIcon = statusInfo.icon;
 
           return (
-            <Card key={request.id} className="hover:shadow-md transition-shadow">
+            <Card key={request.id} className="hover:shadow-md transition-all duration-200">
               <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h4 className="font-medium text-gray-900 dark:text-gray-100">{request.title}</h4>
-                      <Badge className={statusInfo.color}>
+                {/* Header compacto */}
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
+                        {request.title}
+                      </h4>
+                      <Badge className={`${statusInfo.color} shrink-0 text-xs`}>
                         <StatusIcon className="w-3 h-3 mr-1" />
                         {statusInfo.label}
                       </Badge>
                     </div>
-
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
-                      {request.description}
-                    </p>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                          <XCircle className="w-4 h-4 text-red-500 dark:text-red-400" />
-                          <span className="font-medium">Original:</span>
-                          <span>{formatDate(request.originalDate)} às {formatTime(request.originalTime)}</span>
-                        </div>
-                        <div className="ml-6 text-gray-500 dark:text-gray-400">
-                          {getTypeLabel(request.originalType)}
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                          <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400" />
-                          <span className="font-medium">Corrigido:</span>
-                          <span>{formatDate(request.correctedDate)} às {formatTime(request.correctedTime)}</span>
-                        </div>
-                        <div className="ml-6 text-gray-500 dark:text-gray-400">
-                          {getTypeLabel(request.correctedType)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-4 mt-3 text-xs text-gray-500 dark:text-gray-400">
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-gray-500 dark:text-gray-400" />
-                        <span>Criado em {formatDate(request.createdAt)}</span>
-                      </div>
-                      {request.approvedAt && (
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-gray-500 dark:text-gray-400" />
-                          <span>Aprovado em {formatDate(request.approvedAt)}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {request.approvedBy && (
-                      <div className="flex items-center gap-1 mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        <User className="w-3 h-3 text-gray-500 dark:text-gray-400" />
-                        <span>Aprovado por {request.approvedBy.name}</span>
-                      </div>
-                    )}
-
-                    {request.rejectionReason && (
-                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-xs text-red-700 dark:text-red-300">
-                        <strong>Motivo da rejeição:</strong> {request.rejectionReason}
-                      </div>
+                    {request.justification && (
+                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1">
+                        {request.justification}
+                      </p>
                     )}
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelectedRequest(request)}
+                    className="shrink-0 h-8 px-2"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
 
-                  <div className="ml-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedRequest(request)}
-                    >
-                      <Eye className="w-4 h-4 mr-1" />
-                      Ver Detalhes
-                    </Button>
+                {/* Comparação compacta */}
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {/* Original */}
+                  <div className="p-2.5 rounded border-l-2 border-red-500 dark:border-red-400 bg-red-50/50 dark:bg-red-900/10">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
+                        {formatDate(request.originalDate)} {formatTime(request.originalTime)}
+                      </p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        {getTypeLabel(request.originalType)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Corrigido */}
+                  <div className="p-2.5 rounded border-l-2 border-green-500 dark:border-green-400 bg-green-50/50 dark:bg-green-900/10">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
+                        {formatDate(request.correctedDate)} {formatTime(request.correctedTime)}
+                      </p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        {getTypeLabel(request.correctedType)}
+                      </p>
+                    </div>
                   </div>
                 </div>
+
+                {/* Footer compacto */}
+                <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                    <Calendar className="w-3 h-3" />
+                    <span>{formatDate(request.createdAt)}</span>
+                  </div>
+                  {request.approvedAt && (
+                    <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <Clock className="w-3 h-3" />
+                      <span>Aprovado {formatDate(request.approvedAt)}</span>
+                    </div>
+                  )}
+                  {request.approvedBy && (
+                    <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <User className="w-3 h-3" />
+                      <span>{request.approvedBy.name}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Motivo da rejeição compacto */}
+                {request.rejectionReason && (
+                  <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border-l-2 border-red-500 dark:border-red-400 rounded-r">
+                    <p className="text-xs text-red-700 dark:text-red-300">
+                      <span className="font-semibold">Rejeição:</span> {request.rejectionReason}
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           );
-        })}
+        })
+      )}
       </div>
 
       {/* Modal de detalhes */}
@@ -235,7 +332,6 @@ export const PointCorrectionList: React.FC = () => {
             <div className="px-6 py-4 space-y-4">
               <div>
                 <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">{selectedRequest.title}</h4>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{selectedRequest.description}</p>
               </div>
 
               <div>

@@ -61,8 +61,8 @@ export default function SolicitacoesPage() {
         <div className="space-y-6 w-full px-4">
           {/* Header */}
           <div className="text-center">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Solicitações de Correção</h1>
-            <p className="mt-1 text-gray-600 dark:text-gray-400">Gerencie suas solicitações de correção de ponto</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Solicitações de Correção</h1>
+            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Gerencie suas solicitações de correção de ponto</p>
           </div>
 
           {/* Navegação no topo */}
@@ -96,11 +96,20 @@ export default function SolicitacoesPage() {
           {/* Conteúdo principal */}
           <Card>
             <CardHeader>
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                  {activeTab === 'list' ? 'Minhas Solicitações' : 'Nova Solicitação de Correção'}
-                </h1>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center">
+                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                    <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="ml-3 sm:ml-4 min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {activeTab === 'list' ? 'Minhas Solicitações' : 'Nova Solicitação'}
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {activeTab === 'list' ? 'Visualize e gerencie suas solicitações de correção' : 'Preencha os dados para criar uma nova solicitação'}
+                    </p>
+                  </div>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
