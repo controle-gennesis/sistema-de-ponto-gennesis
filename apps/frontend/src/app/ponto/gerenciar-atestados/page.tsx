@@ -141,7 +141,7 @@ export default function AtestadosPage() {
       <div className="space-y-6">
         {/* Cabeçalho */}
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Registros de Ausência</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Ausências</h1>
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Gerencie todas as ausências da empresa</p>
         </div>
 

@@ -138,22 +138,28 @@ export const PointCorrectionList: React.FC = () => {
 
   if (!allRequests || allRequests.length === 0) {
     return (
-      <div className="text-center py-8">
-        <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-        <p className="text-gray-600 dark:text-gray-400">Nenhuma solicitação encontrada</p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Crie sua primeira solicitação de correção</p>
-      </div>
+      <Card>
+        <CardContent className="p-6 text-center">
+          <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+            Nenhuma solicitação encontrada
+          </h3>
+          <p className="text-gray-500 dark:text-gray-400">
+            Crie sua primeira solicitação de correção
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
     <div className="space-y-4">
       {/* Tabs de Status */}
-      <div className="mb-6">
-        <nav className="flex space-x-1 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+      <div className="border-b border-gray-200 dark:border-gray-700">
+        <nav className="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto">
           <button
             onClick={() => setActiveStatusTab('PENDING')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
               activeStatusTab === 'PENDING'
                 ? 'border-yellow-500 dark:border-yellow-400 text-yellow-600 dark:text-yellow-400'
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
@@ -163,7 +169,7 @@ export const PointCorrectionList: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveStatusTab('APPROVED')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
               activeStatusTab === 'APPROVED'
                 ? 'border-green-500 dark:border-green-400 text-green-600 dark:text-green-400'
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
@@ -173,7 +179,7 @@ export const PointCorrectionList: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveStatusTab('REJECTED')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
               activeStatusTab === 'REJECTED'
                 ? 'border-red-500 dark:border-red-400 text-red-600 dark:text-red-400'
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
@@ -183,7 +189,7 @@ export const PointCorrectionList: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveStatusTab('CANCELLED')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
               activeStatusTab === 'CANCELLED'
                 ? 'border-gray-500 dark:border-gray-400 text-gray-600 dark:text-gray-400'
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
@@ -193,7 +199,7 @@ export const PointCorrectionList: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveStatusTab('all')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
               activeStatusTab === 'all'
                 ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
@@ -206,14 +212,19 @@ export const PointCorrectionList: React.FC = () => {
 
       <div className="space-y-3">
         {filteredRequests.length === 0 ? (
-          <div className="text-center py-8">
-            <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">
-              {activeStatusTab !== 'all' 
-                ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
-                : 'Nenhuma solicitação encontrada.'}
-            </p>
-          </div>
+          <Card>
+            <CardContent className="p-6 text-center">
+              <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                Nenhuma solicitação encontrada
+              </h3>
+              <p className="text-gray-500 dark:text-gray-400">
+                {activeStatusTab !== 'all' 
+                  ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
+                  : 'Nenhuma solicitação encontrada.'}
+              </p>
+            </CardContent>
+          </Card>
         ) : (
           filteredRequests.map((request: PointCorrectionRequest) => {
           const statusInfo = getStatusInfo(request.status);

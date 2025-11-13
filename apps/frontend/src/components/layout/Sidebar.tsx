@@ -146,7 +146,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Users,
         items: [
       {
-        name: 'Funcionários',
+        name: 'Gerenciar Funcionários',
         href: '/ponto/funcionarios',
         icon: Users,
         description: 'Gerenciar funcionários',
