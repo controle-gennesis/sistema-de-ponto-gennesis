@@ -794,9 +794,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         {!isFiltersMinimized && (
           <CardContent className="p-4 sm:p-6">
             <div className="space-y-4">
-              {/* Filtro Principal - Busca Geral e Status */}
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-                <div className="space-y-2 sm:col-span-10">
+              {/* Filtro Principal - Busca Geral */}
+              <div>
+                <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Buscar Funcionário
                   </label>
@@ -813,21 +813,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     />
                   </div>
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Status
-                  </label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
-                    className="w-full px-3 pr-8 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 text-sm"
-                  >
-                    <option value="active">Ativos</option>
-                    <option value="inactive">Inativos</option>
-                    <option value="all">Todos</option>
-                  </select>
                 </div>
               </div>
 
@@ -903,6 +888,21 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           {polos.filter(p => p !== 'Todos').map((p) => (
                             <option key={p} value={p}>{p}</option>
                           ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Status
+                        </label>
+                        <select
+                          value={statusFilter}
+                          onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
+                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
+                        >
+                          <option value="active">Ativos</option>
+                          <option value="inactive">Inativos</option>
+                          <option value="all">Todos</option>
                         </select>
                       </div>
                     </div>
@@ -1032,8 +1032,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
           {/* Conteúdo dos Filtros */}
           {!isFiltersMinimized && (
           <div className="p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
-                <div className="relative flex-1">
+              <div className="mb-4">
+                <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <input
                     type="text"
@@ -1042,18 +1042,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     onChange={(e) => handleSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
-                </div>
-                <div className="flex items-center space-x-2 sm:w-48">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">Status:</label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
-                    className="w-full px-3 pr-8 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="active">Ativos</option>
-                    <option value="inactive">Inativos</option>
-                    <option value="all">Todos</option>
-                  </select>
                 </div>
               </div>
               
