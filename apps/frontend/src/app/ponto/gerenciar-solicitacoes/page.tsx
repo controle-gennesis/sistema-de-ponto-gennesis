@@ -20,7 +20,8 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
-  RotateCcw
+  RotateCcw,
+  Building2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -519,16 +520,19 @@ export default function GerenciarSolicitacoesPage() {
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Setor
                         </label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
                         <select
                           value={filters.department}
                           onChange={handleDepartmentChange}
-                          className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
+                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                         >
-                          <option value="">Todos</option>
+                            <option value="">Todos os setores</option>
                           {DEPARTMENTS_LIST.map(dept => (
                             <option key={dept} value={dept}>{dept}</option>
                           ))}
                         </select>
+                        </div>
                       </div>
 
                       <div>
@@ -540,7 +544,7 @@ export default function GerenciarSolicitacoesPage() {
                           onChange={handlePositionChange}
                           className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                         >
-                          <option value="">Todos</option>
+                          <option value="">Todos os cargos</option>
                           {CARGOS_LIST.map(cargo => (
                             <option key={cargo} value={cargo}>{cargo}</option>
                           ))}
@@ -556,7 +560,7 @@ export default function GerenciarSolicitacoesPage() {
                           onChange={handleCompanyChange}
                           className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                         >
-                          <option value="">Todas</option>
+                          <option value="">Todas as empresas</option>
                           {COMPANIES_LIST.map(company => (
                             <option key={company} value={company}>{company}</option>
                           ))}
@@ -626,75 +630,81 @@ export default function GerenciarSolicitacoesPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {/* Tabs de Status */}
-            <div className="mb-6">
-              <nav className="flex space-x-1 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-                <button
-                  onClick={() => setActiveStatusTab('PENDING')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                    activeStatusTab === 'PENDING'
-                      ? 'border-yellow-500 dark:border-yellow-400 text-yellow-600 dark:text-yellow-400'
-                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
-                >
-                  Pendentes ({statusCounts.PENDING})
-                </button>
-                <button
-                  onClick={() => setActiveStatusTab('APPROVED')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                    activeStatusTab === 'APPROVED'
-                      ? 'border-green-500 dark:border-green-400 text-green-600 dark:text-green-400'
-                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
-                >
-                  Aprovados ({statusCounts.APPROVED})
-                </button>
-                <button
-                  onClick={() => setActiveStatusTab('REJECTED')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                    activeStatusTab === 'REJECTED'
-                      ? 'border-red-500 dark:border-red-400 text-red-600 dark:text-red-400'
-                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
-                >
-                  Rejeitados ({statusCounts.REJECTED})
-                </button>
-                <button
-                  onClick={() => setActiveStatusTab('CANCELLED')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                    activeStatusTab === 'CANCELLED'
-                      ? 'border-gray-500 dark:border-gray-400 text-gray-600 dark:text-gray-400'
-                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
-                >
-                  Cancelados ({statusCounts.CANCELLED})
-                </button>
-                <button
-                  onClick={() => setActiveStatusTab('all')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                    activeStatusTab === 'all'
-                      ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
-                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
-                >
-                  Todas ({statusCounts.all})
-                </button>
-              </nav>
-            </div>
+            <div className="space-y-4">
+              {/* Tabs de Status */}
+              <div className="border-b border-gray-200 dark:border-gray-700">
+                <nav className="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto">
+                  <button
+                    onClick={() => setActiveStatusTab('PENDING')}
+                    className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                      activeStatusTab === 'PENDING'
+                        ? 'border-yellow-500 dark:border-yellow-400 text-yellow-600 dark:text-yellow-400'
+                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    Pendentes ({statusCounts.PENDING})
+                  </button>
+                  <button
+                    onClick={() => setActiveStatusTab('APPROVED')}
+                    className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                      activeStatusTab === 'APPROVED'
+                        ? 'border-green-500 dark:border-green-400 text-green-600 dark:text-green-400'
+                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    Aprovados ({statusCounts.APPROVED})
+                  </button>
+                  <button
+                    onClick={() => setActiveStatusTab('REJECTED')}
+                    className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                      activeStatusTab === 'REJECTED'
+                        ? 'border-red-500 dark:border-red-400 text-red-600 dark:text-red-400'
+                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    Rejeitados ({statusCounts.REJECTED})
+                  </button>
+                  <button
+                    onClick={() => setActiveStatusTab('CANCELLED')}
+                    className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                      activeStatusTab === 'CANCELLED'
+                        ? 'border-gray-500 dark:border-gray-400 text-gray-600 dark:text-gray-400'
+                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    Cancelados ({statusCounts.CANCELLED})
+                  </button>
+                  <button
+                    onClick={() => setActiveStatusTab('all')}
+                    className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                      activeStatusTab === 'all'
+                        ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    Todas ({statusCounts.all})
+                  </button>
+                </nav>
+              </div>
 
-            {/* Lista de solicitações */}
-            <div className="space-y-3">
+              {/* Lista de solicitações */}
+              <div className="space-y-3">
               {filteredRequests.length === 0 ? (
-                <div className="text-center py-8">
+                <Card>
+                  <CardContent className="p-6 text-center">
                   <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                  <p className="text-gray-600 dark:text-gray-400">
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                      Nenhuma solicitação encontrada
+                    </h3>
+                    <p className="text-gray-500 dark:text-gray-400">
                     {activeStatusTab !== 'all' 
                       ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
                       : (filters.search || filters.department || filters.position || filters.company)
                         ? 'Nenhum registro encontrado com os filtros selecionados.'
                         : 'Nenhuma solicitação encontrada.'}
                   </p>
-                </div>
+                  </CardContent>
+                </Card>
               ) : (
                 filteredRequests.map((request: PointCorrectionRequest) => {
                   const statusInfo = getStatusInfo(request.status);
@@ -705,26 +715,26 @@ export default function GerenciarSolicitacoesPage() {
                       <CardContent className="p-4">
                         {/* Header compacto */}
                         <div className="flex items-start justify-between gap-3 mb-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
                               <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                {request.title}
+                                  {request.title}
                               </h4>
                               <Badge className={`${statusInfo.color} shrink-0 text-xs`}>
-                                <StatusIcon className="w-3 h-3 mr-1" />
-                                {statusInfo.label}
-                              </Badge>
-                            </div>
+                                  <StatusIcon className="w-3 h-3 mr-1" />
+                                  {statusInfo.label}
+                                </Badge>
+                              </div>
                             <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
                               <User className="w-3 h-3 inline mr-1" />
-                              {request.employee.user.name} - {request.employee.position} de {request.employee.department}
-                            </p>
+                                {request.employee.user.name} - {request.employee.position} de {request.employee.department}
+                              </p>
                             {request.justification && (
                               <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1">
                                 {request.justification}
                               </p>
                             )}
-                          </div>
+                                </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             {request.status === 'PENDING' && (
                               <>
@@ -827,6 +837,7 @@ export default function GerenciarSolicitacoesPage() {
                   );
                 })
               )}
+              </div>
             </div>
           </CardContent>
         </Card>

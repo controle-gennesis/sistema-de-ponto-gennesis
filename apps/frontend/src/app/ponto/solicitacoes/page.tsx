@@ -58,8 +58,8 @@ export default function SolicitacoesPage() {
         userName={user.name} 
         onLogout={handleLogout}
       >
-        <div className="space-y-6 w-full px-4">
-          {/* Header */}
+        <div className="space-y-6">
+          {/* Cabeçalho */}
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Solicitações de Correção</h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Gerencie suas solicitações de correção de ponto</p>
