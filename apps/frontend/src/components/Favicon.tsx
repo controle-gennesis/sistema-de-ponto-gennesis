@@ -19,13 +19,13 @@ export function Favicon() {
     const shortcutLink = document.createElement('link');
     shortcutLink.rel = 'shortcut icon';
     shortcutLink.type = 'image/png';
-    shortcutLink.href = '/logo3.png';
+    shortcutLink.href = '/logoredonda.png';
     document.head.appendChild(shortcutLink);
 
     // Adicionar apple-touch-icon
     const appleLink = document.createElement('link');
     appleLink.rel = 'apple-touch-icon';
-    appleLink.href = '/logo3.png';
+    appleLink.href = '/logoredonda.png';
     document.head.appendChild(appleLink);
   }, []);
 
