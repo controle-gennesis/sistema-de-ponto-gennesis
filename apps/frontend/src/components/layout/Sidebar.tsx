@@ -381,36 +381,51 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         {/* Header */}
         <div className={`${isCollapsed ? 'p-4' : 'p-4'} overflow-hidden`}>
           <div className={`flex items-center overflow-hidden ${
-            isCollapsed ? 'justify-center' : 'justify-between'
+            isCollapsed ? 'flex-col justify-center space-y-3' : 'justify-between'
           }`}>
-            {!isCollapsed && (
+            {isCollapsed ? (
+              /* Quando colapsada: logo acima do botão */
+              <>
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+                  <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
+                </div>
+                <button
+                  onClick={() => setIsCollapsed(!isCollapsed)}
+                  className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
+                  title="Expandir menu"
+                >
+                  <PanelLeftOpen className="w-5 h-5 flex-shrink-0" />
+                </button>
+              </>
+            ) : (
+              /* Quando expandida: logo e texto à esquerda, botão à direita */
+              <>
                 <div className="flex items-center space-x-3 transition-opacity duration-500 ease-in-out">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
                     <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
-                <div className="transition-all duration-500 ease-in-out">
-                  <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Attendance</h1>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 transition-all duration-500">v1.0.2</p>
+                  <div className="transition-all duration-500 ease-in-out">
+                    <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Attendance</h1>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 transition-all duration-500">v1.0.2</p>
+                  </div>
                 </div>
-              </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
+                    title="Colapsar menu"
+                  >
+                    <PanelRightOpen className="w-5 h-5 flex-shrink-0" />
+                  </button>
+                  <button
+                    onClick={() => setIsOpen(false)}
+                    className="lg:hidden w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </>
             )}
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setIsCollapsed(!isCollapsed)}
-                className={`hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 ${
-                  isCollapsed ? 'w-8 h-8' : 'w-8 h-8'
-                }`}
-                title={isCollapsed ? 'Expandir menu' : 'Colapsar menu'}
-              >
-                {isCollapsed ? <PanelLeftOpen className="w-5 h-5 flex-shrink-0" /> : <PanelRightOpen className="w-5 h-5 flex-shrink-0" />}
-              </button>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="lg:hidden w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-300"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
           </div>
         </div>
 
