@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <head>
-        <title>Gennesis Engenharia</title>
+        <title>Gennesis Attendance</title>
         <meta name="description" content="Sistema completo para controle de frequência de colaboradores" />
         <meta name="keywords" content="ponto, frequência, engenharia, controle, horas" />
         <meta name="robots" content="noindex, nofollow" />
