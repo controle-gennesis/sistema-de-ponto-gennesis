@@ -33,7 +33,8 @@ import {
   MailPlus,
   Moon,
   Sun,
-  AlertCircle
+  AlertCircle,
+  MessageSquare
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTheme } from '@/context/ThemeContext';

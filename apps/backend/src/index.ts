@@ -37,6 +37,7 @@ import salaryAdjustmentRoutes from './routes/salaryAdjustments';
 import salaryDiscountRoutes from './routes/salaryDiscounts';
 import pointCorrectionRoutes from './routes/pointCorrections';
 import holidayRoutes from './routes/holidays';
+import chatRoutes from './routes/chats';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -112,6 +113,7 @@ app.use('/api/salary-adjustments', salaryAdjustmentRoutes);
 app.use('/api/salary-discounts', salaryDiscountRoutes);
 app.use('/api/solicitacoes', pointCorrectionRoutes);
 app.use('/api/holidays', holidayRoutes);
+app.use('/api/chats', chatRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

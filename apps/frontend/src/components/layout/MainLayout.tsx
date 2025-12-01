@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
+import { ChatWidget } from '../chat/ChatWidget';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -36,6 +37,9 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
           {children}
         </main>
       </div>
+
+      {/* Chat Widget */}
+      <ChatWidget />
     </div>
   );
 }

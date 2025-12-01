@@ -35,6 +35,10 @@ model User {
   salaryDiscounts   SalaryDiscount[]
   pointCorrectionRequests PointCorrectionRequest[] @relation("PointCorrectionApprover")
   pointCorrectionComments PointCorrectionComment[]
+  sentMessages      Message[]                       @relation("MessageSender")
+  initiatedChats    Chat[]                          @relation("ChatInitiator")
+  acceptedChats     Chat[]                          @relation("ChatAccepter")
+  closedChats       Chat[]                          @relation("ChatCloser")
 
   @@map("users")
 }
@@ -557,4 +561,82 @@ enum HolidayType {
   MUNICIPAL  // Feriado municipal
   OPTIONAL   // Ponto facultativo
   COMPANY    // Feriado da empresa
+}
+
+// Modelo de Chat/Conversa entre Setores
+model Chat {
+  id                  String          @id @default(cuid())
+  initiatorId         String          // Quem iniciou a conversa
+  recipientDepartment String          // Setor destinatário
+  status              ChatStatus      @default(PENDING) // PENDING, ACCEPTED, CLOSED
+  acceptedBy          String?         // Quem aceitou a conversa
+  acceptedAt          DateTime?       // Quando foi aceita
+  closedBy            String?         // Quem encerrou
+  closedAt            DateTime?       // Quando foi encerrada
+  lastMessageAt       DateTime?       // Última mensagem enviada
+  
+  // Mensagens da conversa
+  messages            Message[]
+  
+  // Relacionamentos
+  initiator           User            @relation("ChatInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  accepter            User?           @relation("ChatAccepter", fields: [acceptedBy], references: [id], onDelete: SetNull)
+  closer              User?           @relation("ChatCloser", fields: [closedBy], references: [id], onDelete: SetNull)
+  
+  @@index([initiatorId])
+  @@index([recipientDepartment])
+  @@index([status])
+  @@index([lastMessageAt])
+  @@map("chats")
+}
+
+// Modelo de Mensagens dentro de um Chat
+model Message {
+  id              String            @id @default(cuid())
+  chatId          String            // Chat ao qual pertence
+  senderId        String            // Quem enviou
+  content         String            // Conteúdo da mensagem
+  isRead          Boolean           @default(false)
+  readAt          DateTime?         // Quando foi lida
+  
+  // Anexos
+  attachments     MessageAttachment[]
+  
+  // Auditoria
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Relacionamentos
+  chat            Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender          User              @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  
+  @@index([chatId])
+  @@index([senderId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// Modelo de Anexos de Mensagens
+model MessageAttachment {
+  id          String    @id @default(cuid())
+  messageId   String
+  fileName    String    // Nome original do arquivo
+  fileUrl     String?   // URL do arquivo no S3
+  fileKey     String?   // Chave do arquivo no S3
+  fileSize    Int?      // Tamanho em bytes
+  mimeType    String?   // Tipo MIME do arquivo
+  createdAt   DateTime  @default(now())
+  
+  // Relacionamento
+  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  
+  @@index([messageId])
+  @@map("message_attachments")
+}
+
+enum ChatStatus {
+  PENDING     // Aguardando aceitação
+  ACCEPTED     // Aceito e ativo
+  CLOSED       // Encerrado
 }

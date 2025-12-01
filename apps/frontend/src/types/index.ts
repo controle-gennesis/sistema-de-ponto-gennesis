@@ -570,3 +570,76 @@ export interface DiscountTypeOption {
   label: string;
   color: string;
 }
+
+// Tipos para Chat/Conversas
+export enum ChatStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  CLOSED = 'CLOSED',
+}
+
+export interface MessageAttachment {
+  id: string;
+  messageId: string;
+  fileName: string;
+  fileUrl: string | null;
+  fileKey: string | null;
+  fileSize: number | null;
+  mimeType: string | null;
+  createdAt: string;
+}
+
+export interface Message {
+  id: string;
+  chatId: string;
+  senderId: string;
+  content: string;
+  isRead: boolean;
+  readAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sender: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  attachments: MessageAttachment[];
+}
+
+export interface Chat {
+  id: string;
+  initiatorId: string;
+  recipientDepartment: string;
+  status: ChatStatus;
+  acceptedBy: string | null;
+  acceptedAt: string | null;
+  closedBy: string | null;
+  closedAt: string | null;
+  lastMessageAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  initiator?: {
+    id: string;
+    name: string;
+    email: string;
+    employee?: {
+      department: string;
+      position: string;
+    };
+  };
+  accepter?: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+  messages: Message[];
+}
+
+export interface CreateMessageData {
+  recipientDepartment: string;
+  subject?: string;
+  content: string;
+  isImportant?: boolean;
+  parentMessageId?: string;
+  attachments?: File[];
+}
