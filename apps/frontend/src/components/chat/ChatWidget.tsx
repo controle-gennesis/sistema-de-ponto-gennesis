@@ -84,12 +84,10 @@ export function ChatWidget() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; chatId: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const queryClient = useQueryClient();
 
@@ -357,24 +355,6 @@ export function ChatWidget() {
     }
   };
 
-  const handleCloseChatById = async (chatId: string) => {
-    if (!confirm('Tem certeza que deseja encerrar esta conversa?')) return;
-
-    try {
-      await api.patch(`/chats/${chatId}/close`);
-      queryClient.invalidateQueries({ queryKey: ['chats-active'] });
-      queryClient.invalidateQueries({ queryKey: ['chats-pending'] });
-      refetchActiveChats();
-      
-      // Se estiver visualizando o chat encerrado, voltar para a lista
-      if (selectedChat?.id === chatId) {
-        setActiveView('list');
-        setSelectedChat(null);
-      }
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Erro ao encerrar chat');
-    }
-  };
 
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -427,29 +407,21 @@ export function ChatWidget() {
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
         setShowEmojiPicker(false);
       }
-      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
-        setContextMenu(null);
-      }
     };
 
-    if (showEmojiPicker || contextMenu) {
+    if (showEmojiPicker) {
       document.addEventListener('mousedown', handleClickOutside);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showEmojiPicker, contextMenu]);
+  }, [showEmojiPicker]);
 
   // Fechar conversa ao pressionar Esc
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        // Se houver menu de contexto aberto, fechar ele primeiro
-        if (contextMenu) {
-          setContextMenu(null);
-          return;
-        }
         // Se houver emoji picker aberto, fechar ele primeiro
         if (showEmojiPicker) {
           setShowEmojiPicker(false);
@@ -470,17 +442,7 @@ export function ChatWidget() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, activeView, selectedChat, contextMenu, showEmojiPicker]);
-
-  const handleContextMenu = (e: React.MouseEvent, chatId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      chatId
-    });
-  };
+  }, [isOpen, activeView, selectedChat, showEmojiPicker]);
 
   const getChatTitle = (chat: Chat) => {
     if (chat.initiatorId === userId) {
@@ -765,7 +727,6 @@ export function ChatWidget() {
                             <div
                               key={chat.id}
                               onClick={() => handleOpenChat(chat)}
-                              onContextMenu={(e) => handleContextMenu(e, chat.id)}
                               className={`px-3 py-2.5 cursor-pointer transition-colors group border-l-2 ${
                                 isSelected
                                   ? 'bg-gray-50 dark:bg-gray-700/50 border-red-600 dark:border-red-500'
@@ -846,7 +807,6 @@ export function ChatWidget() {
                             <div
                               key={chat.id}
                               onClick={() => handleOpenChat(chat)}
-                              onContextMenu={(e) => handleContextMenu(e, chat.id)}
                               className={`px-3 py-2.5 cursor-pointer transition-colors group border-l-2 ${
                                 isSelected
                                   ? 'bg-gray-50 dark:bg-gray-700/50 border-red-600 dark:border-red-500'
@@ -1033,7 +993,6 @@ export function ChatWidget() {
                   {/* Header do Chat */}
                   <div 
                     className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800"
-                    onContextMenu={(e) => safeCurrentChat && handleContextMenu(e, safeCurrentChat.id)}
                   >
                     <div className="flex items-center space-x-3 flex-1 min-w-0">
                       <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 border-2 border-red-500 flex items-center justify-center flex-shrink-0">
@@ -1312,37 +1271,6 @@ export function ChatWidget() {
         </div>
       )}
 
-      {/* Menu de Contexto */}
-      {contextMenu && (() => {
-        const chat = [...activeChats, ...pendingChats].find(c => c.id === contextMenu.chatId);
-        const canClose = chat?.status === 'ACCEPTED';
-        
-        return (
-          <div
-            ref={contextMenuRef}
-            className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-50 min-w-[180px]"
-            style={{
-              left: `${Math.min(contextMenu.x, window.innerWidth - 200)}px`,
-              top: `${Math.min(contextMenu.y, window.innerHeight - 100)}px`,
-            }}
-          >
-            {canClose && (
-              <button
-                onClick={() => {
-                  if (contextMenu.chatId) {
-                    handleCloseChatById(contextMenu.chatId);
-                  }
-                  setContextMenu(null);
-                }}
-                className="w-full text-left px-4 py-2.5 text-sm text-orange-600 dark:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2"
-              >
-                <Power className="w-4 h-4" />
-                <span>Encerrar conversa</span>
-              </button>
-            )}
-          </div>
-        );
-      })()}
     </>
   );
 }
