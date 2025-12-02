@@ -579,12 +579,12 @@ export function ChatWidget() {
       {/* Botão Flutuante */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl hover:bg-blue-700 hover:scale-110 transition-all duration-300 z-50 flex items-center justify-center group"
+        className="fixed bottom-6 right-6 w-14 h-14 bg-red-600 text-white rounded-full shadow-2xl hover:bg-red-700 hover:scale-110 transition-all duration-300 z-50 flex items-center justify-center group"
         style={{ 
-          boxShadow: '0 8px 24px rgba(37, 99, 235, 0.4)',
+          boxShadow: '0 8px 24px rgba(220, 38, 38, 0.4)',
         }}
       >
-        <MessageCircle className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+        <MessageCircle className="w-6 h-6 transition-transform" />
         {totalNotifications > 0 && (
           <span 
             className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-bounce shadow-lg"
@@ -599,20 +599,20 @@ export function ChatWidget() {
 
       {/* Modal de Chat */}
       {isOpen && (
-        <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center p-3 md:p-4 lg:p-6">
-          <div className="bg-white rounded-lg shadow-xl w-[calc(100%-1.5rem)] md:w-[calc(100%-2rem)] lg:w-full max-w-7xl h-[calc(100vh-1.5rem)] md:h-[calc(100vh-2rem)] lg:h-[90vh] flex overflow-hidden border border-gray-200">
+        <div className="fixed inset-0 bg-black/20 dark:bg-black/40 z-50 flex items-center justify-center p-3 md:p-4 lg:p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-[calc(100%-1.5rem)] md:w-[calc(100%-2rem)] lg:w-full max-w-7xl h-[calc(100vh-1.5rem)] md:h-[calc(100vh-2rem)] lg:h-[90vh] flex overflow-hidden border border-gray-200 dark:border-gray-700">
             {/* Sidebar - Lista de Conversas */}
-            <div className={`${activeView === 'chat' || activeView === 'new' ? 'hidden' : 'flex'} lg:flex w-full lg:w-80 border-r border-gray-200 flex-col bg-white`}>
+            <div className={`${activeView === 'chat' || activeView === 'new' ? 'hidden' : 'flex'} lg:flex w-full lg:w-80 border-r border-gray-200 dark:border-gray-700 flex-col bg-white dark:bg-gray-800`}>
               {/* Header Sidebar */}
-              <div className="px-4 py-3 border-b border-gray-200 flex-shrink-0">
+              <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
                 <div className="flex items-center justify-between mb-3 flex-shrink-0">
-                  <h2 className="text-lg font-semibold text-gray-900 flex-shrink-0">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
                     Conversas
                   </h2>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={handleStartNewChat}
-                      className="w-7 h-7 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded flex items-center justify-center transition-colors flex-shrink-0"
+                      className="w-7 h-7 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center justify-center transition-colors flex-shrink-0"
                       title="Nova conversa"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-square-pen">
@@ -622,7 +622,7 @@ export function ChatWidget() {
                     </button>
                     <button
                       onClick={() => setIsOpen(false)}
-                      className="w-7 h-7 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded flex items-center justify-center transition-colors flex-shrink-0"
+                      className="w-7 h-7 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center justify-center transition-colors flex-shrink-0"
                       title="Fechar"
                     >
                       <X className="w-4 h-4" />
@@ -632,20 +632,20 @@ export function ChatWidget() {
                 
                 {/* Busca */}
                 <div className="relative flex-shrink-0">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                   <input
                     type="text"
                     placeholder="Buscar..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:bg-white"
+                    className="w-full pl-9 pr-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 focus:bg-white dark:focus:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400"
                   />
                 </div>
               </div>
 
               {/* Título "Conversas Encerradas" - Aparece abaixo da linha de borda quando expandido */}
               <div 
-                className={`border-b border-gray-200 flex-shrink-0 bg-white overflow-hidden transition-all duration-500 ease-in-out ${
+                className={`border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-white dark:bg-gray-800 overflow-hidden transition-all duration-500 ease-in-out ${
                   showClosedChats 
                     ? 'opacity-100 translate-y-0 max-h-20' 
                     : 'opacity-0 -translate-y-full max-h-0'
@@ -656,16 +656,16 @@ export function ChatWidget() {
                     onClick={() => {
                       setShowClosedChats(false);
                     }}
-                    className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors"
+                    className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded transition-colors"
                   >
                     <div className="flex items-center gap-2">
-                      <Archive className="w-4 h-4 text-gray-500" />
-                      <span className="font-medium">Conversas Encerradas</span>
+                      <Archive className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Conversas Encerradas</span>
                       {filteredClosedChats.length > 0 && (
-                        <span className="text-xs text-gray-500">({filteredClosedChats.length})</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">({filteredClosedChats.length})</span>
                       )}
                     </div>
-                    <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-300 rotate-180" />
+                    <ChevronDown className="w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform duration-300 rotate-180" />
                   </button>
                 </div>
               </div>
@@ -682,8 +682,8 @@ export function ChatWidget() {
                 >
                   {/* Chats Pendentes */}
                   {filteredPendingChats.length > 0 && (
-                    <div className="px-4 py-2 border-b border-gray-200">
-                      <h3 className="text-xs font-medium text-gray-500 mb-2">
+                    <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                      <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
                         Pendentes ({filteredPendingChats.length})
                       </h3>
                       <div className="space-y-1.5">
@@ -692,7 +692,7 @@ export function ChatWidget() {
                           return (
                             <div
                               key={chat.id}
-                              className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:border-gray-300 transition-colors"
+                              className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 transition-colors"
                             >
                               <div className="flex items-start gap-3 mb-2">
                                 <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 border-2 border-red-500 flex items-center justify-center flex-shrink-0">
@@ -707,13 +707,13 @@ export function ChatWidget() {
                                   </span>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <h4 className="text-sm font-medium text-gray-900 truncate">
+                                  <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                                     {headerInfo.name}
                                   </h4>
                                 </div>
                               </div>
                               {chat.messages[0] && (
-                                <p className="text-xs text-gray-600 mb-3 line-clamp-2">
+                                <p className="text-xs text-gray-600 dark:text-gray-300 mb-3 line-clamp-2">
                                   {chat.messages[0].content}
                                 </p>
                               )}
@@ -723,7 +723,7 @@ export function ChatWidget() {
                                     e.stopPropagation();
                                     handleAcceptChat(chat.id);
                                   }}
-                                  className="flex-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors"
+                                  className="flex-1 px-3 py-1.5 bg-green-600 dark:bg-green-500 text-white text-xs font-medium rounded hover:bg-green-700 dark:hover:bg-green-600 transition-colors"
                                 >
                                   Aceitar
                                 </button>
@@ -732,7 +732,7 @@ export function ChatWidget() {
                                     e.stopPropagation();
                                     handleRejectChat(chat.id);
                                   }}
-                                  className="flex-1 px-3 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded hover:bg-gray-300 transition-colors"
+                                  className="flex-1 px-3 py-1.5 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs font-medium rounded hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
                                 >
                                   Rejeitar
                                 </button>
@@ -748,7 +748,7 @@ export function ChatWidget() {
                   <div className="px-4 py-2 pt-1">
                     {filteredActiveChats.length === 0 && filteredPendingChats.length === 0 ? (
                       <div className="text-center py-6">
-                        <p className="text-sm text-gray-400">Nenhuma conversa ativa</p>
+                        <p className="text-sm text-gray-400 dark:text-gray-500">Nenhuma conversa ativa</p>
                       </div>
                     ) : (
                       <div className="space-y-0.5">
@@ -768,10 +768,10 @@ export function ChatWidget() {
                               onContextMenu={(e) => handleContextMenu(e, chat.id)}
                               className={`px-3 py-2.5 cursor-pointer transition-colors group border-l-2 ${
                                 isSelected
-                                  ? 'bg-gray-50 border-blue-600'
+                                  ? 'bg-gray-50 dark:bg-gray-700/50 border-red-600 dark:border-red-500'
                                   : isPending && isMyChat
-                                  ? 'bg-yellow-50/50 border-yellow-400'
-                                  : 'border-transparent hover:bg-gray-50'
+                                  ? 'bg-yellow-50/50 dark:bg-yellow-900/20 border-yellow-400 dark:border-yellow-500'
+                                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-700/50'
                               }`}
                             >
                               <div className="flex items-center gap-3">
@@ -789,23 +789,23 @@ export function ChatWidget() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex-1 min-w-0">
-                                      <h4 className={`text-sm truncate ${isSelected ? 'font-semibold text-gray-900' : 'font-medium text-gray-800'}`}>
+                                      <h4 className={`text-sm truncate ${isSelected ? 'font-semibold text-gray-900 dark:text-gray-100' : 'font-medium text-gray-800 dark:text-gray-200'}`}>
                                         {headerInfo.name}
                                       </h4>
                                       {lastMessage && (
-                                        <p className={`text-xs truncate mt-0.5 ${isSelected ? 'text-gray-600' : 'text-gray-500'}`}>
+                                        <p className={`text-xs truncate mt-0.5 ${isSelected ? 'text-gray-600 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'}`}>
                                           {lastMessage.content}
                                         </p>
                                       )}
                                     </div>
                                     <div className="flex items-center gap-2 flex-shrink-0">
                                       {lastMessage && (
-                                        <span className="text-xs text-gray-400">
+                                        <span className="text-xs text-gray-400 dark:text-gray-500">
                                           {formatTime(lastMessage.createdAt)}
                                         </span>
                                       )}
                                       {unreadCount > 0 && (
-                                        <span className="bg-blue-600 text-white text-[10px] font-medium rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1.5">
+                                        <span className="bg-red-600 text-white text-[10px] font-medium rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1.5">
                                           {unreadCount > 9 ? '9+' : unreadCount}
                                         </span>
                                       )}
@@ -832,7 +832,7 @@ export function ChatWidget() {
                   <div className="px-4 py-2">
                     {filteredClosedChats.length === 0 ? (
                       <div className="text-center py-6">
-                        <p className="text-sm text-gray-400">Nenhuma conversa encerrada</p>
+                        <p className="text-sm text-gray-400 dark:text-gray-500">Nenhuma conversa encerrada</p>
                       </div>
                     ) : (
                       <div className="space-y-0.5">
@@ -849,8 +849,8 @@ export function ChatWidget() {
                               onContextMenu={(e) => handleContextMenu(e, chat.id)}
                               className={`px-3 py-2.5 cursor-pointer transition-colors group border-l-2 ${
                                 isSelected
-                                  ? 'bg-gray-50 border-blue-600'
-                                  : 'border-transparent hover:bg-gray-50'
+                                  ? 'bg-gray-50 dark:bg-gray-700/50 border-red-600 dark:border-red-500'
+                                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-700/50'
                               }`}
                             >
                               <div className="flex items-center gap-3">
@@ -868,18 +868,18 @@ export function ChatWidget() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex-1 min-w-0">
-                                      <h4 className={`text-sm truncate ${isSelected ? 'font-semibold text-gray-900' : 'font-medium text-gray-800'}`}>
+                                      <h4 className={`text-sm truncate ${isSelected ? 'font-semibold text-gray-900 dark:text-gray-100' : 'font-medium text-gray-800 dark:text-gray-200'}`}>
                                         {headerInfo.name}
                                       </h4>
                                       {lastMessage && lastMessage.content && (
-                                        <p className={`text-xs truncate mt-0.5 ${isSelected ? 'text-gray-600' : 'text-gray-500'}`}>
+                                        <p className={`text-xs truncate mt-0.5 ${isSelected ? 'text-gray-600 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'}`}>
                                           {lastMessage.content}
                                         </p>
                                       )}
                                     </div>
                                     <div className="flex items-center gap-2 flex-shrink-0">
                                       {lastMessage && lastMessage.createdAt && (
-                                        <span className="text-xs text-gray-400">
+                                        <span className="text-xs text-gray-400 dark:text-gray-500">
                                           {formatTime(lastMessage.createdAt)}
                                         </span>
                                       )}
@@ -897,22 +897,22 @@ export function ChatWidget() {
 
                 {/* Botão para Mostrar Conversas Encerradas - Fixo na parte inferior quando fechado */}
                 {!showClosedChats && (
-                  <div className="absolute bottom-0 left-0 right-0 px-4 py-2 border-t border-gray-200 bg-white flex-shrink-0">
+                  <div className="absolute bottom-0 left-0 right-0 px-4 py-2 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
                     <button
                       onClick={() => {
                         setShowClosedChats(true);
                         refetchClosedChats();
                       }}
-                      className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors"
+                      className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded transition-colors"
                     >
                       <div className="flex items-center gap-2">
-                        <Archive className="w-4 h-4 text-gray-500" />
-                        <span className="font-medium">Conversas Encerradas</span>
+                        <Archive className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        <span className="font-medium text-gray-700 dark:text-gray-300">Conversas Encerradas</span>
                         {filteredClosedChats.length > 0 && (
-                          <span className="text-xs text-gray-500">({filteredClosedChats.length})</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">({filteredClosedChats.length})</span>
                         )}
                       </div>
-                      <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-300" />
+                      <ChevronDown className="w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform duration-300" />
                     </button>
                   </div>
                 )}
@@ -920,25 +920,25 @@ export function ChatWidget() {
             </div>
 
             {/* Área Principal - Chat ou Nova Conversa */}
-            <div className="flex-1 flex flex-col bg-white">
+            <div className="flex-1 flex flex-col bg-white dark:bg-gray-800">
               {activeView === 'new' && (
                 <div className="flex-1 flex flex-col">
                   {/* Header */}
-                  <div className="px-4 py-3 border-b border-gray-200">
-                    <h2 className="text-lg font-semibold text-gray-900">Nova Conversa</h2>
+                  <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Nova Conversa</h2>
                   </div>
 
                   {/* Formulário */}
                   <div className="flex-1 overflow-y-auto p-6">
                     <div className="max-w-xl mx-auto space-y-5">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Setor <span className="text-red-500">*</span>
                         </label>
                         <select
                           value={selectedDepartment}
                           onChange={(e) => setSelectedDepartment(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                         >
                           <option value="">Selecione um setor...</option>
                           {DEPARTMENTS.map(dept => (
@@ -950,20 +950,20 @@ export function ChatWidget() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Assunto <span className="text-red-500">*</span>
                         </label>
                         <textarea
                           value={initialMessage}
                           onChange={(e) => setInitialMessage(e.target.value)}
                           rows={6}
-                          className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none text-gray-900 placeholder-gray-400"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 resize-none text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400 bg-white dark:bg-gray-700"
                           placeholder="Digite o assunto da conversa..."
                         />
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Anexos
                         </label>
                         <input
@@ -975,7 +975,7 @@ export function ChatWidget() {
                         />
                         <button
                           onClick={() => fileInputRef.current?.click()}
-                          className="w-full px-4 py-3 border border-gray-300 rounded hover:border-gray-400 hover:bg-gray-50 transition-colors flex items-center justify-center space-x-2 text-gray-700"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-center space-x-2 text-gray-700 dark:text-gray-300"
                         >
                           <Paperclip className="w-4 h-4" />
                           <span className="text-sm">Anexar arquivos</span>
@@ -985,20 +985,20 @@ export function ChatWidget() {
                             {selectedFiles.map((file, index) => (
                               <div
                                 key={index}
-                                className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded border border-gray-200"
+                                className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700/50 rounded border border-gray-200 dark:border-gray-600"
                               >
                                 <div className="flex items-center space-x-2 flex-1 min-w-0">
-                                  <FileText className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                                  <span className="text-sm text-gray-700 truncate">
+                                  <FileText className="w-4 h-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                  <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
                                     {file.name}
                                   </span>
-                                  <span className="text-xs text-gray-500 flex-shrink-0">
+                                  <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
                                     ({(file.size / 1024).toFixed(1)} KB)
                                   </span>
                                 </div>
                                 <button
                                   onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== index))}
-                                  className="text-gray-400 hover:text-gray-600 p-1 transition-colors"
+                                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 transition-colors"
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
@@ -1011,14 +1011,14 @@ export function ChatWidget() {
                       <div className="flex space-x-3 pt-2">
                         <button
                           onClick={() => setActiveView('list')}
-                          className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors text-sm font-medium"
+                          className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-medium"
                         >
                           Cancelar
                         </button>
                         <button
                           onClick={handleCreateChat}
                           disabled={!selectedDepartment || !initialMessage.trim()}
-                          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                          className="flex-1 px-4 py-2 bg-red-600 dark:bg-red-500 text-white rounded hover:bg-red-700 dark:hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
                         >
                           Enviar
                         </button>
@@ -1032,7 +1032,7 @@ export function ChatWidget() {
                 <>
                   {/* Header do Chat */}
                   <div 
-                    className="px-4 py-3 border-b border-gray-200 flex items-center justify-between"
+                    className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800"
                     onContextMenu={(e) => safeCurrentChat && handleContextMenu(e, safeCurrentChat.id)}
                   >
                     <div className="flex items-center space-x-3 flex-1 min-w-0">
@@ -1053,11 +1053,11 @@ export function ChatWidget() {
                           const headerInfo = getChatHeaderInfo(safeCurrentChat);
                           return (
                             <>
-                              <h3 className="font-semibold text-sm text-gray-900 truncate">
+                              <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
                                 {headerInfo.name}
                               </h3>
                               {headerInfo.department && (
-                                <p className="text-xs text-gray-500 truncate">
+                                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                                   {headerInfo.department}
                                 </p>
                               )}
@@ -1070,7 +1070,7 @@ export function ChatWidget() {
                       {safeCurrentChat.status === 'ACCEPTED' && (
                         <button
                           onClick={handleCloseChat}
-                          className="text-gray-400 hover:text-orange-600 hover:bg-orange-50 p-1.5 rounded transition-colors"
+                          className="text-gray-400 dark:text-gray-500 hover:text-orange-600 dark:hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 p-1.5 rounded transition-colors"
                           title="Encerrar"
                         >
                           <Power className="w-4 h-4" />
@@ -1080,12 +1080,12 @@ export function ChatWidget() {
                   </div>
 
                   {/* Área de Mensagens */}
-                  <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+                  <div className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-900">
                     {!safeCurrentChat.messages || safeCurrentChat.messages.length === 0 ? (
                       <div className="h-full flex items-center justify-center">
                         <div className="text-center">
-                          <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                          <p className="text-gray-500 text-sm">Nenhuma mensagem ainda</p>
+                          <MessageCircle className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                          <p className="text-gray-500 dark:text-gray-400 text-sm">Nenhuma mensagem ainda</p>
                         </div>
                       </div>
                     ) : (
@@ -1103,7 +1103,7 @@ export function ChatWidget() {
                             <React.Fragment key={message.id}>
                               {showDate && (
                                 <div className="flex items-center justify-center my-4">
-                                  <div className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded">
+                                  <div className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-0.5 rounded">
                                     {new Date(message.createdAt).toLocaleDateString('pt-BR', {
                                       day: 'numeric',
                                       month: 'short'
@@ -1114,21 +1114,21 @@ export function ChatWidget() {
                               <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`flex items-end space-x-2 max-w-[75%] ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
                                   {!isOwn && (
-                                    <div className="w-6 h-6 rounded-full bg-gray-300 flex items-center justify-center text-white text-[10px] font-medium flex-shrink-0 mb-0.5">
+                                    <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-white dark:text-gray-200 text-[10px] font-medium flex-shrink-0 mb-0.5">
                                       {message.sender.name.charAt(0).toUpperCase()}
                                     </div>
                                   )}
                                   <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
                                     {!isOwn && (
-                                      <span className="text-xs font-semibold text-gray-900 mb-0.5 px-1 block">
+                                      <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-0.5 px-1 block">
                                         {message.sender.name}
                                       </span>
                                     )}
                                     <div
                                       className={`rounded-lg px-3 py-2 ${
                                         isOwn
-                                          ? 'bg-blue-600 text-white'
-                                          : 'bg-white text-gray-900 border border-gray-200'
+                                          ? 'bg-red-600 dark:bg-red-500 text-white'
+                                          : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'
                                       }`}
                                     >
                                       <div className="text-sm whitespace-pre-wrap break-words">
@@ -1144,8 +1144,8 @@ export function ChatWidget() {
                                               rel="noopener noreferrer"
                                               className={`flex items-center space-x-2 p-2 rounded text-sm ${
                                                 isOwn
-                                                  ? 'bg-white/20 hover:bg-white/30 text-white'
-                                                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                                                  ? 'bg-white/20 dark:bg-white/10 hover:bg-white/30 dark:hover:bg-white/20 text-white'
+                                                  : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300'
                                               }`}
                                             >
                                               <FileText className="w-4 h-4 flex-shrink-0" />
@@ -1158,7 +1158,7 @@ export function ChatWidget() {
                                     </div>
                                     {showTime && (
                                       <div className={`flex items-center space-x-1 mt-0.5 px-1 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
-                                        <span className="text-[10px] text-gray-400">
+                                        <span className="text-[10px] text-gray-400 dark:text-gray-500">
                                           {new Date(message.createdAt).toLocaleTimeString('pt-BR', {
                                             hour: '2-digit',
                                             minute: '2-digit'
@@ -1167,9 +1167,9 @@ export function ChatWidget() {
                                         {isOwn && (
                                           <span className="text-[10px]">
                                             {message.isRead ? (
-                                              <span className="text-blue-600">✓✓</span>
+                                              <span className="text-blue-600 dark:text-blue-400">✓✓</span>
                                             ) : (
-                                              <span className="text-gray-400">✓</span>
+                                              <span className="text-gray-400 dark:text-gray-500">✓</span>
                                             )}
                                           </span>
                                         )}
@@ -1188,21 +1188,21 @@ export function ChatWidget() {
 
                   {/* Input de Mensagem */}
                   {safeCurrentChat.status === 'ACCEPTED' && (
-                    <div className="p-3 border-t border-gray-200 bg-white">
+                    <div className="p-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                       {selectedFiles.length > 0 && (
                         <div className="mb-2 flex flex-wrap gap-1.5">
                           {selectedFiles.map((file, index) => (
                             <div
                               key={index}
-                              className="flex items-center space-x-1.5 bg-gray-50 border border-gray-200 px-2 py-1 rounded text-xs"
+                              className="flex items-center space-x-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded text-xs"
                             >
-                              <FileText className="w-3 h-3 text-gray-500" />
-                              <span className="text-gray-700 truncate max-w-[150px]">
+                              <FileText className="w-3 h-3 text-gray-500 dark:text-gray-400" />
+                              <span className="text-gray-700 dark:text-gray-300 truncate max-w-[150px]">
                                 {file.name}
                               </span>
                               <button
                                 onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== index))}
-                                className="text-gray-400 hover:text-gray-600"
+                                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                               >
                                 <X className="w-3 h-3" />
                               </button>
@@ -1213,7 +1213,7 @@ export function ChatWidget() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => fileInputRef.current?.click()}
-                          className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 p-2 rounded-lg transition-colors flex-shrink-0 flex items-center justify-center"
+                          className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded-lg transition-colors flex-shrink-0 flex items-center justify-center"
                           title="Anexar arquivo"
                         >
                           <Paperclip className="w-5 h-5" />
@@ -1228,19 +1228,19 @@ export function ChatWidget() {
                         <div className="relative" ref={emojiPickerRef}>
                           <button
                             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                            className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 p-2 rounded-lg transition-colors flex-shrink-0 flex items-center justify-center"
+                            className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded-lg transition-colors flex-shrink-0 flex items-center justify-center"
                             title="Adicionar emoji"
                           >
                             <Smile className="w-5 h-5" />
                           </button>
                           {showEmojiPicker && (
-                            <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-50 max-h-64 overflow-y-auto w-64">
+                            <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 z-50 max-h-64 overflow-y-auto w-64">
                               <div className="grid grid-cols-8 gap-1">
                                 {emojis.map((emoji, index) => (
                                   <button
                                     key={index}
                                     onClick={() => handleEmojiClick(emoji)}
-                                    className="text-xl p-1.5 hover:bg-gray-100 rounded transition-colors flex items-center justify-center"
+                                    className="text-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors flex items-center justify-center"
                                     title={emoji}
                                   >
                                     {emoji}
@@ -1263,14 +1263,14 @@ export function ChatWidget() {
                             }}
                             placeholder="Digite sua mensagem..."
                             rows={1}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none max-h-24 overflow-y-auto text-sm"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none max-h-24 overflow-y-auto text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400"
                             style={{ minHeight: '40px', maxHeight: '96px', lineHeight: '1.4' }}
                           />
                         </div>
                         <button
                           onClick={handleSendMessage}
                           disabled={!newMessage.trim() && selectedFiles.length === 0}
-                          className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex-shrink-0 flex items-center justify-center"
+                          className="bg-red-600 dark:bg-red-500 text-white p-2 rounded-lg hover:bg-red-700 dark:hover:bg-red-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors flex-shrink-0 flex items-center justify-center"
                           title="Enviar mensagem"
                         >
                           <Send className="w-5 h-5" />
@@ -1280,16 +1280,16 @@ export function ChatWidget() {
                   )}
 
                   {safeCurrentChat.status === 'PENDING' && (
-                    <div className="p-4 bg-yellow-50 border-t border-yellow-200 text-center">
-                      <p className="text-yellow-800 text-sm">
+                    <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border-t border-yellow-200 dark:border-yellow-800 text-center">
+                      <p className="text-yellow-800 dark:text-yellow-300 text-sm">
                         Aguardando aceitação do setor destinatário
                       </p>
                     </div>
                   )}
 
                   {safeCurrentChat.status === 'CLOSED' && (
-                    <div className="p-4 bg-gray-100 border-t border-gray-200 text-center">
-                      <p className="text-gray-600 text-sm">
+                    <div className="p-4 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-center">
+                      <p className="text-gray-600 dark:text-gray-400 text-sm">
                         Esta conversa foi encerrada
                       </p>
                     </div>
@@ -1298,10 +1298,10 @@ export function ChatWidget() {
               )}
 
               {activeView === 'list' && !selectedChat && (
-                <div className="hidden lg:flex flex-1 items-center justify-center bg-gray-50">
+                <div className="hidden lg:flex flex-1 items-center justify-center bg-gray-50 dark:bg-gray-900">
                   <div className="text-center">
-                    <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-sm text-gray-500">
+                    <MessageCircle className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                       Selecione uma conversa ou inicie uma nova
                     </p>
                   </div>
@@ -1320,7 +1320,7 @@ export function ChatWidget() {
         return (
           <div
             ref={contextMenuRef}
-            className="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-[180px]"
+            className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-50 min-w-[180px]"
             style={{
               left: `${Math.min(contextMenu.x, window.innerWidth - 200)}px`,
               top: `${Math.min(contextMenu.y, window.innerHeight - 100)}px`,
@@ -1334,7 +1334,7 @@ export function ChatWidget() {
                   }
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-4 py-2.5 text-sm text-orange-600 hover:bg-orange-50 transition-colors flex items-center gap-2"
+                className="w-full text-left px-4 py-2.5 text-sm text-orange-600 dark:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2"
               >
                 <Power className="w-4 h-4" />
                 <span>Encerrar conversa</span>
