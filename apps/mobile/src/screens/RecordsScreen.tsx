@@ -15,9 +15,8 @@ import { useNavigation, NavigationProp, useFocusEffect } from '@react-navigation
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { Clock, Eye, LogIn, Utensils, RotateCw, LogOut, Menu, Plus, Moon, Sun } from 'lucide-react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { buildApiUrl } from '../config/api';
 import MenuComponent from '../components/Menu';
+import api from '../services/api';
 
 type RootStackParamList = {
   Main: undefined;
@@ -57,12 +56,7 @@ export default function DashboardScreen() {
 
   const fetchTodayRecords = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      const response = await fetch(buildApiUrl('/api/time-records/my-records/today'), {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await api.get('/api/time-records/my-records/today');
 
       if (response.ok) {
         const data = await response.json();

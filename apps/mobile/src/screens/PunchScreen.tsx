@@ -18,7 +18,7 @@ import * as Location from 'expo-location';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { buildApiUrl } from '../config/api';
+import api from '../services/api';
 import Toast from 'react-native-toast-message';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -88,12 +88,7 @@ export default function PunchScreen() {
 
   const fetchTodayRecords = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      const response = await fetch(buildApiUrl('/api/time-records/my-records/today'), {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await api.get('/api/time-records/my-records/today');
 
       if (response.ok) {
         const data = await response.json();
@@ -274,15 +269,10 @@ export default function PunchScreen() {
         name: 'punch_photo.jpg',
       } as any);
 
-      const token = await AsyncStorage.getItem('token');
-
-      const response = await fetch(buildApiUrl('/api/time-records/punch'), {
-        method: 'POST',
+      const response = await api.post('/api/time-records/punch', formData, {
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
         },
-        body: formData,
       });
 
       if (!response.ok) {

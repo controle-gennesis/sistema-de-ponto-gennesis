@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { Clock, Calendar, ChevronDown, ChevronUp, X } from 'lucide-react-native';
-import { buildApiUrl } from '../config/api';
+import api from '../services/api';
 
 const { width } = Dimensions.get('window');
 
@@ -87,13 +87,7 @@ export default function BankHoursScreen() {
   const fetchBankHours = async () => {
     try {
       setLoading(true);
-      const token = await AsyncStorage.getItem('token');
-      const response = await fetch(buildApiUrl('/api/time-records/my-records/bank-hours'), {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.get('/api/time-records/my-records/bank-hours');
       
       if (!response.ok) {
         throw new Error('Erro na requisição');
@@ -118,20 +112,13 @@ export default function BankHoursScreen() {
       const startDate = new Date(year, monthIndex, 1);
       const endDate = new Date(year, monthIndex + 1, 0); // Último dia do mês
       
-      const token = await AsyncStorage.getItem('token');
       const params = new URLSearchParams({
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
         detailed: 'true',
       });
       
-      const response = await fetch(buildApiUrl(`/api/time-records/my-records/bank-hours?${params}`), {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.get(`/api/time-records/my-records/bank-hours?${params}`);
       
       if (!response.ok) {
         throw new Error('Erro na requisição');

@@ -270,6 +270,43 @@ export class AuthController {
     }
   }
 
+  // Método público para refresh que aceita tokens expirados
+  async publicRefreshToken(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      // O middleware authenticateForRefresh já validou e populou req.user
+      const userId = req.user!.id;
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          isActive: true,
+        }
+      });
+
+      if (!user || !user.isActive) {
+        throw createError('Usuário não encontrado ou inativo', 401);
+      }
+
+      // Gerar novo token
+      const token = jwt.sign(
+        { id: user.id, email: user.email, role: user.role },
+        process.env.JWT_SECRET as string,
+        { expiresIn: '7d' }
+      );
+
+      return res.json({
+        success: true,
+        data: { token },
+        message: 'Token renovado com sucesso'
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
   async changePassword(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { currentPassword, newPassword } = req.body;

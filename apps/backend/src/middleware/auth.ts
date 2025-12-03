@@ -102,3 +102,58 @@ export const optionalAuth = async (
     return next(error);
   }
 };
+
+// Middleware para refresh token que aceita tokens expirados
+export const authenticateForRefresh = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      throw createError('Token de acesso necessário', 401);
+    }
+
+    // Decodificar token mesmo se expirado (ignoreExpiration)
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error: any) {
+      // Se o token expirou, tenta decodificar sem verificar expiração
+      if (error.name === 'TokenExpiredError') {
+        decoded = jwt.decode(token) as any;
+        if (!decoded || !decoded.id) {
+          throw createError('Token inválido', 401);
+        }
+      } else {
+        throw createError('Token inválido', 401);
+      }
+    }
+    
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        isActive: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      throw createError('Usuário não encontrado ou inativo', 401);
+    }
+
+    req.user = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};

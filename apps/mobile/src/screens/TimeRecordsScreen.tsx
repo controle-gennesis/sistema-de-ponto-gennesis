@@ -12,8 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { ArrowLeft, LogIn, LogOut, Utensils, RotateCw, Coffee, Clock, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { buildApiUrl } from '../config/api';
+import api from '../services/api';
 
 export type TimeRecord = {
   id: string;
@@ -46,16 +45,12 @@ export default function TimeRecordsScreen() {
   const fetchRecords = async () => {
     try {
       setLoading(true);
-      const token = await AsyncStorage.getItem('token');
       
       const startDate = new Date(selectedYear, selectedMonth, 1);
       const endDate = new Date(selectedYear, selectedMonth + 1, 0);
       
-      const res = await fetch(
-        buildApiUrl(`/api/time-records/my-records?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`),
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+      const res = await api.get(
+        `/api/time-records/my-records?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`
       );
       
       if (!res.ok) {

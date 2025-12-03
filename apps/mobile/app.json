@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gennesis Attendance",
     "slug": "sistema-ponto-engenharia",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/favicon.png",
     "userInterfaceStyle": "automatic",
@@ -28,7 +28,7 @@
       }
     },
     "android": {
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/favicon.png",
         "backgroundColor": "#111827"
