@@ -177,7 +177,7 @@ export class PayrollService {
     );
     
     // Calcular dias trabalhados e faltas de forma mais inteligente
-    const { daysWorked, totalWorkingDays } = this.calculateWorkingDays(
+    const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
       timeRecords.length, 
       month, 
       year, 
@@ -195,7 +195,7 @@ export class PayrollService {
   /**
    * Calcula dias trabalhados e faltas de forma inteligente
    */
-  private calculateWorkingDays(daysWorked: number, month: number, year: number, hireDate?: Date) {
+  private async calculateWorkingDays(daysWorked: number, month: number, year: number, hireDate?: Date) {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentYear = today.getFullYear();
@@ -210,15 +210,38 @@ export class PayrollService {
       ? hireDate.getDate()
       : 1;
     
+    // Buscar feriados ativos no mês para desconsiderar da contagem de dias úteis
+    const startDateRange = new Date(year, month - 1, startDay);
+    const endDateRange = new Date(year, month - 1, endDay, 23, 59, 59);
+    const holidays = await prisma.holiday.findMany({
+      where: {
+        isActive: true,
+        date: {
+          gte: startDateRange,
+          lte: endDateRange
+        }
+      }
+    });
+    const holidaySet = new Set(
+      holidays.map((h) => {
+        const d = h.date;
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      })
+    );
+
     let totalWorkingDays = 0;
     
     // Contar apenas dias úteis (segunda a sexta) no período
     for (let day = startDay; day <= endDay; day++) {
       const date = new Date(year, month - 1, day);
       const dayOfWeek = date.getDay(); // 0 = domingo, 1 = segunda, ..., 6 = sábado
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       
       // Contar apenas dias úteis (1-5 = segunda a sexta)
-      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      if (dayOfWeek >= 1 && dayOfWeek <= 5 && !holidaySet.has(dateKey)) {
         totalWorkingDays++;
       }
     }
