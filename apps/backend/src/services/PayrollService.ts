@@ -231,7 +231,7 @@ export class PayrollService {
         return `${yyyy}-${mm}-${dd}`;
       })
     );
-
+    
     let totalWorkingDays = 0;
     
     // Contar apenas dias úteis (segunda a sexta) no período
