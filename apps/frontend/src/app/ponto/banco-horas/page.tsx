@@ -257,8 +257,17 @@ export default function BankHoursPage() {
     // Adicionar worksheet ao workbook
     XLSX.utils.book_append_sheet(wb, ws, 'Banco de Horas');
 
-    // Gerar nome do arquivo
-    const fileName = `banco-horas.xlsx`;
+    // Gerar nome do arquivo com período
+    const formatDateForFileName = (dateString: string) => {
+      // Parsear a data manualmente para evitar problemas de timezone
+      // dateString está no formato "YYYY-MM-DD"
+      const [year, month, day] = dateString.split('-').map(Number);
+      return `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+    };
+
+    const startDateFormatted = formatDateForFileName(filters.startDate);
+    const endDateFormatted = formatDateForFileName(filters.endDate);
+    const fileName = `Banco_Horas_${startDateFormatted}_a_${endDateFormatted}.xlsx`;
 
     // Salvar arquivo
     XLSX.writeFile(wb, fileName);
