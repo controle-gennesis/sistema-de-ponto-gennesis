@@ -764,11 +764,45 @@ export default function FolhaPagamentoPage() {
                               const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
                               const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
                               
-                              const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0);
-                              const totalDescontos = employee.totalDiscounts + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT;
-                              const liquidoReceber = totalProventos - totalDescontos;
+                              const totalHorasExtras = (employee.he50Hours || 0) + (employee.he100Hours || 0);
+                              const diasUteis = employee.totalWorkingDays || 0;
+                              const diasNaoUteis = diasDoMes - diasUteis;
+                              const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+                              const valorDSRHE = diasUteis > 0 ? 
+                                ((employee.he50Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0) + 
+                                ((employee.he100Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0)
+                                : 0;
                               
-                              return liquidoReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                              const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
+                              const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+                                ? 0 
+                                : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+                              
+                              const calcularINSS = (baseINSS: number): number => {
+                                if (baseINSS <= 0) return 0;
+                                
+                                if (baseINSS <= 1518) {
+                                  return baseINSS * 0.075;
+                                } else if (baseINSS <= 2793) {
+                                  return (1518 * 0.075) + ((baseINSS - 1518) * 0.09);
+                                } else if (baseINSS <= 4190) {
+                                  return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12);
+                                } else if (baseINSS <= 8157) {
+                                  return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14);
+                                } else {
+                                  return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14);
+                                }
+                              };
+
+                              const inssMensal = calcularINSS(baseINSSMensal);
+                              const irrfMensal = employee.irrfMensal || 0;
+                              
+                              const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
+                              const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
+                              const liquidoReceber = totalProventos - totalDescontos;
+                              const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
+                              
+                              return liquidoComAcrescimos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                             })()}
                           </span>
                         </td>

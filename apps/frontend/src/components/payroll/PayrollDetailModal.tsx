@@ -162,14 +162,15 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   };
   
   const inssMensal = calcularINSS(baseINSSMensal);
+  const irrfMensal = employee.irrfMensal || 0;
   
-  const totalProventos = salarioBase + periculosidade + insalubridade + salarioFamilia + (employee.totalTransportVoucher || 0) + (dsrHE * (employee.hourlyRate || 0));
-  const totalDescontos = employee.totalDiscounts + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal;
+  const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
+  const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
   const liquidoReceber = totalProventos - totalDescontos;
   
   // Cálculo com acréscimos
-  const totalProventosComAcrescimos = salarioBase + periculosidade + insalubridade + salarioFamilia + employee.totalAdjustments + (employee.totalTransportVoucher || 0) + (dsrHE * (employee.hourlyRate || 0));
-  const liquidoComAcrescimos = totalProventosComAcrescimos - totalDescontos;
+  const totalProventosComAcrescimos = totalProventos + (employee.totalAdjustments || 0);
+  const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
