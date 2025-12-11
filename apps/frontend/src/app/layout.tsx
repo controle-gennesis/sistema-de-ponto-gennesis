@@ -21,6 +21,8 @@ export default function RootLayout({
         <meta name="keywords" content="ponto, frequência, engenharia, controle, horas" />
         <meta name="robots" content="noindex, nofollow" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/logoredonda.png" type="image/png" />
+        <link rel="shortcut icon" href="/logoredonda.png" type="image/png" />
       </head>
       <body className={inter.className}>
         <Favicon />

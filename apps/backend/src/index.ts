@@ -49,8 +49,39 @@ const PORT = parseInt(process.env.PORT || '5000', 10);
 // Isso permite obter o IP real do cliente via X-Forwarded-For de forma segura
 app.set('trust proxy', 1);
 
-// Middleware de segurança
-app.use(helmet());
+// CORS - DEVE VIR ANTES DO HELMET
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+    'https://sistema-pontofrontend-production.up.railway.app',
+    'https://sistema-pontobackend-production.up.railway.app'
+  ]
+  : ['http://localhost:3000', 'http://localhost:19006'];
+
+console.log('🌐 CORS configurado para origens:', allowedOrigins);
+console.log('📊 Ambiente:', process.env.NODE_ENV || 'development');
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permitir requisições sem origin (ex: mobile apps, Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      callback(new Error('Não permitido pelo CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+}));
+
+// Middleware de segurança - Configurado para não bloquear CORS
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false,
+}));
 app.use(compression());
 
 // Rate limiting
@@ -60,17 +91,6 @@ const limiter = rateLimit({
   message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
 });
 app.use(limiter);
-
-// CORS
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? [
-      'https://sistema-pontofrontend-production.up.railway.app', // SEU FRONTEND
-      'https://sistema-pontobackend-production.up.railway.app'   // SEU BACKEND
-      ]
-    : ['http://localhost:3000', 'http://localhost:19006'],
-  credentials: true,
-}));
 
 // Logging
 app.use(morgan('combined'));
@@ -84,6 +104,21 @@ if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.e
   const uploadsPath = path.join(process.cwd(), 'apps', 'backend', 'uploads');
   app.use('/uploads', express.static(uploadsPath));
 }
+
+// Handler para requisições OPTIONS (preflight CORS)
+app.options('*', cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      callback(new Error('Não permitido pelo CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
 
 // Health check
 app.get('/health', (req, res) => {
