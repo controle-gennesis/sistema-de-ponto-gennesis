@@ -1175,7 +1175,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                 >
                   {/* Avatar com iniciais - Centralizado */}
                   <div className="flex flex-col items-center text-center mb-6 relative">
-                    <div className="w-16 h-16 bg-white dark:bg-gray-700 border-2 border-blue-500 dark:border-blue-400 rounded-full flex items-center justify-center mb-3 shadow-sm">
+                    <div className="w-16 h-16 bg-transparent border-2 border-blue-500 dark:border-blue-400 rounded-full flex items-center justify-center mb-3">
                       <span className="text-blue-600 dark:text-blue-400 font-bold text-lg">
                         {employee.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                       </span>
