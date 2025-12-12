@@ -1030,4 +1030,126 @@ export class TimeRecordController {
       next(error);
     }
   }
+
+  /**
+   * Criar ponto manualmente para um funcionário (apenas admin)
+   */
+  async createManualRecord(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { employeeId, date, time, type, observation } = req.body;
+
+      if (!employeeId || !date || !time || !type) {
+        throw createError('ID do funcionário, data, horário e tipo são obrigatórios', 400);
+      }
+
+      // Validar tipo de registro
+      if (!['ENTRY', 'LUNCH_START', 'LUNCH_END', 'EXIT'].includes(type)) {
+        throw createError('Tipo de registro inválido. Use: ENTRY, LUNCH_START, LUNCH_END ou EXIT', 400);
+      }
+
+      // Buscar dados do funcionário
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: {
+          id: true,
+          userId: true,
+          employeeId: true,
+          costCenter: true,
+          dailyFoodVoucher: true,
+          dailyTransportVoucher: true,
+          user: {
+            select: {
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      if (!employee) {
+        throw createError('Funcionário não encontrado', 404);
+      }
+
+      // Criar data completa para o ponto (mesma lógica do punchInOut para evitar problemas de timezone)
+      // Parsear a data manualmente para criar Date no horário correto
+      const [year, month, day] = date.split('-').map(Number);
+      const [hour, minute] = time.split(':').map(Number);
+      
+      // Construir timestamp exatamente como é salvo no banco (mesma lógica do TimeRecordController)
+      // Formato: YYYY-MM-DDTHH:mm:00Z
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+      const timestamp = new Date(dateStr + 'Z'); // Adicionar Z para forçar UTC
+
+      // Verificar se já existe ponto do mesmo tipo para essa data
+      // Criar range do dia usando a mesma lógica
+      const startOfDayStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00`;
+      const endOfDayStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T23:59:59`;
+      const startOfDay = new Date(startOfDayStr + 'Z');
+      const endOfDay = new Date(endOfDayStr + 'Z');
+
+      const existingRecord = await prisma.timeRecord.findFirst({
+        where: {
+          employeeId,
+          type: type as any,
+          timestamp: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        }
+      });
+
+      if (existingRecord) {
+        throw createError(`Já existe um ponto de ${type === 'ENTRY' ? 'entrada' : type === 'LUNCH_START' ? 'início do almoço' : type === 'LUNCH_END' ? 'retorno do almoço' : 'saída'} para esta data.`, 400);
+      }
+
+      // Adicionar VT e VA apenas no ponto de entrada
+      let foodVoucherAmount = null;
+      let transportVoucherAmount = null;
+      
+      if (type === 'ENTRY') {
+        foodVoucherAmount = employee.dailyFoodVoucher || 0;
+        transportVoucherAmount = employee.dailyTransportVoucher || 0;
+      }
+
+      // Criar o ponto
+      const record = await prisma.timeRecord.create({
+        data: {
+          userId: employee.userId,
+          employeeId: employee.id,
+          type: type as any,
+          timestamp: timestamp,
+          isValid: true,
+          reason: 'Ponto criado manualmente',
+          observation: observation || null,
+          foodVoucherAmount,
+          transportVoucherAmount,
+          costCenter: employee.costCenter,
+          approvedBy: req.user!.id,
+          approvedAt: new Date()
+        },
+        include: {
+          user: {
+            select: { name: true, email: true }
+          },
+          employee: {
+            select: { 
+              employeeId: true, 
+              department: true, 
+              position: true
+            }
+          }
+        }
+      });
+
+      res.status(201).json({
+        success: true,
+        data: {
+          record,
+          message: 'Ponto criado manualmente com sucesso'
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }

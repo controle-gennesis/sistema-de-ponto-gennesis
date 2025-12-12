@@ -24,6 +24,7 @@ import { EditEmployeeForm } from './EditEmployeeForm';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData, SalaryDiscount, CreateDiscountData, UpdateDiscountData } from '@/types';
+import toast from 'react-hot-toast';
 
 interface Employee {
   id: string;
@@ -119,6 +120,15 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editVisibleSections, setEditVisibleSections] = useState<Array<'personal'|'professional'|'bank'|'remuneration'>|undefined>(undefined);
+  
+  // Estados para criar ponto manualmente
+  const [showManualPointModal, setShowManualPointModal] = useState(false);
+  const [manualPointData, setManualPointData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    time: '07:00',
+    type: 'ENTRY',
+    observation: ''
+  });
 
   const queryClient = useQueryClient();
 
@@ -391,6 +401,32 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     },
     onError: (error: any) => {
       console.error('Erro ao atualizar registro:', error);
+    }
+  });
+
+  // Criar ponto manualmente
+  const createManualPointMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await api.post('/time-records/manual', {
+        employeeId: selectedEmployee?.employee?.id,
+        ...data
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee-records', selectedEmployee?.id, selectedMonth, selectedYear] });
+      setShowManualPointModal(false);
+      setManualPointData({
+        date: new Date().toISOString().split('T')[0],
+        time: '07:00',
+        type: 'ENTRY',
+        observation: ''
+      });
+      toast.success('Ponto criado com sucesso!');
+    },
+    onError: (error: any) => {
+      const errorMessage = error.response?.data?.error || 'Erro ao criar ponto';
+      toast.error(errorMessage);
     }
   });
 
@@ -1854,9 +1890,20 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <h4 className="text-md font-semibold text-gray-900 dark:text-gray-100">
-                      Registros de {selectedMonth.toString().padStart(2, '0')}/{selectedYear}
-                    </h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-md font-semibold text-gray-900 dark:text-gray-100">
+                        Registros de {selectedMonth.toString().padStart(2, '0')}/{selectedYear}
+                      </h4>
+                      {canManageEmployees && (
+                        <button
+                          onClick={() => setShowManualPointModal(true)}
+                          className="px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center space-x-2 text-sm"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Adicionar Ponto</span>
+                        </button>
+                      )}
+                    </div>
                     
                     {employeeRecordsData?.data?.length === 0 ? (
                       <div className="text-center py-8">
@@ -2106,6 +2153,130 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
           onClose={handleCloseEditForm}
           visibleSections={editVisibleSections}
         />
+      )}
+
+      {/* Modal de criar ponto manualmente */}
+      {showManualPointModal && selectedEmployee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowManualPointModal(false)} />
+          <div className="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Adicionar Ponto Manualmente</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{selectedEmployee.name}</p>
+              </div>
+              <button
+                onClick={() => setShowManualPointModal(false)}
+                className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Tipo de Ponto
+                </label>
+                <select
+                  value={manualPointData.type}
+                  onChange={(e) => {
+                    const type = e.target.value;
+                    // Definir horário padrão baseado no tipo
+                    let defaultTime = '08:00';
+                    if (type === 'ENTRY') {
+                      defaultTime = '07:00';
+                    } else if (type === 'LUNCH_START') {
+                      defaultTime = '12:00';
+                    } else if (type === 'LUNCH_END') {
+                      defaultTime = '13:00';
+                    } else if (type === 'EXIT') {
+                      defaultTime = '17:00';
+                    }
+                    setManualPointData({ ...manualPointData, type, time: defaultTime });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                >
+                  <option value="ENTRY">Entrada</option>
+                  <option value="LUNCH_START">Início do Almoço</option>
+                  <option value="LUNCH_END">Retorno do Almoço</option>
+                  <option value="EXIT">Saída</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Data
+                </label>
+                <input
+                  type="date"
+                  value={manualPointData.date}
+                  onChange={(e) => setManualPointData({ ...manualPointData, date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Horário
+                </label>
+                <input
+                  type="time"
+                  value={manualPointData.time}
+                  onChange={(e) => setManualPointData({ ...manualPointData, time: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Observação (opcional)
+                </label>
+                <textarea
+                  value={manualPointData.observation}
+                  onChange={(e) => setManualPointData({ ...manualPointData, observation: e.target.value })}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                  placeholder="Observação sobre o ponto criado..."
+                />
+              </div>
+
+              <div className="flex space-x-3 pt-4">
+                <button
+                  onClick={() => setShowManualPointModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    createManualPointMutation.mutate({
+                      date: manualPointData.date,
+                      time: manualPointData.time,
+                      type: manualPointData.type,
+                      observation: manualPointData.observation || null
+                    });
+                  }}
+                  disabled={createManualPointMutation.isPending}
+                  className="flex-1 px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                >
+                  {createManualPointMutation.isPending ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Criando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      <span>Criar Ponto</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </Card>
     </>

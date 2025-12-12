@@ -32,4 +32,7 @@ router.get('/reports/late-arrivals', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 
 // Centro de custo por funcionário
 router.get('/employee/:employeeId/cost-center', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), timeRecordController.getEmployeeCostCenter);
 
+// Criar ponto manualmente (apenas ADMIN)
+router.post('/manual', authorize('ADMIN'), timeRecordController.createManualRecord);
+
 export default router;
