@@ -181,9 +181,14 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
             <div className="flex items-center space-x-3">
               <div className="p-2">
                 <img 
-                  src="/logo.png" 
+                  src="/logopv.png" 
                   alt="Logo da Empresa" 
-                  className="w-12 h-12 object-contain"
+                  className="w-12 h-12 object-contain dark:hidden"
+                />
+                <img 
+                  src="/logobranca.png" 
+                  alt="Logo da Empresa" 
+                  className="w-12 h-12 object-contain hidden dark:block"
                 />
               </div>
               <div>

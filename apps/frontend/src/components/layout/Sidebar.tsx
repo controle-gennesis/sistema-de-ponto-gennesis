@@ -675,7 +675,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                           className="w-10 h-10 rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 border-2 border-red-500 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-transparent border-2 border-red-500 flex items-center justify-center">
                           <span className="text-sm font-semibold text-red-500">
                             {getInitials(user?.name || userName)}
                           </span>
