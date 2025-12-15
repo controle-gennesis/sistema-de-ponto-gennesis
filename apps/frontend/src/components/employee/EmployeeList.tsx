@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
@@ -2266,11 +2266,33 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                             <div className="flex flex-wrap gap-2">
                               {records.map((record: any, index: number) => {
                                 const recordMenuId = `${date}-${index}-${record.id}`;
+                                
+                                // Função para obter o ícone baseado no tipo
+                                const getTypeIcon = () => {
+                                  switch (record.type) {
+                                    case 'ENTRY':
+                                      return <DoorOpen className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                    case 'EXIT':
+                                      return <DoorClosed className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                    case 'LUNCH_START':
+                                      return <Utensils className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                    case 'LUNCH_END':
+                                      return <UtensilsCrossed className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                    case 'BREAK_START':
+                                    case 'BREAK_END':
+                                      return <Clock className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                    case 'ABSENCE_JUSTIFIED':
+                                      return <FileCheck className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                    default:
+                                      return <Clock className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                  }
+                                };
+                                
                                 return (
                                 <div key={index} className="relative px-3 py-2 bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center space-x-2 flex-1 min-w-0">
-                                      <Clock className="w-3 h-3 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                      {getTypeIcon()}
                                       {record.type !== 'ABSENCE_JUSTIFIED' && (
                                         <span className="text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
                                           {(() => {
@@ -2282,15 +2304,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                           })()}
                                         </span>
                                       )}
-                                      <span className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                        {record.type === 'ENTRY' ? 'Entrada' :
-                                         record.type === 'EXIT' ? 'Saída' :
-                                         record.type === 'LUNCH_START' ? 'Almoço' :
-                                         record.type === 'LUNCH_END' ? 'Retorno' :
-                                         record.type === 'BREAK_START' ? 'Início Pausa' :
-                                         record.type === 'BREAK_END' ? 'Fim Pausa' :
-                                         record.type === 'ABSENCE_JUSTIFIED' ? 'Ausência Justificada' : record.type}
-                                      </span>
                                       {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && (
                                         <button
                                           onClick={() => setViewingCertificate(viewingCertificate === `${date}-${index}` ? null : `${date}-${index}`)}
@@ -2298,15 +2311,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                           title="Ver detalhes do atestado"
                                         >
                                           <Eye className="w-3 h-3" />
-                                        </button>
-                                      )}
-                                      {record.photoUrl && (
-                                        <button
-                                          onClick={() => window.open(record.photoUrl, '_blank')}
-                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-green-600 dark:hover:text-green-400 transition-colors flex-shrink-0"
-                                          title="Ver foto"
-                                        >
-                                          <Camera className="w-3 h-3" />
                                         </button>
                                       )}
                                     </div>
@@ -2334,10 +2338,28 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                               <button
                                                 onClick={(e) => {
                                                   e.stopPropagation();
+                                                  if (record.photoUrl) {
+                                                    window.open(record.photoUrl, '_blank');
+                                                    setOpenRecordMenu(null);
+                                                  }
+                                                }}
+                                                disabled={!record.photoUrl}
+                                                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors text-sm ${
+                                                  record.photoUrl 
+                                                    ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer' 
+                                                    : 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+                                                }`}
+                                              >
+                                                <Camera className={`w-3.5 h-3.5 ${record.photoUrl ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`} />
+                                                <span>Ver Foto</span>
+                                              </button>
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
                                                   handleEditRecord(record);
                                                   setOpenRecordMenu(null);
                                                 }}
-                                                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300"
+                                                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 border-t border-gray-200 dark:border-gray-700"
                                               >
                                                 <Edit className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                                                 <span>Editar</span>
