@@ -664,6 +664,51 @@ export class TimeRecordController {
     }
   }
 
+  async deleteRecord(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      // Verificar se o registro existe
+      const existingRecord = await prisma.timeRecord.findUnique({
+        where: { id },
+        include: {
+          user: {
+            select: { name: true, email: true }
+          },
+          employee: {
+            select: { 
+              employeeId: true, 
+              department: true, 
+              position: true
+            }
+          }
+        }
+      });
+
+      if (!existingRecord) {
+        throw createError('Registro não encontrado', 404);
+      }
+
+      // Deletar registro
+      await prisma.timeRecord.delete({
+        where: { id }
+      });
+
+      res.json({
+        success: true,
+        message: 'Registro removido com sucesso',
+        data: {
+          id: existingRecord.id,
+          employeeName: existingRecord.user.name,
+          timestamp: existingRecord.timestamp,
+          type: existingRecord.type
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async validateRecord(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

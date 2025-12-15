@@ -23,7 +23,10 @@ router.put('/:id/validate', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR',
 router.put('/:id/invalidate', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), timeRecordController.invalidateRecord);
 
 // Rota para editar registros - APENAS ADMINISTRADORES
-router.put('/:id', authorize('ADMIN'), timeRecordController.updateRecord);
+router.put('/:id', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordController.updateRecord);
+
+// Rota para deletar registros - APENAS ADMINISTRADORES E DEPARTAMENTO PESSOAL
+router.delete('/:id', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordController.deleteRecord);
 
 // Relatórios
 router.get('/reports/attendance', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), timeRecordController.getAttendanceReport);

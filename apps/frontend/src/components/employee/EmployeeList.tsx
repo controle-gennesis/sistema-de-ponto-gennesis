@@ -93,6 +93,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
+  const [deleteRecordConfirm, setDeleteRecordConfirm] = useState<string | null>(null);
   const [viewingCertificate, setViewingCertificate] = useState<string | null>(null);
   const [showAddAdjustmentForm, setShowAddAdjustmentForm] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState<SalaryAdjustment | null>(null);
@@ -398,9 +399,28 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       queryClient.invalidateQueries({ queryKey: ['employee-records', selectedEmployee?.id, selectedMonth, selectedYear] });
       setEditingRecord(null);
       setEditForm({ type: '', timestamp: '', reason: '', observation: '' } as any);
+      toast.success('Registro atualizado com sucesso!');
     },
     onError: (error: any) => {
-      console.error('Erro ao atualizar registro:', error);
+      const errorMessage = error.response?.data?.error || 'Erro ao atualizar registro';
+      toast.error(errorMessage);
+    }
+  });
+
+  // Deletar registro de ponto
+  const deleteRecordMutation = useMutation({
+    mutationFn: async (recordId: string) => {
+      const res = await api.delete(`/time-records/${recordId}`);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee-records', selectedEmployee?.id, selectedMonth, selectedYear] });
+      setDeleteRecordConfirm(null);
+      toast.success('Registro removido com sucesso!');
+    },
+    onError: (error: any) => {
+      const errorMessage = error.response?.data?.error || 'Erro ao remover registro';
+      toast.error(errorMessage);
     }
   });
 
@@ -1978,6 +1998,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                         >
                                           <Edit className="w-3 h-3" />
                                         </button>
+                                        <button
+                                          onClick={() => setDeleteRecordConfirm(record.id)}
+                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                          title="Remover registro"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
                                       </>
                                     )}
                                   </div>
@@ -2270,6 +2297,60 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <>
                       <Plus className="w-4 h-4" />
                       <span>Criar Ponto</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação para deletar registro */}
+      {deleteRecordConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDeleteRecordConfirm(null)} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-full">
+                  <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Remover Registro de Ponto
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Esta ação não pode ser desfeita
+                  </p>
+                </div>
+              </div>
+              <p className="text-gray-700 dark:text-gray-300 mb-6">
+                Tem certeza que deseja remover este registro de ponto? Esta ação é permanente e não pode ser revertida.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteRecordConfirm(null)}
+                  className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    deleteRecordMutation.mutate(deleteRecordConfirm);
+                  }}
+                  disabled={deleteRecordMutation.isPending}
+                  className="flex-1 px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                >
+                  {deleteRecordMutation.isPending ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Removendo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>Remover</span>
                     </>
                   )}
                 </button>
