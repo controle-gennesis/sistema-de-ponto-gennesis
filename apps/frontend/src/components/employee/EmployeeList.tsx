@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
@@ -95,6 +95,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
   const [deleteRecordConfirm, setDeleteRecordConfirm] = useState<string | null>(null);
   const [viewingCertificate, setViewingCertificate] = useState<string | null>(null);
+  const [openRecordMenu, setOpenRecordMenu] = useState<string | null>(null);
   const [showAddAdjustmentForm, setShowAddAdjustmentForm] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState<SalaryAdjustment | null>(null);
   const [adjustments, setAdjustments] = useState<SalaryAdjustment[]>([]);
@@ -130,6 +131,12 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     type: 'ENTRY',
     observation: ''
   });
+
+  // Estados para importar pontos
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [parsedRecords, setParsedRecords] = useState<Array<{date: string; time: string; type: 'ENTRY' | 'LUNCH_START' | 'LUNCH_END' | 'EXIT'; observation?: string}>>([]);
+  const [isParsing, setIsParsing] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -449,6 +456,284 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       toast.error(errorMessage);
     }
   });
+
+  // Importar pontos de planilha
+  const importRecordsMutation = useMutation({
+    mutationFn: async (records: Array<{date: string; time: string; type: 'ENTRY' | 'LUNCH_START' | 'LUNCH_END' | 'EXIT'; observation?: string}>) => {
+      const res = await api.post('/time-records/import', {
+        employeeId: selectedEmployee?.employee?.id,
+        records
+      });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['employee-records', selectedEmployee?.id, selectedMonth, selectedYear] });
+      setShowImportModal(false);
+      setSelectedFile(null);
+      setParsedRecords([]);
+      toast.success(data.data?.message || 'Pontos importados com sucesso!');
+    },
+    onError: (error: any) => {
+      const errorMessage = error.response?.data?.error || 'Erro ao importar pontos';
+      toast.error(errorMessage);
+    }
+  });
+
+  // Função para processar planilha
+  const parseSpreadsheet = async () => {
+    if (!selectedFile || !selectedEmployee?.employee?.id) {
+      toast.error('Selecione um arquivo');
+      return;
+    }
+
+    setIsParsing(true);
+    try {
+      const data = await selectedFile.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' }) as any[][];
+
+      // Encontrar linha do cabeçalho
+      let headerRow = -1;
+      let diaCol = -1;
+      let ent1Col = -1, sai1Col = -1;
+      let ent2Col = -1, sai2Col = -1;
+
+      for (let i = 0; i < Math.min(20, jsonData.length); i++) {
+        const row = jsonData[i];
+        for (let j = 0; j < row.length; j++) {
+          const cell = String(row[j] || '').toLowerCase().trim();
+          if (cell === 'dia' || (cell.includes('dia') && !cell.includes('h.d') && !cell.includes('h.t'))) {
+            diaCol = j;
+            headerRow = i;
+          }
+          if (cell.includes('ent. 1') || cell.includes('ent1') || cell.includes('entrada 1')) {
+            ent1Col = j;
+          }
+          if (cell.includes('sai. 1') || cell.includes('sai1') || cell.includes('saída 1')) {
+            sai1Col = j;
+          }
+          if (cell.includes('ent. 2') || cell.includes('ent2') || cell.includes('entrada 2')) {
+            ent2Col = j;
+          }
+          if (cell.includes('sai. 2') || cell.includes('sai2') || cell.includes('saída 2')) {
+            sai2Col = j;
+          }
+        }
+        if (diaCol !== -1 && (ent1Col !== -1 || sai1Col !== -1)) {
+          break;
+        }
+      }
+
+      if (diaCol === -1) {
+        toast.error('Não foi possível encontrar a coluna "Dia" na planilha');
+        setIsParsing(false);
+        return;
+      }
+
+      const records: Array<{date: string; time: string; type: 'ENTRY' | 'LUNCH_START' | 'LUNCH_END' | 'EXIT'; observation?: string}> = [];
+
+      // Detectar ano
+      let detectedYear = new Date().getFullYear();
+      for (let i = jsonData.length - 1; i >= Math.max(0, jsonData.length - 10); i--) {
+        const row = jsonData[i];
+        for (let j = 0; j < row.length; j++) {
+          const cell = String(row[j] || '');
+          const yearMatch = cell.match(/\b(20\d{2})\b/);
+          if (yearMatch) {
+            const year = parseInt(yearMatch[1]);
+            if (year >= 2020 && year <= 2100) {
+              detectedYear = year;
+              break;
+            }
+          }
+        }
+      }
+
+      const getFormattedDate = (sheet: any, rowIndex: number, colIndex: number) => {
+        try {
+          const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+          const cell = sheet[cellAddress];
+          if (cell && cell.w) {
+            return cell.w;
+          }
+        } catch (e) {}
+        return null;
+      };
+
+      // Processar linhas
+      for (let i = headerRow + 1; i < jsonData.length; i++) {
+        const row = jsonData[i];
+        const dia = row[diaCol];
+        
+        if (!dia || (typeof dia === 'string' && dia.trim() === '')) continue;
+
+        const formattedDate = getFormattedDate(firstSheet, i, diaCol);
+        let dateStr = '';
+        
+        const parseDateString = (dateValue: string): string => {
+          const cleanedDate = dateValue.replace(/^(seg|ter|qua|qui|sex|sáb|dom|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*/i, '').trim();
+          
+          const fullDateMatch = cleanedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (fullDateMatch) {
+            const [, day, month, year] = fullDateMatch;
+            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+          
+          const shortDateMatch = cleanedDate.match(/(\d{1,2})\/(\d{1,2})/);
+          if (shortDateMatch) {
+            const [, day, month] = shortDateMatch;
+            return `${detectedYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+          
+          return '';
+        };
+
+        if (formattedDate) {
+          dateStr = parseDateString(formattedDate);
+        }
+        
+        if (!dateStr) {
+          if (typeof dia === 'string') {
+            dateStr = parseDateString(dia);
+          } else if (typeof dia === 'number') {
+            const excelDate = XLSX.SSF.parse_date_code(dia);
+            let year = excelDate.y;
+            let month = excelDate.m;
+            let day = excelDate.d;
+            
+            if (!year || !month || !day || month < 1 || month > 12 || day < 1 || day > 31) {
+              continue;
+            }
+            
+            if (year < 2020) {
+              year = detectedYear;
+            }
+            
+            dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          }
+        }
+
+        if (!dateStr) {
+          continue;
+        }
+
+        const dateParts = dateStr.split('-');
+        if (dateParts.length !== 3) {
+          continue;
+        }
+        const [year, month, day] = dateParts.map(Number);
+        if (isNaN(year) || isNaN(month) || isNaN(day) || year < 2020 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+          continue;
+        }
+
+        const rowAsString = row.join(' ').toLowerCase();
+        if (rowAsString.includes('total') || 
+            rowAsString.includes('saldo') || 
+            rowAsString.includes('processado') ||
+            rowAsString.includes('abonos') ||
+            rowAsString.includes('descontos') ||
+            rowAsString.includes('horas noturnas')) {
+          continue;
+        }
+
+        const isValidTime = (timeCell: any): boolean => {
+          if (!timeCell) return false;
+          
+          if (typeof timeCell === 'number') {
+            return timeCell >= 0.04 && timeCell < 1.0;
+          } else if (typeof timeCell === 'string') {
+            const trimmed = timeCell.trim();
+            if (!trimmed || trimmed === '-' || trimmed === '--' || trimmed === '--**' || trimmed === '**') return false;
+            const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})/);
+            if (timeMatch) {
+              const hour = parseInt(timeMatch[1]);
+              const minute = parseInt(timeMatch[2]);
+              return hour >= 0 && hour < 24 && minute >= 0 && minute < 60;
+            }
+            return false;
+          }
+          return false;
+        };
+
+        const hasValidTime = 
+          (ent1Col !== -1 && isValidTime(row[ent1Col])) ||
+          (sai1Col !== -1 && isValidTime(row[sai1Col])) ||
+          (ent2Col !== -1 && isValidTime(row[ent2Col])) ||
+          (sai2Col !== -1 && isValidTime(row[sai2Col]));
+
+        if (!hasValidTime) {
+          continue;
+        }
+
+        const processTime = (timeCell: any, type: 'ENTRY' | 'LUNCH_START' | 'LUNCH_END' | 'EXIT') => {
+          if (!timeCell) return;
+          
+          let timeStr = '';
+          if (typeof timeCell === 'number') {
+            if (timeCell < 0.0001) return;
+            
+            const totalSeconds = Math.floor(timeCell * 86400);
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+          } else if (typeof timeCell === 'string') {
+            const trimmed = timeCell.trim();
+            if (!trimmed || trimmed === '-' || trimmed === '--' || trimmed === '--**' || trimmed === '**') return;
+            
+            const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+            if (timeMatch) {
+              const [, hour, minute] = timeMatch;
+              timeStr = `${hour.padStart(2, '0')}:${minute}`;
+            }
+          }
+
+          if (timeStr) {
+            records.push({
+              date: dateStr,
+              time: timeStr,
+              type
+            });
+          }
+        };
+
+        if (ent1Col !== -1) {
+          processTime(row[ent1Col], 'ENTRY');
+        }
+        if (sai1Col !== -1) {
+          processTime(row[sai1Col], 'LUNCH_START');
+        }
+        if (ent2Col !== -1) {
+          processTime(row[ent2Col], 'LUNCH_END');
+        }
+        if (sai2Col !== -1) {
+          processTime(row[sai2Col], 'EXIT');
+        }
+      }
+
+      if (records.length === 0) {
+        toast.error('Nenhum registro de ponto encontrado na planilha');
+        setIsParsing(false);
+        return;
+      }
+
+      setParsedRecords(records);
+      toast.success(`${records.length} registro(s) encontrado(s) na planilha`);
+    } catch (error: any) {
+      console.error('Erro ao processar planilha:', error);
+      toast.error('Erro ao processar planilha: ' + (error.message || 'Erro desconhecido'));
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setParsedRecords([]);
+    }
+  };
 
   // Buscar acréscimos do funcionário
   const { data: adjustmentsData } = useQuery({
@@ -1846,89 +2131,121 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
 
                 {detailsTab === 'records' && (
                   <>
-                {/* Seletor de mês/ano */}
-                <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Registros de Ponto</h4>
-                    {employeeRecordsData?.data && employeeRecordsData.data.length > 0 && (
-                      <button
-                        onClick={exportToExcel}
-                        className="flex items-center space-x-2 px-4 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>Exportar XLSX</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mês</label>
-                      <select
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                      >
-                        <option value={1}>Janeiro</option>
-                        <option value={2}>Fevereiro</option>
-                        <option value={3}>Março</option>
-                        <option value={4}>Abril</option>
-                        <option value={5}>Maio</option>
-                        <option value={6}>Junho</option>
-                        <option value={7}>Julho</option>
-                        <option value={8}>Agosto</option>
-                        <option value={9}>Setembro</option>
-                        <option value={10}>Outubro</option>
-                        <option value={11}>Novembro</option>
-                        <option value={12}>Dezembro</option>
-                      </select>
+                {/* Header de Registros de Ponto */}
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                  {/* Título e Período */}
+                  <div className="px-6 py-4 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-lg font-bold text-gray-900 dark:text-gray-100">Registros de Ponto</h4>
+                      {employeeRecordsData?.data && employeeRecordsData.data.length > 0 && (
+                        <button
+                          onClick={exportToExcel}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 transition-all shadow-sm hover:shadow-md font-medium text-sm"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Exportar XLSX</span>
+                        </button>
+                      )}
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ano</label>
-                      <select
-                        value={selectedYear}
-                        onChange={(e) => setSelectedYear(Number(e.target.value))}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                      >
-                        {Array.from({ length: 5 }, (_, i) => {
-                          const year = new Date().getFullYear() - 2 + i;
-                          return (
-                            <option key={year} value={year}>
-                              {year}
-                            </option>
-                          );
-                        })}
-                      </select>
+                  </div>
+
+                  {/* Controles e Filtros */}
+                  <div className="px-6 py-5">
+                    <div className="flex flex-col xl:flex-row xl:items-end gap-4">
+                      {/* Filtros de Período */}
+                      <div className="flex items-end gap-4 flex-1">
+                        <div className="flex flex-col">
+                          <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mês</label>
+                          <select
+                            value={selectedMonth}
+                            onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                            className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none cursor-pointer transition-all text-sm font-medium min-w-[150px] shadow-sm"
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundPosition: 'right 0.75rem center',
+                              backgroundRepeat: 'no-repeat',
+                              backgroundSize: '1.25em 1.25em',
+                              paddingRight: '2.5rem'
+                            }}
+                          >
+                            <option value={1}>Janeiro</option>
+                            <option value={2}>Fevereiro</option>
+                            <option value={3}>Março</option>
+                            <option value={4}>Abril</option>
+                            <option value={5}>Maio</option>
+                            <option value={6}>Junho</option>
+                            <option value={7}>Julho</option>
+                            <option value={8}>Agosto</option>
+                            <option value={9}>Setembro</option>
+                            <option value={10}>Outubro</option>
+                            <option value={11}>Novembro</option>
+                            <option value={12}>Dezembro</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col">
+                          <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Ano</label>
+                          <select
+                            value={selectedYear}
+                            onChange={(e) => setSelectedYear(Number(e.target.value))}
+                            className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none cursor-pointer transition-all text-sm font-medium min-w-[110px] shadow-sm"
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundPosition: 'right 0.75rem center',
+                              backgroundRepeat: 'no-repeat',
+                              backgroundSize: '1.25em 1.25em',
+                              paddingRight: '2.5rem'
+                            }}
+                          >
+                            {Array.from({ length: 5 }, (_, i) => {
+                              const year = new Date().getFullYear() - 2 + i;
+                              return (
+                                <option key={year} value={year}>
+                                  {year}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Botões de Ação */}
+                      {canManageEmployees && (
+                        <div className="flex items-end gap-2.5">
+                          <button
+                            onClick={() => setShowImportModal(true)}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all shadow-sm hover:shadow-md font-medium text-sm"
+                          >
+                            <Upload className="w-4 h-4" />
+                            <span>Importar Pontos</span>
+                          </button>
+                          <button
+                            onClick={() => setShowManualPointModal(true)}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm hover:shadow-md font-medium text-sm"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Adicionar Ponto</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* Lista de registros */}
                 {loadingRecords ? (
-                  <div className="text-center py-8">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-12 bg-white dark:bg-gray-800 text-center">
                     <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-                    <p className="text-gray-600 dark:text-gray-400">Carregando registros...</p>
+                    <p className="text-gray-600 dark:text-gray-400 font-medium">Carregando registros...</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-md font-semibold text-gray-900 dark:text-gray-100">
-                        Registros de {selectedMonth.toString().padStart(2, '0')}/{selectedYear}
-                      </h4>
-                      {canManageEmployees && (
-                        <button
-                          onClick={() => setShowManualPointModal(true)}
-                          className="px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center space-x-2 text-sm"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Adicionar Ponto</span>
-                        </button>
-                      )}
-                    </div>
-                    
+                  <div className="mt-4">
                     {employeeRecordsData?.data?.length === 0 ? (
-                      <div className="text-center py-8">
-                        <Clock className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                        <p className="text-gray-600 dark:text-gray-400">Nenhum registro encontrado para este período</p>
+                      <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-12 bg-white dark:bg-gray-800 text-center">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                          <Clock className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 font-medium">Nenhum registro encontrado para este período</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Selecione outro mês ou ano para visualizar os registros</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -1947,65 +2264,99 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                             </div>
                             
                             <div className="flex flex-wrap gap-2">
-                              {records.map((record: any, index: number) => (
-                                <div key={index} className="px-3 py-2 bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
-                                  <div className="flex items-center space-x-2">
-                                    <Clock className="w-3 h-3 text-gray-500 dark:text-gray-400" />
-                                    {record.type !== 'ABSENCE_JUSTIFIED' && (
-                                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                        {(() => {
-                                          const date = new Date(record.timestamp);
-                                          const hours = date.getUTCHours().toString().padStart(2, '0');
-                                          const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-                                          const seconds = date.getUTCSeconds().toString().padStart(2, '0');
-                                          return `${hours}:${minutes}:${seconds}`;
-                                        })()}
+                              {records.map((record: any, index: number) => {
+                                const recordMenuId = `${date}-${index}-${record.id}`;
+                                return (
+                                <div key={index} className="relative px-3 py-2 bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center space-x-2 flex-1 min-w-0">
+                                      <Clock className="w-3 h-3 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                      {record.type !== 'ABSENCE_JUSTIFIED' && (
+                                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                          {(() => {
+                                            const date = new Date(record.timestamp);
+                                            const hours = date.getUTCHours().toString().padStart(2, '0');
+                                            const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+                                            const seconds = date.getUTCSeconds().toString().padStart(2, '0');
+                                            return `${hours}:${minutes}:${seconds}`;
+                                          })()}
+                                        </span>
+                                      )}
+                                      <span className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                        {record.type === 'ENTRY' ? 'Entrada' :
+                                         record.type === 'EXIT' ? 'Saída' :
+                                         record.type === 'LUNCH_START' ? 'Almoço' :
+                                         record.type === 'LUNCH_END' ? 'Retorno' :
+                                         record.type === 'BREAK_START' ? 'Início Pausa' :
+                                         record.type === 'BREAK_END' ? 'Fim Pausa' :
+                                         record.type === 'ABSENCE_JUSTIFIED' ? 'Ausência Justificada' : record.type}
                                       </span>
-                                    )}
-                                    <span className="text-xs text-gray-600 dark:text-gray-400">
-                                      {record.type === 'ENTRY' ? 'Entrada' :
-                                       record.type === 'EXIT' ? 'Saída' :
-                                       record.type === 'LUNCH_START' ? 'Almoço' :
-                                       record.type === 'LUNCH_END' ? 'Retorno' :
-                                       record.type === 'BREAK_START' ? 'Início Pausa' :
-                                       record.type === 'BREAK_END' ? 'Fim Pausa' :
-                                       record.type === 'ABSENCE_JUSTIFIED' ? 'Ausência Justificada' : record.type}
-                                    </span>
+                                      {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && (
+                                        <button
+                                          onClick={() => setViewingCertificate(viewingCertificate === `${date}-${index}` ? null : `${date}-${index}`)}
+                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex-shrink-0"
+                                          title="Ver detalhes do atestado"
+                                        >
+                                          <Eye className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                      {record.photoUrl && (
+                                        <button
+                                          onClick={() => window.open(record.photoUrl, '_blank')}
+                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-green-600 dark:hover:text-green-400 transition-colors flex-shrink-0"
+                                          title="Ver foto"
+                                        >
+                                          <Camera className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                    </div>
                                     {canManageEmployees && (
-                                      <>
-                                        {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && (
-                                          <button
-                                            onClick={() => setViewingCertificate(viewingCertificate === `${date}-${index}` ? null : `${date}-${index}`)}
-                                            className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                            title="Ver detalhes do atestado"
-                                          >
-                                            <Eye className="w-3 h-3" />
-                                          </button>
-                                        )}
-                                        {record.photoUrl && (
-                                          <button
-                                            onClick={() => window.open(record.photoUrl, '_blank')}
-                                            className="p-1 text-gray-400 dark:text-gray-500 hover:text-green-600 dark:hover:text-green-400 transition-colors"
-                                            title="Ver foto"
-                                          >
-                                            <Camera className="w-3 h-3" />
-                                          </button>
-                                        )}
+                                      <div className="relative flex-shrink-0">
                                         <button
-                                          onClick={() => handleEditRecord(record)}
-                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                          title="Editar registro"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setOpenRecordMenu(openRecordMenu === recordMenuId ? null : recordMenuId);
+                                          }}
+                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                                          title="Mais ações"
                                         >
-                                          <Edit className="w-3 h-3" />
+                                          <MoreVertical className="w-4 h-4" />
                                         </button>
-                                        <button
-                                          onClick={() => setDeleteRecordConfirm(record.id)}
-                                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                          title="Remover registro"
-                                        >
-                                          <Trash2 className="w-3 h-3" />
-                                        </button>
-                                      </>
+                                        
+                                        {/* Dropdown Menu */}
+                                        {openRecordMenu === recordMenuId && (
+                                          <>
+                                            <div 
+                                              className="fixed inset-0 z-10" 
+                                              onClick={() => setOpenRecordMenu(null)}
+                                            />
+                                            <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-20 overflow-hidden">
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleEditRecord(record);
+                                                  setOpenRecordMenu(null);
+                                                }}
+                                                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300"
+                                              >
+                                                <Edit className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                                                <span>Editar</span>
+                                              </button>
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setDeleteRecordConfirm(record.id);
+                                                  setOpenRecordMenu(null);
+                                                }}
+                                                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 border-t border-gray-200 dark:border-gray-700"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                                                <span>Remover</span>
+                                              </button>
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
                                   
@@ -2046,7 +2397,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                     </div>
                                   )}
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                             
                             {/* Mostrar motivo de alterações apenas se houver */}
@@ -2301,6 +2653,200 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de importar pontos */}
+      {showImportModal && selectedEmployee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => {
+            setShowImportModal(false);
+            setSelectedFile(null);
+            setParsedRecords([]);
+          }} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Importar Pontos de Planilha</h3>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setSelectedFile(null);
+                  setParsedRecords([]);
+                }}
+                className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Upload de arquivo */}
+              <div>
+                <label className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  <FileSpreadsheet className="w-4 h-4 mr-2 text-gray-500 dark:text-gray-400" />
+                  Planilha de Espelho de Ponto
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleFileSelect}
+                    id="file-upload"
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="file-upload"
+                    className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors duration-200"
+                  >
+                    Escolher arquivo
+                  </label>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    {selectedFile ? selectedFile.name : 'Nenhum arquivo escolhido'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Botão Processar */}
+              <button
+                onClick={parseSpreadsheet}
+                disabled={!selectedFile || isParsing}
+                className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium transition-colors duration-200 shadow-sm hover:shadow-md"
+              >
+                {isParsing ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Processando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5" />
+                    <span>Processar Planilha</span>
+                  </>
+                )}
+              </button>
+
+              {/* Preview dos Registros */}
+              {parsedRecords.length > 0 && (
+                <>
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          Preview dos Registros
+                        </h4>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                          {parsedRecords.length} registro(s) encontrado(s)
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                      Revise os registros antes de importar. Você pode remover registros indesejados.
+                    </p>
+                    <div className="overflow-x-auto max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 shadow-sm">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 dark:bg-gray-700/80 sticky top-0 z-10">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200 dark:border-gray-600">
+                              DATA
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200 dark:border-gray-600">
+                              HORÁRIO
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200 dark:border-gray-600">
+                              TIPO
+                            </th>
+                            <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200 dark:border-gray-600">
+                              AÇÃO
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                          {parsedRecords.map((record, index) => {
+                            const [year, month, day] = record.date.split('-');
+                            const formattedDate = `${day}/${month}/${year}`;
+                            
+                            return (
+                              <tr 
+                                key={index} 
+                                className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-150"
+                              >
+                                <td className="px-6 py-3 whitespace-nowrap">
+                                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    {formattedDate}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-3 whitespace-nowrap">
+                                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    {record.time}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-3 whitespace-nowrap">
+                                  <span className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                    {record.type === 'ENTRY' ? 'Entrada' : 
+                                     record.type === 'LUNCH_START' ? 'Início Almoço' :
+                                     record.type === 'LUNCH_END' ? 'Retorno Almoço' : 'Saída'}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-3 whitespace-nowrap text-center">
+                                  <button
+                                    onClick={() => {
+                                      setParsedRecords(prev => prev.filter((_, i) => i !== index));
+                                    }}
+                                    className="inline-flex items-center justify-center w-8 h-8 rounded-md text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-700 dark:hover:text-red-300 transition-colors duration-150"
+                                    title="Remover registro"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Botão Importar */}
+                  <div className="flex space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <button
+                      onClick={() => {
+                        setShowImportModal(false);
+                        setSelectedFile(null);
+                        setParsedRecords([]);
+                      }}
+                      className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-700"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (parsedRecords.length === 0) {
+                          toast.error('Nenhum registro para importar');
+                          return;
+                        }
+                        importRecordsMutation.mutate(parsedRecords);
+                      }}
+                      disabled={importRecordsMutation.isPending || parsedRecords.length === 0}
+                      className="flex-1 px-4 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                    >
+                      {importRecordsMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Importando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4" />
+                          <span>Importar {parsedRecords.length} registro(s)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

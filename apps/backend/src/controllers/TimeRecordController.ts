@@ -1197,4 +1197,157 @@ export class TimeRecordController {
       next(error);
     }
   }
+
+  /**
+   * Importar múltiplos pontos de uma planilha
+   */
+  async importRecordsFromSpreadsheet(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { employeeId, records } = req.body;
+
+      if (!employeeId || !Array.isArray(records) || records.length === 0) {
+        throw createError('ID do funcionário e lista de registros são obrigatórios', 400);
+      }
+
+      // Buscar dados do funcionário
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: {
+          id: true,
+          userId: true,
+          employeeId: true,
+          costCenter: true,
+          dailyFoodVoucher: true,
+          dailyTransportVoucher: true,
+          user: {
+            select: {
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      if (!employee) {
+        throw createError('Funcionário não encontrado', 404);
+      }
+
+      const createdRecords = [];
+      const errors = [];
+      const skipped = [];
+
+      for (const recordData of records) {
+        try {
+          const { date, time, type } = recordData;
+
+          if (!date || !time || !type) {
+            errors.push({ date, time, type, error: 'Data, horário e tipo são obrigatórios' });
+            continue;
+          }
+
+          // Validar tipo
+          if (!['ENTRY', 'LUNCH_START', 'LUNCH_END', 'EXIT'].includes(type)) {
+            errors.push({ date, time, type, error: 'Tipo de registro inválido' });
+            continue;
+          }
+
+          // Parsear data e hora
+          const [year, month, day] = date.split('-').map(Number);
+          const [hour, minute] = time.split(':').map(Number);
+          
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+          const timestamp = new Date(dateStr + 'Z');
+
+          // Verificar se já existe
+          const startOfDayStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00`;
+          const endOfDayStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T23:59:59`;
+          const startOfDay = new Date(startOfDayStr + 'Z');
+          const endOfDay = new Date(endOfDayStr + 'Z');
+
+          const existingRecord = await prisma.timeRecord.findFirst({
+            where: {
+              employeeId,
+              type: type as any,
+              timestamp: {
+                gte: startOfDay,
+                lte: endOfDay
+              }
+            }
+          });
+
+          if (existingRecord) {
+            skipped.push({ date, time, type, reason: 'Ponto já existe' });
+            continue;
+          }
+
+          // Adicionar VT e VA apenas no ponto de entrada
+          let foodVoucherAmount = null;
+          let transportVoucherAmount = null;
+          
+          if (type === 'ENTRY') {
+            // Verificar se já existe ENTRY neste dia
+            const existingEntry = await prisma.timeRecord.findFirst({
+              where: {
+                employeeId,
+                type: 'ENTRY',
+                timestamp: {
+                  gte: startOfDay,
+                  lte: endOfDay
+                }
+              }
+            });
+
+            if (!existingEntry) {
+              foodVoucherAmount = employee.dailyFoodVoucher || 0;
+              transportVoucherAmount = employee.dailyTransportVoucher || 0;
+            }
+          }
+
+          // Criar o ponto
+          const record = await prisma.timeRecord.create({
+            data: {
+              userId: employee.userId,
+              employeeId: employee.id,
+              type: type as any,
+              timestamp: timestamp,
+              isValid: true,
+              reason: 'Ponto importado de planilha',
+              observation: recordData.observation || null,
+              foodVoucherAmount,
+              transportVoucherAmount,
+              costCenter: employee.costCenter,
+              approvedBy: req.user!.id,
+              approvedAt: new Date()
+            }
+          });
+
+          createdRecords.push(record);
+        } catch (error: any) {
+          errors.push({ 
+            date: recordData.date, 
+            time: recordData.time, 
+            type: recordData.type, 
+            error: error.message || 'Erro ao criar registro' 
+          });
+        }
+      }
+
+      res.status(201).json({
+        success: true,
+        data: {
+          created: createdRecords.length,
+          skipped: skipped.length,
+          errors: errors.length,
+          details: {
+            created: createdRecords,
+            skipped,
+            errors
+          },
+          message: `${createdRecords.length} ponto(s) importado(s) com sucesso${skipped.length > 0 ? `, ${skipped.length} ponto(s) ignorado(s) (já existem)` : ''}${errors.length > 0 ? `, ${errors.length} erro(s)` : ''}`
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }

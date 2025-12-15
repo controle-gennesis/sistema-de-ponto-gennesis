@@ -36,6 +36,9 @@ router.get('/reports/late-arrivals', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 
 router.get('/employee/:employeeId/cost-center', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL', 'GESTOR', 'DIRETOR'), timeRecordController.getEmployeeCostCenter);
 
 // Criar ponto manualmente (apenas ADMIN)
-router.post('/manual', authorize('ADMIN'), timeRecordController.createManualRecord);
+router.post('/manual', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordController.createManualRecord);
+
+// Importar pontos de planilha (apenas ADMIN e DEPARTAMENTO_PESSOAL)
+router.post('/import', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordController.importRecordsFromSpreadsheet);
 
 export default router;
