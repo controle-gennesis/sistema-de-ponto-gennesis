@@ -210,7 +210,7 @@ export default function BankHoursPage() {
   };
 
   const exportToExcel = () => {
-    if (!filteredData || filteredData.length === 0) {
+    if (!Array.isArray(filteredData) || filteredData.length === 0) {
       alert('Nenhum dado para exportar');
       return;
     }
@@ -425,7 +425,7 @@ export default function BankHoursPage() {
                             className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os setores</option>
-                            {DEPARTMENTS_LIST.map(dept => (
+                            {(DEPARTMENTS_LIST || []).map(dept => (
                               <option key={dept} value={dept}>
                                 {dept}
                               </option>
@@ -446,7 +446,7 @@ export default function BankHoursPage() {
                             className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os cargos</option>
-                            {CARGOS_LIST.map(cargo => (
+                            {(CARGOS_LIST || []).map(cargo => (
                               <option key={cargo} value={cargo}>
                                 {cargo}
                               </option>
@@ -492,7 +492,7 @@ export default function BankHoursPage() {
                             className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os centros de custo</option>
-                            {COST_CENTERS_LIST.map(center => (
+                            {(COST_CENTERS_LIST || []).map(center => (
                               <option key={center} value={center}>
                                 {center}
                               </option>
@@ -513,7 +513,7 @@ export default function BankHoursPage() {
                             className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os tomadores</option>
-                            {CLIENTS_LIST.map(client => (
+                            {(CLIENTS_LIST || []).map(client => (
                               <option key={client} value={client}>
                                 {client}
                               </option>
@@ -534,7 +534,7 @@ export default function BankHoursPage() {
                             className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os polos</option>
-                            {POLOS_LIST.map(polo => (
+                            {(POLOS_LIST || []).map(polo => (
                               <option key={polo} value={polo}>
                                 {polo}
                               </option>
@@ -619,7 +619,7 @@ export default function BankHoursPage() {
                         </div>
                       </td>
                     </tr>
-                  ) : filteredData.length === 0 ? (
+                  ) : !Array.isArray(filteredData) || filteredData.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="px-6 py-8 text-center">
                         <div className="text-gray-500 dark:text-gray-400">

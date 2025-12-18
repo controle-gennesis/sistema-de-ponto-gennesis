@@ -514,23 +514,15 @@ export default function AlocacaoPage() {
 
   const employees = employeesResponse?.data?.employees || [];
 
-    // Limpar e buscar dados dos funcionários quando o mês/ano mudar ou quando a lista de funcionários carregar
+    // Limpar cache quando o mês/ano mudar
     useEffect(() => {
       // Limpar o cache quando o mês/ano mudar
       setEmployeeDataMap({});
     }, [filters.month, filters.year]);
   
-    // Buscar dados de todos os funcionários quando a lista estiver disponível
-    useEffect(() => {
-      if (employees.length > 0 && !loadingEmployees) {
-        employees.forEach((employee: PayrollEmployee) => {
-          if (employee.id) {
-            // Buscar dados do funcionário (a função já verifica se já existe no cache)
-            fetchEmployeeData(employee.id);
-          }
-        });
-      }
-    }, [employees.length, loadingEmployees, filters.month, filters.year]);
+    // REMOVIDO: useEffect que buscava dados de todos os funcionários de uma vez
+    // Isso estava causando muitas requisições simultâneas (erro 429)
+    // Os dados agora são buscados sob demanda quando necessário (lazy loading)
   
   // Opções de mês e ano
   const monthOptions = [
@@ -954,7 +946,7 @@ export default function AlocacaoPage() {
                         </div>
                       </td>
                     </tr>
-                  ) : employees.length === 0 ? (
+                  ) : !Array.isArray(employees) || employees.length === 0 ? (
                     <tr>
                       <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
                         <div className="text-gray-500 dark:text-gray-400">

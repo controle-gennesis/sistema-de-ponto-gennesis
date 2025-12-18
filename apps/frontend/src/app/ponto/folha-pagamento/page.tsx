@@ -176,7 +176,7 @@ export default function FolhaPagamentoPage() {
   };
 
   const exportToExcel = () => {
-    if (!payrollData || payrollData.employees.length === 0) {
+    if (!payrollData || !Array.isArray(payrollData.employees) || payrollData.employees.length === 0) {
       alert('Não há dados para exportar');
       return;
     }
@@ -413,7 +413,7 @@ export default function FolhaPagamentoPage() {
   const payrollData: MonthlyPayrollData | null = payrollResponse?.data || null;
   const employees: PayrollEmployee[] = payrollData?.employees || [];
   const uniqueDepartments = Array.from(
-    new Set(employees.map(emp => emp.department).filter(Boolean))
+    new Set((employees || []).map(emp => emp.department).filter(Boolean))
   ).sort();
 
   // Opções de mês e ano
@@ -838,7 +838,7 @@ export default function FolhaPagamentoPage() {
                         </div>
                       </td>
                     </tr>
-                  ) : employees.length === 0 ? (
+                  ) : !Array.isArray(employees) || employees.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-6 py-8 text-center">
                         <div className="text-gray-500 dark:text-gray-400">
