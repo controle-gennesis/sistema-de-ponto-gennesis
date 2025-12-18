@@ -50,19 +50,25 @@ const PORT = parseInt(process.env.PORT || '5000', 10);
 app.set('trust proxy', 1);
 
 // CORS - DEVE VIR ANTES DO HELMET
-const isProduction = process.env.NODE_ENV === 'production';
-const allowedOrigins = isProduction
-  ? [
-    'https://sistema-pontofrontend-production.up.railway.app',
-    'https://sistema-pontobackend-production.up.railway.app'
-  ]
-  : ['http://localhost:3000', 'http://localhost:19006'];
+// Verificar se está em produção (Railway geralmente não define NODE_ENV, então verificamos pela URL)
+const isProduction = process.env.NODE_ENV === 'production' || 
+                     process.env.RAILWAY_ENVIRONMENT === 'production' ||
+                     !process.env.NODE_ENV || // Se não está definido, assumir produção no Railway
+                     process.env.PORT; // Se tem PORT definido, provavelmente é produção
+
+const allowedOrigins = [
+  'https://sistema-pontofrontend-production.up.railway.app',
+  'https://sistema-pontobackend-production.up.railway.app',
+  'http://localhost:3000',
+  'http://localhost:19006'
+];
 
 console.log('🌐 CORS configurado para origens:', allowedOrigins);
 console.log('📊 Ambiente:', process.env.NODE_ENV || 'development');
+console.log('📊 RAILWAY_ENVIRONMENT:', process.env.RAILWAY_ENVIRONMENT);
 console.log('🔍 É produção?', isProduction);
 
-// Configuração de CORS mais robusta
+// Configuração de CORS mais robusta e permissiva
 const corsOptions = {
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
     // Permitir requisições sem origin (ex: mobile apps, Postman, curl)
@@ -73,18 +79,28 @@ const corsOptions = {
     
     // Log para debug
     console.log('🔍 Origin recebida:', origin);
-    console.log('🔍 Origem permitida?', allowedOrigins.includes(origin));
     
     // Verificar se a origem está na lista permitida
     if (allowedOrigins.includes(origin)) {
+      console.log('✅ Origem permitida:', origin);
+      callback(null, true);
+    } else if (origin.includes('railway.app') || origin.includes('localhost')) {
+      // Permitir qualquer subdomínio do Railway ou localhost
+      console.log('✅ Origem Railway/localhost permitida:', origin);
       callback(null, true);
     } else if (!isProduction) {
       // Em desenvolvimento, permitir qualquer origem
       console.log('⚠️  Ambiente de desenvolvimento - permitindo origem:', origin);
       callback(null, true);
     } else {
-      console.error('❌ Origem não permitida pelo CORS:', origin);
-      callback(new Error('Não permitido pelo CORS'));
+      // Em produção, mas permitir Railway mesmo assim (fallback de segurança)
+      if (origin.includes('railway') || origin.includes('localhost')) {
+        console.log('✅ Origem Railway permitida (fallback):', origin);
+        callback(null, true);
+      } else {
+        console.error('❌ Origem não permitida pelo CORS:', origin);
+        callback(new Error('Não permitido pelo CORS'));
+      }
     }
   },
   credentials: true,
@@ -127,6 +143,26 @@ if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.e
 
 // Handler para requisições OPTIONS (preflight CORS) - usando a mesma configuração
 app.options('*', cors(corsOptions));
+
+// Middleware adicional para garantir que CORS funcione mesmo se houver problemas
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Se a origem for do Railway ou localhost, sempre permitir
+  if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  }
+  
+  // Se for uma requisição OPTIONS, responder imediatamente
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  
+  next();
+});
 
 // Health check
 app.get('/health', (req, res) => {
