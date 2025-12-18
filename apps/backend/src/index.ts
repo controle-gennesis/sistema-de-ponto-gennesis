@@ -145,7 +145,7 @@ if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.e
 app.options('*', cors(corsOptions));
 
 // Middleware adicional para garantir que CORS funcione mesmo se houver problemas
-app.use((req, res, next) => {
+app.use((req: express.Request, res: express.Response, next: express.NextFunction): void => {
   const origin = req.headers.origin;
   
   // Se a origem for do Railway ou localhost, sempre permitir
@@ -158,7 +158,8 @@ app.use((req, res, next) => {
   
   // Se for uma requisição OPTIONS, responder imediatamente
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
+    res.sendStatus(204);
+    return;
   }
   
   next();
