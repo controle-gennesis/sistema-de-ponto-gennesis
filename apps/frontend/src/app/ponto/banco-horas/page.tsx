@@ -158,24 +158,33 @@ export default function BankHoursPage() {
     };
   }, []);
 
-  const { data: bankHoursData, isLoading: loadingBankHours } = useQuery({
+  const { data: bankHoursData, isLoading: loadingBankHours, error: bankHoursError } = useQuery({
     queryKey: ['bank-hours', filters],
     queryFn: async () => {
-      const res = await api.get('/bank-hours/employees', {
-        params: { 
-          search: filters.search,
-          department: filters.department,
-          position: filters.position,
-          costCenter: filters.costCenter,
-          client: filters.client,
-          polo: filters.polo,
-          status: filters.status,
-          startDate: filters.startDate, 
-          endDate: filters.endDate
-        }
-      });
-      return res.data;
-    }
+      try {
+        const res = await api.get('/bank-hours/employees', {
+          params: { 
+            search: filters.search,
+            department: filters.department,
+            position: filters.position,
+            costCenter: filters.costCenter,
+            client: filters.client,
+            polo: filters.polo,
+            status: filters.status,
+            startDate: filters.startDate, 
+            endDate: filters.endDate
+          }
+        });
+        console.log('📊 Resposta da API banco de horas:', res.data);
+        return res.data;
+      } catch (error: any) {
+        console.error('❌ Erro ao buscar banco de horas:', error);
+        console.error('❌ Detalhes do erro:', error.response?.data || error.message);
+        throw error;
+      }
+    },
+    retry: 2,
+    retryDelay: 1000
   });
 
   const formatHours = (hours: number) => {
@@ -293,6 +302,12 @@ export default function BankHoursPage() {
   };
 
   const filteredData = bankHoursData?.data || [];
+  
+  // Log para debug
+  console.log('📊 bankHoursData:', bankHoursData);
+  console.log('📊 filteredData:', filteredData);
+  console.log('📊 filteredData length:', filteredData?.length);
+  console.log('❌ Erro banco de horas:', bankHoursError);
 
   return (
     <MainLayout 
@@ -610,7 +625,25 @@ export default function BankHoursPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {loadingBankHours ? (
+                  {bankHoursError ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-8 text-center">
+                        <div className="text-red-600 dark:text-red-400">
+                          <p className="font-semibold">Erro ao carregar dados</p>
+                          <p className="text-sm mt-1">
+                            {bankHoursError instanceof Error && bankHoursError.message.includes('CORS')
+                              ? 'Erro de CORS: Verifique a configuração do servidor'
+                              : bankHoursError instanceof Error
+                              ? bankHoursError.message
+                              : 'Não foi possível conectar ao servidor. Tente novamente mais tarde.'}
+                          </p>
+                          <p className="text-xs mt-2 text-gray-500 dark:text-gray-400">
+                            Verifique o console do navegador para mais detalhes.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : loadingBankHours ? (
                     <tr>
                       <td colSpan={8} className="px-6 py-8 text-center">
                         <div className="flex items-center justify-center">

@@ -59,26 +59,35 @@ export default function FolhaPagamentoPage() {
     }
   });
 
-  const { data: payrollResponse, isLoading: loadingPayroll } = useQuery({
+  const { data: payrollResponse, isLoading: loadingPayroll, error: payrollError } = useQuery({
     queryKey: ['payroll-monthly', filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (filters.search) params.append('search', filters.search);
-      if (filters.department) params.append('department', filters.department);
-      if (filters.company) params.append('company', filters.company);
-      if (filters.position) params.append('position', filters.position);
-      if (filters.costCenter) params.append('costCenter', filters.costCenter);
-      if (filters.client) params.append('client', filters.client);
-      if (filters.modality) params.append('modality', filters.modality);
-      if (filters.bank) params.append('bank', filters.bank);
-      if (filters.accountType) params.append('accountType', filters.accountType);
-      if (filters.polo) params.append('polo', filters.polo);
-      params.append('month', filters.month.toString());
-      params.append('year', filters.year.toString());
-      
-      const res = await api.get(`/payroll/employees?${params.toString()}`);
-      return res.data;
-    }
+      try {
+        const params = new URLSearchParams();
+        if (filters.search) params.append('search', filters.search);
+        if (filters.department) params.append('department', filters.department);
+        if (filters.company) params.append('company', filters.company);
+        if (filters.position) params.append('position', filters.position);
+        if (filters.costCenter) params.append('costCenter', filters.costCenter);
+        if (filters.client) params.append('client', filters.client);
+        if (filters.modality) params.append('modality', filters.modality);
+        if (filters.bank) params.append('bank', filters.bank);
+        if (filters.accountType) params.append('accountType', filters.accountType);
+        if (filters.polo) params.append('polo', filters.polo);
+        params.append('month', filters.month.toString());
+        params.append('year', filters.year.toString());
+        
+        const res = await api.get(`/payroll/employees?${params.toString()}`);
+        console.log('📊 Resposta da API folha de pagamento:', res.data);
+        return res.data;
+      } catch (error: any) {
+        console.error('❌ Erro ao buscar folha de pagamento:', error);
+        console.error('❌ Detalhes do erro:', error.response?.data || error.message);
+        throw error;
+      }
+    },
+    retry: 2,
+    retryDelay: 1000
   });
 
   const handleLogout = () => {
@@ -412,6 +421,14 @@ export default function FolhaPagamentoPage() {
 
   const payrollData: MonthlyPayrollData | null = payrollResponse?.data || null;
   const employees: PayrollEmployee[] = payrollData?.employees || [];
+  
+  // Log para debug
+  console.log('📊 payrollResponse:', payrollResponse);
+  console.log('📊 payrollData:', payrollData);
+  console.log('📊 employees:', employees);
+  console.log('📊 employees length:', employees?.length);
+  console.log('❌ Erro folha de pagamento:', payrollError);
+  
   const uniqueDepartments = Array.from(
     new Set((employees || []).map(emp => emp.department).filter(Boolean))
   ).sort();
@@ -829,7 +846,25 @@ export default function FolhaPagamentoPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {loadingPayroll ? (
+                  {payrollError ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-8 text-center">
+                        <div className="text-red-600 dark:text-red-400">
+                          <p className="font-semibold">Erro ao carregar dados</p>
+                          <p className="text-sm mt-1">
+                            {payrollError instanceof Error && payrollError.message.includes('CORS')
+                              ? 'Erro de CORS: Verifique a configuração do servidor'
+                              : payrollError instanceof Error
+                              ? payrollError.message
+                              : 'Não foi possível conectar ao servidor. Tente novamente mais tarde.'}
+                          </p>
+                          <p className="text-xs mt-2 text-gray-500 dark:text-gray-400">
+                            Verifique o console do navegador para mais detalhes.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : loadingPayroll ? (
                     <tr>
                       <td colSpan={7} className="px-6 py-8 text-center">
                         <div className="flex items-center justify-center">

@@ -50,7 +50,8 @@ const PORT = parseInt(process.env.PORT || '5000', 10);
 app.set('trust proxy', 1);
 
 // CORS - DEVE VIR ANTES DO HELMET
-const allowedOrigins = process.env.NODE_ENV === 'production' 
+const isProduction = process.env.NODE_ENV === 'production';
+const allowedOrigins = isProduction
   ? [
     'https://sistema-pontofrontend-production.up.railway.app',
     'https://sistema-pontobackend-production.up.railway.app'
@@ -59,23 +60,42 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
 
 console.log('🌐 CORS configurado para origens:', allowedOrigins);
 console.log('📊 Ambiente:', process.env.NODE_ENV || 'development');
+console.log('🔍 É produção?', isProduction);
 
-app.use(cors({
-  origin: function (origin, callback) {
-    // Permitir requisições sem origin (ex: mobile apps, Postman)
-    if (!origin) return callback(null, true);
+// Configuração de CORS mais robusta
+const corsOptions = {
+  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    // Permitir requisições sem origin (ex: mobile apps, Postman, curl)
+    if (!origin) {
+      console.log('⚠️  Requisição sem origin - permitindo');
+      return callback(null, true);
+    }
     
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+    // Log para debug
+    console.log('🔍 Origin recebida:', origin);
+    console.log('🔍 Origem permitida?', allowedOrigins.includes(origin));
+    
+    // Verificar se a origem está na lista permitida
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else if (!isProduction) {
+      // Em desenvolvimento, permitir qualquer origem
+      console.log('⚠️  Ambiente de desenvolvimento - permitindo origem:', origin);
       callback(null, true);
     } else {
+      console.error('❌ Origem não permitida pelo CORS:', origin);
       callback(new Error('Não permitido pelo CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
-}));
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
 
 // Middleware de segurança - Configurado para não bloquear CORS
 app.use(helmet({
@@ -105,20 +125,8 @@ if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.e
   app.use('/uploads', express.static(uploadsPath));
 }
 
-// Handler para requisições OPTIONS (preflight CORS)
-app.options('*', cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
-      callback(null, true);
-    } else {
-      callback(new Error('Não permitido pelo CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-}));
+// Handler para requisições OPTIONS (preflight CORS) - usando a mesma configuração
+app.options('*', cors(corsOptions));
 
 // Health check
 app.get('/health', (req, res) => {

@@ -62,26 +62,35 @@ export default function AlocacaoPage() {
     }
   });
 
-  const { data: employeesResponse, isLoading: loadingEmployees } = useQuery({
+  const { data: employeesResponse, isLoading: loadingEmployees, error: employeesError } = useQuery({
     queryKey: ['employees-alocacao', filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (filters.search) params.append('search', filters.search);
-      if (filters.department) params.append('department', filters.department);
-      if (filters.company) params.append('company', filters.company);
-      if (filters.position) params.append('position', filters.position);
-      if (filters.costCenter) params.append('costCenter', filters.costCenter);
-      if (filters.client) params.append('client', filters.client);
-      if (filters.modality) params.append('modality', filters.modality);
-      if (filters.bank) params.append('bank', filters.bank);
-      if (filters.accountType) params.append('accountType', filters.accountType);
-      if (filters.polo) params.append('polo', filters.polo);
-      params.append('month', filters.month.toString());
-      params.append('year', filters.year.toString());
-      
-      const res = await api.get(`/payroll/employees?${params.toString()}`);
-      return res.data;
-    }
+      try {
+        const params = new URLSearchParams();
+        if (filters.search) params.append('search', filters.search);
+        if (filters.department) params.append('department', filters.department);
+        if (filters.company) params.append('company', filters.company);
+        if (filters.position) params.append('position', filters.position);
+        if (filters.costCenter) params.append('costCenter', filters.costCenter);
+        if (filters.client) params.append('client', filters.client);
+        if (filters.modality) params.append('modality', filters.modality);
+        if (filters.bank) params.append('bank', filters.bank);
+        if (filters.accountType) params.append('accountType', filters.accountType);
+        if (filters.polo) params.append('polo', filters.polo);
+        params.append('month', filters.month.toString());
+        params.append('year', filters.year.toString());
+        
+        const res = await api.get(`/payroll/employees?${params.toString()}`);
+        console.log('📊 Resposta da API alocação:', res.data);
+        return res.data;
+      } catch (error: any) {
+        console.error('❌ Erro ao buscar alocação:', error);
+        console.error('❌ Detalhes do erro:', error.response?.data || error.message);
+        throw error;
+      }
+    },
+    retry: 2,
+    retryDelay: 1000
   });
 
   // Query para buscar dados do funcionário selecionado
@@ -513,6 +522,12 @@ export default function AlocacaoPage() {
   };
 
   const employees = employeesResponse?.data?.employees || [];
+  
+  // Log para debug
+  console.log('📊 employeesResponse:', employeesResponse);
+  console.log('📊 employees:', employees);
+  console.log('📊 employees length:', employees?.length);
+  console.log('❌ Erro alocação:', employeesError);
 
     // Limpar cache quando o mês/ano mudar
     useEffect(() => {
@@ -925,7 +940,29 @@ export default function AlocacaoPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {loadingEmployees ? (
+                  {employeesError ? (
+                    <tr>
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
+                        <div className="text-red-600 dark:text-red-400">
+                          <p className="font-semibold">Erro ao carregar dados</p>
+                          <p className="text-sm mt-1">
+                            {employeesError instanceof Error && employeesError.message.includes('CORS')
+                              ? 'Erro de CORS: Verifique a configuração do servidor'
+                              : employeesError instanceof Error
+                              ? employeesError.message
+                              : 'Não foi possível conectar ao servidor. Tente novamente mais tarde.'}
+                          </p>
+                        </div>
+                      </td>
+                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1) + 1} className="px-3 sm:px-6 py-4 text-center">
+                        <div className="text-red-600 dark:text-red-400">
+                          <p className="text-xs mt-2 text-gray-500 dark:text-gray-400">
+                            Verifique o console do navegador para mais detalhes.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : loadingEmployees ? (
                     <tr>
                       <td className="px-3 sm:px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
                         <div className="flex items-center justify-center">
