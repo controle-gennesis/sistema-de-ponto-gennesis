@@ -358,6 +358,28 @@ export class TimeRecordService {
     // Converter polo para estado (para verificação de feriados)
     const employeeState = this.poloToState(employee?.polo);
 
+    // OTIMIZAÇÃO: Buscar todos os dados de uma vez
+    const periodStart = adjustedStart.clone().startOf('day').toDate();
+    const periodEnd = end.clone().endOf('day').toDate();
+
+    // Buscar todos os registros do período de uma vez
+    const allRecords = await prisma.timeRecord.findMany({
+      where: { 
+        userId, 
+        timestamp: { 
+          gte: periodStart, 
+          lte: periodEnd 
+        } 
+      },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    // Buscar todos os feriados do período de uma vez
+    const holidays = await holidayService.getHolidaysByPeriod(periodStart, periodEnd, employeeState);
+    const holidayDates = new Set(
+      holidays.map(h => moment(h.date).format('YYYY-MM-DD'))
+    );
+
     const days: Array<{
       date: Date;
       expectedHours: number;
@@ -370,7 +392,13 @@ export class TimeRecordService {
     }> = [];
 
     while (cursor.isSameOrBefore(end, 'day')) {
-      const expected = await this.getExpectedWorkHoursByRule(cursor.toDate(), employeeState);
+      const dateStr = cursor.format('YYYY-MM-DD');
+      const isHoliday = holidayDates.has(dateStr);
+      
+      // Calcular horas esperadas sem fazer query (otimizado)
+      const dow = cursor.day(); // 0 dom, 1 seg ... 6 sáb
+      const expected = isHoliday ? 0 : (dow >= 1 && dow <= 4 ? 9 : dow === 5 ? 8 : 0);
+
       let worked = 0;
       let overtime = 0;
       let overtime15 = 0; // 1.5x
@@ -379,17 +407,16 @@ export class TimeRecordService {
       const notes: string[] = [];
 
       // Verificar se é feriado para adicionar nota
-      const isHoliday = await holidayService.isHoliday(cursor.toDate(), employeeState);
       if (isHoliday) {
         notes.push('Feriado');
       }
 
-      // Buscar registros de ponto sempre (mesmo em feriados/finais de semana)
+      // Buscar registros do dia (já em memória)
       const dayStart = cursor.clone().startOf('day').toDate();
       const dayEnd = cursor.clone().endOf('day').toDate();
-      const dayRecords = await prisma.timeRecord.findMany({
-        where: { userId, timestamp: { gte: dayStart, lte: dayEnd } },
-        orderBy: { timestamp: 'asc' },
+      const dayRecords = allRecords.filter(r => {
+        const recordDate = moment(r.timestamp);
+        return recordDate.isSameOrAfter(dayStart) && recordDate.isSameOrBefore(dayEnd);
       });
 
       if (expected > 0) {

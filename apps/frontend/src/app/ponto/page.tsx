@@ -127,7 +127,7 @@ export default function PontoPage() {
 
   // Funções de registro removidas - apenas mobile
 
-  const { data: bankHoursDetailed } = useQuery({
+  const { data: bankHoursDetailed, error: bankHoursDetailedError, isLoading: loadingBankHoursDetailed } = useQuery({
     queryKey: ['bank-hours-detailed', selectedBankYear, selectedBankMonth, isBankDetailsOpen],
     enabled: isBankDetailsOpen,
     queryFn: async () => {
@@ -139,10 +139,13 @@ export default function PontoPage() {
           startDate: startDate.toISOString(),
           endDate: endDate.toISOString(),
           detailed: true,
-        }
+        },
+        timeout: 30000, // 30 segundos para requisições detalhadas
       });
       return res.data;
-    }
+    },
+    retry: 2,
+    retryDelay: 1000,
   });
 
   // Função para formatar horas decimais para HH:MM:SS
@@ -397,6 +400,25 @@ export default function PontoPage() {
               </div>
             </div>
             <div className="max-h-[70vh] overflow-auto p-6 bg-white dark:bg-gray-800">
+              {loadingBankHoursDetailed ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400 mb-4"></div>
+                    <p className="text-gray-600 dark:text-gray-400">Carregando detalhamento...</p>
+                  </div>
+                </div>
+              ) : bankHoursDetailedError ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <p className="text-red-600 dark:text-red-400 mb-2">Erro ao carregar detalhamento</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {bankHoursDetailedError instanceof Error 
+                        ? bankHoursDetailedError.message 
+                        : 'Erro desconhecido'}
+                    </p>
+                  </div>
+                </div>
+              ) : (
               <div className="w-full overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -454,6 +476,7 @@ export default function PontoPage() {
                 )}
                 </table>
               </div>
+              )}
             </div>
           </div>
         </div>
