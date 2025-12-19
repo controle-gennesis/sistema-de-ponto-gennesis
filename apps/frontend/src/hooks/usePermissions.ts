@@ -94,9 +94,11 @@ export function usePermissions() {
 
   const user = userData?.data;
   const userPosition = user?.employee?.position;
+  const userDepartment = user?.employee?.department;
 
   console.log('User object:', user);
   console.log('User position:', userPosition);
+  console.log('User department:', userDepartment);
 
   const getPermissions = () => {
     if (!userPosition) {
@@ -111,9 +113,15 @@ export function usePermissions() {
 
   const permissions = getPermissions();
 
+  // Verificar se o usuário é do Departamento Pessoal
+  const isDepartmentPessoal = userDepartment?.toLowerCase().includes('departamento pessoal') || 
+                               userDepartment?.toLowerCase().includes('pessoal');
+
   return {
     user,
     userPosition,
+    userDepartment,
+    isDepartmentPessoal,
     permissions,
     isLoading,
     canAccessPayroll: permissions.canAccessPayroll,
@@ -130,7 +138,7 @@ export function usePermissions() {
 
 // Hook para verificar permissão de rota específica
 export function useRoutePermission(route: string) {
-  const { permissions, isLoading } = usePermissions();
+  const { permissions, isLoading, isDepartmentPessoal } = usePermissions();
 
   if (isLoading) {
     return { hasAccess: false, isLoading: true };
@@ -142,7 +150,7 @@ export function useRoutePermission(route: string) {
     '/ponto/funcionarios': permissions.canManageEmployees,
     '/ponto/aniversariantes': permissions.canViewBirthdays,
     '/ponto/atestados': true, // Todos podem registrar suas próprias ausências
-    '/ponto/gerenciar-atestados': permissions.canManageAbsences,
+    '/ponto/gerenciar-atestados': isDepartmentPessoal, // Apenas Departamento Pessoal
     '/ponto/solicitacoes': true, // Todos podem ver suas próprias solicitações
     '/ponto/gerenciar-solicitacoes': permissions.canManageAbsences, // Mesma permissão das ausências
     '/ponto/ferias': true, // Todos podem solicitar suas próprias férias

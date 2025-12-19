@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { MedicalCertificateList } from '@/components/medical-certificate/MedicalCertificateList';
 import { FileText, Users, Clock, CheckCircle, XCircle, Filter, Search, Calendar, ChevronDown, ChevronUp, RotateCcw, Building2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -133,12 +134,13 @@ export default function AtestadosPage() {
   };
 
   return (
-    <MainLayout 
-      userRole={user.role} 
-      userName={user.name} 
-      onLogout={handleLogout}
-    >
-      <div className="space-y-6">
+    <ProtectedRoute route="/ponto/gerenciar-atestados">
+      <MainLayout 
+        userRole={user.role} 
+        userName={user.name} 
+        onLogout={handleLogout}
+      >
+        <div className="space-y-6">
         {/* Cabeçalho */}
         <div className="text-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Ausências</h1>
@@ -419,5 +421,6 @@ export default function AtestadosPage() {
         </Card>
       </div>
     </MainLayout>
+    </ProtectedRoute>
   );
 }

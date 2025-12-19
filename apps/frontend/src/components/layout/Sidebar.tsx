@@ -63,7 +63,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { permissions, isLoading, userPosition, user } = usePermissions();
+  const { permissions, isLoading, userPosition, user, isDepartmentPessoal } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -179,7 +179,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/gerenciar-atestados',
         icon: BookText,
         description: 'Gerenciar todas as ausências',
-        permission: permissions.canManageAbsences
+        permission: isDepartmentPessoal
           }
         ]
       },
