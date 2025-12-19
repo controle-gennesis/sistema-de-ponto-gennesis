@@ -31,5 +31,9 @@ export const CARGOS_LIST = [
   'Serviços gerais',
   'Supervisor',
   'Técnico',
-  'Vidraceiro'
+  'Vidraceiro',
+  'Administrador' // Cargo especial que não aparece na lista de seleção
 ];
+
+// Lista de cargos disponíveis para seleção (sem Administrador)
+export const CARGOS_AVAILABLE = CARGOS_LIST.filter(cargo => cargo !== 'Administrador');

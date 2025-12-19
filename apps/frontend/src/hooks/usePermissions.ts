@@ -6,7 +6,22 @@ import { CARGOS_LIST } from '@/constants/cargos';
 const generatePositionPermissions = () => {
   const permissions: Record<string, any> = {};
   
+  // Permissões para Administrador - Acesso total
+  permissions['Administrador'] = {
+    canAccessPayroll: true,
+    canManageEmployees: true,
+    canViewReports: true,
+    canManageVacations: true,
+    canManageAbsences: true,
+    canManageBankHours: true,
+    canViewBirthdays: true,
+    canRegisterTime: true,
+    canViewDashboard: true,
+  };
+  
   CARGOS_LIST.forEach(cargo => {
+    // Pular Administrador pois já foi definido acima
+    if (cargo === 'Administrador') return;
     // Definir permissões baseadas no cargo
     if (cargo === 'Diretor' || cargo === 'Gerente') {
       // DIREÇÃO - Acesso total
@@ -106,6 +121,11 @@ export function usePermissions() {
       return POSITION_PERMISSIONS['Analista'];
     }
     
+    // Se for Administrador, retornar permissões de acesso total
+    if (userPosition === 'Administrador') {
+      return POSITION_PERMISSIONS['Administrador'];
+    }
+    
     const permissions = POSITION_PERMISSIONS[userPosition as keyof typeof POSITION_PERMISSIONS] || POSITION_PERMISSIONS['Analista'];
     console.log('Permissions for position', userPosition, ':', permissions);
     return permissions;
@@ -142,26 +162,29 @@ export function usePermissions() {
 
 // Hook para verificar permissão de rota específica
 export function useRoutePermission(route: string) {
-  const { permissions, isLoading, isDepartmentPessoal, isDepartmentProjetos } = usePermissions();
+  const { permissions, isLoading, isDepartmentPessoal, isDepartmentProjetos, userPosition } = usePermissions();
 
   if (isLoading) {
     return { hasAccess: false, isLoading: true };
   }
 
+  // Se for Administrador, tem acesso a todas as rotas
+  const isAdministrator = userPosition === 'Administrador';
+  
   const routePermissions: Record<string, boolean> = {
-    '/ponto': permissions.canRegisterTime,
-    '/ponto/dashboard': permissions.canViewDashboard,
-    '/ponto/funcionarios': permissions.canManageEmployees,
-    '/ponto/aniversariantes': permissions.canViewBirthdays,
+    '/ponto': isAdministrator || permissions.canRegisterTime,
+    '/ponto/dashboard': isAdministrator || permissions.canViewDashboard,
+    '/ponto/funcionarios': isAdministrator || permissions.canManageEmployees,
+    '/ponto/aniversariantes': isAdministrator || permissions.canViewBirthdays,
     '/ponto/atestados': true, // Todos podem registrar suas próprias ausências
-    '/ponto/gerenciar-atestados': isDepartmentPessoal, // Apenas Departamento Pessoal
+    '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal, // Administrador ou Departamento Pessoal
     '/ponto/solicitacoes': true, // Todos podem ver suas próprias solicitações
-    '/ponto/gerenciar-solicitacoes': isDepartmentProjetos, // Apenas setor Projetos
+    '/ponto/gerenciar-solicitacoes': isAdministrator || isDepartmentProjetos, // Administrador ou setor Projetos
     '/ponto/ferias': true, // Todos podem solicitar suas próprias férias
-    '/ponto/gerenciar-ferias': permissions.canManageVacations,
-    '/ponto/banco-horas': permissions.canManageBankHours,
-    '/ponto/folha-pagamento': permissions.canAccessPayroll,
-    '/relatorios/alocacao': permissions.canAccessPayroll,
+    '/ponto/gerenciar-ferias': isAdministrator || permissions.canManageVacations,
+    '/ponto/banco-horas': isAdministrator || permissions.canManageBankHours,
+    '/ponto/folha-pagamento': isAdministrator || permissions.canAccessPayroll,
+    '/relatorios/alocacao': isAdministrator || permissions.canAccessPayroll,
   };
 
   return {

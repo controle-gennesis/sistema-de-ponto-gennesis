@@ -67,6 +67,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  
+  // Verificar se é administrador
+  const isAdministrator = userPosition === 'Administrador';
 
   const handleLogout = () => {
     setShowUserMenu(false);
@@ -123,7 +126,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/dashboard',
         icon: LayoutDashboard,
         description: 'Visão geral do sistema',
-        permission: permissions.canViewDashboard
+        permission: isAdministrator || permissions.canViewDashboard
           }
         ]
       },
@@ -137,7 +140,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/folha-pagamento',
             icon: FileSpreadsheet,
             description: 'Gestão de folha de pagamento',
-            permission: permissions.canAccessPayroll
+            permission: isAdministrator || permissions.canAccessPayroll
           }
         ]
       },
@@ -151,7 +154,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto',
             icon: FolderClock,
             description: 'Gerencie seus registros',
-            permission: permissions.canRegisterTime
+            permission: isAdministrator || permissions.canRegisterTime
           }
         ]
       },
@@ -165,14 +168,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/funcionarios',
         icon: Users,
         description: 'Gerenciar funcionários',
-        permission: permissions.canManageEmployees
+        permission: isAdministrator || permissions.canManageEmployees
       },
           {
             name: 'Aniversariantes',
             href: '/ponto/aniversariantes',
             icon: CalendarDays,
             description: 'Ver aniversariantes do mês',
-            permission: permissions.canViewBirthdays
+            permission: isAdministrator || permissions.canViewBirthdays
           }
         ]
       },
@@ -193,7 +196,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/gerenciar-atestados',
         icon: BookText,
         description: 'Gerenciar todas as ausências',
-        permission: isDepartmentPessoal
+        permission: isAdministrator || isDepartmentPessoal
           }
         ]
       },
@@ -214,7 +217,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
             description: 'Aprovar solicitações de correção',
-            permission: isDepartmentProjetos // Apenas setor Projetos
+            permission: isAdministrator || isDepartmentProjetos // Administrador ou setor Projetos
           }
         ]
       },
@@ -235,14 +238,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/gerenciar-ferias',
             icon: BookImage,
             description: 'Gerenciar férias dos funcionários',
-            permission: permissions.canManageVacations
+            permission: isAdministrator || permissions.canManageVacations
           },
           {
             name: 'Gerenciar Feriados',
             href: '/ponto/gerenciar-feriados',
             icon: CalendarDays,
             description: 'Gerenciar calendário de feriados',
-            permission: permissions.canManageVacations
+            permission: isAdministrator || permissions.canManageVacations
           }
         ]
       },
@@ -256,14 +259,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/banco-horas',
         icon: FolderClock,
         description: 'Controle de banco de horas',
-        permission: permissions.canManageBankHours
+        permission: isAdministrator || permissions.canManageBankHours
       },
       {
         name: 'Alocação',
         href: '/relatorios/alocacao',
         icon: Users,
         description: 'Alocação de funcionários',
-        permission: permissions.canAccessPayroll
+        permission: isAdministrator || permissions.canAccessPayroll
       }
         ]
       }

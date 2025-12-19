@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserPlus, X, Save, AlertCircle, CheckCircle, Eye, EyeOff, ChevronRight, ChevronLeft, User, Briefcase, DollarSign, CreditCard, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
-import { CARGOS_LIST } from '@/constants/cargos';
+import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -91,8 +91,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     'Financeiro'
   ];
 
-  // Lista de cargos disponíveis
-  const positions = CARGOS_LIST;
+  // Lista de cargos disponíveis (sem Administrador)
+  const positions = CARGOS_AVAILABLE;
 
   // Lista de empresas
   const companies = [
