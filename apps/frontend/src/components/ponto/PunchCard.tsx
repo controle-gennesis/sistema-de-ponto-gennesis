@@ -224,7 +224,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   const locationStatus = getLocationStatus();
 
   return (
-    <div className="w-full max-w-sm mx-auto bg-white rounded-xl shadow-lg border border-gray-100">
+    <div className="w-full max-w-sm mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
       <div className="p-5 space-y-5">
         {/* Header minimalista */}
         <div className="relative text-center">
@@ -239,10 +239,10 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
           )}
           
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold text-gray-800">
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
               {punchTypes.find(p => p.type === selectedType)?.label}
             </h2>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
               {currentTime.toLocaleDateString('pt-BR', {
                 weekday: 'long',
                 month: 'long',
@@ -250,7 +250,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 year: 'numeric'
               }).replace(/^\w/, c => c.toUpperCase())}
             </div>
-            <div className="text-lg font-semibold text-gray-800 tracking-wide">
+            <div className="text-lg font-semibold text-gray-800 dark:text-gray-100 tracking-wide">
               {currentTime.toLocaleTimeString('pt-BR', {
                 hour: '2-digit',
                 minute: '2-digit',
@@ -328,10 +328,10 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
 
             {/* Status da Localização */}
-            <div className="flex items-center space-x-2 p-3 bg-gray-50 rounded-lg">
-              <MapPin className="w-4 h-4 text-gray-500" />
+            <div className="flex items-center space-x-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+              <MapPin className="w-4 h-4 text-gray-500 dark:text-gray-400" />
               <div className="flex-1">
-                <p className="text-xs font-medium text-gray-600">Localização</p>
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-300">Localização</p>
                 {!location && (
                   <Badge variant={locationStatus.variant} size="sm">
                     {locationStatus.text}
@@ -339,7 +339,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 )}
               </div>
               {location && (
-                <div className="text-xs text-gray-400">
+                <div className="text-xs text-gray-400 dark:text-gray-500">
                   {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
                 </div>
               )}
@@ -347,18 +347,18 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
             {/* Seção de Foto */}
             <div className="space-y-2">
-              <label className="block text-xs font-medium text-gray-600">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                 Foto do Funcionário *
               </label>
               
               {!capturedPhoto && !showCamera && (
                 <button
                   onClick={handleOpenCamera}
-                  className="w-full p-3 border border-dashed border-gray-300 rounded-lg hover:border-gray-400 hover:bg-gray-50 transition-colors"
+                  className="w-full p-3 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   <div className="flex items-center justify-center space-x-2">
-                    <Camera className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm text-gray-600">Tirar Foto</span>
+                    <Camera className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Tirar Foto</span>
                   </div>
                 </button>
               )}
@@ -442,18 +442,18 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
             {/* Campo de Observação */}
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-gray-600">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                 Observação (Opcional)
               </label>
               <textarea
                 value={observation}
                 onChange={(e) => setObservation(e.target.value)}
                 placeholder="Digite uma observação..."
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                 rows={2}
                 maxLength={500}
               />
-              <div className="text-right text-xs text-gray-400">
+              <div className="text-right text-xs text-gray-400 dark:text-gray-500">
                 {observation.length}/500
               </div>
             </div>
@@ -461,9 +461,9 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
             {/* Botão de Confirmar */}
             <button
               onClick={handlePunch}
-              disabled={punchLoading || !location || !!locationError}
+              disabled={punchLoading || !capturedPhoto}
               className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 ${
-                punchLoading || !location || !!locationError
+                punchLoading || !capturedPhoto
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-700 text-white'
               }`}

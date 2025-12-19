@@ -12,6 +12,7 @@ import { TimeRecordsList } from '@/components/ponto/TimeRecordsList';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import { Loading } from '@/components/ui/Loading';
+import { PunchCard } from '@/components/ponto/PunchCard';
 import api from '@/lib/api';
 
 export default function PontoPage() {
@@ -122,10 +123,10 @@ export default function PontoPage() {
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Estados para responsividade
-  // Modal de registro removido - apenas mobile
   const [isMobile, setIsMobile] = useState(false);
 
-  // Funções de registro removidas - apenas mobile
+  // Modal de bater ponto
+  const [isPunchModalOpen, setIsPunchModalOpen] = useState(false);
 
   const { data: bankHoursDetailed, error: bankHoursDetailedError, isLoading: loadingBankHoursDetailed } = useQuery({
     queryKey: ['bank-hours-detailed', selectedBankYear, selectedBankMonth, isBankDetailsOpen],
@@ -200,7 +201,16 @@ export default function PontoPage() {
         <p className="mt-1 text-gray-600 dark:text-gray-400">Gerencie seus registros de ponto e banco de horas</p>
       </div>  
            
-      {/* Botões de ação removidos - registro apenas no mobile */}
+      {/* Botão para bater ponto */}
+      <div className="flex justify-center mb-6">
+        <button
+          onClick={() => setIsPunchModalOpen(true)}
+          className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 flex items-center space-x-2"
+        >
+          <Clock className="w-5 h-5" />
+          <span>Bater Ponto</span>
+        </button>
+      </div>
 
       {/* Cards lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -493,7 +503,24 @@ export default function PontoPage() {
         }}
       />
 
-      {/* Modal de registro removido - apenas mobile */}
+      {/* Modal de bater ponto */}
+      {isPunchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="relative w-full max-w-md">
+            <PunchCard
+              onSuccess={() => {
+                setIsPunchModalOpen(false);
+                // Invalidar queries para atualizar os registros
+                queryClient.invalidateQueries({ queryKey: ['today-records'] });
+                queryClient.invalidateQueries({ queryKey: ['bank-hours-total'] });
+                queryClient.invalidateQueries({ queryKey: ['day-records'] });
+              }}
+              showCloseButton={true}
+              onClose={() => setIsPunchModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
       </div>
     </MainLayout>
   );
