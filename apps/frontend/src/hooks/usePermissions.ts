@@ -117,11 +117,15 @@ export function usePermissions() {
   const isDepartmentPessoal = userDepartment?.toLowerCase().includes('departamento pessoal') || 
                                userDepartment?.toLowerCase().includes('pessoal');
 
+  // Verificar se o usuário é do setor Projetos
+  const isDepartmentProjetos = userDepartment?.toLowerCase().includes('projetos');
+
   return {
     user,
     userPosition,
     userDepartment,
     isDepartmentPessoal,
+    isDepartmentProjetos,
     permissions,
     isLoading,
     canAccessPayroll: permissions.canAccessPayroll,
@@ -138,7 +142,7 @@ export function usePermissions() {
 
 // Hook para verificar permissão de rota específica
 export function useRoutePermission(route: string) {
-  const { permissions, isLoading, isDepartmentPessoal } = usePermissions();
+  const { permissions, isLoading, isDepartmentPessoal, isDepartmentProjetos } = usePermissions();
 
   if (isLoading) {
     return { hasAccess: false, isLoading: true };
@@ -152,7 +156,7 @@ export function useRoutePermission(route: string) {
     '/ponto/atestados': true, // Todos podem registrar suas próprias ausências
     '/ponto/gerenciar-atestados': isDepartmentPessoal, // Apenas Departamento Pessoal
     '/ponto/solicitacoes': true, // Todos podem ver suas próprias solicitações
-    '/ponto/gerenciar-solicitacoes': permissions.canManageAbsences, // Mesma permissão das ausências
+    '/ponto/gerenciar-solicitacoes': isDepartmentProjetos, // Apenas setor Projetos
     '/ponto/ferias': true, // Todos podem solicitar suas próprias férias
     '/ponto/gerenciar-ferias': permissions.canManageVacations,
     '/ponto/banco-horas': permissions.canManageBankHours,

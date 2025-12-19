@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { DEPARTMENTS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
@@ -376,12 +377,13 @@ export default function GerenciarSolicitacoesPage() {
   };
 
   return (
-    <MainLayout 
-      userRole={user.role} 
-      userName={user.name} 
-      onLogout={handleLogout}
-    >
-      <div className="space-y-6">
+    <ProtectedRoute route="/ponto/gerenciar-solicitacoes">
+      <MainLayout 
+        userRole={user.role} 
+        userName={user.name} 
+        onLogout={handleLogout}
+      >
+        <div className="space-y-6">
         {/* Cabeçalho */}
         <div className="text-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Solicitações</h1>
@@ -1029,5 +1031,6 @@ export default function GerenciarSolicitacoesPage() {
         )}
       </div>
     </MainLayout>
+    </ProtectedRoute>
   );
 }

@@ -63,7 +63,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { permissions, isLoading, userPosition, user, isDepartmentPessoal } = usePermissions();
+  const { permissions, isLoading, userPosition, user, isDepartmentPessoal, isDepartmentProjetos } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -200,7 +200,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
             description: 'Aprovar solicitações de correção',
-            permission: permissions.canManageAbsences // Mesma permissão das ausências
+            permission: isDepartmentProjetos // Apenas setor Projetos
           }
         ]
       },
