@@ -855,6 +855,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     setEditingEmployee(null);
     setShowEditForm(false);
     setEditVisibleSections(undefined);
+    // Forçar refetch dos dados para atualizar a lista e o funcionário selecionado
+    queryClient.invalidateQueries({ queryKey: ['employees'], exact: false });
+    queryClient.refetchQueries({ queryKey: ['employees'], exact: false });
+    // Se houver um funcionário selecionado, atualizar também
+    if (selectedEmployee) {
+      queryClient.invalidateQueries({ queryKey: ['employee-records', selectedEmployee.id] });
+    }
   };
 
   const handleEditRecord = (record: any) => {
@@ -2553,6 +2560,14 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
           employee={editingEmployee}
           onClose={handleCloseEditForm}
           visibleSections={editVisibleSections}
+          onEmployeeUpdated={(updatedEmployee) => {
+            // Atualizar o funcionário selecionado se for o mesmo
+            if (selectedEmployee && selectedEmployee.id === updatedEmployee.id) {
+              setSelectedEmployee(updatedEmployee);
+            }
+            // Atualizar o funcionário em edição
+            setEditingEmployee(updatedEmployee);
+          }}
         />
       )}
 

@@ -106,9 +106,10 @@ interface EditEmployeeFormProps {
   employee: Employee;
   onClose: () => void;
   visibleSections?: VisibleSection[];
+  onEmployeeUpdated?: (updatedEmployee: Employee) => void;
 }
 
-export function EditEmployeeForm({ employee, onClose, visibleSections }: EditEmployeeFormProps) {
+export function EditEmployeeForm({ employee, onClose, visibleSections, onEmployeeUpdated }: EditEmployeeFormProps) {
   // Lista de setores disponíveis
   const sectors = [
     'Projetos',
@@ -408,11 +409,61 @@ export function EditEmployeeForm({ employee, onClose, visibleSections }: EditEmp
       });
       return response.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['employees'] });
+    onSuccess: async (response) => {
+      const updatedEmployee = response?.data;
+      
+      // Atualizar o cache diretamente com os dados retornados
+      if (updatedEmployee) {
+        // Atualizar todas as queries de employees no cache
+        queryClient.setQueriesData(
+          { queryKey: ['employees'], exact: false },
+          (oldData: any) => {
+            if (!oldData?.data) return oldData;
+            
+            // Atualizar o funcionário na lista
+            const updatedData = oldData.data.map((emp: any) => 
+              emp.id === employee.id ? updatedEmployee : emp
+            );
+            
+            return {
+              ...oldData,
+              data: updatedData
+            };
+          }
+        );
+        
+        // Notificar o componente pai sobre a atualização
+        if (onEmployeeUpdated) {
+          onEmployeeUpdated(updatedEmployee);
+        }
+      }
+      
+      // Invalidar e refetch para garantir sincronização completa
+      queryClient.invalidateQueries({ 
+        queryKey: ['employees'],
+        exact: false
+      });
       queryClient.invalidateQueries({ queryKey: ['user'] });
+      
+      // Forçar refetch imediato
+      await Promise.all([
+        queryClient.refetchQueries({ 
+          queryKey: ['employees'],
+          exact: false,
+          type: 'active'
+        }),
+        queryClient.refetchQueries({ 
+          queryKey: ['user'],
+          type: 'active'
+        })
+      ]);
+      
       toast.success('Funcionário atualizado com sucesso!');
-      onClose();
+      
+      // Fechar após garantir que tudo foi atualizado
+      setTimeout(() => {
+        onClose();
+      }, 300);
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Erro ao atualizar funcionário');
@@ -430,7 +481,12 @@ export function EditEmployeeForm({ employee, onClose, visibleSections }: EditEmp
 
     setIsSubmitting(true);
     try {
-      await updateEmployeeMutation.mutateAsync(formData);
+      const result = await updateEmployeeMutation.mutateAsync(formData);
+      // Forçar atualização imediata após salvar
+      await queryClient.refetchQueries({ 
+        queryKey: ['employees'],
+        exact: false
+      });
     } catch (error) {
       console.error('Erro ao atualizar funcionário:', error);
     } finally {
