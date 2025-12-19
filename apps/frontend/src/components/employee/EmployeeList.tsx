@@ -1496,27 +1496,25 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                     <div className={`absolute top-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 ${
                       employee.isActive ? 'bg-green-500' : 'bg-red-500'
                     }`} title={employee.isActive ? 'Ativo' : 'Inativo'} />
-                    <span className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">{employee.name}</span>
-                        {employee.employee && (
-                          <>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 px-3 py-1 rounded-full">{employee.employee.position} de {employee.employee.department}</p>
-                      </>
-                    )}
+                    <span className="text-base font-semibold text-gray-900 dark:text-gray-100">{employee.name}</span>
                   </div>
 
                   {/* Informações do funcionário */}
                   {employee.employee && (
                     <>
-
                       {/* Informações organizadas */}
-                      <div className="space-y-3 text-xs bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-4">
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Matrícula:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.employeeId}</span>
-                        </div>
+                      <div className="space-y-3 text-xs bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
                         <div className="flex justify-between items-center">
                           <span className="text-gray-500 dark:text-gray-400 font-medium">CPF:</span>
                           <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.cpf}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Setor:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.position}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Cargo:</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.department}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-500 dark:text-gray-400 font-medium">Empresa:</span>
@@ -1717,7 +1715,6 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                   </div>
                       <div className="min-w-0">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">{selectedEmployee.name}</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400 truncate">{selectedEmployee.employee?.position} de {selectedEmployee.employee?.department}</p>
                   </div>
                 </div>
                     <div className="flex items-center gap-2">
