@@ -509,11 +509,11 @@ export default function PontoPage() {
           <div className="relative w-full max-w-md">
             <PunchCard
               onSuccess={() => {
-                setIsPunchModalOpen(false);
                 // Invalidar queries para atualizar os registros
                 queryClient.invalidateQueries({ queryKey: ['today-records'] });
                 queryClient.invalidateQueries({ queryKey: ['bank-hours-total'] });
                 queryClient.invalidateQueries({ queryKey: ['day-records'] });
+                // NÃO fechar o modal aqui - deixar o modal de confirmação controlar
               }}
               showCloseButton={true}
               onClose={() => setIsPunchModalOpen(false)}

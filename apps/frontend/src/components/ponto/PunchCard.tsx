@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MapPin, Clock, AlertCircle, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, Camera, X, RotateCcw } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { MapPin, Clock, AlertCircle, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, Camera, X, RotateCcw, CheckCircle, Download, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -25,6 +26,8 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   const [observation, setObservation] = useState('');
   const [todayRecords, setTodayRecords] = useState<any[]>([]);
   const [allPointsCompleted, setAllPointsCompleted] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [punchData, setPunchData] = useState<{ type: TimeRecordType; timestamp: Date } | null>(null);
   
   const { location, error: locationError, loading: locationLoading } = useGeolocation();
   const { 
@@ -183,6 +186,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
     }
 
     try {
+      const now = new Date();
       await punchInOut({
         type: selectedType,
         latitude: location?.latitude || null,
@@ -191,13 +195,19 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
         observation: observation.trim(),
       } as any);
       
+      // Salvar dados do ponto batido para o modal de confirmação
+      console.log('Ponto batido com sucesso, mostrando modal de confirmação');
+      setPunchData({ type: selectedType, timestamp: now });
+      setShowSuccessModal(true);
+      console.log('Estado atualizado - showSuccessModal:', true, 'punchData:', { type: selectedType, timestamp: now });
+      
       // Atualizar o último registro para o próximo tipo
       setLastRecord(selectedType);
       setCapturedPhoto(null);
       setObservation('');
       
       // Atualizar registros e verificar se todos os pontos foram completados
-      const updatedRecords = [...todayRecords, { type: selectedType, timestamp: new Date() }];
+      const updatedRecords = [...todayRecords, { type: selectedType, timestamp: now }];
       setTodayRecords(updatedRecords);
       const completed = checkAllPointsCompleted(updatedRecords);
       setAllPointsCompleted(completed);
@@ -205,13 +215,165 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
       // Chamar callbacks de sucesso
       onSuccess?.();
       
-      // Fechar a modal após bater o ponto
-      if (onClose) {
-        onClose();
-      }
+      // NÃO fechar o modal aqui - deixar o modal de confirmação aparecer
     } catch (error) {
       console.error('Erro ao bater ponto:', error);
     }
+  };
+
+  // Função para gerar comprovante em imagem
+  const generateComprovante = () => {
+    if (!punchData) return;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = 800;
+    const height = 600;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Fundo branco
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, width, height);
+
+    // Borda superior vermelha
+    ctx.fillStyle = '#ce3736';
+    ctx.fillRect(0, 0, width, 100);
+
+    // Carregar e desenhar logo branca
+    const logo = new Image();
+    logo.crossOrigin = 'anonymous';
+    
+    return new Promise<void>((resolve) => {
+      const drawImage = () => {
+        // Logo branca (ajustar tamanho conforme necessário)
+        const logoSize = 50;
+        const logoX = 40;
+        const logoY = 25;
+        
+        if (logo.complete && logo.naturalWidth > 0) {
+          ctx.drawImage(logo, logoX, logoY, logoSize, logoSize);
+        }
+
+        // Título - alinhado à esquerda após a logo
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 26px Arial';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        const titleX = logoX + logoSize + 20;
+        const titleY = 30;
+        ctx.fillText('COMPROVANTE DE PONTO', titleX, titleY);
+
+        // Data e hora do comprovante - alinhado abaixo do título
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, titleX, titleY + 35);
+
+        // Conteúdo principal
+        let y = 150;
+
+        // Tipo de ponto
+        const typeLabels: Record<TimeRecordType, string> = {
+          [TimeRecordType.ENTRY]: 'ENTRADA',
+          [TimeRecordType.EXIT]: 'SAÍDA',
+          [TimeRecordType.LUNCH_START]: 'INÍCIO DO ALMOÇO',
+          [TimeRecordType.LUNCH_END]: 'RETORNO DO ALMOÇO',
+          [TimeRecordType.BREAK_START]: 'INÍCIO DO INTERVALO',
+          [TimeRecordType.BREAK_END]: 'FIM DO INTERVALO',
+          [TimeRecordType.ABSENCE_JUSTIFIED]: 'AUSÊNCIA JUSTIFICADA',
+        };
+
+        ctx.fillStyle = '#1F2937';
+        ctx.font = 'bold 32px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(typeLabels[punchData.type], width / 2, y);
+        y += 60;
+
+        // Data
+        const dateStr = punchData.timestamp.toLocaleDateString('pt-BR', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+        ctx.fillStyle = '#4B5563';
+        ctx.font = '20px Arial';
+        ctx.fillText(dateStr.charAt(0).toUpperCase() + dateStr.slice(1), width / 2, y);
+        y += 50;
+
+        // Horário
+        const timeStr = punchData.timestamp.toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        ctx.fillStyle = '#DC2626';
+        ctx.font = 'bold 48px Arial';
+        ctx.fillText(timeStr, width / 2, y);
+        y += 100;
+
+        // Linha divisória
+        ctx.strokeStyle = '#E5E7EB';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(50, y);
+        ctx.lineTo(width - 50, y);
+        ctx.stroke();
+        y += 40;
+
+        // Informações adicionais
+        ctx.fillStyle = '#6B7280';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText('Este comprovante é válido como registro de ponto.', 50, y);
+        y += 30;
+        ctx.fillText('Guarde este documento para seus registros.', 50, y);
+        y += 30;
+        ctx.fillText('Em caso de dúvidas, entre em contato com o Departamento Pessoal.', 50, y);
+
+        // Rodapé
+        ctx.fillStyle = '#9CA3AF';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Gennesis Attendance - Sistema de Controle de Ponto', width / 2, height - 30);
+
+        // Converter para imagem e fazer download
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            resolve();
+            return;
+          }
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          const fileName = `Comprovante_${typeLabels[punchData.type]}_${punchData.timestamp.toISOString().split('T')[0]}_${punchData.timestamp.toTimeString().split(' ')[0].replace(/:/g, '-')}.png`;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          resolve();
+        }, 'image/png');
+      };
+
+      logo.onload = drawImage;
+      logo.onerror = () => {
+        // Se a logo não carregar, desenhar sem ela
+        drawImage();
+      };
+      logo.src = '/logobranca.png';
+      
+      // Timeout de segurança
+      setTimeout(() => {
+        if (!logo.complete) {
+          drawImage();
+        }
+      }, 2000);
+    });
   };
 
   const getLocationStatus = () => {
@@ -485,6 +647,84 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
           </>
         )}
       </div>
+
+      {/* Modal de Confirmação de Ponto Batido - Renderizado via Portal */}
+      {showSuccessModal && punchData && typeof window !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
+          <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-xl shadow-2xl">
+            <div className="p-6 space-y-4">
+              {/* Ícone de sucesso */}
+              <div className="flex justify-center">
+                <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
+                </div>
+              </div>
+
+              {/* Título */}
+              <div className="text-center">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                  Ponto Registrado com Sucesso!
+                </h3>
+              </div>
+
+              {/* Informações do ponto */}
+              <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Tipo:</span>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {punchTypes.find(p => p.type === punchData.type)?.label}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Data:</span>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {punchData.timestamp.toLocaleDateString('pt-BR', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    }).replace(/^\w/, c => c.toUpperCase())}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Horário:</span>
+                  <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                    {punchData.timestamp.toLocaleTimeString('pt-BR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Botões */}
+              <div className="flex flex-col space-y-2">
+                <button
+                  onClick={generateComprovante}
+                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2"
+                >
+                  <Download className="w-5 h-5" />
+                  <span>Salvar Comprovante</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSuccessModal(false);
+                    setPunchData(null);
+                    if (onClose) {
+                      onClose();
+                    }
+                  }}
+                  className="w-full py-3 px-4 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition-colors"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };
