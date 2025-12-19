@@ -993,6 +993,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       // Apenas funcionários (não RH/Admin)
       if (emp.role !== 'EMPLOYEE') return false;
       
+      // Ocultar funcionários com cargo "Administrador"
+      if (emp.employee?.position === 'Administrador') return false;
+      
       // Busca geral - verifica em todos os campos
       if (searchTerm.trim() !== '') {
         const searchLower = searchTerm.toLowerCase().trim();
