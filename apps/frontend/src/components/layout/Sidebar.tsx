@@ -128,6 +128,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         ]
       },
       {
+        id: 'payroll',
+        name: 'Folha de Pagamento',
+        icon: FileSpreadsheet,
+        items: [
+          {
+            name: 'Folha de Pagamento',
+            href: '/ponto/folha-pagamento',
+            icon: FileSpreadsheet,
+            description: 'Gestão de folha de pagamento',
+            permission: permissions.canAccessPayroll
+          }
+        ]
+      },
+      {
         id: 'time-control',
         name: 'Registros de Ponto',
         icon: Clock,
@@ -243,13 +257,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: FolderClock,
         description: 'Controle de banco de horas',
         permission: permissions.canManageBankHours
-      },
-      {
-        name: 'Folha de Pagamento',
-        href: '/ponto/folha-pagamento',
-        icon: FileSpreadsheet,
-        description: 'Gestão de folha de pagamento',
-        permission: permissions.canAccessPayroll
       },
       {
         name: 'Alocação',
@@ -481,12 +488,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const isFirstItem = index === 0;
             
             // Se tiver apenas um item, renderizar como link direto
-            // Mas quando a sidebar estiver fechada, não mostrar páginas individuais, exceto Dashboard e Registros de Ponto
             if (isSingleItem && singleItem) {
-              // Se a sidebar estiver fechada, apenas mostrar Dashboard e Registros de Ponto
-              if (isCollapsed && category.id !== 'main' && category.id !== 'time-control') {
-                return null;
-              }
               
               const active = isActive(singleItem.href);
               const SingleItemIcon = singleItem.icon || CategoryIcon;
