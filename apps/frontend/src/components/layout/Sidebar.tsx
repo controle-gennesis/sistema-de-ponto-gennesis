@@ -189,7 +189,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: MailPlus,
         items: [
           {
-            name: 'Solicitações de Correção',
+            name: 'Correção de Ponto',
             href: '/ponto/solicitacoes',
             icon: FileText,
             description: 'Minhas solicitações de correção',
