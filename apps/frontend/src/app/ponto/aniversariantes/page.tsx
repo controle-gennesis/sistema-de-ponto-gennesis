@@ -273,7 +273,7 @@ export default function AniversariantesPage() {
                         const value = e.target.value;
                         setSelectedMonth(value === 'all' ? 'all' : parseInt(value));
                       }}
-                      className="w-full px-3 pr-8 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 text-sm"
+                      className="w-full px-3 pr-8 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 text-sm"
                     >
                       <option value="all">Todos</option>
                       {months.map((month, index) => (
