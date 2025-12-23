@@ -51,6 +51,9 @@ export interface Employee {
   unhealthyPay?: number; // INSALUBRIDADE
   admissionDate?: string; // Data de admissão
   
+  // Campo para controlar se o funcionário precisa bater ponto
+  requiresTimeClock?: boolean; // Se false, não precisa bater ponto
+  
   createdAt: string;
   updatedAt: string;
 }

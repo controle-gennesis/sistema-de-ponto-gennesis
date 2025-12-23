@@ -94,7 +94,7 @@ export const getEmployeeById = async (req: Request, res: Response) => {
 
 export const createEmployee = async (req: Request, res: Response) => {
   try {
-    const {
+      const {
       name,
       email,
       cpf,
@@ -118,7 +118,8 @@ export const createEmployee = async (req: Request, res: Response) => {
       pixKey,
       polo,
       categoriaFinanceira,
-      fixedAdjustments
+      fixedAdjustments,
+      requiresTimeClock = true // Padrão: precisa bater ponto
     } = req.body;
 
     // Verificar se email já existe
@@ -190,7 +191,8 @@ export const createEmployee = async (req: Request, res: Response) => {
           pixKeyType,
           pixKey,
           polo,
-          categoriaFinanceira
+          categoriaFinanceira,
+          requiresTimeClock: requiresTimeClock !== undefined ? requiresTimeClock : true
         },
         include: {
           user: {
@@ -256,7 +258,8 @@ export const updateEmployee = async (req: Request, res: Response) => {
       pixKeyType,
       pixKey,
       polo,
-      categoriaFinanceira
+      categoriaFinanceira,
+      requiresTimeClock
     } = req.body;
 
     const employee = await prisma.employee.findUnique({
@@ -334,7 +337,9 @@ export const updateEmployee = async (req: Request, res: Response) => {
           ...(pixKeyType !== undefined && { pixKeyType }),
           ...(pixKey !== undefined && { pixKey }),
           ...(polo !== undefined && { polo }),
-          ...(categoriaFinanceira !== undefined && { categoriaFinanceira })
+          ...(categoriaFinanceira !== undefined && { categoriaFinanceira }),
+          // requiresTimeClock deve sempre ser enviado, mesmo se for false
+          requiresTimeClock: requiresTimeClock !== undefined ? requiresTimeClock : true
         },
         include: {
           user: {

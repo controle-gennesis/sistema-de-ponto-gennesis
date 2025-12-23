@@ -58,6 +58,9 @@ interface EmployeeFormData {
   // Novos campos - Polo e Categoria Financeira
   polo: 'BRASÍLIA' | 'GOIÁS' | '';
   categoriaFinanceira: 'GASTO' | 'DESPESA' | '';
+  
+  // Campo para controlar se precisa bater ponto
+  requiresTimeClock: boolean;
 }
 
 interface Employee {
@@ -229,7 +232,10 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
     
     // Novos campos - Polo e Categoria Financeira
     polo: (employee.employee?.polo as any) || '',
-    categoriaFinanceira: (employee.employee?.categoriaFinanceira as any) || ''
+    categoriaFinanceira: (employee.employee?.categoriaFinanceira as any) || '',
+    
+    // Campo para controlar se precisa bater ponto
+    requiresTimeClock: employee.employee?.requiresTimeClock !== undefined ? employee.employee.requiresTimeClock : true
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -390,15 +396,23 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
         dangerPay: data.dangerPay ? parsePercentToNumber(data.dangerPay as any) : undefined,
         unhealthyPay: data.unhealthyPay ? parsePercentToNumber(data.unhealthyPay as any) : undefined,
         polo: data.polo || undefined,
-        categoriaFinanceira: data.categoriaFinanceira || undefined
+        categoriaFinanceira: data.categoriaFinanceira || undefined,
+        
+        // Campo para controlar se precisa bater ponto - sempre enviar, mesmo se for false
+        requiresTimeClock: data.requiresTimeClock !== undefined ? data.requiresTimeClock : true
       };
 
-      // Remover campos undefined ou vazios (exceto workSchedule e isRemote)
+      // Remover campos undefined ou vazios (exceto workSchedule, isRemote e requiresTimeClock)
+      // requiresTimeClock deve sempre ser enviado, mesmo se for false
       Object.keys(employeeData).forEach(key => {
-        if (key !== 'workSchedule' && key !== 'isRemote' && (employeeData[key] === undefined || employeeData[key] === '')) {
+        if (key !== 'workSchedule' && key !== 'isRemote' && key !== 'requiresTimeClock' && (employeeData[key] === undefined || employeeData[key] === '')) {
           delete employeeData[key];
         }
       });
+      
+      // Garantir que requiresTimeClock sempre seja enviado (não pode ser removido)
+      // O valor deve ser explicitamente false ou true, nunca undefined
+      employeeData.requiresTimeClock = data.requiresTimeClock !== undefined ? data.requiresTimeClock : true;
 
       const response = await api.put(`/users/${employee.id}`, {
         name: data.name,
@@ -788,6 +802,37 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
                     )}
                   </div>
 
+                </div>
+              </div>
+              )}
+
+              {/* Toggle para controlar se precisa bater ponto - na seção de Dados Profissionais */}
+              {(!visibleSections || visibleSections.includes('professional')) && (
+              <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                      Precisa bater ponto?
+                    </label>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Se desativado, o funcionário não precisará bater ponto e não aparecerá nos relatórios de ponto
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('requiresTimeClock', !formData.requiresTimeClock)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      formData.requiresTimeClock
+                        ? 'bg-blue-600 dark:bg-blue-500'
+                        : 'bg-gray-200 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        formData.requiresTimeClock ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
               )}

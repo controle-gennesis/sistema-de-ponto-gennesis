@@ -158,7 +158,8 @@ export class PayrollController {
         month, 
         year,
         page = 1,
-        limit = 50
+        limit = 50,
+        forAllocation = false // Parâmetro para indicar se é para relatório de alocação
       } = req.query;
 
       // Validar parâmetros obrigatórios
@@ -170,6 +171,10 @@ export class PayrollController {
       const yearNum = parseInt(year as string);
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
+      // Converter forAllocation para boolean de forma segura
+      const isForAllocation = typeof forAllocation === 'string' 
+        ? (forAllocation === 'true' || forAllocation === '1')
+        : Boolean(forAllocation);
 
       const filters: PayrollFilters = {
         search: search as string,
@@ -183,7 +188,8 @@ export class PayrollController {
         accountType: accountType as string,
         polo: polo as string,
         month: monthNum,
-        year: yearNum
+        year: yearNum,
+        forAllocation: isForAllocation
       };
 
       const payrollData = await payrollService.generateMonthlyPayroll(filters);

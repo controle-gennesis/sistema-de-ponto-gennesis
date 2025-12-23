@@ -49,7 +49,16 @@ export class BankHoursController {
       }
 
       if (position) {
-        whereClause.position = { contains: position as string, mode: 'insensitive' };
+        // Combinar filtro de position com exclusão de administradores
+        whereClause.position = { 
+          AND: [
+            { contains: position as string, mode: 'insensitive' },
+            { not: 'Administrador' }
+          ]
+        };
+      } else {
+        // Se não houver filtro de position, apenas excluir administradores
+        whereClause.position = { not: 'Administrador' };
       }
 
       if (costCenter) {
@@ -85,6 +94,9 @@ export class BankHoursController {
         ];
       }
 
+      // Adicionar filtro para funcionários que precisam bater ponto
+      whereClause.requiresTimeClock = true;
+
       // Buscar funcionários com filtros aplicados
       let employees = await prisma.employee.findMany({
         where: whereClause,
@@ -108,6 +120,11 @@ export class BankHoursController {
       if (shouldFilterManually && search) {
         const searchLower = (search as string).toLowerCase();
         employees = employees.filter((employee: any) => {
+          // Excluir administradores
+          if (employee.position === 'Administrador') {
+            return false;
+          }
+          
           // Verificar CPF sem formatação
           if (employee.user?.cpf) {
             const employeeCpfNumbers = employee.user.cpf.replace(/\D/g, '');
@@ -140,6 +157,9 @@ export class BankHoursController {
           return nameA.localeCompare(nameB);
         });
       }
+
+      // Filtrar administradores que possam ter passado pelo filtro manual (garantia extra)
+      employees = employees.filter((employee: any) => employee.position !== 'Administrador');
 
       // Calcular banco de horas para cada funcionário usando TimeRecordService
       const bankHoursData = await Promise.all(

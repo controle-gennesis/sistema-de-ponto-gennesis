@@ -60,6 +60,9 @@ interface EmployeeFormData {
   // Novos campos - Polo e Categoria Financeira
   polo: 'BRASÍLIA' | 'GOIÁS' | '';
   categoriaFinanceira: 'GASTO' | 'DESPESA' | '';
+  
+  // Campo para controlar se precisa bater ponto
+  requiresTimeClock: boolean;
 }
 
 interface CreateEmployeeFormProps {
@@ -207,7 +210,10 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
     // Novos campos - Polo e Categoria Financeira
     polo: '',
-    categoriaFinanceira: ''
+    categoriaFinanceira: '',
+    
+    // Campo para controlar se precisa bater ponto
+    requiresTimeClock: true // Padrão: precisa bater ponto
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -400,7 +406,10 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
         // Novos campos - Polo e Categoria Financeira
         polo: data.polo || null,
-        categoriaFinanceira: data.categoriaFinanceira || null
+        categoriaFinanceira: data.categoriaFinanceira || null,
+        
+        // Campo para controlar se precisa bater ponto
+        requiresTimeClock: data.requiresTimeClock !== undefined ? data.requiresTimeClock : true
       };
 
       const response = await api.post('/users', {
@@ -1923,6 +1932,35 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 min="0"
                 max="60"
               />
+            </div>
+
+            {/* Toggle para controlar se precisa bater ponto */}
+            <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                    Precisa bater ponto?
+                  </label>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    Se desativado, o funcionário não precisará bater ponto e não aparecerá nos relatórios de ponto
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleInputChange('requiresTimeClock', !formData.requiresTimeClock)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formData.requiresTimeClock
+                      ? 'bg-blue-600 dark:bg-blue-500'
+                      : 'bg-gray-200 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.requiresTimeClock ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
           )}

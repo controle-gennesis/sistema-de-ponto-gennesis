@@ -70,6 +70,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   
   // Verificar se é administrador
   const isAdministrator = userPosition === 'Administrador';
+  
+  // Verificar se o funcionário precisa bater ponto
+  const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
 
   const handleLogout = () => {
     setShowUserMenu(false);
@@ -154,7 +157,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto',
             icon: FolderClock,
             description: 'Gerencie seus registros',
-            permission: isAdministrator || permissions.canRegisterTime
+            permission: (isAdministrator || permissions.canRegisterTime) && requiresTimeClock
           }
         ]
       },

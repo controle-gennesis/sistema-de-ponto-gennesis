@@ -16,16 +16,23 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
     const dayEnd = new Date(dayStart);
     dayEnd.setDate(dayEnd.getDate() + 1);
 
-    // Construir filtros para funcionários
-    const employeeWhere: any = {
-      isNot: null
-    };
+    // Construir filtros para funcionários (excluindo administradores)
+    const employeeWhere: any = {};
 
     if (department && department !== 'all') {
       employeeWhere.department = { contains: department as string, mode: 'insensitive' };
     }
     if (position && position !== 'all') {
-      employeeWhere.position = { contains: position as string, mode: 'insensitive' };
+      // Se há filtro de position, combinar com exclusão de administrador
+      employeeWhere.position = { 
+        AND: [
+          { contains: position as string, mode: 'insensitive' },
+          { not: 'Administrador' }
+        ]
+      };
+    } else {
+      // Se não há filtro de position, apenas excluir administrador
+      employeeWhere.position = { not: 'Administrador' };
     }
     if (costCenter && costCenter !== 'all') {
       employeeWhere.costCenter = { contains: costCenter as string, mode: 'insensitive' };
@@ -34,32 +41,39 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
       employeeWhere.client = { contains: client as string, mode: 'insensitive' };
     }
 
-    // Buscar IDs dos usuários que atendem aos filtros
+    // Buscar IDs dos usuários que atendem aos filtros (excluindo administradores)
     let userIds: string[] = [];
     if (department !== 'all' || position !== 'all' || costCenter !== 'all' || client !== 'all') {
       const usersInFilter = await prisma.user.findMany({
         where: {
           role: 'EMPLOYEE',
           isActive: true,
-          employee: employeeWhere
+          employee: {
+            is: employeeWhere
+          }
         },
         select: { id: true }
       });
       userIds = usersInFilter.map((u: any) => u.id);
     }
 
-    const [totalEmployees, presentUsers, allTodayRecords] = await Promise.all([
+    const [totalEmployees, presentUsers, allTodayRecords, employeesWithoutTimeClock] = await Promise.all([
       prisma.user.count({ 
         where: userIds.length > 0 ? {
           role: 'EMPLOYEE', 
           isActive: true,
-          id: { in: userIds }
+          id: { in: userIds },
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } }
+          ]
         } : {
           role: 'EMPLOYEE', 
           isActive: true,
-          employee: {
-            isNot: null
-          }
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } }
+          ]
         }
       }),
       prisma.timeRecord.findMany({
@@ -71,7 +85,10 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
           user: userIds.length > 0 ? undefined : {
             role: 'EMPLOYEE',
             isActive: true,
-            employee: { isNot: null }
+            AND: [
+              { employee: { isNot: null } },
+              { employee: { position: { not: 'Administrador' } } }
+            ]
           }
         },
         select: { userId: true },
@@ -85,22 +102,56 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
           user: userIds.length > 0 ? undefined : {
             role: 'EMPLOYEE',
             isActive: true,
-            employee: { isNot: null }
+            AND: [
+              { employee: { isNot: null } },
+              { employee: { position: { not: 'Administrador' } } }
+            ]
           }
         },
         select: { userId: true, type: true },
       }),
+      // Buscar funcionários que não precisam bater ponto (excluindo administradores)
+      prisma.user.findMany({
+        where: userIds.length > 0 ? {
+          role: 'EMPLOYEE',
+          isActive: true,
+          id: { in: userIds },
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } },
+            { employee: { requiresTimeClock: false } }
+          ]
+        } : {
+          role: 'EMPLOYEE',
+          isActive: true,
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } },
+            { employee: { requiresTimeClock: false } }
+          ]
+        },
+        select: { id: true }
+      }),
     ]);
 
-    const presentToday = presentUsers.length;
-    const presentUserIds = new Set(presentUsers.map((u: any) => u.userId));
+    // Funcionários que não precisam bater ponto são automaticamente considerados presentes
+    const employeesWithoutTimeClockIds = employeesWithoutTimeClock.map((u: any) => u.id);
+    const presentUserIds = new Set([
+      ...presentUsers.map((u: any) => u.userId),
+      ...employeesWithoutTimeClockIds
+    ]);
+    const presentToday = presentUserIds.size;
     
-    // Buscar dados dos funcionários presentes
+    // Buscar dados dos funcionários presentes (excluindo administradores)
     const presentEmployeesData = await prisma.user.findMany({
       where: {
         id: { in: Array.from(presentUserIds) },
         role: 'EMPLOYEE',
-        isActive: true
+        isActive: true,
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } }
+        ]
       },
       select: {
         id: true,
@@ -109,24 +160,30 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
         employee: {
           select: {
             department: true,
-            position: true
+            position: true,
+            requiresTimeClock: true
           }
         }
       }
     });
 
-    // Buscar todos os funcionários ativos
+    // Buscar todos os funcionários ativos (excluindo administradores)
     const allEmployees = await prisma.user.findMany({
       where: userIds.length > 0 ? {
         role: 'EMPLOYEE',
         isActive: true,
-        id: { in: userIds }
+        id: { in: userIds },
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } }
+        ]
       } : {
         role: 'EMPLOYEE',
         isActive: true,
-        employee: {
-          isNot: null
-        }
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } }
+        ]
       },
       select: {
         id: true,
@@ -135,7 +192,8 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
         employee: {
           select: {
             department: true,
-            position: true
+            position: true,
+            requiresTimeClock: true
           }
         }
       }
@@ -158,6 +216,11 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
 
     const pendingUserIds: string[] = [];
     recordsByUser.forEach((userRecords, userId) => {
+      // Ignorar funcionários que não precisam bater ponto
+      if (employeesWithoutTimeClockIds.includes(userId)) {
+        return;
+      }
+      
       const hasEntry = userRecords.has('ENTRY');
       const hasLunchStart = userRecords.has('LUNCH_START');
       const hasLunchEnd = userRecords.has('LUNCH_END');
@@ -169,12 +232,17 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
       }
     });
 
-    // Buscar dados dos funcionários pendentes
+    // Buscar dados dos funcionários pendentes (excluindo administradores e os que não precisam bater ponto)
     const pendingEmployeesData = await prisma.user.findMany({
       where: {
         id: { in: pendingUserIds },
         role: 'EMPLOYEE',
-        isActive: true
+        isActive: true,
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } },
+          { employee: { requiresTimeClock: true } } // Apenas os que precisam bater ponto podem estar pendentes
+        ]
       },
       select: {
         id: true,
@@ -240,16 +308,23 @@ router.get('/', async (req: AuthRequest, res, next) => {
     const dayEnd = new Date(dayStart);
     dayEnd.setDate(dayEnd.getDate() + 1);
 
-    // Construir filtros para funcionários
-    const employeeWhere: any = {
-      isNot: null
-    };
+    // Construir filtros para funcionários (excluindo administradores)
+    const employeeWhere: any = {};
 
     if (department && department !== 'all') {
       employeeWhere.department = { contains: department as string, mode: 'insensitive' };
     }
     if (position && position !== 'all') {
-      employeeWhere.position = { contains: position as string, mode: 'insensitive' };
+      // Se há filtro de position, combinar com exclusão de administrador
+      employeeWhere.position = { 
+        AND: [
+          { contains: position as string, mode: 'insensitive' },
+          { not: 'Administrador' }
+        ]
+      };
+    } else {
+      // Se não há filtro de position, apenas excluir administrador
+      employeeWhere.position = { not: 'Administrador' };
     }
     if (costCenter && costCenter !== 'all') {
       employeeWhere.costCenter = { contains: costCenter as string, mode: 'insensitive' };
@@ -258,32 +333,39 @@ router.get('/', async (req: AuthRequest, res, next) => {
       employeeWhere.client = { contains: client as string, mode: 'insensitive' };
     }
 
-    // Buscar IDs dos usuários que atendem aos filtros
+    // Buscar IDs dos usuários que atendem aos filtros (excluindo administradores)
     let userIds: string[] = [];
     if (department !== 'all' || position !== 'all' || costCenter !== 'all' || client !== 'all') {
       const usersInFilter = await prisma.user.findMany({
         where: {
           role: 'EMPLOYEE',
           isActive: true,
-          employee: employeeWhere
+          employee: {
+            is: employeeWhere
+          }
         },
         select: { id: true }
       });
       userIds = usersInFilter.map((u: any) => u.id);
     }
 
-    const [totalEmployees, presentUsers, allTodayRecords] = await Promise.all([
+    const [totalEmployees, presentUsers, allTodayRecords, employeesWithoutTimeClock] = await Promise.all([
       prisma.user.count({ 
         where: userIds.length > 0 ? {
           role: 'EMPLOYEE', 
           isActive: true,
-          id: { in: userIds }
+          id: { in: userIds },
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } }
+          ]
         } : {
           role: 'EMPLOYEE', 
           isActive: true,
-          employee: {
-            isNot: null
-          }
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } }
+          ]
         }
       }),
       prisma.timeRecord.findMany({
@@ -295,7 +377,10 @@ router.get('/', async (req: AuthRequest, res, next) => {
           user: userIds.length > 0 ? undefined : {
             role: 'EMPLOYEE',
             isActive: true,
-            employee: { isNot: null }
+            AND: [
+              { employee: { isNot: null } },
+              { employee: { position: { not: 'Administrador' } } }
+            ]
           }
         },
         select: { userId: true },
@@ -309,22 +394,56 @@ router.get('/', async (req: AuthRequest, res, next) => {
           user: userIds.length > 0 ? undefined : {
             role: 'EMPLOYEE',
             isActive: true,
-            employee: { isNot: null }
+            AND: [
+              { employee: { isNot: null } },
+              { employee: { position: { not: 'Administrador' } } }
+            ]
           }
         },
         select: { userId: true, type: true },
       }),
+      // Buscar funcionários que não precisam bater ponto (excluindo administradores)
+      prisma.user.findMany({
+        where: userIds.length > 0 ? {
+          role: 'EMPLOYEE',
+          isActive: true,
+          id: { in: userIds },
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } },
+            { employee: { requiresTimeClock: false } }
+          ]
+        } : {
+          role: 'EMPLOYEE',
+          isActive: true,
+          AND: [
+            { employee: { isNot: null } },
+            { employee: { position: { not: 'Administrador' } } },
+            { employee: { requiresTimeClock: false } }
+          ]
+        },
+        select: { id: true }
+      }),
     ]);
 
-    const presentToday = presentUsers.length;
-    const presentUserIds = new Set(presentUsers.map((u: any) => u.userId));
+    // Funcionários que não precisam bater ponto são automaticamente considerados presentes
+    const employeesWithoutTimeClockIds = employeesWithoutTimeClock.map((u: any) => u.id);
+    const presentUserIds = new Set([
+      ...presentUsers.map((u: any) => u.userId),
+      ...employeesWithoutTimeClockIds
+    ]);
+    const presentToday = presentUserIds.size;
     
-    // Buscar dados dos funcionários presentes
+    // Buscar dados dos funcionários presentes (excluindo administradores)
     const presentEmployeesData = await prisma.user.findMany({
       where: {
         id: { in: Array.from(presentUserIds) },
         role: 'EMPLOYEE',
-        isActive: true
+        isActive: true,
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } }
+        ]
       },
       select: {
         id: true,
@@ -333,24 +452,30 @@ router.get('/', async (req: AuthRequest, res, next) => {
         employee: {
           select: {
             department: true,
-            position: true
+            position: true,
+            requiresTimeClock: true
           }
         }
       }
     });
 
-    // Buscar todos os funcionários ativos
+    // Buscar todos os funcionários ativos (excluindo administradores)
     const allEmployees = await prisma.user.findMany({
       where: userIds.length > 0 ? {
         role: 'EMPLOYEE',
         isActive: true,
-        id: { in: userIds }
+        id: { in: userIds },
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } }
+        ]
       } : {
         role: 'EMPLOYEE',
         isActive: true,
-        employee: {
-          isNot: null
-        }
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } }
+        ]
       },
       select: {
         id: true,
@@ -359,7 +484,8 @@ router.get('/', async (req: AuthRequest, res, next) => {
         employee: {
           select: {
             department: true,
-            position: true
+            position: true,
+            requiresTimeClock: true
           }
         }
       }
@@ -382,6 +508,11 @@ router.get('/', async (req: AuthRequest, res, next) => {
 
     const pendingUserIds: string[] = [];
     recordsByUser.forEach((userRecords, userId) => {
+      // Ignorar funcionários que não precisam bater ponto
+      if (employeesWithoutTimeClockIds.includes(userId)) {
+        return;
+      }
+      
       const hasEntry = userRecords.has('ENTRY');
       const hasLunchStart = userRecords.has('LUNCH_START');
       const hasLunchEnd = userRecords.has('LUNCH_END');
@@ -393,12 +524,17 @@ router.get('/', async (req: AuthRequest, res, next) => {
       }
     });
 
-    // Buscar dados dos funcionários pendentes
+    // Buscar dados dos funcionários pendentes (excluindo administradores e os que não precisam bater ponto)
     const pendingEmployeesData = await prisma.user.findMany({
       where: {
         id: { in: pendingUserIds },
         role: 'EMPLOYEE',
-        isActive: true
+        isActive: true,
+        AND: [
+          { employee: { isNot: null } },
+          { employee: { position: { not: 'Administrador' } } },
+          { employee: { requiresTimeClock: true } } // Apenas os que precisam bater ponto podem estar pendentes
+        ]
       },
       select: {
         id: true,

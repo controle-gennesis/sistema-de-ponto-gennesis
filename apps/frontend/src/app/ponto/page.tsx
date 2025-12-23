@@ -19,12 +19,25 @@ export default function PontoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   
-  const { data: userData, isLoading: loadingUser } = useQuery({
+  // Estados
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isPunchModalOpen, setIsPunchModalOpen] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  
+  const { data: userData, isLoading: loadingUser, error: userError } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
-      const res = await api.get('/auth/me');
-      return res.data;
-    }
+      try {
+        const res = await api.get('/auth/me');
+        return res.data;
+      } catch (error: any) {
+        console.error('Erro ao buscar dados do usuário:', error);
+        setHasError(true);
+        throw error;
+      }
+    },
+    retry: 1,
   });
 
   const handleLogout = () => {
@@ -34,8 +47,6 @@ export default function PontoPage() {
     // Redireciona para a tela de login
     router.push('/auth/login');
   };
-
-  // Removido: verificação de role - agora usamos apenas cargos
 
   // Verificar se é o primeiro login
   const isFirstLogin = userData?.data?.isFirstLogin || false;
@@ -74,23 +85,101 @@ export default function PontoPage() {
     };
   }, []);
 
-  const { data: todayRecords, isLoading: loadingToday } = useQuery({
+  // Verificar se o funcionário precisa bater ponto (após carregar dados do usuário)
+  // Só calcular se userData estiver disponível para evitar erros
+  const requiresTimeClock = userData?.data?.employee?.requiresTimeClock !== false;
+
+  const { data: todayRecords, isLoading: loadingToday, error: todayRecordsError } = useQuery({
     queryKey: ['today-records'],
     queryFn: async () => {
-      const res = await api.get('/time-records/my-records/today');
-      return res.data;
-    }
+      try {
+        const res = await api.get('/time-records/my-records/today');
+        return res.data;
+      } catch (error: any) {
+        console.error('Erro ao buscar registros de hoje:', error);
+        // Se for erro 500 ou outro erro, retornar estrutura vazia em vez de quebrar
+        if (error.response?.status >= 500 || error.response?.status === 404) {
+          return { 
+            success: true,
+            data: {
+              records: [],
+              summary: {
+                date: new Date(),
+                totalHours: 0,
+                regularHours: 0,
+                overtimeHours: 0,
+                lunchHours: 0,
+                breakHours: 0,
+                records: [],
+                isComplete: false,
+                issues: []
+              }
+            }
+          };
+        }
+        // Para outros erros, também retornar estrutura vazia para não quebrar a página
+        return { 
+          success: true,
+          data: {
+            records: [],
+            summary: {
+              date: new Date(),
+              totalHours: 0,
+              regularHours: 0,
+              overtimeHours: 0,
+              lunchHours: 0,
+              breakHours: 0,
+              records: [],
+              isComplete: false,
+              issues: []
+            }
+          }
+        };
+      }
+    },
+    enabled: !!userData?.data && !loadingUser && requiresTimeClock, // Só fazer a chamada se o usuário estiver carregado e precisar bater ponto
+    retry: false, // Não tentar novamente para evitar loops
   });
 
   // Banco de horas total (desde a admissão)
   const { data: bankHoursData, error: bankHoursError, isLoading: bankHoursLoading, refetch: refetchBankHours } = useQuery({
     queryKey: ['bank-hours-total'],
     queryFn: async () => {
-      const res = await api.get('/time-records/my-records/bank-hours');
-      return res.data;
+      try {
+        const res = await api.get('/time-records/my-records/bank-hours');
+        return res.data;
+      } catch (error: any) {
+        console.error('Erro ao buscar banco de horas:', error);
+        // Se for erro 500 ou outro erro, retornar estrutura vazia em vez de quebrar
+        if (error.response?.status >= 500 || error.response?.status === 404) {
+          return { 
+            success: true,
+            data: { 
+              balanceHours: 0,
+              total: 0, 
+              positive: 0, 
+              negative: 0,
+              hours: '00:00:00'
+            }
+          };
+        }
+        // Para outros erros, também retornar estrutura vazia para não quebrar a página
+        return { 
+          success: true,
+          data: { 
+            balanceHours: 0,
+            total: 0, 
+            positive: 0, 
+            negative: 0,
+            hours: '00:00:00'
+          }
+        };
+      }
     },
+    enabled: !!userData?.data && !loadingUser && requiresTimeClock, // Só fazer a chamada se o usuário estiver carregado e precisar bater ponto
     staleTime: 0, // Sempre considerar os dados como obsoletos
     gcTime: 0, // Não cachear os dados
+    retry: false, // Não tentar novamente para evitar loops
   });
 
 
@@ -118,15 +207,6 @@ export default function PontoPage() {
   const [isBankDetailsOpen, setIsBankDetailsOpen] = useState(false);
   const [selectedBankYear, setSelectedBankYear] = useState<number>(now.getFullYear());
   const [selectedBankMonth, setSelectedBankMonth] = useState<number>(now.getMonth() + 1);
-  
-  // Modal de alterar senha
-  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-
-  // Estados para responsividade
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Modal de bater ponto
-  const [isPunchModalOpen, setIsPunchModalOpen] = useState(false);
 
   const { data: bankHoursDetailed, error: bankHoursDetailedError, isLoading: loadingBankHoursDetailed } = useQuery({
     queryKey: ['bank-hours-detailed', selectedBankYear, selectedBankMonth, isBankDetailsOpen],
@@ -172,7 +252,34 @@ export default function PontoPage() {
     return weekday.charAt(0).toUpperCase() + weekday.slice(1);
   };
 
-  if (loadingUser || loadingToday) {
+  // Se houver erro ao carregar dados do usuário, mostrar mensagem de erro
+  // Mas só se realmente não conseguir carregar após algumas tentativas
+  if ((userError && userError.response?.status >= 500) || (hasError && !loadingUser)) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center max-w-md mx-4">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">
+            Erro ao carregar dados
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">
+            Não foi possível carregar suas informações. Por favor, tente novamente.
+          </p>
+          <button
+            onClick={() => {
+              setHasError(false);
+              queryClient.invalidateQueries({ queryKey: ['user'] });
+            }}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Se ainda está carregando dados do usuário, mostrar loading
+  if (loadingUser || !userData) {
     return (
       <Loading 
         message="Carregando dados..."
@@ -182,11 +289,27 @@ export default function PontoPage() {
     );
   }
 
-  const user = userData?.data || {
-    name: 'Usuário',
-    cpf: '000.000.000-00',
-    role: 'EMPLOYEE'
-  };
+  // Verificar se há dados do usuário antes de continuar
+  if (!userData?.data) {
+    return (
+      <Loading 
+        message="Carregando informações do usuário..."
+        fullScreen
+        size="lg"
+      />
+    );
+  }
+
+  const user = userData.data;
+
+  // Se houver erro nas queries, mostrar mensagem de erro mas não quebrar a página
+  if (todayRecordsError && todayRecordsError.response?.status >= 500) {
+    console.error('Erro ao carregar registros:', todayRecordsError);
+  }
+
+  if (bankHoursError && bankHoursError.response?.status >= 500) {
+    console.error('Erro ao carregar banco de horas:', bankHoursError);
+  }
 
   return (
     <MainLayout 
@@ -201,16 +324,29 @@ export default function PontoPage() {
         <p className="mt-1 text-gray-600 dark:text-gray-400">Gerencie seus registros de ponto e banco de horas</p>
       </div>  
            
-      {/* Botão para bater ponto */}
-      <div className="flex justify-center mb-6">
-        <button
-          onClick={() => setIsPunchModalOpen(true)}
-          className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 flex items-center space-x-2"
-        >
-          <Clock className="w-5 h-5" />
-          <span>Bater Ponto</span>
-        </button>
-      </div>
+      {/* Botão para bater ponto - apenas se o funcionário precisa bater ponto */}
+      {requiresTimeClock && (
+        <div className="flex justify-center mb-6">
+          <button
+            onClick={() => setIsPunchModalOpen(true)}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 flex items-center space-x-2"
+          >
+            <Clock className="w-5 h-5" />
+            <span>Bater Ponto</span>
+          </button>
+        </div>
+      )}
+      
+      {/* Mensagem para funcionários que não precisam bater ponto */}
+      {!requiresTimeClock && (
+        <div className="flex justify-center mb-6">
+          <div className="px-6 py-4 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg border border-gray-300 dark:border-gray-600">
+            <p className="text-center">
+              Você não precisa bater ponto. Seu registro é automático.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Cards lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -86,6 +86,9 @@ model Employee {
   polo              String?   // POLO (BRASÍLIA, GOIÁS)
   categoriaFinanceira String?  // CATEGORIA FINANCEIRA (GASTO, DESPESA)
   
+  // Campo para controlar se o funcionário precisa bater ponto
+  requiresTimeClock Boolean   @default(true) // Se false, não precisa bater ponto
+  
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 

@@ -147,6 +147,7 @@ export interface PayrollFilters {
   polo?: string;
   month: number;
   year: number;
+  forAllocation?: boolean; // Se true, filtra funcionários que não batem ponto (para relatório de alocação)
 }
 
 export class PayrollService {
@@ -154,6 +155,44 @@ export class PayrollService {
    * Calcula os totais mensais de VA e VT para um funcionário
    */
   private async calculateMonthlyTotals(employeeId: string, month: number, year: number, hireDate?: Date) {
+    // Buscar dados do funcionário para verificar se precisa bater ponto
+    const employee = await prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: {
+        requiresTimeClock: true,
+        dailyFoodVoucher: true,
+        dailyTransportVoucher: true
+      }
+    });
+
+    // Se o funcionário não precisa bater ponto, calcular baseado nos dias úteis
+    if (employee && employee.requiresTimeClock === false) {
+      // Calcular dias úteis do mês
+      const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
+        0, // Não há registros de ponto
+        month, 
+        year, 
+        hireDate
+      );
+      
+      // Para funcionários que não batem ponto, considerar todos os dias úteis como presenças
+      const daysPresent = totalWorkingDays;
+      
+      // Calcular VA e VT baseado nos dias úteis e valores diários
+      const dailyVA = Number(employee.dailyFoodVoucher || 0);
+      const dailyVT = Number(employee.dailyTransportVoucher || 0);
+      const totalVA = daysPresent * dailyVA;
+      const totalVT = daysPresent * dailyVT;
+      
+      return { 
+        totalVA, 
+        totalVT, 
+        daysWorked: daysPresent, // Todos os dias úteis são considerados trabalhados
+        totalWorkingDays
+      };
+    }
+
+    // Para funcionários que batem ponto, usar a lógica normal
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);
     
@@ -334,7 +373,7 @@ export class PayrollService {
    * Gera folha de pagamento mensal
    */
   async generateMonthlyPayroll(filters: PayrollFilters): Promise<MonthlyPayrollData> {
-    const { search, company, department, position, costCenter, client, modality, bank, accountType, polo, month, year } = filters;
+    const { search, company, department, position, costCenter, client, modality, bank, accountType, polo, month, year, forAllocation } = filters;
 
     // Validar período
     const currentDate = new Date();
@@ -392,7 +431,16 @@ export class PayrollService {
     }
 
     if (position) {
-      where.position = { contains: position, mode: 'insensitive' };
+      // Combinar filtro de position com exclusão de administradores
+      where.position = { 
+        AND: [
+          { contains: position, mode: 'insensitive' },
+          { not: 'Administrador' }
+        ]
+      };
+    } else {
+      // Se não houver filtro de position, apenas excluir administradores
+      where.position = { not: 'Administrador' };
     }
 
     if (costCenter) {
@@ -419,22 +467,43 @@ export class PayrollService {
       where.polo = { contains: polo, mode: 'insensitive' };
     }
 
+    // Adicionar filtro para funcionários que precisam bater ponto (apenas para relatório de alocação)
+    // Nota: Para folha de pagamento (forAllocation = false ou undefined), não filtramos por requiresTimeClock
+    // Mas para alocação (forAllocation = true), precisamos filtrar porque a alocação depende de registros de ponto
+    if (forAllocation) {
+      where.requiresTimeClock = true;
+    }
+
     // Construir where clause para busca manual (aplicar filtros específicos)
     let manualWhere: any = {
       user: {
         isActive: true
-      }
+      },
+      // Excluir administradores da folha de pagamento
+      position: { not: 'Administrador' }
     };
     
     if (company) manualWhere.company = { contains: company, mode: 'insensitive' };
     if (department) manualWhere.department = { contains: department, mode: 'insensitive' };
-    if (position) manualWhere.position = { contains: position, mode: 'insensitive' };
+    if (position) {
+      // Combinar filtro de position com exclusão de administradores
+      manualWhere.position = { 
+        AND: [
+          { contains: position, mode: 'insensitive' },
+          { not: 'Administrador' }
+        ]
+      };
+    }
     if (costCenter) manualWhere.costCenter = { contains: costCenter, mode: 'insensitive' };
     if (client) manualWhere.client = { contains: client, mode: 'insensitive' };
     if (modality) manualWhere.modality = { contains: modality, mode: 'insensitive' };
     if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
     if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
     if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
+    // Adicionar filtro para funcionários que precisam bater ponto (apenas para relatório de alocação)
+    if (forAllocation) {
+      manualWhere.requiresTimeClock = true;
+    }
 
     // Buscar funcionários
     let employees = await prisma.employee.findMany({
@@ -495,9 +564,17 @@ export class PayrollService {
       });
     }
 
+    // Nota: O filtro de requiresTimeClock já foi aplicado na query do Prisma acima
+    // Então não precisamos filtrar novamente aqui
+
     // Calcular totais para cada funcionário e filtrar apenas os ativos no período
     const employeesWithTotals = await Promise.all(
       employees.map(async (employee: any) => {
+        // Excluir administradores da folha de pagamento
+        if (employee.position === 'Administrador') {
+          return null; // Administrador não deve aparecer na folha
+        }
+        
         // Verificar se o funcionário estava ativo no período
         const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
         
@@ -847,6 +924,11 @@ export class PayrollService {
     });
 
     if (!employee) {
+      return null;
+    }
+
+    // Excluir administradores da folha de pagamento
+    if (employee.position === 'Administrador') {
       return null;
     }
 

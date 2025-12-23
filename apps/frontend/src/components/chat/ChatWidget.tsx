@@ -151,6 +151,7 @@ export function ChatWidget() {
       const res = await api.get('/chats/unread/count');
       return res.data;
     },
+    enabled: !!userId, // Só executar se o usuário estiver autenticado
     refetchInterval: 10000
   });
 
@@ -160,6 +161,7 @@ export function ChatWidget() {
       const res = await api.get('/chats/pending/count');
       return res.data;
     },
+    enabled: !!userId, // Só executar se o usuário estiver autenticado
     refetchInterval: 10000
   });
 

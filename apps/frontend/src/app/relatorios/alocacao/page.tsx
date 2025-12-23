@@ -79,6 +79,7 @@ export default function AlocacaoPage() {
         if (filters.polo) params.append('polo', filters.polo);
         params.append('month', filters.month.toString());
         params.append('year', filters.year.toString());
+        params.append('forAllocation', 'true'); // Indicar que é para relatório de alocação
         
         const res = await api.get(`/payroll/employees?${params.toString()}`);
         console.log('📊 Resposta da API alocação:', res.data);

@@ -559,7 +559,10 @@ export class HolidayService {
       const endYear = moment(normalizedEnd).year();
 
       for (let year = currentYear; year <= endYear; year++) {
-        const checkDate = moment(`${year}-${holidayDate.month() + 1}-${holidayDate.date()}`);
+        // Usar formato ISO válido (YYYY-MM-DD) com padding zero
+        const month = String(holidayDate.month() + 1).padStart(2, '0');
+        const day = String(holidayDate.date()).padStart(2, '0');
+        const checkDate = moment(`${year}-${month}-${day}`, 'YYYY-MM-DD');
         
         if (checkDate.isSameOrAfter(normalizedStart, 'day') && 
             checkDate.isSameOrBefore(normalizedEnd, 'day')) {

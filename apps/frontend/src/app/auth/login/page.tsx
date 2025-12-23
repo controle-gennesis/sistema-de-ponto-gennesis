@@ -11,6 +11,7 @@ import { toast } from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '@/context/ThemeContext';
 import { Loading } from '@/components/ui/Loading';
+import api from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,14 +31,41 @@ export default function LoginPage() {
     setError('');
 
     try {
-      await authService.login(formData);
+      const loginResponse = await authService.login(formData);
       // Limpar cache do React Query
       queryClient.clear();
       toast.success('Login realizado com sucesso!');
-      // Pequeno delay para o toast aparecer antes do redirecionamento
-      setTimeout(() => {
-        router.push('/ponto');
-      }, 500);
+      
+      // Verificar se o token foi salvo antes de fazer a chamada
+      const token = localStorage.getItem('token');
+      if (!token) {
+        // Se não tem token, redirecionar para /ponto por padrão
+        setTimeout(() => {
+          router.push('/ponto');
+        }, 500);
+        return;
+      }
+      
+      // Buscar dados do usuário para verificar se precisa bater ponto
+      // Usar um pequeno delay para garantir que o token está disponível
+      setTimeout(async () => {
+        try {
+          const userRes = await api.get('/auth/me');
+          const userData = userRes.data?.data;
+          const requiresTimeClock = userData?.employee?.requiresTimeClock !== false;
+          
+          // Se não precisa bater ponto, redirecionar para dashboard
+          if (!requiresTimeClock) {
+            router.push('/ponto/dashboard');
+          } else {
+            router.push('/ponto');
+          }
+        } catch (userError: any) {
+          console.error('Erro ao buscar dados do usuário:', userError);
+          // Se não conseguir buscar dados do usuário, redirecionar para /ponto por padrão
+          router.push('/ponto');
+        }
+      }, 300);
     } catch (error: any) {
       // Verificar se é erro de credenciais inválidas
       if (error.message?.includes('Credenciais inválidas') || 

@@ -86,6 +86,8 @@ export class UserController {
                 // Novos campos - Polo e Categoria Financeira
                 polo: true,
                 categoriaFinanceira: true,
+                // Campo para controlar se precisa bater ponto
+                requiresTimeClock: true,
               }
             }
           },
@@ -363,7 +365,9 @@ export class UserController {
               ...(employeeData.dailyTransportVoucher !== undefined && { dailyTransportVoucher: employeeData.dailyTransportVoucher }),
               // Novos campos - Polo e Categoria Financeira
               ...(employeeData.polo !== undefined && { polo: employeeData.polo }),
-              ...(employeeData.categoriaFinanceira !== undefined && { categoriaFinanceira: employeeData.categoriaFinanceira })
+              ...(employeeData.categoriaFinanceira !== undefined && { categoriaFinanceira: employeeData.categoriaFinanceira }),
+              // Campo para controlar se precisa bater ponto - sempre incluir, mesmo se for false
+              requiresTimeClock: employeeData.requiresTimeClock !== undefined ? employeeData.requiresTimeClock : true
             }
           });
         }
