@@ -304,11 +304,13 @@ export default function PontoPage() {
   const user = userData.data;
 
   // Se houver erro nas queries, mostrar mensagem de erro mas não quebrar a página
-  if (todayRecordsError && todayRecordsError.response?.status >= 500) {
+  const todayRecordsErrorStatus = (todayRecordsError as any)?.response?.status;
+  if (todayRecordsError && todayRecordsErrorStatus >= 500) {
     console.error('Erro ao carregar registros:', todayRecordsError);
   }
 
-  if (bankHoursError && bankHoursError.response?.status >= 500) {
+  const bankHoursErrorStatus = (bankHoursError as any)?.response?.status;
+  if (bankHoursError && bankHoursErrorStatus >= 500) {
     console.error('Erro ao carregar banco de horas:', bankHoursError);
   }
 
