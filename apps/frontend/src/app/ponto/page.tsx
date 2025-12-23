@@ -254,7 +254,8 @@ export default function PontoPage() {
 
   // Se houver erro ao carregar dados do usuário, mostrar mensagem de erro
   // Mas só se realmente não conseguir carregar após algumas tentativas
-  if ((userError && userError.response?.status >= 500) || (hasError && !loadingUser)) {
+  const userErrorStatus = (userError as any)?.response?.status;
+  if ((userError && userErrorStatus >= 500) || (hasError && !loadingUser)) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center max-w-md mx-4">
