@@ -100,6 +100,8 @@ interface Employee {
     // Novos campos - Polo e Categoria Financeira
     polo?: string;
     categoriaFinanceira?: string;
+    // Campo para controlar se precisa bater ponto
+    requiresTimeClock?: boolean;
   };
 }
 
