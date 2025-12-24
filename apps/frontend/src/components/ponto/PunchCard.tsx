@@ -29,7 +29,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [punchData, setPunchData] = useState<{ type: TimeRecordType; timestamp: Date } | null>(null);
   
-  const { location, error: locationError, loading: locationLoading } = useGeolocation();
+  const { location, error: locationError, loading: locationLoading, refetch: refetchLocation } = useGeolocation();
   const { 
     punchInOut, 
     loading: punchLoading, 
@@ -490,19 +490,46 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
 
             {/* Status da Localização */}
-            <div className="flex items-center space-x-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-              <MapPin className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-              <div className="flex-1">
-                <p className="text-xs font-medium text-gray-600 dark:text-gray-300">Localização</p>
-                {!location && (
-                  <Badge variant={locationStatus.variant} size="sm">
-                    {locationStatus.text}
-                  </Badge>
+            <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg space-y-2">
+              <div className="flex items-center space-x-2">
+                <MapPin className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-300">Localização</p>
+                  {!location && (
+                    <Badge variant={locationStatus.variant} size="sm" className="mt-1">
+                      {locationStatus.text}
+                    </Badge>
+                  )}
+                </div>
+                {location && (
+                  <div className="text-xs text-gray-400 dark:text-gray-500">
+                    {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+                  </div>
                 )}
               </div>
-              {location && (
-                <div className="text-xs text-gray-400 dark:text-gray-500">
-                  {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+              {locationError && (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {locationError}
+                  </p>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                    <p className="font-medium">Dicas para resolver:</p>
+                    <ul className="list-disc list-inside space-y-0.5 ml-2">
+                      <li>Verifique se o site está acessível via HTTPS</li>
+                      <li>Permita o acesso à localização nas configurações do navegador</li>
+                      <li>Verifique se o GPS está ativado (em dispositivos móveis)</li>
+                      <li>Recarregue a página após permitir a localização</li>
+                    </ul>
+                  </div>
+                  <Button
+                    onClick={refetchLocation}
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-2"
+                  >
+                    <RotateCcw className="w-3 h-3 mr-1" />
+                    Tentar novamente
+                  </Button>
                 </div>
               )}
             </div>
