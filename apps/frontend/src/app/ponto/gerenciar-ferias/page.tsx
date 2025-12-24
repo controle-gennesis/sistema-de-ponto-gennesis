@@ -32,6 +32,8 @@ export default function FeriasPage() {
   const [selectedTab, setSelectedTab] = useState<'pending' | 'all' | 'compliance'>('pending');
   const [showExpiringModal, setShowExpiringModal] = useState(false);
   const [searchExpiring, setSearchExpiring] = useState('');
+  const [showExpiredModal, setShowExpiredModal] = useState(false);
+  const [searchExpired, setSearchExpired] = useState('');
 
   // Buscar dados do usuário
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -204,7 +206,7 @@ export default function FeriasPage() {
         </div>
 
         {/* Cards de Estatísticas */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
@@ -254,6 +256,33 @@ export default function FeriasPage() {
                 {expiringList.length > 0 && (
                   <button
                     onClick={() => setShowExpiringModal(true)}
+                    className="p-2 sm:p-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex-shrink-0 mt-1 sm:mt-0"
+                    title="Ver lista"
+                  >
+                    <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3">
+                <div className="flex items-center flex-1 min-w-[120px] pr-2">
+                  <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
+                    <XCircle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div className="ml-3 flex-1 overflow-hidden">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 leading-tight break-normal">Vencidas</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                      {loadingCompliance ? '...' : (compliance?.expiredVacations?.length || 0)}
+                    </p>
+                  </div>
+                </div>
+                {compliance?.expiredVacations && compliance.expiredVacations.length > 0 && (
+                  <button
+                    onClick={() => setShowExpiredModal(true)}
                     className="p-2 sm:p-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex-shrink-0 mt-1 sm:mt-0"
                     title="Ver lista"
                   >
@@ -591,6 +620,99 @@ export default function FeriasPage() {
                     {searchExpiring.trim() 
                       ? 'Nenhum funcionário encontrado com o termo pesquisado'
                       : 'Nenhum funcionário com férias vencendo'}
+                  </p>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Funcionários com Férias Vencidas */}
+      {showExpiredModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => {
+            setShowExpiredModal(false);
+            setSearchExpired('');
+          }} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Funcionários com Férias Vencidas ({compliance?.expiredVacations?.length || 0})
+              </h3>
+              <button
+                onClick={() => {
+                  setShowExpiredModal(false);
+                  setSearchExpired('');
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Barra de pesquisa */}
+            <div className="px-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar por nome, departamento..."
+                  value={searchExpired}
+                  onChange={(e) => setSearchExpired(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto p-6">
+              {(() => {
+                const expiredList = compliance?.expiredVacations || [];
+                const filtered = expiredList.filter((item: any) => {
+                  if (!searchExpired.trim()) return true;
+                  const searchLower = searchExpired.toLowerCase();
+                  return (
+                    item.employeeName?.toLowerCase().includes(searchLower) ||
+                    item.employee?.name?.toLowerCase().includes(searchLower) ||
+                    item.department?.toLowerCase().includes(searchLower) ||
+                    item.employee?.department?.toLowerCase().includes(searchLower)
+                  );
+                });
+                
+                return filtered.length > 0 ? (
+                  <div className="space-y-3">
+                    {filtered.map((item: any, index: number) => {
+                      const employeeName = item.employeeName || item.employee?.name || 'N/A';
+                      const department = item.department || item.employee?.department || 'N/A';
+                      const availableDays = item.availableDays || item.daysAvailable || 0;
+                      const expiresAt = item.expiresAt || item.expiredAt;
+                      
+                      return (
+                        <div
+                          key={item.userId || item.employeeId || index}
+                          className="p-4 bg-red-50 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-800"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <p className="font-medium text-red-900 dark:text-red-300">{employeeName}</p>
+                              <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                                {department} • {availableDays} dias disponíveis
+                              </p>
+                              {expiresAt && (
+                                <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                                  Venceu em: {new Date(expiresAt).toLocaleDateString('pt-BR')}
+                                </p>
+                              )}
+                            </div>
+                            <XCircle className="w-6 h-6 text-red-500 dark:text-red-400 flex-shrink-0 ml-4" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    {searchExpired.trim() 
+                      ? 'Nenhum funcionário encontrado com o termo pesquisado'
+                      : 'Nenhum funcionário com férias vencidas'}
                   </p>
                 );
               })()}
