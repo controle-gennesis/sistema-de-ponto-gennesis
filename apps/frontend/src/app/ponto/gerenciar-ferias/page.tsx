@@ -21,7 +21,8 @@ import {
   AlertTriangle,
   Eye,
   Check,
-  X
+  X,
+  Search
 } from 'lucide-react';
 import { Vacation, ComplianceReport } from '@/types';
 
@@ -29,6 +30,8 @@ export default function FeriasPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [selectedTab, setSelectedTab] = useState<'pending' | 'all' | 'compliance'>('pending');
+  const [showExpiringModal, setShowExpiringModal] = useState(false);
+  const [searchExpiring, setSearchExpiring] = useState('');
 
   // Buscar dados do usuário
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -236,16 +239,27 @@ export default function FeriasPage() {
 
           <Card>
             <CardContent className="p-4">
-              <div className="flex items-center">
-                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                  <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+              <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3">
+                <div className="flex items-center flex-1 min-w-[120px] pr-2">
+                  <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
+                    <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div className="ml-3 flex-1 overflow-hidden">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 leading-tight break-normal">Vencendo</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                      {expiringList.length}
+                    </p>
+                  </div>
                 </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Vencendo</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {expiringList.length}
-                  </p>
-                </div>
+                {expiringList.length > 0 && (
+                  <button
+                    onClick={() => setShowExpiringModal(true)}
+                    className="p-2 sm:p-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex-shrink-0 mt-1 sm:mt-0"
+                    title="Ver lista"
+                  >
+                    <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -503,6 +517,87 @@ export default function FeriasPage() {
           </div>
         )}
       </div>
+
+      {/* Modal de Funcionários com Férias Vencendo */}
+      {showExpiringModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => {
+            setShowExpiringModal(false);
+            setSearchExpiring('');
+          }} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Funcionários com Férias Vencendo ({expiringList.length})
+              </h3>
+              <button
+                onClick={() => {
+                  setShowExpiringModal(false);
+                  setSearchExpiring('');
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Barra de pesquisa */}
+            <div className="px-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar por nome, departamento..."
+                  value={searchExpiring}
+                  onChange={(e) => setSearchExpiring(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto p-6">
+              {(() => {
+                const filtered = expiringList.filter((item: any) => {
+                  if (!searchExpiring.trim()) return true;
+                  const searchLower = searchExpiring.toLowerCase();
+                  return (
+                    item.employeeName?.toLowerCase().includes(searchLower) ||
+                    item.department?.toLowerCase().includes(searchLower)
+                  );
+                });
+                
+                return filtered.length > 0 ? (
+                  <div className="space-y-3">
+                    {filtered.map((item: any) => (
+                      <div
+                        key={item.userId}
+                        className="p-4 bg-red-50 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-800"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <p className="font-medium text-red-900 dark:text-red-300">{item.employeeName}</p>
+                            <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                              {item.department} • {item.availableDays} dias disponíveis
+                            </p>
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              Vence em: {new Date(item.expiresAt).toLocaleDateString('pt-BR')}
+                            </p>
+                          </div>
+                          <AlertTriangle className="w-6 h-6 text-red-500 dark:text-red-400 flex-shrink-0 ml-4" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    {searchExpiring.trim() 
+                      ? 'Nenhum funcionário encontrado com o termo pesquisado'
+                      : 'Nenhum funcionário com férias vencendo'}
+                  </p>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 }
