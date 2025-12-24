@@ -8,6 +8,7 @@ export interface VacationBalance {
   usedDays: number;
   availableDays: number;
   pendingDays: number;
+  expiredDays: number;
   nextVacationDate?: Date;
   expiresAt?: Date;
   aquisitiveStart?: Date;
@@ -37,6 +38,7 @@ export interface ComplianceReport {
     department: string;
     expiresAt: Date;
     availableDays: number;
+    expiredDays: number;
   }>;
   pendingApprovals: number;
   upcomingExpirations: number;
@@ -125,11 +127,19 @@ export class VacationService {
     const aquisitiveEnd = hireDate.clone().add(Math.floor(yearsWorked) + 1, 'years').toDate();
     const concessiveEnd = aquisitiveEnd;
 
+    // Calcular dias vencidos (períodos concessivos que já passaram)
+    // Considera apenas os dias não usados dos períodos vencidos
+    const expiredDays = this.calculateExpiredDays(hireDate, currentDate, vacationDaysPerYear, usedDays);
+
+    // Calcular dias disponíveis: total menos dias usados menos dias vencidos não usados
+    const availableDays = Math.max(0, totalDays - usedDays - expiredDays);
+
     return {
       totalDays,
       usedDays,
-      availableDays: Math.max(0, totalDays - usedDays),
+      availableDays,
       pendingDays,
+      expiredDays,
       nextVacationDate: nextVacationDate.toDate(),
       expiresAt: expiresAt ? expiresAt.toDate() : undefined,
       aquisitiveStart,
@@ -191,6 +201,44 @@ export class VacationService {
     
     // Período concessivo: 12 meses após o período aquisitivo
     return acquisitionPeriodEnd.clone().add(12, 'months');
+  }
+
+  /**
+   * Calcula quantos dias de férias já venceram (períodos concessivos que passaram)
+   * Retorna apenas os dias não usados dos períodos que venceram
+   */
+  private calculateExpiredDays(hireDate: moment.Moment, currentDate: moment.Moment, vacationDaysPerYear: number, usedDays: number): number {
+    // Normalizar as datas para início do dia para comparação precisa
+    const hireDateNormalized = hireDate.clone().startOf('day');
+    const currentDateNormalized = currentDate.clone().startOf('day');
+    
+    const yearsWorked = currentDateNormalized.diff(hireDateNormalized, 'years', true);
+    
+    // Se não completou 1 ano, não tem dias vencidos
+    if (yearsWorked < 1) {
+      return 0;
+    }
+
+    let totalExpiredPeriodDays = 0;
+    const completedYears = Math.floor(yearsWorked);
+
+    // Verificar cada período aquisitivo completo
+    for (let year = 1; year <= completedYears; year++) {
+      // Fim do período aquisitivo
+      const acquisitionPeriodEnd = hireDateNormalized.clone().add(year, 'years');
+      
+      // Fim do período concessivo (12 meses após o período aquisitivo)
+      const concessivePeriodEnd = acquisitionPeriodEnd.clone().add(12, 'months').startOf('day');
+      
+      // Se o período concessivo já passou ou é hoje, os dias desse período venceram
+      if (currentDateNormalized.isSameOrAfter(concessivePeriodEnd, 'day')) {
+        totalExpiredPeriodDays += vacationDaysPerYear;
+      }
+    }
+
+    // Retornar apenas os dias não usados dos períodos vencidos
+    // Assumimos que os dias usados são dos períodos mais antigos primeiro
+    return Math.max(0, totalExpiredPeriodDays - usedDays);
   }
 
   /**
@@ -376,8 +424,15 @@ export class VacationService {
     department: string;
     expiresAt: Date;
     availableDays: number;
+    expiredDays: number;
   }>> {
     const expirationDate = moment().add(daysBeforeExpiration, 'days').toDate();
+    const currentDate = moment();
+    const isExpired = daysBeforeExpiration === 0; // Se for 0, busca os já vencidos
+
+    // Buscar configurações da empresa
+    const companySettings = await prisma.companySettings.findFirst();
+    const vacationDaysPerYear = companySettings?.vacationDaysPerYear || 30;
 
     // Buscar funcionários com férias próximas do vencimento
     const employees = await prisma.employee.findMany({
@@ -391,16 +446,60 @@ export class VacationService {
     const expiringVacations = [];
 
     for (const employee of employees) {
-      const balance = await this.getVacationBalance(employee.userId);
+      const hireDate = moment(employee.hireDate).startOf('day');
+      const yearsWorked = currentDate.diff(hireDate, 'years', true); // Usar true para precisão decimal
       
-      if (balance.expiresAt && balance.expiresAt <= expirationDate && balance.availableDays > 0) {
-        expiringVacations.push({
-          userId: employee.userId,
-          employeeName: employee.user.name,
-          department: employee.department,
-          expiresAt: balance.expiresAt,
-          availableDays: balance.availableDays
-        });
+      // Se não completou 1 ano, não tem férias para vencer
+      if (yearsWorked < 1) {
+        continue;
+      }
+
+      const completedYears = Math.floor(yearsWorked);
+      let lastExpiredPeriodEnd: moment.Moment | null = null;
+
+      // Verificar cada período aquisitivo completo para encontrar o último período vencido
+      for (let year = 1; year <= completedYears; year++) {
+        const acquisitionPeriodEnd = hireDate.clone().add(year, 'years');
+        const concessivePeriodEnd = acquisitionPeriodEnd.clone().add(12, 'months').startOf('day');
+        
+        // Se o período concessivo já passou ou é hoje, é um período vencido
+        if (currentDate.isSameOrAfter(concessivePeriodEnd, 'day')) {
+          lastExpiredPeriodEnd = concessivePeriodEnd;
+        } else {
+          break; // Se encontrou um período não vencido, para de procurar
+        }
+      }
+
+      // Se está buscando vencidos, verificar se há períodos vencidos
+      if (isExpired) {
+        if (lastExpiredPeriodEnd) {
+          const balance = await this.getVacationBalance(employee.userId);
+          // Só incluir se realmente tem dias vencidos
+          if (balance.expiredDays > 0) {
+            expiringVacations.push({
+              userId: employee.userId,
+              employeeName: employee.user.name,
+              department: employee.department,
+              expiresAt: lastExpiredPeriodEnd.toDate(),
+              availableDays: balance.availableDays,
+              expiredDays: balance.expiredDays
+            });
+          }
+        }
+      } else {
+        // Se está buscando vencendo, usar a lógica original
+        const balance = await this.getVacationBalance(employee.userId);
+        
+        if (balance.expiresAt && balance.expiresAt <= expirationDate && balance.availableDays > 0) {
+          expiringVacations.push({
+            userId: employee.userId,
+            employeeName: employee.user.name,
+            department: employee.department,
+            expiresAt: balance.expiresAt,
+            availableDays: balance.availableDays,
+            expiredDays: balance.expiredDays || 0
+          });
+        }
       }
     }
 

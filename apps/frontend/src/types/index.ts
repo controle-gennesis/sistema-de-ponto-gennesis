@@ -57,6 +57,7 @@ export interface VacationBalance {
   usedDays: number;
   availableDays: number;
   pendingDays: number;
+  expiredDays: number;
   nextVacationDate?: string;
   expiresAt?: string;
   aquisitiveStart?: string;

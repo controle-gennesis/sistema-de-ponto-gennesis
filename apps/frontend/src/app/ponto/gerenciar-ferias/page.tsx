@@ -17,7 +17,6 @@ import {
   CheckCircle, 
   XCircle, 
   Users,
-  TrendingUp,
   AlertTriangle,
   Eye,
   Check,
@@ -206,7 +205,7 @@ export default function FeriasPage() {
         </div>
 
         {/* Cards de Estatísticas */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
@@ -243,8 +242,8 @@ export default function FeriasPage() {
             <CardContent className="p-4">
               <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3">
                 <div className="flex items-center flex-1 min-w-[120px] pr-2">
-                  <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
-                    <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                  <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex-shrink-0">
+                    <AlertTriangle className="w-6 h-6 text-orange-600 dark:text-orange-400" />
                   </div>
                   <div className="ml-3 flex-1 overflow-hidden">
                     <p className="text-sm font-medium text-gray-600 dark:text-gray-400 leading-tight break-normal">Vencendo</p>
@@ -289,22 +288,6 @@ export default function FeriasPage() {
                     <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
                   </button>
                 )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center">
-                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                  <TrendingUp className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Conformidade</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {loadingCompliance ? '...' : `${compliance?.complianceRate.toFixed(1)}%`}
-                  </p>
-                </div>
               </div>
             </CardContent>
           </Card>
