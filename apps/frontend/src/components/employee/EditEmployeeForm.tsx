@@ -242,6 +242,10 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasOperation, setHasOperation] = useState(() => {
+    const op = employee.employee?.operation || '';
+    return op && op !== 'N/A' && op.trim() !== '';
+  });
 
   const queryClient = useQueryClient();
 
@@ -388,7 +392,7 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
         bank: data.bank || undefined,
         accountType: data.accountType || undefined,
         agency: data.agency || undefined,
-        operation: data.operation || undefined,
+        operation: hasOperation && data.operation ? data.operation : 'N/A',
         account: data.account || undefined,
         digit: data.digit || undefined,
         pixKeyType: data.pixKeyType || undefined,
@@ -973,8 +977,41 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
                     <input type="text" value={formData.agency} onChange={(e)=>handleInputChange('agency', e.target.value)} className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Operação</label>
-                    <input type="text" value={formData.operation} onChange={(e)=>handleInputChange('operation', e.target.value)} className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Operação
+                      </label>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="hasOperation"
+                          checked={hasOperation}
+                          onChange={(e) => {
+                            setHasOperation(e.target.checked);
+                            if (!e.target.checked) {
+                              handleInputChange('operation', '');
+                            }
+                          }}
+                          className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                        />
+                        <label htmlFor="hasOperation" className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                          Tem operação?
+                        </label>
+                      </div>
+                    </div>
+                    {hasOperation ? (
+                      <input 
+                        type="text" 
+                        value={formData.operation} 
+                        onChange={(e)=>handleInputChange('operation', e.target.value)} 
+                        className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" 
+                        placeholder="01"
+                      />
+                    ) : (
+                      <div className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-md text-gray-400 dark:text-gray-500 text-sm">
+                        N/A
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Conta</label>
