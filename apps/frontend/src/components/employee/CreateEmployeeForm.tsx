@@ -94,8 +94,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     'Financeiro'
   ];
 
-  // Lista de cargos disponíveis (sem Administrador)
-  const positions = CARGOS_AVAILABLE;
+  // Lista de cargos disponíveis (sem Administrador e sem Diretor)
+  const positions = CARGOS_AVAILABLE.filter(cargo => cargo !== 'Diretor');
 
   // Lista de empresas
   const companies = [
