@@ -575,10 +575,37 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                   </div>
 
                   {cameraError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <div className="flex items-center space-x-2 text-red-600">
-                        <AlertCircle className="w-4 h-4" />
-                        <span className="text-sm">{cameraError}</span>
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <div className="flex items-start space-x-3">
+                        <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-red-800 dark:text-red-300 mb-1">
+                            Erro ao acessar a câmera
+                          </p>
+                          <p className="text-sm text-red-700 dark:text-red-400 mb-3">{cameraError}</p>
+                          <div className="mt-3 text-xs text-red-600 dark:text-red-400 mb-3">
+                            <p className="font-medium mb-1">Como resolver:</p>
+                            <ul className="list-disc list-inside space-y-1 ml-2">
+                              <li>Verifique se permitiu o acesso à câmera no navegador</li>
+                              <li>Feche outros aplicativos que possam estar usando a câmera</li>
+                              <li>Recarregue a página e tente novamente</li>
+                              <li>Verifique se há uma câmera conectada ao computador</li>
+                            </ul>
+                          </div>
+                          <Button
+                            onClick={async () => {
+                              stopCamera();
+                              await new Promise(resolve => setTimeout(resolve, 500));
+                              await startCamera();
+                            }}
+                            variant="outline"
+                            size="sm"
+                            className="w-full border-red-300 text-red-700 hover:bg-red-100 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/30"
+                          >
+                            <RotateCcw className="w-4 h-4 mr-2" />
+                            Tentar Novamente
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   )}
