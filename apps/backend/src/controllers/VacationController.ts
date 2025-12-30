@@ -51,7 +51,20 @@ export class VacationController {
 
       // Determinar tipo baseado no fracionamento
       let vacationType = vacationRequest.type;
-      if (fraction) {
+      // Se o tipo for FRACTIONED, converter para FRACTIONED_1, FRACTIONED_2 ou FRACTIONED_3 baseado no fraction
+      if (vacationRequest.type === 'FRACTIONED') {
+        if (fraction) {
+          switch (fraction) {
+            case 1: vacationType = 'FRACTIONED_1'; break;
+            case 2: vacationType = 'FRACTIONED_2'; break;
+            case 3: vacationType = 'FRACTIONED_3'; break;
+            default: throw createError('Período fracionado inválido. Deve ser 1, 2 ou 3', 400);
+          }
+        } else {
+          throw createError('Período fracionado é obrigatório quando o tipo é Fracionado', 400);
+        }
+      } else if (fraction) {
+        // Se não for FRACTIONED mas tiver fraction, também converter
         switch (fraction) {
           case 1: vacationType = 'FRACTIONED_1'; break;
           case 2: vacationType = 'FRACTIONED_2'; break;

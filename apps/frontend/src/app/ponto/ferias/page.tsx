@@ -38,6 +38,15 @@ export default function VacationsPage() {
     fraction: undefined
   });
 
+  // Quando o tipo mudar para ANNUAL, limpar o fraction
+  const handleTypeChange = (newType: string) => {
+    if (newType === 'ANNUAL') {
+      setFormData({ ...formData, type: newType, fraction: undefined });
+    } else {
+      setFormData({ ...formData, type: newType });
+    }
+  };
+
   // Buscar dados do usuário
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -108,7 +117,18 @@ export default function VacationsPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    requestVacationMutation.mutate(formData);
+    
+    // Validação: se for fracionado, o período fracionado é obrigatório
+    if (formData.type === 'FRACTIONED' && !formData.fraction) {
+      toast.error('Por favor, selecione o período fracionado');
+      return;
+    }
+    
+    // Se for anual, garantir que fraction seja undefined
+    const dataToSubmit = formData.type === 'ANNUAL' 
+      ? { ...formData, fraction: undefined }
+      : formData;
+    requestVacationMutation.mutate(dataToSubmit);
   };
 
   const handleCancel = (vacationId: string) => {
@@ -142,12 +162,17 @@ export default function VacationsPage() {
     }
   };
 
-  const getTypeText = (type: string) => {
+  const getTypeText = (type: string, fraction?: number) => {
     switch (type) {
-      case 'ANNUAL': return 'Anual';
+      case 'ANNUAL': return 'Férias Completas';
       case 'FRACTIONED_1': return '1º Período Fracionado';
       case 'FRACTIONED_2': return '2º Período Fracionado';
       case 'FRACTIONED_3': return '3º Período Fracionado';
+      case 'FRACTIONED': 
+        if (fraction === 1) return '1º Período Fracionado';
+        if (fraction === 2) return '2º Período Fracionado';
+        if (fraction === 3) return '3º Período Fracionado';
+        return 'Fracionado';
       case 'SICK': return 'Por Doença';
       case 'MATERNITY': return 'Maternidade';
       case 'PATERNITY': return 'Paternidade';
@@ -326,42 +351,41 @@ export default function VacationsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className={`grid gap-4 ${formData.type === 'FRACTIONED' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1'}`}>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Tipo de Férias *
                     </label>
                     <select
                       value={formData.type}
-                      onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                      onChange={(e) => handleTypeChange(e.target.value)}
                       className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                     >
-                      <option value="ANNUAL">Anual</option>
-                      <option value="FRACTIONED_1">1º Período Fracionado</option>
-                      <option value="FRACTIONED_2">2º Período Fracionado</option>
-                      <option value="FRACTIONED_3">3º Período Fracionado</option>
-                      <option value="SICK">Por Doença</option>
-                      <option value="EMERGENCY">Emergência</option>
+                      <option value="ANNUAL">Férias Completas</option>
+                      <option value="FRACTIONED">Fracionado</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Período Fracionado (se aplicável)
-                    </label>
-                    <select
-                      value={formData.fraction || ''}
-                      onChange={(e) => setFormData({ 
-                        ...formData, 
-                        fraction: e.target.value ? Number(e.target.value) : undefined 
-                      })}
-                      className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                    >
-                      <option value="">Não fracionado</option>
-                      <option value="1">1º Período</option>
-                      <option value="2">2º Período</option>
-                      <option value="3">3º Período</option>
-                    </select>
-                  </div>
+                  {formData.type === 'FRACTIONED' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Período Fracionado *
+                      </label>
+                      <select
+                        value={formData.fraction || ''}
+                        onChange={(e) => setFormData({ 
+                          ...formData, 
+                          fraction: e.target.value ? Number(e.target.value) : undefined 
+                        })}
+                        required={formData.type === 'FRACTIONED'}
+                        className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      >
+                        <option value="">Selecione o período</option>
+                        <option value="1">1º Período</option>
+                        <option value="2">2º Período</option>
+                        <option value="3">3º Período</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -435,7 +459,7 @@ export default function VacationsPage() {
                         {getStatusIcon(vacation.status)}
                         <div>
                           <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                            {getTypeText(vacation.type)}
+                            {getTypeText(vacation.type, vacation.fraction || undefined)}
                           </h3>
                           <p className="text-sm text-gray-600 dark:text-gray-400">
                             {new Date(vacation.startDate).toLocaleDateString('pt-BR')} -{' '}
