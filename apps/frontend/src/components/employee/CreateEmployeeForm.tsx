@@ -59,7 +59,7 @@ interface EmployeeFormData {
 
   // Novos campos - Polo e Categoria Financeira
   polo: 'BRASÍLIA' | 'GOIÁS' | '';
-  categoriaFinanceira: 'GASTO' | 'DESPESA' | '';
+  categoriaFinanceira: 'CUSTO' | 'DESPESA' | '';
   
   // Campo para controlar se precisa bater ponto
   requiresTimeClock: boolean;
@@ -1418,7 +1418,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   }`}
                 >
                   <option value="">Selecione a categoria</option>
-                  <option value="GASTO">GASTO</option>
+                  <option value="CUSTO">CUSTO</option>
                   <option value="DESPESA">DESPESA</option>
                 </select>
                 {errors.categoriaFinanceira && (

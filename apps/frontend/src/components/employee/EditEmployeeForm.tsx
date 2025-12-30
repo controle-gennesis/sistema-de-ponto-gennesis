@@ -57,7 +57,7 @@ interface EmployeeFormData {
   
   // Novos campos - Polo e Categoria Financeira
   polo: 'BRASÍLIA' | 'GOIÁS' | '';
-  categoriaFinanceira: 'GASTO' | 'DESPESA' | '';
+  categoriaFinanceira: 'CUSTO' | 'DESPESA' | '';
   
   // Campo para controlar se precisa bater ponto
   requiresTimeClock: boolean;
@@ -796,7 +796,7 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
                       className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${errors.categoriaFinanceira ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'}`}
                     >
                       <option value="">Selecione a categoria</option>
-                      <option value="GASTO">GASTO</option>
+                      <option value="CUSTO">CUSTO</option>
                       <option value="DESPESA">DESPESA</option>
                     </select>
                     {errors.categoriaFinanceira && (

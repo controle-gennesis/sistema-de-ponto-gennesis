@@ -25,7 +25,7 @@ export const MODALITIES_LIST = [
 
 // Lista de categorias financeiras
 export const CATEGORIAS_FINANCEIRAS_LIST = [
-  'GASTO',
+  'CUSTO',
   'DESPESA'
 ];
 
