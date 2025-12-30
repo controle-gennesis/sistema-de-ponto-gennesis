@@ -223,6 +223,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [warningMessage, setWarningMessage] = useState<string>('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [isCheckingCpf, setIsCheckingCpf] = useState(false);
 
   // Estado para controlar a etapa atual do formulário
   const [currentStep, setCurrentStep] = useState(1);
@@ -485,8 +486,11 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         newErrors.cpf = 'CPF deve ter 11 dígitos';
       } else if (!isValidCPF(cpfNumbers)) {
         newErrors.cpf = 'CPF inválido';
-        }
+      } else if (errors.cpf && errors.cpf.includes('já está em uso')) {
+        // Manter o erro de CPF já em uso se existir
+        newErrors.cpf = errors.cpf;
       }
+    }
       
       if (!formData.password.trim()) newErrors.password = 'Senha é obrigatória';
       else if (formData.password.length < 6) newErrors.password = 'Senha deve ter pelo menos 6 caracteres';
@@ -615,6 +619,12 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
   // Funções de navegação entre etapas
   const nextStep = () => {
+    // Verificar se há erro de CPF já em uso antes de validar
+    if (errors.cpf && errors.cpf.includes('já está em uso')) {
+      toast.error('Não é possível avançar: Este CPF já está em uso');
+      return;
+    }
+    
     const isValid = validateStep(currentStep);
     if (isValid) {
       if (currentStep < steps.length) {
@@ -818,9 +828,72 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     return numbers.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
   };
 
+  // Função para verificar se o CPF já existe
+  const checkCpfExists = async (cpf: string) => {
+    // Remover formatação do CPF
+    const cpfNumbers = cpf.replace(/\D/g, '');
+    
+    // Só verificar se o CPF tiver 11 dígitos e for válido
+    if (cpfNumbers.length !== 11 || !isValidCPF(cpfNumbers)) {
+      // Limpar erro se o CPF não estiver completo ou for inválido
+      if (errors.cpf && errors.cpf.includes('já está em uso')) {
+        setErrors(prev => {
+          const newErrors = { ...prev };
+          delete newErrors.cpf;
+          return newErrors;
+        });
+      }
+      return;
+    }
+
+    setIsCheckingCpf(true);
+    try {
+      const response = await api.get('/users/check-cpf', {
+        params: { cpf: cpfNumbers }
+      });
+
+      if (response.data.exists) {
+        setErrors(prev => ({
+          ...prev,
+          cpf: 'Este CPF já está em uso'
+        }));
+      } else {
+        // Limpar erro se o CPF não existir
+        if (errors.cpf && errors.cpf.includes('já está em uso')) {
+          setErrors(prev => {
+            const newErrors = { ...prev };
+            delete newErrors.cpf;
+            return newErrors;
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao verificar CPF:', error);
+      // Não mostrar erro para o usuário se a verificação falhar
+    } finally {
+      setIsCheckingCpf(false);
+    }
+  };
+
   const handleCPFChange = (value: string) => {
     const formatted = formatCPF(value);
     handleInputChange('cpf', formatted);
+    
+    // Verificar CPF imediatamente quando tiver 11 dígitos
+    const cpfNumbers = formatted.replace(/\D/g, '');
+    if (cpfNumbers.length === 11) {
+      // Verificar imediatamente após digitar o último dígito
+      checkCpfExists(formatted);
+    } else {
+      // Limpar erro se o CPF não estiver completo
+      if (errors.cpf && errors.cpf.includes('já está em uso')) {
+        setErrors(prev => {
+          const newErrors = { ...prev };
+          delete newErrors.cpf;
+          return newErrors;
+        });
+      }
+    }
   };
 
   // Função para formatar data (dd/mm/aaaa)
@@ -974,17 +1047,29 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   CPF *
                 </label>
-                <input
-                  type="text"
-                  value={formData.cpf}
-                  onChange={(e) => handleCPFChange(e.target.value)}
-                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
-                    errors.cpf ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                  placeholder="000.000.000-00"
-                  maxLength={14}
-                />
-                {errors.cpf && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.cpf}</p>}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={formData.cpf}
+                    onChange={(e) => handleCPFChange(e.target.value)}
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      errors.cpf ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                    placeholder="000.000.000-00"
+                    maxLength={14}
+                  />
+                  {isCheckingCpf && formData.cpf.replace(/\D/g, '').length === 11 && (
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    </div>
+                  )}
+                </div>
+                {errors.cpf && (
+                  <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
+                    <AlertCircle className="w-3 h-3 mr-1" />
+                    {errors.cpf}
+                  </p>
+                )}
               </div>
 
               <div>

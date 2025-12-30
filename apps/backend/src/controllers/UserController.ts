@@ -555,4 +555,67 @@ export class UserController {
       next(error);
     }
   }
+
+  async checkCpfExists(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { cpf } = req.query;
+
+      if (!cpf || typeof cpf !== 'string') {
+        return res.json({
+          success: true,
+          exists: false
+        });
+      }
+
+      // Remover formatação do CPF recebido
+      const cpfNumbers = cpf.replace(/\D/g, '');
+
+      if (cpfNumbers.length !== 11) {
+        return res.json({
+          success: true,
+          exists: false
+        });
+      }
+
+      // Buscar CPF no banco - pode estar com ou sem formatação
+      // Buscamos tanto o CPF formatado quanto sem formatação
+      const cpfFormatted = `${cpfNumbers.slice(0, 3)}.${cpfNumbers.slice(3, 6)}.${cpfNumbers.slice(6, 9)}-${cpfNumbers.slice(9, 11)}`;
+      
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { cpf: cpfNumbers },
+            { cpf: cpfFormatted }
+          ]
+        },
+        select: { id: true, name: true }
+      });
+
+      // Se não encontrou, fazer uma busca mais ampla normalizando CPFs
+      if (!existingUser) {
+        const allUsers = await prisma.user.findMany({
+          select: { id: true, name: true, cpf: true }
+        });
+
+        const foundUser = allUsers.find(user => {
+          const userCpfNumbers = user.cpf.replace(/\D/g, '');
+          return userCpfNumbers === cpfNumbers;
+        });
+
+        return res.json({
+          success: true,
+          exists: !!foundUser,
+          user: foundUser ? { id: foundUser.id, name: foundUser.name } : null
+        });
+      }
+
+      return res.json({
+        success: true,
+        exists: true,
+        user: { id: existingUser.id, name: existingUser.name }
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }

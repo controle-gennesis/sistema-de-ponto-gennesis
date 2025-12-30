@@ -12,6 +12,9 @@ router.use(authenticate);
 // Rota para aniversariantes (DEVE vir antes de /:id)
 router.get('/birthdays', authorize('EMPLOYEE'), getBirthdayEmployees);
 
+// Rota para verificar se CPF existe (DEVE vir antes de /:id)
+router.get('/check-cpf', authorize('EMPLOYEE'), userController.checkCpfExists);
+
 // Rotas para funcionários - agora todos têm acesso
 router.get('/', authorize('EMPLOYEE'), userController.getAllUsers);
 router.get('/me/employee', userController.getMyEmployeeData);
