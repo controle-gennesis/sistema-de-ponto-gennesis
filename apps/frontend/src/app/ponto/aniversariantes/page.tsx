@@ -7,6 +7,7 @@ import { Cake, Search, Calendar, Users, Mail, Filter, ChevronDown, ChevronUp } f
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 
 interface BirthdayEmployee {
@@ -166,12 +167,13 @@ export default function AniversariantesPage() {
   };
 
   return (
-    <MainLayout 
-      userRole={user.role} 
-      userName={user.name} 
-      onLogout={handleLogout}
-    >
-      <div className="space-y-6">
+    <ProtectedRoute route="/ponto/aniversariantes">
+      <MainLayout 
+        userRole={user.role} 
+        userName={user.name} 
+        onLogout={handleLogout}
+      >
+        <div className="space-y-6">
         {/* Header */}
         <div className="text-center">
           <div className="flex items-center justify-center space-x-3 mb-4">
@@ -497,12 +499,13 @@ export default function AniversariantesPage() {
         </Card>
       </div>
 
-      {/* Modal de alterar senha */}
-      <ChangePasswordModal
-        isOpen={isChangePasswordOpen}
-        onClose={() => setIsChangePasswordOpen(false)}
-        onSuccess={() => setIsChangePasswordOpen(false)}
-      />
-    </MainLayout>
+        {/* Modal de alterar senha */}
+        <ChangePasswordModal
+          isOpen={isChangePasswordOpen}
+          onClose={() => setIsChangePasswordOpen(false)}
+          onSuccess={() => setIsChangePasswordOpen(false)}
+        />
+      </MainLayout>
+    </ProtectedRoute>
   );
 }

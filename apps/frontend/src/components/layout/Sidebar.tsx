@@ -129,7 +129,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/dashboard',
         icon: LayoutDashboard,
         description: 'Visão geral do sistema',
-        permission: isAdministrator || permissions.canViewDashboard
+        permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
           }
         ]
       },
@@ -143,7 +143,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/folha-pagamento',
             icon: FileSpreadsheet,
             description: 'Gestão de folha de pagamento',
-            permission: isAdministrator || permissions.canAccessPayroll
+            permission: isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll
           }
         ]
       },
@@ -157,7 +157,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto',
             icon: FolderClock,
             description: 'Gerencie seus registros',
-            permission: (isAdministrator || permissions.canRegisterTime) && requiresTimeClock
+            permission: (isAdministrator || isDepartmentPessoal || permissions.canRegisterTime) && requiresTimeClock
           }
         ]
       },
@@ -171,14 +171,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/funcionarios',
         icon: Users,
         description: 'Gerenciar funcionários',
-        permission: isAdministrator || permissions.canManageEmployees
+        permission: isAdministrator || isDepartmentPessoal || permissions.canManageEmployees
       },
           {
             name: 'Aniversariantes',
             href: '/ponto/aniversariantes',
             icon: CalendarDays,
             description: 'Ver aniversariantes do mês',
-            permission: isAdministrator || permissions.canViewBirthdays
+            permission: isAdministrator || isDepartmentPessoal // Apenas Administrador ou Departamento Pessoal
           }
         ]
       },
@@ -241,14 +241,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/gerenciar-ferias',
             icon: BookImage,
             description: 'Gerenciar férias dos funcionários',
-            permission: isAdministrator || permissions.canManageVacations
+            permission: isAdministrator || isDepartmentPessoal || permissions.canManageVacations
           },
           {
             name: 'Gerenciar Feriados',
             href: '/ponto/gerenciar-feriados',
             icon: CalendarDays,
             description: 'Gerenciar calendário de feriados',
-            permission: isAdministrator || permissions.canManageVacations
+            permission: isAdministrator || isDepartmentPessoal || permissions.canManageVacations
           }
         ]
       },
@@ -262,7 +262,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         href: '/ponto/banco-horas',
         icon: FolderClock,
         description: 'Controle de banco de horas',
-        permission: isAdministrator || permissions.canManageBankHours
+        permission: isAdministrator || isDepartmentPessoal || permissions.canManageBankHours
       },
       {
         name: 'Alocação',

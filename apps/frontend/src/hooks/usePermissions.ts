@@ -23,7 +23,7 @@ const generatePositionPermissions = () => {
     // Pular Administrador pois já foi definido acima
     if (cargo === 'Administrador') return;
     // Definir permissões baseadas no cargo
-    if (cargo === 'Diretor' || cargo === 'Gerente') {
+    if (cargo === 'Diretor') {
       // DIREÇÃO - Acesso total
       permissions[cargo] = {
         canAccessPayroll: true,
@@ -36,56 +36,18 @@ const generatePositionPermissions = () => {
         canRegisterTime: true,
         canViewDashboard: true,
       };
-    } else if (cargo === 'Coordenador(a)' || cargo === 'Supervisor') {
-      // COORDENAÇÃO - Acesso administrativo sem folha
-      permissions[cargo] = {
-        canAccessPayroll: false,
-        canManageEmployees: cargo === 'Coordenador(a)',
-        canViewReports: true,
-        canManageVacations: cargo === 'Coordenador(a)',
-        canManageAbsences: true,
-        canManageBankHours: true,
-        canViewBirthdays: true,
-        canRegisterTime: true,
-        canViewDashboard: false,
-      };
-    } else if (cargo === 'Encarregado' || cargo === 'Mestre de obras') {
-      // SUPERVISÃO OPERACIONAL
-      permissions[cargo] = {
-        canAccessPayroll: false,
-        canManageEmployees: false,
-        canViewReports: true,
-        canManageVacations: false,
-        canManageAbsences: true,
-        canManageBankHours: true,
-        canViewBirthdays: true,
-        canRegisterTime: true,
-        canViewDashboard: false,
-      };
-    } else if (cargo === 'Engenheiro' || cargo === 'Orçamentista') {
-      // TÉCNICO ESPECIALIZADO COM RELATÓRIOS
-      permissions[cargo] = {
-        canAccessPayroll: false,
-        canManageEmployees: false,
-        canViewReports: true,
-        canManageVacations: false,
-        canManageAbsences: false,
-        canManageBankHours: false,
-        canViewBirthdays: true,
-        canRegisterTime: true,
-        canViewDashboard: false,
-      };
     } else {
-      // TODOS OS OUTROS CARGOS - Acesso básico
+      // TODOS OS OUTROS CARGOS (Gerente, Coordenador, Supervisor, Encarregado, Mestre de Obras, Engenheiro, Orçamentista, etc.)
+      // Permissões básicas: Registrar Ponto, Registrar Ausência, Correção de Ponto, Solicitar Férias
       permissions[cargo] = {
         canAccessPayroll: false,
         canManageEmployees: false,
         canViewReports: false,
-        canManageVacations: false,
-        canManageAbsences: false,
+        canManageVacations: false, // Não pode gerenciar férias de outros, mas pode solicitar suas próprias
+        canManageAbsences: false, // Não pode gerenciar ausências de outros, mas pode registrar suas próprias
         canManageBankHours: false,
-        canViewBirthdays: true,
-        canRegisterTime: true,
+        canViewBirthdays: false,
+        canRegisterTime: true, // Pode registrar ponto
         canViewDashboard: false,
       };
     }
@@ -140,23 +102,36 @@ export function usePermissions() {
   // Verificar se o usuário é do setor Projetos
   const isDepartmentProjetos = userDepartment?.toLowerCase().includes('projetos');
 
+  // Se for Departamento Pessoal, tem acesso total (exceto gerenciar solicitações)
+  const finalPermissions = isDepartmentPessoal ? {
+    canAccessPayroll: true,
+    canManageEmployees: true,
+    canViewReports: true,
+    canManageVacations: true,
+    canManageAbsences: true,
+    canManageBankHours: true,
+    canViewBirthdays: true,
+    canRegisterTime: true,
+    canViewDashboard: true,
+  } : permissions;
+
   return {
     user,
     userPosition,
     userDepartment,
     isDepartmentPessoal,
     isDepartmentProjetos,
-    permissions,
+    permissions: finalPermissions,
     isLoading,
-    canAccessPayroll: permissions.canAccessPayroll,
-    canManageEmployees: permissions.canManageEmployees,
-    canViewReports: permissions.canViewReports,
-    canManageVacations: permissions.canManageVacations,
-    canManageAbsences: permissions.canManageAbsences,
-    canManageBankHours: permissions.canManageBankHours,
-    canViewBirthdays: permissions.canViewBirthdays,
-    canRegisterTime: permissions.canRegisterTime,
-    canViewDashboard: permissions.canViewDashboard,
+    canAccessPayroll: finalPermissions.canAccessPayroll,
+    canManageEmployees: finalPermissions.canManageEmployees,
+    canViewReports: finalPermissions.canViewReports,
+    canManageVacations: finalPermissions.canManageVacations,
+    canManageAbsences: finalPermissions.canManageAbsences,
+    canManageBankHours: finalPermissions.canManageBankHours,
+    canViewBirthdays: finalPermissions.canViewBirthdays,
+    canRegisterTime: finalPermissions.canRegisterTime,
+    canViewDashboard: finalPermissions.canViewDashboard,
   };
 }
 
@@ -172,19 +147,19 @@ export function useRoutePermission(route: string) {
   const isAdministrator = userPosition === 'Administrador';
   
   const routePermissions: Record<string, boolean> = {
-    '/ponto': isAdministrator || permissions.canRegisterTime,
-    '/ponto/dashboard': isAdministrator || permissions.canViewDashboard,
-    '/ponto/funcionarios': isAdministrator || permissions.canManageEmployees,
-    '/ponto/aniversariantes': isAdministrator || permissions.canViewBirthdays,
+    '/ponto': isAdministrator || isDepartmentPessoal || permissions.canRegisterTime,
+    '/ponto/dashboard': isAdministrator || isDepartmentPessoal || permissions.canViewDashboard,
+    '/ponto/funcionarios': isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
+    '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal, // Administrador ou Departamento Pessoal
     '/ponto/atestados': true, // Todos podem registrar suas próprias ausências
     '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal, // Administrador ou Departamento Pessoal
     '/ponto/solicitacoes': true, // Todos podem ver suas próprias solicitações
-    '/ponto/gerenciar-solicitacoes': isAdministrator || isDepartmentProjetos, // Administrador ou setor Projetos
+    '/ponto/gerenciar-solicitacoes': isAdministrator || isDepartmentProjetos, // Administrador ou setor Projetos (DEPARTAMENTO PESSOAL NÃO TEM ACESSO)
     '/ponto/ferias': true, // Todos podem solicitar suas próprias férias
-    '/ponto/gerenciar-ferias': isAdministrator || permissions.canManageVacations,
-    '/ponto/banco-horas': isAdministrator || permissions.canManageBankHours,
-    '/ponto/folha-pagamento': isAdministrator || permissions.canAccessPayroll,
-    '/relatorios/alocacao': isAdministrator || permissions.canAccessPayroll,
+    '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
+    '/ponto/banco-horas': isAdministrator || isDepartmentPessoal || permissions.canManageBankHours,
+    '/ponto/folha-pagamento': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
+    '/relatorios/alocacao': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
   };
 
   return {
