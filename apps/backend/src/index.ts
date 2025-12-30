@@ -77,12 +77,8 @@ const corsOptions = {
       return callback(null, true);
     }
     
-    // Log para debug
-    console.log('🔍 Origin recebida:', origin);
-    
     // Verificar se a origem está na lista permitida
     if (allowedOrigins.includes(origin)) {
-      console.log('✅ Origem permitida:', origin);
       callback(null, true);
     } else if (origin.includes('railway.app') || origin.includes('localhost')) {
       // Permitir qualquer subdomínio do Railway ou localhost
