@@ -242,9 +242,9 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [hasOperation, setHasOperation] = useState(() => {
+  const [hasOperation, setHasOperation] = useState<boolean>(() => {
     const op = employee.employee?.operation || '';
-    return op && op !== 'N/A' && op.trim() !== '';
+    return !!(op && op !== 'N/A' && op.trim() !== '');
   });
 
   const queryClient = useQueryClient();
