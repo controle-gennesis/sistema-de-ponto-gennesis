@@ -1512,11 +1512,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                           <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.cpf}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Setor:</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Cargo:</span>
                           <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.position}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Cargo:</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-medium">Setor:</span>
                           <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.department}</span>
                         </div>
                         <div className="flex justify-between items-center">
