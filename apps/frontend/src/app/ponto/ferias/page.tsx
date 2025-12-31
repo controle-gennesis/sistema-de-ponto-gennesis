@@ -21,10 +21,19 @@ import {
   Trash2,
   CalendarDays,
   CalendarCheck,
-  CalendarX,
-  CalendarClock
+  CalendarX
 } from 'lucide-react';
 import { VacationFormData, VacationBalance, Vacation } from '@/types';
+
+// Função helper para formatar data corretamente (evita problemas de timezone)
+const formatDate = (dateString: string | Date): string => {
+  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  // Usar UTC para evitar problemas de timezone ao exibir datas do banco
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${day}/${month}/${year}`;
+};
 
 export default function VacationsPage() {
   const router = useRouter();
@@ -37,6 +46,42 @@ export default function VacationsPage() {
     reason: '',
     fraction: undefined
   });
+
+  // Calcular quantidade de dias entre as datas (inclusive)
+  const calculateDays = (start: string, end: string): number | null => {
+    if (!start || !end) return null;
+    
+    // Parse das datas no formato YYYY-MM-DD
+    const startParts = start.split('-');
+    const endParts = end.split('-');
+    
+    if (startParts.length !== 3 || endParts.length !== 3) return null;
+    
+    // Criar datas no timezone local (sem hora) para cálculo correto
+    const startYear = parseInt(startParts[0]);
+    const startMonth = parseInt(startParts[1]) - 1;
+    const startDay = parseInt(startParts[2]);
+    
+    const endYear = parseInt(endParts[0]);
+    const endMonth = parseInt(endParts[1]) - 1;
+    const endDay = parseInt(endParts[2]);
+    
+    // Calcular diferença diretamente: (endDay - startDay) + 1
+    // Mas precisamos considerar meses e anos também
+    const startDate = new Date(startYear, startMonth, startDay);
+    const endDate = new Date(endYear, endMonth, endDay);
+    
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return null;
+    if (endDate < startDate) return null;
+    
+    // Calcular diferença em dias (inclusive): (endDate - startDate) + 1
+    // Usar Math.floor para garantir cálculo correto
+    const diffTime = endDate.getTime() - startDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 para incluir ambos os dias
+    return diffDays;
+  };
+
+  const vacationDays = calculateDays(formData.startDate, formData.endDate);
 
   // Quando o tipo mudar para ANNUAL, limpar o fraction
   const handleTypeChange = (newType: string) => {
@@ -94,8 +139,21 @@ export default function VacationsPage() {
       });
     },
     onError: (error: any) => {
-      const message = error.response?.data?.message || 'Erro ao criar solicitação';
-      toast.error(message);
+      const errorData = error.response?.data;
+      if (errorData?.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
+        // Mostrar todos os erros de validação
+        errorData.errors.forEach((err: string) => {
+          toast.error(err);
+        });
+      } else if (errorData?.warnings && Array.isArray(errorData.warnings) && errorData.warnings.length > 0) {
+        // Se só houver avisos, mostrar mas permitir continuar
+        errorData.warnings.forEach((warn: string) => {
+          toast.error(warn);
+        });
+      } else {
+        const message = errorData?.message || 'Erro ao criar solicitação';
+        toast.error(message);
+      }
     }
   });
 
@@ -222,7 +280,7 @@ export default function VacationsPage() {
 
         {/* Saldo de Férias */}
         {balance && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
@@ -260,20 +318,6 @@ export default function VacationsPage() {
                   <div className="ml-3 sm:ml-4 min-w-0">
                     <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Usado</p>
                     <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{balance.usedDays}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex-shrink-0">
-                    <CalendarClock className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 dark:text-orange-400" />
-                  </div>
-                  <div className="ml-3 sm:ml-4 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Pendente</p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{balance.pendingDays}</p>
                   </div>
                 </div>
               </CardContent>
@@ -350,6 +394,14 @@ export default function VacationsPage() {
                     />
                   </div>
                 </div>
+                {vacationDays !== null && vacationDays > 0 && (
+                  <div className="flex items-center space-x-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+                    <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                      {vacationDays} {vacationDays === 1 ? 'dia' : 'dias'} de férias
+                    </span>
+                  </div>
+                )}
 
                 <div className={`grid gap-4 ${formData.type === 'FRACTIONED' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1'}`}>
                   <div>
@@ -462,8 +514,7 @@ export default function VacationsPage() {
                             {getTypeText(vacation.type, vacation.fraction || undefined)}
                           </h3>
                           <p className="text-sm text-gray-600 dark:text-gray-400">
-                            {new Date(vacation.startDate).toLocaleDateString('pt-BR')} -{' '}
-                            {new Date(vacation.endDate).toLocaleDateString('pt-BR')} ({vacation.days} dias)
+                            {formatDate(vacation.startDate)} - {formatDate(vacation.endDate)} ({vacation.days} dias)
                           </p>
                         </div>
                       </div>

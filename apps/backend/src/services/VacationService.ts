@@ -94,23 +94,27 @@ export class VacationService {
     const yearsWorked = currentDate.diff(hireDate, 'years');
     const totalDays = Math.min(yearsWorked * vacationDaysPerYear, vacationDaysPerYear * 2); // Máximo 2 anos
 
-    // Buscar férias aprovadas e usadas
+    // Buscar férias aprovadas e usadas (incluindo anuais e fracionadas)
     const usedVacations = await prisma.vacation.findMany({
       where: {
         userId,
         status: 'APPROVED',
-        type: 'ANNUAL'
+        type: {
+          in: ['ANNUAL', 'FRACTIONED_1', 'FRACTIONED_2', 'FRACTIONED_3']
+        }
       }
     });
 
     const usedDays = usedVacations.reduce((total: any, vacation: any) => total + vacation.days, 0);
 
-    // Buscar férias pendentes
+    // Buscar férias pendentes (incluindo anuais e fracionadas)
     const pendingVacations = await prisma.vacation.findMany({
       where: {
         userId,
         status: 'PENDING',
-        type: 'ANNUAL'
+        type: {
+          in: ['ANNUAL', 'FRACTIONED_1', 'FRACTIONED_2', 'FRACTIONED_3']
+        }
       }
     });
 
@@ -149,21 +153,17 @@ export class VacationService {
   }
 
   /**
-   * Calcula o número de dias úteis entre duas datas
+   * Calcula o número de dias corridos entre duas datas (inclusive)
    */
   calculateVacationDays(startDate: Date, endDate: Date): number {
-    const start = moment(startDate);
-    const end = moment(endDate);
-    let days = 0;
-
-    while (start.isSameOrBefore(end, 'day')) {
-      // Contar apenas dias úteis (segunda a sexta)
-      if (start.day() >= 1 && start.day() <= 5) {
-        days++;
-      }
-      start.add(1, 'day');
-    }
-
+    // Usar UTC para evitar problemas de timezone
+    const start = moment.utc(startDate).startOf('day');
+    const end = moment.utc(endDate).startOf('day');
+    
+    // Calcular diferença em dias + 1 (para incluir o dia inicial e final)
+    // Exemplo: 05/01 a 31/01 = (31 - 5) + 1 = 27 dias
+    const days = end.diff(start, 'days') + 1;
+    
     return days;
   }
 
@@ -544,16 +544,16 @@ export class VacationService {
       errors.push('Data de fim deve ser posterior à data de início');
     }
 
-    // Validar aviso de 30 dias
+    // Validar aviso de 30 dias (apenas aviso, não bloqueia)
     const noticeDays = startDate.diff(currentDate, 'days');
     if (noticeDays < 30) {
       warnings.push('Aviso de férias deve ser dado com pelo menos 30 dias de antecedência');
     }
 
-    // Validar restrição de feriados
+    // Validar restrição de feriados (apenas aviso, não bloqueia)
     const twoDaysBefore = startDate.clone().subtract(2, 'days');
     if (twoDaysBefore.day() === 0 || twoDaysBefore.day() === 6) { // Domingo ou sábado
-      errors.push('Férias não podem iniciar 2 dias antes de feriados ou repousos semanais');
+      warnings.push('Férias não devem iniciar 2 dias antes de feriados ou repousos semanais');
     }
 
     // Validar fracionamento

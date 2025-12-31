@@ -14,9 +14,26 @@ export class VacationController {
       const { startDate, endDate, type, reason, fraction } = req.body;
 
       // Criar objeto de solicitação
+      // Garantir que as datas sejam tratadas como data UTC para evitar problemas de timezone
+      // Parse da data no formato YYYY-MM-DD e criar como meia-noite UTC
+      const startDateParts = startDate.split('-');
+      const endDateParts = endDate.split('-');
+      const startDateObj = new Date(Date.UTC(
+        parseInt(startDateParts[0]), 
+        parseInt(startDateParts[1]) - 1, 
+        parseInt(startDateParts[2]),
+        0, 0, 0, 0
+      ));
+      const endDateObj = new Date(Date.UTC(
+        parseInt(endDateParts[0]), 
+        parseInt(endDateParts[1]) - 1, 
+        parseInt(endDateParts[2]),
+        23, 59, 59, 999
+      ));
+      
       const vacationRequest: VacationRequest = {
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+        startDate: startDateObj,
+        endDate: endDateObj,
         type: type || 'ANNUAL',
         reason,
         fraction
@@ -73,12 +90,13 @@ export class VacationController {
       }
 
       // Criar solicitação de férias
+      // As datas já estão em UTC (startDateObj e endDateObj)
       const vacation = await prisma.vacation.create({
         data: {
           userId,
           employeeId: employee.id,
-          startDate: vacationRequest.startDate,
-          endDate: vacationRequest.endDate,
+          startDate: startDateObj,
+          endDate: endDateObj,
           days,
           type: vacationType as any,
           status: 'PENDING',
