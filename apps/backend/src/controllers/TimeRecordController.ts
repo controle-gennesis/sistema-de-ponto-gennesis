@@ -16,7 +16,7 @@ const photoService = new PhotoService();
 const holidayService = new HolidayService();
 
 export class TimeRecordController {
-  async punchInOut(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  async punchInOut(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
       const { type, latitude, longitude, observation, clientTimestamp } = req.body;
@@ -71,10 +71,11 @@ export class TimeRecordController {
       });
 
       if (activeVacation) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: `Você está de férias no período de ${moment(activeVacation.startDate).format('DD/MM/YYYY')} a ${moment(activeVacation.endDate).format('DD/MM/YYYY')}. Não é possível bater ponto durante as férias.`
         });
+        return;
       }
 
       // Validar tipo de registro
@@ -256,7 +257,7 @@ export class TimeRecordController {
         workHours = await timeRecordService.calculateWorkHours(userId, new Date());
       }
 
-      return res.status(201).json({
+      res.status(201).json({
         success: true,
         data: {
           timeRecord,
@@ -266,6 +267,7 @@ export class TimeRecordController {
         },
         message: 'Ponto registrado com sucesso'
       });
+      return;
     } catch (error) {
       next(error);
     }
