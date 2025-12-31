@@ -16,7 +16,7 @@ const photoService = new PhotoService();
 const holidayService = new HolidayService();
 
 export class TimeRecordController {
-  async punchInOut(req: AuthRequest, res: Response, next: NextFunction) {
+  async punchInOut(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!.id;
       const { type, latitude, longitude, observation, clientTimestamp } = req.body;
