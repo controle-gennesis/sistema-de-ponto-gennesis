@@ -56,6 +56,27 @@ export class TimeRecordController {
         throw createError('Dados de funcionário não encontrados', 404);
       }
 
+      // Verificar se o funcionário está de férias aprovadas na data do ponto
+      const punchDate = clientTimestamp ? new Date(clientTimestamp) : new Date();
+      const punchDateStart = moment(punchDate).tz('America/Sao_Paulo').startOf('day').toDate();
+      const punchDateEnd = moment(punchDate).tz('America/Sao_Paulo').endOf('day').toDate();
+
+      const activeVacation = await prisma.vacation.findFirst({
+        where: {
+          userId,
+          status: 'APPROVED',
+          startDate: { lte: punchDateEnd },
+          endDate: { gte: punchDateStart }
+        }
+      });
+
+      if (activeVacation) {
+        return res.status(400).json({
+          success: false,
+          message: `Você está de férias no período de ${moment(activeVacation.startDate).format('DD/MM/YYYY')} a ${moment(activeVacation.endDate).format('DD/MM/YYYY')}. Não é possível bater ponto durante as férias.`
+        });
+      }
+
       // Validar tipo de registro
       if (!Object.values(['ENTRY', 'EXIT', 'LUNCH_START', 'LUNCH_END', 'BREAK_START', 'BREAK_END', 'ABSENCE_JUSTIFIED']).includes(type)) {
         throw createError('Tipo de registro inválido', 400);
