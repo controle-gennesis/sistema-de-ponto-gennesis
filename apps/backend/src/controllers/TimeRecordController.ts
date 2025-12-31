@@ -256,7 +256,7 @@ export class TimeRecordController {
         workHours = await timeRecordService.calculateWorkHours(userId, new Date());
       }
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         data: {
           timeRecord,
