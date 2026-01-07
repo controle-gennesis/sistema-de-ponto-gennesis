@@ -225,7 +225,7 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
                   Registrar Falta
                 </h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Registre faltas para funcionários (mesmo os que não precisam bater ponto)
+                  Registre faltas para funcionários
                 </p>
               </div>
             </div>
@@ -243,7 +243,6 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
             {/* Seleção de funcionário */}
             <div className="relative">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                <User className="w-4 h-4 inline mr-1" />
                 Funcionário *
               </label>
               {loadingEmployees ? (
@@ -314,13 +313,16 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
 
             {/* Tipo de registro */}
             <div>
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.isMultiple}
-                  onChange={(e) => setFormData({ ...formData, isMultiple: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded"
-                />
+              <label className="flex items-center space-x-3 cursor-pointer">
+                <div className="relative inline-flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={formData.isMultiple}
+                    onChange={(e) => setFormData({ ...formData, isMultiple: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 dark:peer-checked:bg-blue-600"></div>
+                </div>
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Registrar múltiplas faltas (período)
                 </span>
@@ -332,7 +334,6 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    <Calendar className="w-4 h-4 inline mr-1" />
                     Data de Início *
                   </label>
                   <input
@@ -346,7 +347,6 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    <Calendar className="w-4 h-4 inline mr-1" />
                     Data de Fim *
                   </label>
                   <input
@@ -363,7 +363,6 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
             ) : (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  <Calendar className="w-4 h-4 inline mr-1" />
                   Data da Falta *
                 </label>
                 <input
@@ -380,7 +379,6 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
             {/* Motivo */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                <FileText className="w-4 h-4 inline mr-1" />
                 Motivo
               </label>
               <input
