@@ -216,18 +216,13 @@ export function RegisterAbsenceModal({ isOpen, onClose }: RegisterAbsenceModalPr
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <CardHeader className="border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
-                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                  Registrar Falta
-                </h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Registre faltas para funcionários
-                </p>
-              </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                Registrar Falta
+              </h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Registre faltas para funcionários
+              </p>
             </div>
             <button
               onClick={handleClose}
