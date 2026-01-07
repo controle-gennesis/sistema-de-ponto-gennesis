@@ -167,6 +167,26 @@ export class PayrollService {
 
     // Se o funcionário não precisa bater ponto, calcular baseado nos dias úteis
     if (employee && employee.requiresTimeClock === false) {
+      // Usar UTC para comparar com timestamps salvos em UTC
+      const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+      // Último dia do mês: usar o primeiro dia do próximo mês e subtrair 1 dia
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
+      
+      // Buscar faltas registradas manualmente no período (também para quem não bate ponto)
+      // Faltas registradas manualmente sempre têm approvedBy preenchido
+      const absences = await prisma.timeRecord.findMany({
+        where: {
+          employeeId,
+          timestamp: {
+            gte: startDate,
+            lte: endDate
+          },
+          type: 'ABSENCE_JUSTIFIED',
+          approvedBy: { not: null }
+        }
+      });
+      
       // Calcular dias úteis do mês
       const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
         0, // Não há registros de ponto
@@ -176,9 +196,10 @@ export class PayrollService {
       );
       
       // Para funcionários que não batem ponto, considerar todos os dias úteis como presenças
-      const daysPresent = totalWorkingDays;
+      // MAS subtrair as faltas registradas
+      const daysPresent = Math.max(0, totalWorkingDays - absences.length);
       
-      // Calcular VA e VT baseado nos dias úteis e valores diários
+      // Calcular VA e VT baseado nos dias presentes (úteis menos faltas) e valores diários
       const dailyVA = Number(employee.dailyFoodVoucher || 0);
       const dailyVT = Number(employee.dailyTransportVoucher || 0);
       const totalVA = daysPresent * dailyVA;
@@ -187,14 +208,18 @@ export class PayrollService {
       return { 
         totalVA, 
         totalVT, 
-        daysWorked: daysPresent, // Todos os dias úteis são considerados trabalhados
-        totalWorkingDays
+        daysWorked: daysPresent, // Dias úteis menos faltas
+        totalWorkingDays,
+        absences: absences.length // Retornar número de faltas para uso na folha
       };
     }
 
     // Para funcionários que batem ponto, usar a lógica normal
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
+    // Usar UTC para comparar com timestamps salvos em UTC
+    const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+    // Último dia do mês: usar o primeiro dia do próximo mês e subtrair 1 dia
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
     
     const timeRecords = await prisma.timeRecord.findMany({
       where: {
@@ -207,6 +232,20 @@ export class PayrollService {
       }
     });
     
+    // Buscar faltas registradas manualmente no período
+    // Faltas registradas manualmente sempre têm approvedBy preenchido
+    const absences = await prisma.timeRecord.findMany({
+      where: {
+        employeeId,
+        timestamp: {
+          gte: startDate,
+          lte: endDate
+        },
+        type: 'ABSENCE_JUSTIFIED',
+        approvedBy: { not: null }
+      }
+    });
+    
     const totalVA = timeRecords.reduce((sum: any, record: any) => 
       sum + (record.foodVoucherAmount || 0), 0
     );
@@ -216,6 +255,7 @@ export class PayrollService {
     );
     
     // Calcular dias trabalhados e faltas de forma mais inteligente
+    // Subtrair faltas registradas manualmente dos dias trabalhados
     const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
       timeRecords.length, 
       month, 
@@ -223,11 +263,15 @@ export class PayrollService {
       hireDate
     );
     
+    // Ajustar dias trabalhados subtraindo as faltas
+    const adjustedDaysWorked = Math.max(0, daysWorked - absences.length);
+    
     return { 
       totalVA, 
       totalVT, 
-      daysWorked,
-      totalWorkingDays
+      daysWorked: adjustedDaysWorked,
+      totalWorkingDays,
+      absences: absences.length // Retornar número de faltas para uso na folha
     };
   }
 
@@ -602,7 +646,8 @@ export class PayrollService {
         const periculosidade = Number(employee.dangerPay || 0);
         const insalubridade = Number(employee.unhealthyPay || 0);
         const salarioFamilia = Number(employee.familySalary || 0);
-        const faltas = totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0;
+        // Calcular faltas: usar o número de faltas retornado ou calcular pela diferença
+        const faltas = totals.absences !== undefined ? totals.absences : (totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0);
         
         // Calcular número de dias do mês
         const diasDoMes = new Date(year, month, 0).getDate();

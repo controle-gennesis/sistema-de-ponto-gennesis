@@ -41,4 +41,8 @@ router.post('/manual', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordCon
 // Importar pontos de planilha (apenas ADMIN e DEPARTAMENTO_PESSOAL)
 router.post('/import', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordController.importRecordsFromSpreadsheet);
 
+// Registrar faltas manualmente (apenas ADMIN e DEPARTAMENTO_PESSOAL)
+router.post('/absence', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordController.registerAbsence);
+router.post('/absence/multiple', authorize('ADMIN', 'DEPARTAMENTO_PESSOAL'), timeRecordController.registerMultipleAbsences);
+
 export default router;

@@ -1373,4 +1373,216 @@ export class TimeRecordController {
       next(error);
     }
   }
+
+  /**
+   * Registrar falta manualmente para um funcionário (apenas admin/departamento pessoal)
+   * Funciona para todos os funcionários, mesmo os que não precisam bater ponto
+   */
+  async registerAbsence(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { employeeId, date, reason, observation } = req.body;
+      const approvedBy = req.user!.id;
+
+      if (!employeeId || !date) {
+        throw createError('ID do funcionário e data são obrigatórios', 400);
+      }
+
+      // Buscar dados do funcionário
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: {
+          id: true,
+          userId: true,
+          employeeId: true,
+          costCenter: true,
+          user: {
+            select: {
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      if (!employee) {
+        throw createError('Funcionário não encontrado', 404);
+      }
+
+      // Parsear a data manualmente para criar Date no horário correto
+      const [year, month, day] = date.split('-').map(Number);
+      
+      // Criar timestamp para 8h da manhã no horário UTC
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T08:00:00`;
+      const timestamp = new Date(dateStr + 'Z'); // Adicionar Z para forçar UTC
+
+      // Verificar se já existe um registro de falta para este dia
+      const dayStart = new Date(year, month - 1, day, 0, 0, 0);
+      const dayEnd = new Date(year, month - 1, day, 23, 59, 59);
+
+      const existingRecord = await prisma.timeRecord.findFirst({
+        where: {
+          userId: employee.userId,
+          employeeId: employee.id,
+          type: 'ABSENCE_JUSTIFIED',
+          timestamp: {
+            gte: dayStart,
+            lte: dayEnd
+          }
+        }
+      });
+
+      if (existingRecord) {
+        throw createError('Já existe um registro de falta para este funcionário nesta data', 400);
+      }
+
+      // Criar registro de falta (usando ABSENCE_JUSTIFIED mas será tratado como falta normal)
+      const absenceRecord = await prisma.timeRecord.create({
+        data: {
+          userId: employee.userId,
+          employeeId: employee.id,
+          type: 'ABSENCE_JUSTIFIED',
+          timestamp: timestamp,
+          isValid: true,
+          reason: reason || 'Falta registrada manualmente',
+          observation: observation || null,
+          approvedBy: approvedBy,
+          approvedAt: new Date(),
+          costCenter: employee.costCenter || null
+        }
+      });
+
+      res.status(201).json({
+        success: true,
+        data: {
+          absenceRecord,
+          employee: {
+            id: employee.id,
+            name: employee.user.name,
+            employeeId: employee.employeeId
+          }
+        },
+        message: 'Falta registrada com sucesso'
+      });
+      return;
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Registrar múltiplas faltas para um funcionário (período)
+   */
+  async registerMultipleAbsences(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { employeeId, startDate, endDate, reason, observation } = req.body;
+      const approvedBy = req.user!.id;
+
+      if (!employeeId || !startDate || !endDate) {
+        throw createError('ID do funcionário, data de início e data de fim são obrigatórios', 400);
+      }
+
+      // Buscar dados do funcionário
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: {
+          id: true,
+          userId: true,
+          employeeId: true,
+          costCenter: true,
+          user: {
+            select: {
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      if (!employee) {
+        throw createError('Funcionário não encontrado', 404);
+      }
+
+      // Parsear datas
+      const startDateParts = startDate.split('-').map(Number);
+      const endDateParts = endDate.split('-').map(Number);
+      const startDateObj = new Date(startDateParts[0], startDateParts[1] - 1, startDateParts[2]);
+      const endDateObj = new Date(endDateParts[0], endDateParts[1] - 1, endDateParts[2]);
+
+      if (endDateObj < startDateObj) {
+        throw createError('Data de fim deve ser posterior à data de início', 400);
+      }
+
+      const createdRecords = [];
+      const skippedDates = [];
+
+      // Iterar por cada dia do período
+      for (let currentDate = new Date(startDateObj); currentDate <= endDateObj; currentDate.setDate(currentDate.getDate() + 1)) {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const day = currentDate.getDate();
+
+        // Verificar se já existe um registro para este dia
+        const dayStart = new Date(year, month - 1, day, 0, 0, 0);
+        const dayEnd = new Date(year, month - 1, day, 23, 59, 59);
+
+        const existingRecord = await prisma.timeRecord.findFirst({
+          where: {
+            userId: employee.userId,
+            employeeId: employee.id,
+            type: 'ABSENCE_JUSTIFIED',
+            timestamp: {
+              gte: dayStart,
+              lte: dayEnd
+            }
+          }
+        });
+
+        if (existingRecord) {
+          skippedDates.push(`${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`);
+          continue;
+        }
+
+        // Criar timestamp para 8h da manhã no horário UTC
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T08:00:00`;
+        const timestamp = new Date(dateStr + 'Z');
+
+        // Criar registro de falta
+        const absenceRecord = await prisma.timeRecord.create({
+          data: {
+            userId: employee.userId,
+            employeeId: employee.id,
+            type: 'ABSENCE_JUSTIFIED',
+            timestamp: timestamp,
+            isValid: true,
+            reason: reason || 'Falta registrada manualmente',
+            observation: observation || null,
+            approvedBy: approvedBy,
+            approvedAt: new Date(),
+            costCenter: employee.costCenter || null
+          }
+        });
+
+        createdRecords.push(absenceRecord);
+      }
+
+      res.status(201).json({
+        success: true,
+        data: {
+          createdRecords,
+          skippedDates,
+          totalCreated: createdRecords.length,
+          totalSkipped: skippedDates.length,
+          employee: {
+            id: employee.id,
+            name: employee.user.name,
+            employeeId: employee.employeeId
+          }
+        },
+        message: `${createdRecords.length} falta(s) registrada(s) com sucesso${skippedDates.length > 0 ? `. ${skippedDates.length} data(s) ignorada(s) (já possuem registro)` : ''}`
+      });
+      return;
+    } catch (error) {
+      next(error);
+    }
+  }
 }

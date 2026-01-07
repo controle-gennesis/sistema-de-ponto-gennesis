@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { MedicalCertificateList } from '@/components/medical-certificate/MedicalCertificateList';
-import { FileText, Users, Clock, CheckCircle, XCircle, Filter, Search, Calendar, ChevronDown, ChevronUp, RotateCcw, Building2 } from 'lucide-react';
+import { RegisterAbsenceModal } from '@/components/absence/RegisterAbsenceModal';
+import { FileText, Users, Clock, CheckCircle, XCircle, Filter, Search, Calendar, ChevronDown, ChevronUp, RotateCcw, Building2, Plus, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import api from '@/lib/api';
 import { DEPARTMENTS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
@@ -14,6 +15,7 @@ import { CARGOS_LIST } from '@/constants/cargos';
 export default function AtestadosPage() {
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showAbsenceModal, setShowAbsenceModal] = useState(false);
   const [filters, setFilters] = useState({
     search: '',
     type: 'all',
@@ -142,10 +144,29 @@ export default function AtestadosPage() {
       >
         <div className="space-y-6">
         {/* Cabeçalho */}
-        <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Ausências</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Gerencie todas as ausências da empresa</p>
-        </div>
+        <Card>
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center">
+                <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
+                  <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                </div>
+                <div className="ml-3 sm:ml-4 min-w-0">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Registrar Falta</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Registre faltas para funcionários do sistema</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAbsenceModal(true)}
+                className="px-3 sm:px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 flex items-center space-x-2 text-sm sm:text-base"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Nova Falta</span>
+                <span className="sm:hidden">Nova</span>
+              </button>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Estatísticas */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -420,6 +441,12 @@ export default function AtestadosPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Modal de Registrar Falta */}
+      <RegisterAbsenceModal
+        isOpen={showAbsenceModal}
+        onClose={() => setShowAbsenceModal(false)}
+      />
     </MainLayout>
     </ProtectedRoute>
   );
