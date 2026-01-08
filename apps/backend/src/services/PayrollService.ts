@@ -307,10 +307,11 @@ export class PayrollService {
     });
     const holidaySet = new Set(
       holidays.map((h) => {
-        const d = h.date;
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
+        const d = new Date(h.date);
+        // Usar UTC para evitar problemas de timezone
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
         return `${yyyy}-${mm}-${dd}`;
       })
     );
@@ -323,7 +324,7 @@ export class PayrollService {
       const dayOfWeek = date.getDay(); // 0 = domingo, 1 = segunda, ..., 6 = sábado
       const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       
-      // Contar apenas dias úteis (1-5 = segunda a sexta)
+      // Contar apenas dias úteis (1-5 = segunda a sexta), excluindo sábados, domingos e feriados
       if (dayOfWeek >= 1 && dayOfWeek <= 5 && !holidaySet.has(dateKey)) {
         totalWorkingDays++;
       }

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon, Save, Plus } from 'lucide-react';
 import { PayrollEmployee } from '@/types';
+import api from '@/lib/api';
 
 interface PayrollDetailModalProps {
   employee: PayrollEmployee;
@@ -32,6 +34,55 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     setInssRescisao(employee.inssRescisao || 0);
     setInss13(employee.inss13 || 0);
   }, [employee]);
+
+  // Converter polo para estado (para buscar feriados)
+  const poloToState = (polo?: string | null): string | undefined => {
+    if (!polo) return undefined;
+    const poloUpper = polo.toUpperCase();
+    if (poloUpper.includes('BRASÍLIA') || poloUpper.includes('BRASILIA')) return 'DF';
+    if (poloUpper.includes('GOIÁS') || poloUpper.includes('GOIAS')) return 'GO';
+    return undefined;
+  };
+
+  // Buscar feriados do mês
+  const employeeState = poloToState(employee.polo);
+  const { data: holidaysData } = useQuery({
+    queryKey: ['holidays', year, month, employeeState],
+    queryFn: async () => {
+      const params: any = { year };
+      if (month) params.month = month;
+      const res = await api.get('/holidays', { params });
+      return res.data;
+    },
+    enabled: isOpen
+  });
+
+  const holidays = holidaysData?.data || [];
+
+  // Buscar datas das faltas do funcionário
+  const { data: absencesData } = useQuery({
+    queryKey: ['absences', employee.id, year, month],
+    queryFn: async () => {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+      
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const token = localStorage.getItem('token');
+      
+      const res = await fetch(`${API_URL}/time-records?employeeId=${employee.id}&startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}&type=ABSENCE_JUSTIFIED`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+      
+      if (!res.ok) return { data: [] };
+      const data = await res.json();
+      return data;
+    },
+    enabled: isOpen && !!employee.id
+  });
+
+  const absenceDates = absencesData?.data?.map((record: any) => new Date(record.timestamp)) || [];
   
   // Função para salvar os valores manuais
   const handleSaveManualValues = async () => {
@@ -118,11 +169,63 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   
   const descontoPorFaltas = (salarioBase / 30) * faltas;
   
+  // Debug: verificar valores
+  if (faltas > 0) {
+    console.log('🔍 Debug DSR por Falta:', {
+      salarioBase,
+      faltas,
+      descontoPorFaltas: descontoPorFaltas.toFixed(2),
+      calculo: `(${salarioBase} / 30) * ${faltas} = ${descontoPorFaltas.toFixed(2)}`
+    });
+  }
+  
   // Desconto de Periculosidade + Insalubridade por faltas
   const descontoPericInsalub = ((periculosidade + insalubridade) / 30) * faltas;
   
-  // Cálculo específico do DSR por Falta
-  const dsrPorFalta = (salarioBase / diasParaDesconto) * faltas;
+  // Cálculo do DSR por Falta considerando feriados
+  // Semana comum: cada falta desconta 2 dias (1 dia de falta + 1 DSR)
+  // Semana com feriado: cada falta desconta 3 dias (1 dia de falta + 1 DSR + 1 feriado)
+  // Como o descontoPorFaltas já desconta 1 dia por falta, o DSR deve descontar:
+  // - Semana comum: 1 DSR por falta = (salário / 30) * 1
+  // - Semana com feriado: 1 DSR + 1 feriado por falta = (salário / 30) * 2
+  let dsrPorFalta = 0;
+  let referenciaDSR = '';
+  
+  if (faltas > 0) {
+    // Verificar se há feriados úteis no mês (segunda a sábado)
+    const feriadosUteis = holidays.filter((holiday: any) => {
+      const holidayDate = new Date(holiday.date);
+      const dayOfWeek = holidayDate.getDay();
+      return dayOfWeek >= 1 && dayOfWeek <= 6; // Segunda a sábado
+    });
+
+    const quantidadeFeriados = feriadosUteis.length;
+
+    if (quantidadeFeriados === 0) {
+      // Sem feriados no mês: todas as faltas descontam apenas 1 DSR
+      dsrPorFalta = (salarioBase / 30) * faltas;
+      referenciaDSR = `${faltas} falta(s) - Sem feriado no mês (1 DSR por falta)`;
+    } else {
+      // Com feriados no mês:
+      // - As primeiras N faltas (N = quantidade de feriados) descontam 2 DSR cada (1 DSR + 1 feriado)
+      // - As faltas restantes descontam apenas 1 DSR cada
+      const faltasComFeriado = Math.min(faltas, quantidadeFeriados);
+      const faltasSemFeriado = Math.max(0, faltas - quantidadeFeriados);
+      
+      const dsrFaltasComFeriado = (salarioBase / 30) * faltasComFeriado * 2; // 1 DSR + 1 feriado
+      const dsrFaltasSemFeriado = (salarioBase / 30) * faltasSemFeriado; // Apenas 1 DSR
+      
+      dsrPorFalta = dsrFaltasComFeriado + dsrFaltasSemFeriado;
+      
+      if (faltasSemFeriado > 0) {
+        referenciaDSR = `${faltasComFeriado} falta(s) c/ feriado + ${faltasSemFeriado} falta(s) comum`;
+      } else {
+        referenciaDSR = `${faltasComFeriado} falta(s) c/ feriado (${quantidadeFeriados} feriado(s) no mês)`;
+      }
+    }
+  } else {
+    referenciaDSR = '-';
+  }
   
   // Cálculos de %VA e %VT baseados no polo
   const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
@@ -569,7 +672,12 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       DSR POR FALTA
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {faltas || 0} faltas
+                      <div className="flex flex-col items-center">
+                        <span className="font-medium">{faltas || 0} falta(s)</span>
+                        {referenciaDSR && referenciaDSR !== '-' && (
+                          <span className="text-xs mt-1 text-gray-500 dark:text-gray-400">{referenciaDSR}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -

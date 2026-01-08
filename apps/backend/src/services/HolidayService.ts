@@ -91,14 +91,15 @@ export class HolidayService {
     const baseWhere: any = {};
 
     if (filter.year || filter.month) {
+      const monthStr = filter.month ? String(filter.month).padStart(2, '0') : '01';
       const startDate = filter.year && filter.month
-        ? moment(`${filter.year}-${filter.month}-01`).startOf('month').toDate()
+        ? moment(`${filter.year}-${monthStr}-01`).startOf('month').toDate()
         : filter.year
         ? moment(`${filter.year}-01-01`).startOf('year').toDate()
         : undefined;
 
       const endDate = filter.year && filter.month
-        ? moment(`${filter.year}-${filter.month}-01`).endOf('month').toDate()
+        ? moment(`${filter.year}-${monthStr}-01`).endOf('month').toDate()
         : filter.year
         ? moment(`${filter.year}-12-31`).endOf('year').toDate()
         : undefined;
