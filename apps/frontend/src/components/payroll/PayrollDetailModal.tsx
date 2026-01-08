@@ -183,16 +183,17 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const descontoPericInsalub = ((periculosidade + insalubridade) / 30) * faltas;
   
   // Cálculo do DSR por Falta considerando feriados
-  // Semana comum: cada falta desconta 2 dias (1 dia de falta + 1 DSR)
-  // Semana com feriado: cada falta desconta 3 dias (1 dia de falta + 1 DSR + 1 feriado)
-  // Como o descontoPorFaltas já desconta 1 dia por falta, o DSR deve descontar:
-  // - Semana comum: 1 DSR por falta = (salário / 30) * 1
-  // - Semana com feriado: 1 DSR + 1 feriado por falta = (salário / 30) * 2
+  // Lógica:
+  // - Se faltas estão na mesma semana: conta apenas 1 DSR total pelas faltas
+  // - Se faltas estão em semanas diferentes: conta 1 DSR por cada falta
+  // - Cada feriado do mês sempre adiciona 1 DSR (independente da semana)
+  // Exemplo: 2 faltas mesma semana + 2 feriados = 1 DSR (faltas) + 2 DSR (feriados) = 3 DSR
+  // Exemplo: 2 faltas semanas diferentes + 2 feriados = 2 DSR (faltas) + 2 DSR (feriados) = 4 DSR
   let dsrPorFalta = 0;
   let referenciaDSR = '';
   
   if (faltas > 0) {
-    // Verificar se há feriados úteis no mês (segunda a sábado)
+    // Verificar quantos feriados úteis há no mês (segunda a sábado)
     const feriadosUteis = holidays.filter((holiday: any) => {
       const holidayDate = new Date(holiday.date);
       const dayOfWeek = holidayDate.getDay();
@@ -201,26 +202,55 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
 
     const quantidadeFeriados = feriadosUteis.length;
 
-    if (quantidadeFeriados === 0) {
-      // Sem feriados no mês: todas as faltas descontam apenas 1 DSR
-      dsrPorFalta = (salarioBase / 30) * faltas;
-      referenciaDSR = `${faltas} falta(s) - Sem feriado no mês (1 DSR por falta)`;
-    } else {
-      // Com feriados no mês:
-      // - As primeiras N faltas (N = quantidade de feriados) descontam 2 DSR cada (1 DSR + 1 feriado)
-      // - As faltas restantes descontam apenas 1 DSR cada
-      const faltasComFeriado = Math.min(faltas, quantidadeFeriados);
-      const faltasSemFeriado = Math.max(0, faltas - quantidadeFeriados);
+    // Função para obter o início da semana (domingo) de uma data
+    const getWeekStart = (date: Date): Date => {
+      const dateCopy = new Date(date);
+      const dayOfWeek = dateCopy.getDay();
+      const weekStart = new Date(dateCopy);
+      weekStart.setDate(dateCopy.getDate() - dayOfWeek);
+      weekStart.setHours(0, 0, 0, 0);
+      return weekStart;
+    };
+
+    // Se temos as datas das faltas, verificar quantas semanas diferentes têm faltas
+    if (absenceDates.length > 0 && absenceDates.length === faltas) {
+      // Agrupar faltas por semana
+      const semanasComFaltas = new Set<string>();
+      absenceDates.forEach((absenceDate: Date) => {
+        const weekStart = getWeekStart(absenceDate);
+        semanasComFaltas.add(weekStart.toISOString());
+      });
+
+      const numSemanasComFaltas = semanasComFaltas.size;
+
+      // DSR das faltas: 1 DSR por semana com faltas (não importa quantas faltas na semana)
+      const dsrDasFaltas = (salarioBase / 30) * numSemanasComFaltas;
+
+      // Cada feriado do mês sempre adiciona 1 DSR
+      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados;
       
-      const dsrFaltasComFeriado = (salarioBase / 30) * faltasComFeriado * 2; // 1 DSR + 1 feriado
-      const dsrFaltasSemFeriado = (salarioBase / 30) * faltasSemFeriado; // Apenas 1 DSR
-      
-      dsrPorFalta = dsrFaltasComFeriado + dsrFaltasSemFeriado;
-      
-      if (faltasSemFeriado > 0) {
-        referenciaDSR = `${faltasComFeriado} falta(s) c/ feriado + ${faltasSemFeriado} falta(s) comum`;
+      dsrPorFalta = dsrDasFaltas + dsrDosFeriados;
+
+      if (quantidadeFeriados === 0) {
+        referenciaDSR = numSemanasComFaltas === 1
+          ? `${faltas} falta(s) em 1 semana (1 DSR)`
+          : `${faltas} falta(s) em ${numSemanasComFaltas} semanas diferentes (${numSemanasComFaltas} DSR)`;
       } else {
-        referenciaDSR = `${faltasComFeriado} falta(s) c/ feriado (${quantidadeFeriados} feriado(s) no mês)`;
+        referenciaDSR = numSemanasComFaltas === 1
+          ? `${faltas} falta(s) em 1 semana (1 DSR) + ${quantidadeFeriados} feriado(s) (${quantidadeFeriados} DSR)`
+          : `${faltas} falta(s) em ${numSemanasComFaltas} semanas (${numSemanasComFaltas} DSR) + ${quantidadeFeriados} feriado(s) (${quantidadeFeriados} DSR)`;
+      }
+    } else {
+      // Fallback: se não temos as datas exatas, assumir que estão em semanas diferentes
+      // (mais conservador: desconta mais)
+      const dsrDasFaltas = (salarioBase / 30) * faltas; // 1 DSR por falta
+      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados; // 1 DSR por feriado
+      dsrPorFalta = dsrDasFaltas + dsrDosFeriados;
+
+      if (quantidadeFeriados === 0) {
+        referenciaDSR = `${faltas} falta(s) - Sem feriado no mês (1 DSR por falta)`;
+      } else {
+        referenciaDSR = `${faltas} falta(s) + ${quantidadeFeriados} feriado(s) no mês`;
       }
     }
   } else {

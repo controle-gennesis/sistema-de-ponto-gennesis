@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
@@ -2289,7 +2289,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                     case 'BREAK_END':
                                       return <Clock className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
                                     case 'ABSENCE_JUSTIFIED':
-                                      return <FileCheck className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
+                                      return <XCircle className="w-4 h-4 text-red-500 dark:text-red-400" />;
                                     default:
                                       return <Clock className="w-4 h-4 text-gray-500 dark:text-gray-400" />;
                                   }
@@ -2309,6 +2309,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                             const seconds = date.getUTCSeconds().toString().padStart(2, '0');
                                             return `${hours}:${minutes}:${seconds}`;
                                           })()}
+                                        </span>
+                                      )}
+                                      {record.type === 'ABSENCE_JUSTIFIED' && (
+                                        <span className="text-sm font-medium text-red-600 dark:text-red-400 whitespace-nowrap">
+                                          Falta Registrada
                                         </span>
                                       )}
                                       {record.type === 'ABSENCE_JUSTIFIED' && record.medicalCertificateDetails && (
@@ -2363,12 +2368,19 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                                               <button
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  handleEditRecord(record);
-                                                  setOpenRecordMenu(null);
+                                                  if (record.type !== 'ABSENCE_JUSTIFIED') {
+                                                    handleEditRecord(record);
+                                                    setOpenRecordMenu(null);
+                                                  }
                                                 }}
-                                                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 border-t border-gray-200 dark:border-gray-700"
+                                                disabled={record.type === 'ABSENCE_JUSTIFIED'}
+                                                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors text-sm border-t border-gray-200 dark:border-gray-700 ${
+                                                  record.type === 'ABSENCE_JUSTIFIED'
+                                                    ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+                                                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                                }`}
                                               >
-                                                <Edit className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                                                <Edit className={`w-3.5 h-3.5 ${record.type === 'ABSENCE_JUSTIFIED' ? 'text-gray-400 dark:text-gray-500' : 'text-blue-600 dark:text-blue-400'}`} />
                                                 <span>Editar</span>
                                               </button>
                                               <button

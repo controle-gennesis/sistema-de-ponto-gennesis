@@ -207,8 +207,7 @@ export default function FolhaPagamentoPage() {
   };
 
   // Função auxiliar para calcular DSR por faltas considerando feriados
-  // Se há N feriados no mês: as primeiras N faltas descontam 2 DSR cada (1 DSR + 1 feriado)
-  // As faltas restantes descontam apenas 1 DSR cada
+  // Lógica simples: Cada falta = 1 DSR, cada feriado do mês = 1 DSR adicional
   const calcularDSRPorFaltas = (salarioBase: number, faltas: number, holidays: any[], diasDoMes: number): number => {
     if (faltas <= 0) return 0;
 
@@ -221,21 +220,10 @@ export default function FolhaPagamentoPage() {
 
     const quantidadeFeriados = feriadosUteis.length;
 
-    if (quantidadeFeriados === 0) {
-      // Sem feriados no mês: todas as faltas descontam apenas 1 DSR
-      return (salarioBase / 30) * faltas;
-    } else {
-      // Com feriados no mês:
-      // - As primeiras N faltas (N = quantidade de feriados) descontam 2 DSR cada
-      // - As faltas restantes descontam apenas 1 DSR cada
-      const faltasComFeriado = Math.min(faltas, quantidadeFeriados);
-      const faltasSemFeriado = Math.max(0, faltas - quantidadeFeriados);
-      
-      const dsrFaltasComFeriado = (salarioBase / 30) * faltasComFeriado * 2; // 1 DSR + 1 feriado
-      const dsrFaltasSemFeriado = (salarioBase / 30) * faltasSemFeriado; // Apenas 1 DSR
-      
-      return dsrFaltasComFeriado + dsrFaltasSemFeriado;
-    }
+    // Cálculo simples: 1 DSR por falta + 1 DSR por cada feriado do mês
+    const dsrDasFaltas = (salarioBase / 30) * faltas;
+    const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados;
+    return dsrDasFaltas + dsrDosFeriados;
   };
 
   const exportToExcel = async () => {
