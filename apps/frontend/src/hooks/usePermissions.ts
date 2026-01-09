@@ -64,7 +64,6 @@ export function usePermissions() {
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
-      console.log('User data from API:', res.data);
       return res.data;
     }
   });
@@ -73,13 +72,8 @@ export function usePermissions() {
   const userPosition = user?.employee?.position;
   const userDepartment = user?.employee?.department;
 
-  console.log('User object:', user);
-  console.log('User position:', userPosition);
-  console.log('User department:', userDepartment);
-
   const getPermissions = () => {
     if (!userPosition) {
-      console.log('No user position found, using Analista permissions');
       return POSITION_PERMISSIONS['Analista'];
     }
     
@@ -89,7 +83,6 @@ export function usePermissions() {
     }
     
     const permissions = POSITION_PERMISSIONS[userPosition as keyof typeof POSITION_PERMISSIONS] || POSITION_PERMISSIONS['Analista'];
-    console.log('Permissions for position', userPosition, ':', permissions);
     return permissions;
   };
 

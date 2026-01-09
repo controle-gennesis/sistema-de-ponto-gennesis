@@ -754,11 +754,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     {/* Informações do usuário */}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {user?.name || userName}
+                        {isAdministrator ? 'Administrador' : (user?.name || userName)}
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                        {user?.position || userPosition}
-                      </p>
+                      {!isAdministrator && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          {user?.position || userPosition}
+                        </p>
+                      )}
                     </div>
                     
                     {/* Botão de menu (3 pontos) */}

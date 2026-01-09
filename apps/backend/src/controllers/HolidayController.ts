@@ -57,7 +57,9 @@ export class HolidayController {
       if (isActive !== undefined) filter.isActive = isActive === 'true';
       if (isRecurring !== undefined) filter.isRecurring = isRecurring === 'true';
 
+      console.log('🔍 Buscando feriados com filtros:', filter);
       const holidays = await holidayService.getHolidays(filter);
+      console.log('✅ Feriados encontrados:', holidays.length);
 
       return res.status(200).json({
         success: true,
@@ -65,6 +67,7 @@ export class HolidayController {
         count: holidays.length,
       });
     } catch (error) {
+      console.error('❌ Erro ao buscar feriados:', error);
       return next(error);
     }
   }

@@ -95,8 +95,10 @@ export default function GerenciarFeriadosPage() {
       const params: any = { year: selectedYear };
       if (selectedMonth) params.month = selectedMonth;
       if (filterType) params.type = filterType;
+      // Não filtrar por isActive na página de gerenciamento - mostrar todos
       
       const res = await api.get('/holidays', { params });
+      console.log('Feriados recebidos:', res.data);
       return res.data;
     },
   });

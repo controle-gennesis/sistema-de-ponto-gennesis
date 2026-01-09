@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText, ChevronDown, ChevronUp, X, ListPlus , RotateCcw } from 'lucide-react';
@@ -102,6 +102,44 @@ export default function FolhaPagamentoPage() {
   });
 
   const holidays = holidaysData?.data || [];
+
+  // Buscar todas as faltas do período para calcular DSR corretamente
+  const { data: absencesData } = useQuery({
+    queryKey: ['absences-all', filters.year, filters.month],
+    queryFn: async () => {
+      const startDate = new Date(filters.year, filters.month - 1, 1);
+      const endDate = new Date(filters.year, filters.month, 0, 23, 59, 59);
+      
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const token = localStorage.getItem('token');
+      
+      const res = await fetch(`${API_URL}/time-records?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}&type=ABSENCE_JUSTIFIED`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+      
+      if (!res.ok) return { data: [] };
+      const data = await res.json();
+      return data;
+    },
+    enabled: !!filters.year && !!filters.month
+  });
+
+  // Criar mapa de faltas por funcionário (employeeId -> array de datas)
+  const absencesByEmployee = useMemo(() => {
+    const map = new Map<string, Date[]>();
+    if (absencesData?.data) {
+      absencesData.data.forEach((record: any) => {
+        const employeeId = record.employeeId;
+        if (!map.has(employeeId)) {
+          map.set(employeeId, []);
+        }
+        map.get(employeeId)!.push(new Date(record.timestamp));
+      });
+    }
+    return map;
+  }, [absencesData]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -206,9 +244,28 @@ export default function FolhaPagamentoPage() {
     return undefined;
   };
 
+  // Função auxiliar para obter o início da semana (domingo) de uma data
+  const getWeekStart = (date: Date): Date => {
+    const dateCopy = new Date(date);
+    const dayOfWeek = dateCopy.getDay();
+    const weekStart = new Date(dateCopy);
+    weekStart.setDate(dateCopy.getDate() - dayOfWeek);
+    weekStart.setHours(0, 0, 0, 0);
+    return weekStart;
+  };
+
   // Função auxiliar para calcular DSR por faltas considerando feriados
-  // Lógica simples: Cada falta = 1 DSR, cada feriado do mês = 1 DSR adicional
-  const calcularDSRPorFaltas = (salarioBase: number, faltas: number, holidays: any[], diasDoMes: number): number => {
+  // Usa a mesma lógica da modal: considera se as faltas estão na mesma semana ou não
+  // - Se faltas estão na mesma semana: conta apenas 1 DSR total pelas faltas
+  // - Se faltas estão em semanas diferentes: conta 1 DSR por cada semana com faltas
+  // - Cada feriado do mês sempre adiciona 1 DSR (independente da semana)
+  const calcularDSRPorFaltas = (
+    salarioBase: number, 
+    faltas: number, 
+    holidays: any[], 
+    diasDoMes: number,
+    absenceDates?: Date[]
+  ): number => {
     if (faltas <= 0) return 0;
 
     // Verificar quantos feriados úteis há no mês (segunda a sábado)
@@ -220,10 +277,31 @@ export default function FolhaPagamentoPage() {
 
     const quantidadeFeriados = feriadosUteis.length;
 
-    // Cálculo simples: 1 DSR por falta + 1 DSR por cada feriado do mês
-    const dsrDasFaltas = (salarioBase / 30) * faltas;
-    const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados;
-    return dsrDasFaltas + dsrDosFeriados;
+    // Se temos as datas das faltas, verificar quantas semanas diferentes têm faltas
+    if (absenceDates && absenceDates.length > 0 && absenceDates.length === faltas) {
+      // Agrupar faltas por semana
+      const semanasComFaltas = new Set<string>();
+      absenceDates.forEach((absenceDate: Date) => {
+        const weekStart = getWeekStart(absenceDate);
+        semanasComFaltas.add(weekStart.toISOString());
+      });
+
+      const numSemanasComFaltas = semanasComFaltas.size;
+
+      // DSR das faltas: 1 DSR por semana com faltas (não importa quantas faltas na semana)
+      const dsrDasFaltas = (salarioBase / 30) * numSemanasComFaltas;
+
+      // Cada feriado do mês sempre adiciona 1 DSR
+      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados;
+      
+      return dsrDasFaltas + dsrDosFeriados;
+    } else {
+      // Fallback: se não temos as datas exatas, assumir que estão em semanas diferentes
+      // (mais conservador: desconta mais)
+      const dsrDasFaltas = (salarioBase / 30) * faltas; // 1 DSR por falta
+      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados; // 1 DSR por feriado
+      return dsrDasFaltas + dsrDosFeriados;
+    }
   };
 
   const exportToExcel = async () => {
@@ -265,7 +343,10 @@ export default function FolhaPagamentoPage() {
         ? holidays.filter((h: any) => !h.state || h.state === employeeState || h.state === null)
         : holidays;
       
-      const dsrPorFalta = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes);
+      // Buscar datas das faltas do funcionário para calcular DSR corretamente
+      const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
+      
+      const dsrPorFalta = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
       const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
       const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
       const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
@@ -961,9 +1042,6 @@ export default function FolhaPagamentoPage() {
                             <div className="text-xs text-gray-400 dark:text-gray-500 sm:hidden">
                               {employee.department && `${employee.department} • ${employee.company || 'N/A'}`}
                             </div>
-                            <div className="text-xs text-gray-400 dark:text-gray-500">
-                              {employee.employeeId || 'N/A'}
-                            </div>
                           </div>
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden sm:table-cell">
@@ -973,9 +1051,6 @@ export default function FolhaPagamentoPage() {
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">
                               {employee.position || 'N/A'}
-                            </div>
-                            <div className="text-xs text-gray-400 dark:text-gray-500">
-                              {employee.modality || 'N/A'}
                             </div>
                           </div>
                         </td>
@@ -1031,7 +1106,10 @@ export default function FolhaPagamentoPage() {
                                 ? holidays.filter((h: any) => !h.state || h.state === employeeState || h.state === null)
                                 : holidays;
                               
-                              const dsrPorFalta = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes);
+                              // Buscar datas das faltas do funcionário para calcular DSR corretamente
+                              const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
+                              
+                              const dsrPorFalta = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
                               
                               // Cálculos de %VA e %VT baseados no polo
                               const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
