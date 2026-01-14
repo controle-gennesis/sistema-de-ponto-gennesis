@@ -340,9 +340,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     },
     enabled: hasToken, // Só executar se houver token
     retry: false, // Não tentar novamente em caso de erro
-    onError: () => {
-      // Silenciar erros 401 - são esperados quando não há autenticação
-    }
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   // Buscar registros de ponto do funcionário selecionado

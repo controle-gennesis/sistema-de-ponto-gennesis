@@ -102,9 +102,7 @@ export function ChatWidget() {
     },
     enabled: hasToken, // Só executar se houver token
     retry: false, // Não tentar novamente em caso de erro
-    onError: () => {
-      // Silenciar erros 401 - são esperados quando não há autenticação
-    }
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   const userId = userData?.data?.id;
@@ -162,9 +160,7 @@ export function ChatWidget() {
     enabled: hasToken && !!userId, // Só executar se houver token e userId
     refetchInterval: 10000,
     retry: false, // Não tentar novamente em caso de erro
-    onError: () => {
-      // Silenciar erros 401 - são esperados quando não há autenticação
-    }
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   const { data: pendingCountResponse } = useQuery({
@@ -176,9 +172,7 @@ export function ChatWidget() {
     enabled: hasToken && !!userId, // Só executar se houver token e userId
     refetchInterval: 10000,
     retry: false, // Não tentar novamente em caso de erro
-    onError: () => {
-      // Silenciar erros 401 - são esperados quando não há autenticação
-    }
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   const pendingChats: Chat[] = (pendingChatsResponse?.data || []).filter((chat: Chat) => chat.status === 'PENDING');
