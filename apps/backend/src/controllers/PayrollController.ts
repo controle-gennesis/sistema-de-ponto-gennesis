@@ -223,7 +223,7 @@ export class PayrollController {
    */
   async saveManualInssValues(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { employeeId, month, year, inssRescisao, inss13 } = req.body;
+      const { employeeId, month, year, inssRescisao, inss13, descontoPorFaltas, dsrPorFalta, horasExtrasValue, dsrHEValue } = req.body;
 
       // Validar parâmetros obrigatórios
       if (!employeeId || !month || !year) {
@@ -244,16 +244,20 @@ export class PayrollController {
       }
 
       const result = await payrollService.saveManualInssValues({
-        employeeId: employeeId, // Já é string, não precisa converter
+        employeeId: employeeId,
         month: parseInt(month),
         year: parseInt(year),
         inssRescisao: parseFloat(inssRescisao) || 0,
-        inss13: parseFloat(inss13) || 0
+        inss13: parseFloat(inss13) || 0,
+        descontoPorFaltas: descontoPorFaltas !== undefined ? parseFloat(descontoPorFaltas) : null,
+        dsrPorFalta: dsrPorFalta !== undefined ? parseFloat(dsrPorFalta) : null,
+        horasExtrasValue: horasExtrasValue !== undefined ? parseFloat(horasExtrasValue) : null,
+        dsrHEValue: dsrHEValue !== undefined ? parseFloat(dsrHEValue) : null
       });
 
       res.json({
         success: true,
-        message: 'Valores manuais de INSS salvos com sucesso',
+        message: 'Valores manuais salvos com sucesso',
         data: result
       });
     } catch (error) {

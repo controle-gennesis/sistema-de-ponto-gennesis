@@ -322,6 +322,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     XLSX.writeFile(wb, fileName);
   };
 
+  // Verificar se há token antes de fazer requisições
+  const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('token');
+
   // Buscar funcionários - buscar todos para filtrar no frontend
   const { data: employeesData, isLoading, error } = useQuery({
     queryKey: ['employees', statusFilter],
@@ -335,7 +338,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       });
       return res.data;
     },
-    enabled: true, // Permitir que todos os usuários vejam a lista
+    enabled: hasToken, // Só executar se houver token
+    retry: false, // Não tentar novamente em caso de erro
+    onError: () => {
+      // Silenciar erros 401 - são esperados quando não há autenticação
+    }
   });
 
   // Buscar registros de ponto do funcionário selecionado

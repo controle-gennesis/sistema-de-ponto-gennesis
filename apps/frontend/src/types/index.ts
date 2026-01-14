@@ -419,6 +419,10 @@ export interface PayrollEmployee {
   // Valores Manuais
   inssRescisao: number;
   inss13: number;
+  descontoPorFaltas?: number;
+  dsrPorFalta?: number;
+  horasExtrasValue?: number;
+  dsrHEValue?: number;
   // FGTS
   fgts: number;
   fgtsFerias: number;

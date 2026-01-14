@@ -2,8 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
+import { emailService } from '../services/EmailService';
 
 const prisma = new PrismaClient();
 
@@ -197,6 +199,10 @@ export class AuthController {
     try {
       const { email } = req.body;
 
+      if (!email) {
+        throw createError('Email é obrigatório', 400);
+      }
+
       const user = await prisma.user.findUnique({
         where: { email }
       });
@@ -209,8 +215,43 @@ export class AuthController {
         });
       }
 
-      // Aqui você implementaria o envio de email
-      // Por enquanto, apenas retornamos sucesso
+      // Invalidar tokens anteriores não utilizados
+      await prisma.passwordResetToken.updateMany({
+        where: {
+          userId: user.id,
+          used: false,
+          expiresAt: { gt: new Date() }
+        },
+        data: {
+          used: true
+        }
+      });
+
+      // Gerar novo token de reset
+      const token = uuidv4();
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 1); // Token válido por 1 hora
+
+      await prisma.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          token,
+          expiresAt
+        }
+      });
+
+      // Construir URL de reset
+      const frontendUrl = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:3000';
+      const resetUrl = `${frontendUrl}/auth/reset-password?token=${token}`;
+
+      // Enviar email
+      try {
+        await emailService.sendPasswordResetEmail(user.email, user.name, token, resetUrl);
+      } catch (emailError) {
+        console.error('Erro ao enviar email de reset:', emailError);
+        // Não falhar a requisição se o email falhar, apenas logar o erro
+      }
+
       return res.json({
         success: true,
         message: 'Se o email existir, você receberá instruções para redefinir sua senha'
@@ -224,8 +265,50 @@ export class AuthController {
     try {
       const { token, newPassword } = req.body;
 
-      // Aqui você validaria o token de reset
-      // Por enquanto, apenas retornamos sucesso
+      if (!token || !newPassword) {
+        throw createError('Token e nova senha são obrigatórios', 400);
+      }
+
+      if (newPassword.length < 6) {
+        throw createError('A senha deve ter no mínimo 6 caracteres', 400);
+      }
+
+      // Buscar token de reset
+      const resetToken = await prisma.passwordResetToken.findUnique({
+        where: { token },
+        include: { user: true }
+      });
+
+      if (!resetToken) {
+        throw createError('Token inválido ou expirado', 400);
+      }
+
+      if (resetToken.used) {
+        throw createError('Este token já foi utilizado', 400);
+      }
+
+      if (resetToken.expiresAt < new Date()) {
+        throw createError('Token expirado', 400);
+      }
+
+      // Hash da nova senha
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      // Atualizar senha do usuário
+      await prisma.user.update({
+        where: { id: resetToken.userId },
+        data: {
+          password: hashedPassword,
+          isFirstLogin: false // Marcar que não é mais primeiro login
+        }
+      });
+
+      // Marcar token como usado
+      await prisma.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data: { used: true }
+      });
+
       return res.json({
         success: true,
         message: 'Senha redefinida com sucesso'

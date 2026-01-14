@@ -61,7 +61,7 @@ export default function BankHoursPage() {
     const today = new Date();
     return {
       search: '',
-      department: '',
+      department: 'Departamento Pessoal',
       position: '',
       costCenter: '',
       client: '',
@@ -674,9 +674,6 @@ export default function BankHoursPage() {
                             </div>
                             <div className="text-xs text-gray-400 dark:text-gray-500 sm:hidden">
                               {employee.department && `${employee.department} • ${employee.costCenter || 'N/A'}`}
-                            </div>
-                            <div className="text-xs text-gray-400 dark:text-gray-500">
-                              {employee.employeeId || 'N/A'}
                             </div>
                           </div>
                         </td>

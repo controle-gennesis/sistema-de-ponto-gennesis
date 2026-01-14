@@ -91,11 +91,19 @@ export function ChatWidget() {
 
   const queryClient = useQueryClient();
 
+  // Verificar se há token antes de fazer requisições
+  const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('token');
+
   const { data: userData } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
+    },
+    enabled: hasToken, // Só executar se houver token
+    retry: false, // Não tentar novamente em caso de erro
+    onError: () => {
+      // Silenciar erros 401 - são esperados quando não há autenticação
     }
   });
 
@@ -151,8 +159,12 @@ export function ChatWidget() {
       const res = await api.get('/chats/unread/count');
       return res.data;
     },
-    enabled: !!userId, // Só executar se o usuário estiver autenticado
-    refetchInterval: 10000
+    enabled: hasToken && !!userId, // Só executar se houver token e userId
+    refetchInterval: 10000,
+    retry: false, // Não tentar novamente em caso de erro
+    onError: () => {
+      // Silenciar erros 401 - são esperados quando não há autenticação
+    }
   });
 
   const { data: pendingCountResponse } = useQuery({
@@ -161,8 +173,12 @@ export function ChatWidget() {
       const res = await api.get('/chats/pending/count');
       return res.data;
     },
-    enabled: !!userId, // Só executar se o usuário estiver autenticado
-    refetchInterval: 10000
+    enabled: hasToken && !!userId, // Só executar se houver token e userId
+    refetchInterval: 10000,
+    retry: false, // Não tentar novamente em caso de erro
+    onError: () => {
+      // Silenciar erros 401 - são esperados quando não há autenticação
+    }
   });
 
   const pendingChats: Chat[] = (pendingChatsResponse?.data || []).filter((chat: Chat) => chat.status === 'PENDING');

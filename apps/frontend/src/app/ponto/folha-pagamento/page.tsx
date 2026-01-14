@@ -34,7 +34,7 @@ export default function FolhaPagamentoPage() {
   
   const [filters, setFilters] = useState<PayrollFilters>({
     search: '',
-    department: '',
+    department: 'Departamento Pessoal',
     company: '',
     position: '',
     costCenter: '',
@@ -275,32 +275,45 @@ export default function FolhaPagamentoPage() {
       return dayOfWeek >= 1 && dayOfWeek <= 6; // Segunda a sábado
     });
 
-    const quantidadeFeriados = feriadosUteis.length;
-
-    // Se temos as datas das faltas, verificar quantas semanas diferentes têm faltas
+    // Se temos as datas das faltas, calcular DSR por semana com falta
     if (absenceDates && absenceDates.length > 0 && absenceDates.length === faltas) {
-      // Agrupar faltas por semana
-      const semanasComFaltas = new Set<string>();
+      // Agrupar faltas por semana e contar feriados de cada semana
+      const semanasComFaltas = new Map<string, number>(); // semana -> quantidade de faltas
       absenceDates.forEach((absenceDate: Date) => {
         const weekStart = getWeekStart(absenceDate);
-        semanasComFaltas.add(weekStart.toISOString());
+        const weekKey = weekStart.toISOString();
+        semanasComFaltas.set(weekKey, (semanasComFaltas.get(weekKey) || 0) + 1);
       });
 
-      const numSemanasComFaltas = semanasComFaltas.size;
+      let totalDSR = 0;
 
-      // DSR das faltas: 1 DSR por semana com faltas (não importa quantas faltas na semana)
-      const dsrDasFaltas = (salarioBase / 30) * numSemanasComFaltas;
+      // Para cada semana com falta, calcular DSR
+      semanasComFaltas.forEach((numFaltasNaSemana, weekKey) => {
+        const weekStart = new Date(weekKey);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6); // Fim da semana (sábado)
 
-      // Cada feriado do mês sempre adiciona 1 DSR
-      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados;
-      
-      return dsrDasFaltas + dsrDosFeriados;
+        // Contar quantos feriados estão nesta semana específica
+        const feriadosNaSemana = feriadosUteis.filter((holiday: any) => {
+          const holidayDate = new Date(holiday.date);
+          return holidayDate >= weekStart && holidayDate <= weekEnd;
+        }).length;
+
+        // DSR = 1 pela semana (independente de quantas faltas) + 1 por cada feriado da semana
+        // Exemplo: 2 faltas na mesma semana + 1 feriado = 1 DSR (semana) + 1 DSR (feriado) = 2 DSR
+        // Exemplo: 1 falta semana 1 (com 1 feriado) + 1 falta semana 2 = 1 DSR (semana 1) + 1 DSR (feriado semana 1) + 1 DSR (semana 2) = 3 DSR
+        const dsrDaSemana = 1 + feriadosNaSemana;
+        totalDSR += dsrDaSemana;
+      });
+
+      return (salarioBase / 30) * totalDSR;
     } else {
       // Fallback: se não temos as datas exatas, assumir que estão em semanas diferentes
-      // (mais conservador: desconta mais)
-      const dsrDasFaltas = (salarioBase / 30) * faltas; // 1 DSR por falta
-      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados; // 1 DSR por feriado
-      return dsrDasFaltas + dsrDosFeriados;
+      // Contar todos os feriados do mês
+      const quantidadeFeriados = feriadosUteis.length;
+      // 1 DSR por falta + 1 DSR por cada feriado (assumindo que pode estar na mesma semana)
+      const totalDSR = faltas + quantidadeFeriados;
+      return (salarioBase / 30) * totalDSR;
     }
   };
 
@@ -331,11 +344,19 @@ export default function FolhaPagamentoPage() {
       const periculosidade = employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0;
       const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
       const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
+      // Calcular número de dias do mês para desconto de faltas
+      // Usa 30 como padrão (a lista não tem acesso à data de admissão do funcionário)
       const diasParaDesconto = 30; // Padrão
-      const descontoPorFaltas = (salarioBase / 30) * faltas;
       
       // Calcular número de dias do mês atual (para outros cálculos)
       const diasDoMes = new Date(filters.year, filters.month, 0).getDate();
+      
+      // Usar valor manual de descontoPorFaltas se existir, senão calcular
+      // Usar a mesma fórmula do backend: (salarioBase + periculosidade + insalubridade) / diasParaDesconto * faltas
+      const descontoPorFaltasCalculado = diasParaDesconto > 0 ? ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas : 0;
+      const descontoPorFaltas = (employee.descontoPorFaltas !== null && employee.descontoPorFaltas !== undefined) 
+        ? Number(employee.descontoPorFaltas) 
+        : descontoPorFaltasCalculado;
       
       // Buscar feriados do estado do funcionário
       const employeeState = poloToState(employee.polo);
@@ -346,16 +367,33 @@ export default function FolhaPagamentoPage() {
       // Buscar datas das faltas do funcionário para calcular DSR corretamente
       const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
       
-      const dsrPorFalta = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
+      // Usar valor manual de dsrPorFalta se existir, senão calcular
+      const dsrPorFaltaCalculado = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
+      const dsrPorFalta = (employee.dsrPorFalta !== null && employee.dsrPorFalta !== undefined) 
+        ? Number(employee.dsrPorFalta) 
+        : dsrPorFaltaCalculado;
+      
       const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
       const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
-      const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
+      
+      // Usar valor manual de horas extras se existir, senão usar o calculado
+      const valorHorasExtrasCalculado = (employee.he50Value || 0) + (employee.he100Value || 0);
+      const valorHorasExtras = (employee.horasExtrasValue !== null && employee.horasExtrasValue !== undefined) 
+        ? Number(employee.horasExtrasValue) 
+        : valorHorasExtrasCalculado;
+      
       const diasUteis = employee.totalWorkingDays || 0;
       const diasNaoUteis = diasDoMes - diasUteis;
-      const valorDSRHE = diasUteis > 0 ? 
+      
+      // Usar valor manual de DSR HE se existir, senão calcular
+      const valorDSRHECalculado = diasUteis > 0 ? 
         ((employee.he50Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0) + 
         ((employee.he100Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0)
         : 0;
+      
+      const valorDSRHE = (employee.dsrHEValue !== null && employee.dsrHEValue !== undefined) 
+        ? (Number(employee.dsrHEValue) * (employee.hourlyRate || 0))
+        : valorDSRHECalculado;
       const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
         ? 0 
         : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
@@ -1098,7 +1136,12 @@ export default function FolhaPagamentoPage() {
                               // Calcular número de dias do mês atual (para outros cálculos)
                               const diasDoMes = new Date(filters.year, filters.month, 0).getDate();
                               
-                              const descontoPorFaltas = (salarioBase / 30) * faltas;
+                              // Usar valor manual de descontoPorFaltas se existir, senão calcular
+                              // Usar a mesma fórmula do backend: (salarioBase + periculosidade + insalubridade) / diasParaDesconto * faltas
+                              const descontoPorFaltasCalculado = diasParaDesconto > 0 ? ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas : 0;
+                              const descontoPorFaltas = (employee.descontoPorFaltas !== null && employee.descontoPorFaltas !== undefined) 
+                                ? Number(employee.descontoPorFaltas) 
+                                : descontoPorFaltasCalculado;
                               
                               // Buscar feriados do estado do funcionário para calcular DSR
                               const employeeState = poloToState(employee.polo);
@@ -1109,7 +1152,11 @@ export default function FolhaPagamentoPage() {
                               // Buscar datas das faltas do funcionário para calcular DSR corretamente
                               const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
                               
-                              const dsrPorFalta = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
+                              // Usar valor manual de dsrPorFalta se existir, senão calcular
+                              const dsrPorFaltaCalculado = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
+                              const dsrPorFalta = (employee.dsrPorFalta !== null && employee.dsrPorFalta !== undefined) 
+                                ? Number(employee.dsrPorFalta) 
+                                : dsrPorFaltaCalculado;
                               
                               // Cálculos de %VA e %VT baseados no polo
                               const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
@@ -1118,13 +1165,22 @@ export default function FolhaPagamentoPage() {
                               const totalHorasExtras = (employee.he50Hours || 0) + (employee.he100Hours || 0);
                               const diasUteis = employee.totalWorkingDays || 0;
                               const diasNaoUteis = diasDoMes - diasUteis;
-                              const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
-                              const valorDSRHE = diasUteis > 0 ? 
+                              
+                              // Usar valor manual de DSR HE se existir, senão calcular
+                              const valorDSRHECalculado = diasUteis > 0 ? 
                                 ((employee.he50Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0) + 
                                 ((employee.he100Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0)
                                 : 0;
                               
-                              const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
+                              const valorDSRHE = (employee.dsrHEValue !== null && employee.dsrHEValue !== undefined) 
+                                ? (Number(employee.dsrHEValue) * (employee.hourlyRate || 0))
+                                : valorDSRHECalculado;
+                              
+                              // Usar valor manual de horas extras se existir, senão usar o calculado
+                              const valorHorasExtrasCalculado = (employee.he50Value || 0) + (employee.he100Value || 0);
+                              const valorHorasExtras = (employee.horasExtrasValue !== null && employee.horasExtrasValue !== undefined) 
+                                ? Number(employee.horasExtrasValue) 
+                                : valorHorasExtrasCalculado;
                               const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
                                 ? 0 
                                 : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);

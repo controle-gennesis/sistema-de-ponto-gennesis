@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon, Save, Plus } from 'lucide-react';
+import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon, Save } from 'lucide-react';
 import { PayrollEmployee } from '@/types';
 import api from '@/lib/api';
 
@@ -26,14 +26,52 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Estados para os valores manuais editáveis
   const [inssRescisao, setInssRescisao] = useState(employee.inssRescisao || 0);
   const [inss13, setInss13] = useState(employee.inss13 || 0);
-  const [editingField, setEditingField] = useState<'inssRescisao' | 'inss13' | null>(null);
+  const [descontoPorFaltas, setDescontoPorFaltas] = useState<number | null>(null);
+  const [dsrPorFalta, setDsrPorFalta] = useState<number | null>(null);
+  const [horasExtrasValue, setHorasExtrasValue] = useState<number | null>(null);
+  const [dsrHEValue, setDsrHEValue] = useState<number | null>(null);
+  const [editingField, setEditingField] = useState<'inssRescisao' | 'inss13' | 'descontoPorFaltas' | 'dsrPorFalta' | 'horasExtras' | 'dsrHE' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Armazenar valores originais para cancelar edição
+  const [originalValues, setOriginalValues] = useState({
+    inssRescisao: employee.inssRescisao || 0,
+    inss13: employee.inss13 || 0,
+    descontoPorFaltas: employee.descontoPorFaltas !== undefined ? employee.descontoPorFaltas : null,
+    dsrPorFalta: employee.dsrPorFalta !== undefined ? employee.dsrPorFalta : null,
+    horasExtrasValue: null,
+    dsrHEValue: null
+  });
 
   // Atualizar estados quando o funcionário mudar
   useEffect(() => {
-    setInssRescisao(employee.inssRescisao || 0);
-    setInss13(employee.inss13 || 0);
+    const newValues = {
+      inssRescisao: employee.inssRescisao || 0,
+      inss13: employee.inss13 || 0,
+      descontoPorFaltas: employee.descontoPorFaltas !== undefined ? employee.descontoPorFaltas : null,
+      dsrPorFalta: employee.dsrPorFalta !== undefined ? employee.dsrPorFalta : null,
+      horasExtrasValue: null,
+      dsrHEValue: null
+    };
+    setOriginalValues(newValues);
+    setInssRescisao(newValues.inssRescisao);
+    setInss13(newValues.inss13);
+    setDescontoPorFaltas(newValues.descontoPorFaltas);
+    setDsrPorFalta(newValues.dsrPorFalta);
+    setHorasExtrasValue(newValues.horasExtrasValue);
+    setDsrHEValue(newValues.dsrHEValue);
   }, [employee]);
+
+  // Função para cancelar edição
+  const handleCancelEdit = () => {
+    setInssRescisao(originalValues.inssRescisao);
+    setInss13(originalValues.inss13);
+    setDescontoPorFaltas(originalValues.descontoPorFaltas);
+    setDsrPorFalta(originalValues.dsrPorFalta);
+    setHorasExtrasValue(originalValues.horasExtrasValue);
+    setDsrHEValue(originalValues.dsrHEValue);
+    setEditingField(null);
+  };
 
   // Converter polo para estado (para buscar feriados)
   const poloToState = (polo?: string | null): string | undefined => {
@@ -102,7 +140,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
           month,
           year,
           inssRescisao,
-          inss13
+          inss13,
+          descontoPorFaltas: descontoPorFaltas !== null ? descontoPorFaltas : undefined,
+          dsrPorFalta: dsrPorFalta !== null ? dsrPorFalta : undefined,
+          horasExtrasValue: horasExtrasValue !== null ? horasExtrasValue : undefined,
+          dsrHEValue: dsrHEValue !== null ? dsrHEValue : undefined
         })
       });
 
@@ -121,8 +163,24 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
         const updatedEmployeeData = await employeeResponse.json();
         if (updatedEmployeeData.success && updatedEmployeeData.data) {
           // Atualizar os estados locais
-          setInssRescisao(updatedEmployeeData.data.inssRescisao || 0);
-          setInss13(updatedEmployeeData.data.inss13 || 0);
+          const newValues = {
+            inssRescisao: updatedEmployeeData.data.inssRescisao || 0,
+            inss13: updatedEmployeeData.data.inss13 || 0,
+            descontoPorFaltas: updatedEmployeeData.data.descontoPorFaltas !== undefined ? updatedEmployeeData.data.descontoPorFaltas : null,
+            dsrPorFalta: updatedEmployeeData.data.dsrPorFalta !== undefined ? updatedEmployeeData.data.dsrPorFalta : null,
+            horasExtrasValue: updatedEmployeeData.data.horasExtrasValue !== undefined ? updatedEmployeeData.data.horasExtrasValue : null,
+            dsrHEValue: updatedEmployeeData.data.dsrHEValue !== undefined ? updatedEmployeeData.data.dsrHEValue : null
+          };
+          
+          setInssRescisao(newValues.inssRescisao);
+          setInss13(newValues.inss13);
+          setDescontoPorFaltas(newValues.descontoPorFaltas);
+          setDsrPorFalta(newValues.dsrPorFalta);
+          setHorasExtrasValue(newValues.horasExtrasValue);
+          setDsrHEValue(newValues.dsrHEValue);
+          
+          // Atualizar valores originais para o próximo cancelamento
+          setOriginalValues(newValues);
           
           // Notificar o componente pai sobre a atualização
           if (onEmployeeUpdate) {
@@ -167,15 +225,18 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Calcular número de dias do mês atual (para outros cálculos)
   const diasDoMes = new Date(year, month, 0).getDate(); // Último dia do mês
   
-  const descontoPorFaltas = (salarioBase / 30) * faltas;
+  // Calcular desconto por faltas (usar valor manual se existir)
+  // Usar a mesma fórmula do backend: (salarioBase + periculosidade + insalubridade) / diasParaDesconto * faltas
+  const descontoPorFaltasCalculado = diasParaDesconto > 0 ? ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas : 0;
+  const descontoPorFaltasFinal = (descontoPorFaltas !== null && descontoPorFaltas !== undefined) ? Number(descontoPorFaltas) : descontoPorFaltasCalculado;
   
   // Debug: verificar valores
   if (faltas > 0) {
     console.log('🔍 Debug DSR por Falta:', {
       salarioBase,
       faltas,
-      descontoPorFaltas: descontoPorFaltas.toFixed(2),
-      calculo: `(${salarioBase} / 30) * ${faltas} = ${descontoPorFaltas.toFixed(2)}`
+      descontoPorFaltas: (descontoPorFaltasFinal || 0).toFixed(2),
+      calculo: `(${salarioBase} / 30) * ${faltas} = ${(descontoPorFaltasFinal || 0).toFixed(2)}`
     });
   }
   
@@ -183,13 +244,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const descontoPericInsalub = ((periculosidade + insalubridade) / 30) * faltas;
   
   // Cálculo do DSR por Falta considerando feriados
-  // Lógica:
-  // - Se faltas estão na mesma semana: conta apenas 1 DSR total pelas faltas
-  // - Se faltas estão em semanas diferentes: conta 1 DSR por cada falta
-  // - Cada feriado do mês sempre adiciona 1 DSR (independente da semana)
-  // Exemplo: 2 faltas mesma semana + 2 feriados = 1 DSR (faltas) + 2 DSR (feriados) = 3 DSR
-  // Exemplo: 2 faltas semanas diferentes + 2 feriados = 2 DSR (faltas) + 2 DSR (feriados) = 4 DSR
-  let dsrPorFalta = 0;
+  // Nova lógica:
+  // - Se faltar em uma semana que tem feriado, perde: 1 DSR pela falta + 1 DSR por cada feriado daquela semana
+  // - Exemplo: 1 falta em semana com 2 feriados = 1 DSR (falta) + 2 DSR (feriados) = 3 DSR
+  // - Exemplo: 2 faltas em semanas diferentes, uma com 1 feriado = 1 DSR (falta semana 1) + 1 DSR (feriado semana 1) + 1 DSR (falta semana 2) = 3 DSR
+  let dsrPorFaltaCalculado = 0;
   let referenciaDSR = '';
   
   if (faltas > 0) {
@@ -199,8 +258,6 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
       const dayOfWeek = holidayDate.getDay();
       return dayOfWeek >= 1 && dayOfWeek <= 6; // Segunda a sábado
     });
-
-    const quantidadeFeriados = feriadosUteis.length;
 
     // Função para obter o início da semana (domingo) de uma data
     const getWeekStart = (date: Date): Date => {
@@ -212,40 +269,54 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
       return weekStart;
     };
 
-    // Se temos as datas das faltas, verificar quantas semanas diferentes têm faltas
+    // Se temos as datas das faltas, calcular DSR por semana com falta
     if (absenceDates.length > 0 && absenceDates.length === faltas) {
       // Agrupar faltas por semana
-      const semanasComFaltas = new Set<string>();
+      const semanasComFaltas = new Map<string, number>(); // semana -> quantidade de faltas
       absenceDates.forEach((absenceDate: Date) => {
         const weekStart = getWeekStart(absenceDate);
-        semanasComFaltas.add(weekStart.toISOString());
+        const weekKey = weekStart.toISOString();
+        semanasComFaltas.set(weekKey, (semanasComFaltas.get(weekKey) || 0) + 1);
       });
 
-      const numSemanasComFaltas = semanasComFaltas.size;
+      let totalDSR = 0;
+      const detalhesSemanas: string[] = [];
 
-      // DSR das faltas: 1 DSR por semana com faltas (não importa quantas faltas na semana)
-      const dsrDasFaltas = (salarioBase / 30) * numSemanasComFaltas;
+      // Para cada semana com falta, calcular DSR
+      semanasComFaltas.forEach((numFaltasNaSemana, weekKey) => {
+        const weekStart = new Date(weekKey);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6); // Fim da semana (sábado)
 
-      // Cada feriado do mês sempre adiciona 1 DSR
-      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados;
-      
-      dsrPorFalta = dsrDasFaltas + dsrDosFeriados;
+        // Contar quantos feriados estão nesta semana específica
+        const feriadosNaSemana = feriadosUteis.filter((holiday: any) => {
+          const holidayDate = new Date(holiday.date);
+          return holidayDate >= weekStart && holidayDate <= weekEnd;
+        }).length;
 
-      if (quantidadeFeriados === 0) {
-        referenciaDSR = numSemanasComFaltas === 1
-          ? `${faltas} falta(s) em 1 semana (1 DSR)`
-          : `${faltas} falta(s) em ${numSemanasComFaltas} semanas diferentes (${numSemanasComFaltas} DSR)`;
-      } else {
-        referenciaDSR = numSemanasComFaltas === 1
-          ? `${faltas} falta(s) em 1 semana (1 DSR) + ${quantidadeFeriados} feriado(s) (${quantidadeFeriados} DSR)`
-          : `${faltas} falta(s) em ${numSemanasComFaltas} semanas (${numSemanasComFaltas} DSR) + ${quantidadeFeriados} feriado(s) (${quantidadeFeriados} DSR)`;
-      }
+        // DSR = 1 pela semana (independente de quantas faltas) + 1 por cada feriado da semana
+        // Exemplo: 2 faltas na mesma semana + 1 feriado = 1 DSR (semana) + 1 DSR (feriado) = 2 DSR
+        // Exemplo: 1 falta semana 1 (com 1 feriado) + 1 falta semana 2 = 1 DSR (semana 1) + 1 DSR (feriado semana 1) + 1 DSR (semana 2) = 3 DSR
+        const dsrDaSemana = 1 + feriadosNaSemana;
+        totalDSR += dsrDaSemana;
+
+        // Montar detalhe para exibição
+        if (feriadosNaSemana > 0) {
+          detalhesSemanas.push(`${numFaltasNaSemana} falta(s) na semana + ${feriadosNaSemana} feriado(s) (${dsrDaSemana} DSR)`);
+        } else {
+          detalhesSemanas.push(`${numFaltasNaSemana} falta(s) na semana (1 DSR)`);
+        }
+      });
+
+      dsrPorFaltaCalculado = (salarioBase / 30) * totalDSR;
+      referenciaDSR = detalhesSemanas.join(' | ');
     } else {
       // Fallback: se não temos as datas exatas, assumir que estão em semanas diferentes
-      // (mais conservador: desconta mais)
-      const dsrDasFaltas = (salarioBase / 30) * faltas; // 1 DSR por falta
-      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados; // 1 DSR por feriado
-      dsrPorFalta = dsrDasFaltas + dsrDosFeriados;
+      // Contar todos os feriados do mês
+      const quantidadeFeriados = feriadosUteis.length;
+      // 1 DSR por falta + 1 DSR por cada feriado (assumindo que pode estar na mesma semana)
+      const totalDSR = faltas + quantidadeFeriados;
+      dsrPorFaltaCalculado = (salarioBase / 30) * totalDSR;
 
       if (quantidadeFeriados === 0) {
         referenciaDSR = `${faltas} falta(s) - Sem feriado no mês (1 DSR por falta)`;
@@ -257,6 +328,9 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     referenciaDSR = '-';
   }
   
+  // Usar valor manual de DSR se existir, senão usar o calculado
+  const dsrPorFaltaFinal = (dsrPorFalta !== null && dsrPorFalta !== undefined) ? Number(dsrPorFalta) : dsrPorFaltaCalculado;
+  
   // Cálculos de %VA e %VT baseados no polo
   const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
   const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
@@ -265,20 +339,31 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const totalHorasExtras = (employee.he50Hours || 0) + (employee.he100Hours || 0);
   const diasUteis = employee.totalWorkingDays || 0; // Segunda a Sábado
   const diasNaoUteis = diasDoMes - diasUteis; // Domingo + feriados
-  const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+  const dsrHECalculado = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+  
+  // Usar valor manual de DSR HE se existir, senão usar o calculado
+  const dsrHE = (dsrHEValue !== null && dsrHEValue !== undefined) ? Number(dsrHEValue) : dsrHECalculado;
   
   // Cálculo do valor do DSR H.E considerando as diferentes taxas
   // he50Hours e he100Hours já vêm multiplicados do backend
-  const valorDSRHE = diasUteis > 0 ? 
+  const valorDSRHECalculado = diasUteis > 0 ? 
     ((employee.he50Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0) +  // DSR sobre HE 50% (já multiplicado)
     ((employee.he100Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0)   // DSR sobre HE 100% (já multiplicado)
     : 0;
   
+  // Usar valor manual se existir, senão usar o calculado
+  const valorDSRHE = (dsrHEValue !== null && dsrHEValue !== undefined) 
+    ? (dsrHEValue * (employee.hourlyRate || 0))
+    : valorDSRHECalculado;
+  
   // Cálculo da BASE INSS MENSAL
-  const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
+  // Usar valor manual de horas extras se existir, senão usar o calculado
+  const valorHorasExtras = (horasExtrasValue !== null && horasExtrasValue !== undefined) 
+    ? Number(horasExtrasValue) 
+    : ((employee.he50Value || 0) + (employee.he100Value || 0));
   const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
     ? 0 
-    : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+    : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltasFinal - dsrPorFaltaFinal);
   
   // Cálculo do INSS MENSAL (Tabela Progressiva)
   const calcularINSS = (baseINSS: number): number => {
@@ -304,7 +389,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const dctfweb = ((employee.inssTotal || 0) + (employee.irrfTotal || 0)) - salarioFamilia;
   
   const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
-  const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
+  const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltasFinal + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
   const liquidoReceber = totalProventos - totalDescontos;
   
   // Cálculo com acréscimos
@@ -619,8 +704,53 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       {((employee.he50Hours || 0) + (employee.he100Hours || 0)).toFixed(2)}h
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {((employee.he50Value || 0) + (employee.he100Value || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('horasExtras')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'horasExtras' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={horasExtrasValue === null || horasExtrasValue === 0 ? '' : horasExtrasValue.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setHorasExtrasValue(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span>
+                          R$ {valorHorasExtras.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -638,8 +768,53 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       {dsrHE.toFixed(2)}h
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {(dsrHE * (employee.hourlyRate || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('dsrHE')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'dsrHE' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={dsrHEValue === null || dsrHEValue === 0 ? '' : dsrHEValue.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setDsrHEValue(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span>
+                          R$ {valorDSRHE.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -688,8 +863,53 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
-                      R$ {(descontoPorFaltas || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('descontoPorFaltas')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'descontoPorFaltas' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={descontoPorFaltas === null || descontoPorFaltas === 0 ? '' : descontoPorFaltas.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setDescontoPorFaltas(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span>
+                          R$ {descontoPorFaltasFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
                     </td>
                   </tr>
 
@@ -712,8 +932,53 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
-                      R$ {(dsrPorFalta || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('dsrPorFalta')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'dsrPorFalta' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={dsrPorFalta === null || dsrPorFalta === 0 ? '' : dsrPorFalta.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setDsrPorFalta(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span>
+                          R$ {dsrPorFaltaFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
                     </td>
                   </tr>
 
@@ -854,9 +1119,13 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-center text-sm font-bold text-red-700 dark:text-red-400">
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('inssRescisao')}
+                      title="Clique para editar"
+                    >
                       {editingField === 'inssRescisao' ? (
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <input
                             type="text"
                             value={inssRescisao === 0 ? '' : inssRescisao.toString()}
@@ -866,35 +1135,39 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             }}
                             className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
                           />
                           <button
-                            onClick={handleSaveManualValues}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
                             disabled={isSaving}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
                             title="Salvar"
                           >
                             <Save className="w-4 h-4" />
                           </button>
-                        </div>
-                      ) : inssRescisao > 0 ? (
-                        <div 
-                          className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded text-right"
-                          onClick={() => setEditingField('inssRescisao')}
-                          title="Clique para editar"
-                        >
-                          R$ {inssRescisao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                      ) : (
-                        <div className="flex justify-center">
                           <button
-                            onClick={() => setEditingField('inssRescisao')}
-                            className="flex items-center justify-center gap-1 px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
-                            title="Adicionar valor"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
                           >
-                            <Plus className="w-3 h-3" />
-                            Adicionar
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
+                      ) : (
+                        <span>
+                          {inssRescisao > 0 
+                            ? `R$ ${inssRescisao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : 'R$ 0,00'
+                          }
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -913,9 +1186,13 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-center text-sm font-bold text-red-700 dark:text-red-400">
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('inss13')}
+                      title="Clique para editar"
+                    >
                       {editingField === 'inss13' ? (
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <input
                             type="text"
                             value={inss13 === 0 ? '' : inss13.toString()}
@@ -925,35 +1202,39 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             }}
                             className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
                           />
                           <button
-                            onClick={handleSaveManualValues}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
                             disabled={isSaving}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
                             title="Salvar"
                           >
                             <Save className="w-4 h-4" />
                           </button>
-                        </div>
-                      ) : inss13 > 0 ? (
-                        <div 
-                          className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded text-right"
-                          onClick={() => setEditingField('inss13')}
-                          title="Clique para editar"
-                        >
-                          R$ {inss13.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                      ) : (
-                        <div className="flex justify-center">
                           <button
-                            onClick={() => setEditingField('inss13')}
-                            className="flex items-center justify-center gap-1 px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
-                            title="Adicionar valor"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
                           >
-                            <Plus className="w-3 h-3" />
-                            Adicionar
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
+                      ) : (
+                        <span>
+                          {inss13 > 0 
+                            ? `R$ ${inss13.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : 'R$ 0,00'
+                          }
+                        </span>
                       )}
                     </td>
                   </tr>
