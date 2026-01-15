@@ -3,7 +3,7 @@
 // Desabilitar prerendering
 export const dynamic = 'force-dynamic';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Lock, AlertCircle, Moon, Sun, ArrowRight, ArrowLeft, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -11,7 +11,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 
-export default function ResetPasswordPage() {
+function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
@@ -288,6 +288,18 @@ export default function ResetPasswordPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900">
+        <Loading message="Carregando..." size="lg" />
+      </div>
+    }>
+      <ResetPasswordForm />
+    </Suspense>
   );
 }
 
