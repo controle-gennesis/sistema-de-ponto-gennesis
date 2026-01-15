@@ -342,9 +342,9 @@ export default function PontoPage() {
       
       {/* Mensagem para funcionários que não precisam bater ponto */}
       {!requiresTimeClock && (
-        <div className="flex justify-center mb-6">
-          <div className="px-6 py-4 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg border border-gray-300 dark:border-gray-600">
-            <p className="text-center">
+        <div className="flex justify-center mb-8">
+          <div className="w-full max-w-2xl px-6 py-4 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <p className="text-center text-base font-medium text-blue-800 dark:text-blue-200">
               Você não precisa bater ponto. Seu registro é automático.
             </p>
           </div>

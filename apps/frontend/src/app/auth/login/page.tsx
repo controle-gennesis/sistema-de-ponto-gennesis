@@ -47,18 +47,20 @@ export default function LoginPage() {
         return;
       }
       
-      // Buscar dados do usuário para verificar se precisa bater ponto
+      // Buscar dados do usuário para verificar cargo e se precisa bater ponto
       // Usar um pequeno delay para garantir que o token está disponível
       setTimeout(async () => {
         try {
           const userRes = await api.get('/auth/me');
           const userData = userRes.data?.data;
+          const userPosition = userData?.employee?.position;
           const requiresTimeClock = userData?.employee?.requiresTimeClock !== false;
           
-          // Se não precisa bater ponto, redirecionar para dashboard
-          if (!requiresTimeClock) {
+          // Se for Administrador, redirecionar para dashboard
+          if (userPosition === 'Administrador') {
             router.push('/ponto/dashboard');
           } else {
+            // Outros funcionários vão para /ponto (a página mostra mensagem se não precisa bater ponto)
             router.push('/ponto');
           }
         } catch (userError: any) {
