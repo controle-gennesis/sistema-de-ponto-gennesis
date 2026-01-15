@@ -51,12 +51,18 @@ export default function FolhaPagamentoPage() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true); // Minimizados por padrão
 
+  // Verificar se há token antes de fazer requisições
+  const hasToken = typeof window !== 'undefined' && !!(localStorage.getItem('token') || sessionStorage.getItem('token'));
+
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
-    }
+    },
+    enabled: hasToken, // Só executar se houver token
+    retry: false, // Não tentar novamente em caso de erro
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   const { data: payrollResponse, isLoading: loadingPayroll, error: payrollError } = useQuery({
@@ -86,8 +92,10 @@ export default function FolhaPagamentoPage() {
         throw error;
       }
     },
+    enabled: hasToken && !!userData, // Só executar se houver token e dados do usuário
     retry: 2,
-    retryDelay: 1000
+    retryDelay: 1000,
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   // Buscar feriados do mês
@@ -98,7 +106,9 @@ export default function FolhaPagamentoPage() {
       if (filters.month) params.month = filters.month;
       const res = await api.get('/holidays', { params });
       return res.data;
-    }
+    },
+    enabled: hasToken && !!userData, // Só executar se houver token e dados do usuário
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   const holidays = holidaysData?.data || [];
@@ -110,20 +120,13 @@ export default function FolhaPagamentoPage() {
       const startDate = new Date(filters.year, filters.month - 1, 1);
       const endDate = new Date(filters.year, filters.month, 0, 23, 59, 59);
       
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-      const token = localStorage.getItem('token');
+      const res = await api.get(`/time-records?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}&type=ABSENCE_JUSTIFIED`);
       
-      const res = await fetch(`${API_URL}/time-records?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}&type=ABSENCE_JUSTIFIED`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        }
-      });
-      
-      if (!res.ok) return { data: [] };
-      const data = await res.json();
-      return data;
+      if (!res.data) return { data: [] };
+      return res.data;
     },
-    enabled: !!filters.year && !!filters.month
+    enabled: hasToken && !!userData && !!filters.year && !!filters.month, // Só executar se houver token, dados do usuário e filtros
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   // Criar mapa de faltas por funcionário (employeeId -> array de datas)
