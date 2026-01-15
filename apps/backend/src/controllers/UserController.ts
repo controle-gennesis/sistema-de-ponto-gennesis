@@ -618,4 +618,45 @@ export class UserController {
       return next(error);
     }
   }
+
+  async checkEmailExists(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { email } = req.query;
+
+      if (!email || typeof email !== 'string') {
+        return res.json({
+          success: true,
+          exists: false
+        });
+      }
+
+      // Validar formato básico de email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.json({
+          success: true,
+          exists: false
+        });
+      }
+
+      // Buscar email no banco (case-insensitive)
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          email: {
+            equals: email,
+            mode: 'insensitive'
+          }
+        },
+        select: { id: true, name: true }
+      });
+
+      return res.json({
+        success: true,
+        exists: !!existingUser,
+        user: existingUser ? { id: existingUser.id, name: existingUser.name } : null
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }
