@@ -158,14 +158,15 @@ export class PayrollService {
   /**
    * Calcula os totais mensais de VA e VT para um funcionário
    */
-  private async calculateMonthlyTotals(employeeId: string, month: number, year: number, hireDate?: Date) {
+  private async calculateMonthlyTotals(employeeId: string, month: number, year: number, controlStartDate?: Date) {
     // Buscar dados do funcionário para verificar se precisa bater ponto
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       select: {
         requiresTimeClock: true,
         dailyFoodVoucher: true,
-        dailyTransportVoucher: true
+        dailyTransportVoucher: true,
+        createdAt: true // Usar createdAt para cálculos de folha
       }
     });
 
@@ -191,12 +192,14 @@ export class PayrollService {
         }
       });
       
-      // Calcular dias úteis do mês
+      // Para funcionários que não batem ponto, calcular folha completa do mês
+      // (não usar createdAt, usar início do mês para funcionários antigos)
+      const monthStartDate = new Date(year, month - 1, 1);
       const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
         0, // Não há registros de ponto
         month, 
         year, 
-        hireDate
+        monthStartDate // Sempre usar início do mês para funcionários que não batem ponto
       );
       
       // Para funcionários que não batem ponto, considerar todos os dias úteis como presenças
@@ -264,7 +267,7 @@ export class PayrollService {
       timeRecords.length, 
       month, 
       year, 
-      hireDate
+      controlStartDate
     );
     
     // Ajustar dias trabalhados subtraindo as faltas
@@ -282,7 +285,7 @@ export class PayrollService {
   /**
    * Calcula dias trabalhados e faltas de forma inteligente
    */
-  private async calculateWorkingDays(daysWorked: number, month: number, year: number, hireDate?: Date) {
+  private async calculateWorkingDays(daysWorked: number, month: number, year: number, controlStartDate?: Date) {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentYear = today.getFullYear();
@@ -292,9 +295,9 @@ export class PayrollService {
       ? today.getDate() 
       : new Date(year, month, 0).getDate();
     
-    // Data de início: data de admissão ou início do mês
-    const startDay = hireDate && hireDate.getMonth() + 1 === month && hireDate.getFullYear() === year
-      ? hireDate.getDate()
+    // Data de início: createdAt (data de criação no sistema) ou início do mês
+    const startDay = controlStartDate && controlStartDate.getMonth() + 1 === month && controlStartDate.getFullYear() === year
+      ? controlStartDate.getDate()
       : 1;
     
     // Buscar feriados ativos no mês para desconsiderar da contagem de dias úteis
@@ -409,13 +412,13 @@ export class PayrollService {
     
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { hireDate: true }
+      select: { createdAt: true } // Usar createdAt para verificar se está ativo no período
     });
 
     if (!employee) return false;
 
-    // Funcionário deve ter sido admitido antes ou durante o período
-    return employee.hireDate <= endDate;
+    // Funcionário deve ter sido criado no sistema antes ou durante o período
+    return employee.createdAt <= endDate;
   }
 
   /**
@@ -632,7 +635,9 @@ export class PayrollService {
             return null; // Funcionário não estava ativo no período
           }
 
-        const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
+        // Usar createdAt (data de criação no sistema) para cálculos de folha
+        const employeeControlDate = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : undefined;
+        const totals = await this.calculateMonthlyTotals(employee.id, month, year, employeeControlDate);
         const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
         const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
         const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
@@ -690,15 +695,15 @@ export class PayrollService {
         
         // Calcular número de dias do mês
         const diasDoMes = new Date(year, month, 0).getDate();
-        // Calcular dias para desconto (30 ou 31 se for mês de admissão)
+        // Calcular dias para desconto (30 ou 31 se for mês de criação no sistema)
         let diasParaDesconto = 30;
-        if (employee.hireDate) {
-          const hireDate = new Date(employee.hireDate);
-          const mesAdmissao = hireDate.getMonth() + 1;
-          const anoAdmissao = hireDate.getFullYear();
-          if (month === mesAdmissao && year === anoAdmissao) {
-            const diasMesAdmissao = new Date(anoAdmissao, mesAdmissao, 0).getDate();
-            if (diasMesAdmissao === 31) {
+        const employeeControlDateForDiscount = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : null;
+        if (employeeControlDateForDiscount) {
+          const mesCriacao = employeeControlDateForDiscount.getMonth() + 1;
+          const anoCriacao = employeeControlDateForDiscount.getFullYear();
+          if (month === mesCriacao && year === anoCriacao) {
+            const diasMesCriacao = new Date(anoCriacao, mesCriacao, 0).getDate();
+            if (diasMesCriacao === 31) {
               diasParaDesconto = 31;
             }
           }
@@ -1132,7 +1137,9 @@ export class PayrollService {
       return null;
     }
 
-    const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
+    // Usar createdAt (data de criação no sistema) para cálculos de folha
+    const employeeControlDateForPayroll = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : undefined;
+    const totals = await this.calculateMonthlyTotals(employee.id, month, year, employeeControlDateForPayroll);
     const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
     const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
     const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
@@ -1156,17 +1163,17 @@ export class PayrollService {
     const faltas = totals.absences !== undefined ? totals.absences : (totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0);
     
     // Calcular número de dias do mês para desconto de faltas
-    // Usa 30 como padrão, ou 31 apenas se for o mês de admissão E o mês de admissão tiver 31 dias
+    // Usa 30 como padrão, ou 31 apenas se for o mês de criação no sistema E o mês tiver 31 dias
     let diasParaDesconto = 30; // Padrão
-    if (employee.hireDate) {
-      const hireDate = new Date(employee.hireDate);
-      const mesAdmissao = hireDate.getMonth() + 1; // getMonth() retorna 0-11
-      const anoAdmissao = hireDate.getFullYear();
+    const employeeControlDateForDiscount = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : null;
+    if (employeeControlDateForDiscount) {
+      const mesCriacao = employeeControlDateForDiscount.getMonth() + 1; // getMonth() retorna 0-11
+      const anoCriacao = employeeControlDateForDiscount.getFullYear();
       
-      // Só usa 31 dias se for o mês de admissão e o mês tiver 31 dias
-      if (month === mesAdmissao && year === anoAdmissao) {
-        const diasMesAdmissao = new Date(anoAdmissao, mesAdmissao, 0).getDate();
-        if (diasMesAdmissao === 31) {
+      // Só usa 31 dias se for o mês de criação no sistema e o mês tiver 31 dias
+      if (month === mesCriacao && year === anoCriacao) {
+        const diasMesCriacao = new Date(anoCriacao, mesCriacao, 0).getDate();
+        if (diasMesCriacao === 31) {
           diasParaDesconto = 31;
         }
       }

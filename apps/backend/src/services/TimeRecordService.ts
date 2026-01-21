@@ -349,7 +349,18 @@ export class TimeRecordService {
 
   async calculateBankHoursDetailed(userId: string, startDate: Date, endDate: Date) {
     const employee = await prisma.employee.findFirst({ where: { userId } });
-    const adjustedStart = employee ? moment.max(moment(startDate).startOf('day'), moment(employee.hireDate).startOf('day')) : moment(startDate).startOf('day');
+    // Usar createdAt (data de criação no sistema) para cálculos de banco de horas
+    // hireDate é usado apenas para cálculos de férias
+    const controlStartDate = employee?.createdAt 
+      ? moment(employee.createdAt).startOf('day')
+      : employee?.hireDate 
+        ? moment(employee.hireDate).startOf('day')
+        : moment(startDate).startOf('day');
+    
+    const adjustedStart = employee 
+      ? moment.max(moment(startDate).startOf('day'), controlStartDate) 
+      : moment(startDate).startOf('day');
+    
     const cursor = adjustedStart.clone();
     // Limitar até o dia atual (não incluir dias futuros)
     const today = moment().endOf('day');
