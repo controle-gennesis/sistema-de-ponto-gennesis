@@ -332,7 +332,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const dsrPorFaltaFinal = (dsrPorFalta !== null && dsrPorFalta !== undefined) ? Number(dsrPorFalta) : dsrPorFaltaCalculado;
   
   // Cálculos de %VA e %VT baseados no polo
-  const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
+  const percentualVA = employee.polo === 'BRASÍLIA' ? ((employee.totalFoodVoucher || 0)* 0.7485) * 0.09 : 0;
   const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
   
   // Cálculo do DSR H.E (Descanso Semanal Remunerado sobre Horas Extras)
