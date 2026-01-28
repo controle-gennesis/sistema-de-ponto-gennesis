@@ -334,7 +334,8 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const dsrPorFaltaFinal = (dsrPorFalta !== null && dsrPorFalta !== undefined) ? Number(dsrPorFalta) : dsrPorFaltaCalculado;
   
   // Cálculos de %VA e %VT baseados no polo
-  const percentualVA = employee.polo === 'BRASÍLIA' ? ((employee.totalFoodVoucher || 0)* 0.7485) * 0.09 : 0;
+  // VA%: Se não for MEI, então (25,2 × dias trabalhados) × 0,09
+  const percentualVA = employee.modality !== 'MEI' ? (25.2 * employee.daysWorked) * 0.09 : 0;
   const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
   
   // Cálculo do DSR H.E (Descanso Semanal Remunerado sobre Horas Extras)
@@ -1000,7 +1001,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VA%
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.polo === 'BRASÍLIA' ? '9% do VA' : 'Não aplicável'}
+                      {employee.modality !== 'MEI' ? `(25,2 × ${employee.daysWorked} dias) × 9%` : 'Não aplicável'}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
