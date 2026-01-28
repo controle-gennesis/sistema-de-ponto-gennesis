@@ -39,12 +39,8 @@ class EmailService {
           minVersion: 'TLSv1.2'
         },
         // Para portas não-seguras, usar STARTTLS
-        requireTLS: !isSecure && port === 587,
-        // Configurações adicionais para Gmail
-        pool: false, // Não usar pool de conexões
-        maxConnections: 1,
-        maxMessages: 1
-      });
+        requireTLS: !isSecure && port === 587
+      } as any);
       
       // Testar conexão ao inicializar (com timeout)
       const verifyPromise = new Promise<void>((resolve, reject) => {
