@@ -1128,22 +1128,26 @@ export class PayrollService {
   }
 
   /**
-   * Calcula o IRRF Mensal baseado na tabela progressiva atualizada
+   * Calcula o IRRF Mensal baseado na tabela progressiva 2026
    */
   private calculateIRRF(baseIRRF: number): number {
     if (baseIRRF <= 0) return 0;
     
-    // Aplicar tabela progressiva do IRRF atualizada
-    if (baseIRRF <= 2428.80) {
+    // Tabela progressiva do IRRF 2026
+    if (baseIRRF <= 5000.00) {
       return 0; // Isento
-    } else if (baseIRRF <= 2826.65) {
-      return (baseIRRF * 0.075) - 182.16; // 7,5% - parcela a deduzir
-    } else if (baseIRRF <= 3751.05) {
-      return (baseIRRF * 0.15) - 394.16; // 15% - parcela a deduzir
-    } else if (baseIRRF <= 4664.68) {
-      return (baseIRRF * 0.225) - 675.49; // 22,5% - parcela a deduzir
+    } else if (baseIRRF <= 7423.07) {
+      // 7,5% - parcela a deduzir = 5000 × 0.075 = 375
+      return (baseIRRF * 0.075) - 375.00;
+    } else if (baseIRRF <= 9850.63) {
+      // 15% - parcela a deduzir = 5000 × 0.075 + (7423.07 - 5000) × 0.15 = 738.46
+      return (baseIRRF * 0.15) - 738.46;
+    } else if (baseIRRF <= 12249.92) {
+      // 22,5% - parcela a deduzir = 5000 × 0.075 + (7423.07 - 5000) × 0.15 + (9850.63 - 7423.07) × 0.225 = 1284.59
+      return (baseIRRF * 0.225) - 1284.59;
     } else {
-      return (baseIRRF * 0.275) - 908.73; // 27,5% - parcela a deduzir
+      // 27,5% - parcela a deduzir = 5000 × 0.075 + (7423.07 - 5000) × 0.15 + (9850.63 - 7423.07) × 0.225 + (12249.92 - 9850.63) × 0.275 = 1944.42
+      return (baseIRRF * 0.275) - 1944.42;
     }
   }
 
