@@ -180,29 +180,38 @@ class AuthService {
 
   async forgotPassword(email: string): Promise<void> {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-    const response = await fetch(`${API_URL}/auth/forgot-password`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({ email }),
-    });
+    
+    try {
+      const response = await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
 
-    if (!response.ok) {
-      const clone = response.clone();
-      try {
-        const error = await clone.json();
-        throw new Error(error?.error || error?.message || 'Erro ao solicitar recuperação de senha');
-      } catch {
-        const text = await response.text();
-        throw new Error(text || 'Erro ao solicitar recuperação de senha');
+      if (!response.ok) {
+        const clone = response.clone();
+        try {
+          const error = await clone.json();
+          throw new Error(error?.error || error?.message || 'Erro ao solicitar recuperação de senha');
+        } catch (parseError) {
+          const text = await response.text();
+          throw new Error(text || `Erro ao solicitar recuperação de senha (${response.status})`);
+        }
       }
-    }
 
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.message || 'Erro ao solicitar recuperação de senha');
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || 'Erro ao solicitar recuperação de senha');
+      }
+    } catch (error: any) {
+      // Se for erro de rede, fornecer mensagem mais clara
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error('Erro de conexão. Verifique sua internet e tente novamente.');
+      }
+      throw error;
     }
   }
 

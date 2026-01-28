@@ -21,17 +21,36 @@ export default function ForgotPasswordPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('handleSubmit chamado, email:', email);
+    
+    // Validação básica do email
+    if (!email || !email.trim()) {
+      setError('Por favor, digite um email válido');
+      return;
+    }
+
+    // Validação de formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError('Por favor, digite um email válido');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess(false);
 
     try {
-      await authService.forgotPassword(email);
+      console.log('Enviando requisição de recuperação de senha para:', email.trim());
+      await authService.forgotPassword(email.trim());
+      console.log('Requisição bem-sucedida');
       setSuccess(true);
       toast.success('Email de recuperação enviado!');
     } catch (error: any) {
-      setError(error.message || 'Erro ao solicitar recuperação de senha');
-      toast.error(error.message || 'Erro ao solicitar recuperação de senha');
+      console.error('Erro ao solicitar recuperação de senha:', error);
+      const errorMessage = error.message || 'Erro ao solicitar recuperação de senha';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
