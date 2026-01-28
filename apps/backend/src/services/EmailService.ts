@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 interface EmailOptions {
   to: string;
@@ -9,9 +10,21 @@ interface EmailOptions {
 
 class EmailService {
   private transporter: nodemailer.Transporter | null = null;
+  private resend: Resend | null = null;
+  private useResend: boolean = false;
 
   constructor() {
-    // Configurar transporter apenas se as variáveis de ambiente estiverem definidas
+    // Priorizar Resend se a API key estiver configurada (mais confiável em plataformas como Railway)
+    const resendApiKey = process.env.RESEND_API_KEY;
+    
+    if (resendApiKey) {
+      this.resend = new Resend(resendApiKey);
+      this.useResend = true;
+      console.log('✅ Configuração Resend detectada - usando Resend para envio de emails');
+      return;
+    }
+
+    // Fallback para SMTP se Resend não estiver configurado
     const smtpHost = process.env.SMTP_HOST;
     const smtpPort = process.env.SMTP_PORT;
     const smtpUser = process.env.SMTP_USER;
@@ -91,19 +104,54 @@ class EmailService {
       if (process.env.NODE_ENV === 'production') {
         console.error('🚨 ATENÇÃO: Você está em PRODUÇÃO e o serviço de email não está configurado!');
         console.error('Isso afetará funcionalidades como recuperação de senha.');
+        console.error('');
+        console.error('💡 SOLUÇÃO RECOMENDADA: Use Resend (gratuito até 3.000 emails/mês)');
+        console.error('   1. Crie uma conta em: https://resend.com');
+        console.error('   2. Obtenha sua API Key');
+        console.error('   3. Configure a variável: RESEND_API_KEY=sua_api_key');
+        console.error('   4. Configure o domínio de email verificado no Resend');
       }
     }
   }
 
   async sendEmail(options: EmailOptions): Promise<void> {
+    // Usar Resend se estiver configurado
+    if (this.useResend && this.resend) {
+      try {
+        const fromEmail = process.env.RESEND_FROM_EMAIL || process.env.SMTP_USER || 'noreply@gennesis.com';
+        const fromName = process.env.COMPANY_NAME || 'Gennesis Engenharia';
+        
+        const { data, error } = await this.resend.emails.send({
+          from: `${fromName} <${fromEmail}>`,
+          to: options.to,
+          subject: options.subject,
+          html: options.html,
+        });
+
+        if (error) {
+          console.error('❌ Erro ao enviar email via Resend:', error);
+          throw new Error(`Erro ao enviar email: ${error.message}`);
+        }
+
+        console.log('✅ Email enviado com sucesso via Resend:', data?.id);
+        return;
+      } catch (error: any) {
+        console.error('❌ Erro ao enviar email via Resend:', error);
+        throw error;
+      }
+    }
+
+    // Fallback para SMTP
     if (!this.transporter) {
-      const errorMsg = '⚠️ Transporter de email não configurado. Email não enviado.';
+      const errorMsg = '⚠️ Serviço de email não configurado. Email não enviado.';
       console.error(errorMsg);
       console.error('📧 Email que seria enviado:');
       console.error('Para:', options.to);
       console.error('Assunto:', options.subject);
-      console.error('Variáveis SMTP necessárias: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS');
-      console.error('Verifique se todas as variáveis estão configuradas no ambiente de produção.');
+      console.error('');
+      console.error('💡 Configure uma das opções:');
+      console.error('   Opção 1 (RECOMENDADO): RESEND_API_KEY=sua_api_key');
+      console.error('   Opção 2: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS');
       
       // Em desenvolvimento, apenas logar o email que seria enviado
       if (process.env.NODE_ENV === 'development') {
@@ -114,7 +162,7 @@ class EmailService {
       }
       
       // Lançar erro para que seja capturado e logado no controller
-      throw new Error('Serviço de email não configurado. Verifique as variáveis de ambiente SMTP.');
+      throw new Error('Serviço de email não configurado. Configure RESEND_API_KEY ou variáveis SMTP.');
     }
 
     try {
@@ -127,9 +175,9 @@ class EmailService {
       };
 
       const info = await this.transporter.sendMail(mailOptions);
-      console.log('✅ Email enviado com sucesso:', info.messageId);
+      console.log('✅ Email enviado com sucesso via SMTP:', info.messageId);
     } catch (error: any) {
-      console.error('❌ Erro ao enviar email:', error);
+      console.error('❌ Erro ao enviar email via SMTP:', error);
       
       // Mensagens de erro mais amigáveis
       if (error.code === 'EAUTH') {
@@ -139,10 +187,9 @@ class EmailService {
         console.error('   - Certifique-se de que a autenticação de 2 fatores está habilitada');
       } else if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
         console.error('🌐 Erro de conexão/timeout SMTP:');
-        console.error('   - Verifique SMTP_HOST e SMTP_PORT');
         console.error('   - O Railway pode estar bloqueando conexões SMTP de saída');
-        console.error('   - Considere usar um serviço de email alternativo (SendGrid, Mailgun, Resend)');
-        console.error('   - Ou verifique se o firewall do Gmail está bloqueando conexões');
+        console.error('   - 💡 RECOMENDAÇÃO: Use Resend (RESEND_API_KEY) em vez de SMTP');
+        console.error('   - Resend é gratuito até 3.000 emails/mês: https://resend.com');
       }
       
       throw error;
