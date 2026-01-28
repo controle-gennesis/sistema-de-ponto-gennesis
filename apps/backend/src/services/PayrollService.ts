@@ -239,7 +239,8 @@ export class PayrollService {
       const daysPresent = Math.max(0, totalWorkingDays - absencesToDiscount.length);
       
       // Separar ausências que não devem descontar VT (maternidade, paternidade, acidente)
-      const absencesWithoutVT = absences.filter(absence => {
+      // IMPORTANTE: usar allAbsences (não absences) para pegar todas as ausências incluindo maternidade
+      const absencesWithoutVT = allAbsences.filter(absence => {
         if (!absence.reason) return false;
         const reasonLower = absence.reason.toLowerCase();
         return reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
