@@ -180,7 +180,7 @@ export class PayrollService {
       
       // Buscar faltas registradas manualmente no período (também para quem não bate ponto)
       // Faltas registradas manualmente sempre têm approvedBy preenchido
-      const absences = await prisma.timeRecord.findMany({
+      const allAbsences = await prisma.timeRecord.findMany({
         where: {
           employeeId,
           timestamp: {
@@ -189,7 +189,25 @@ export class PayrollService {
           },
           type: 'ABSENCE_JUSTIFIED',
           approvedBy: { not: null }
+        },
+        select: {
+          id: true,
+          reason: true
         }
+      });
+      
+      // Filtrar ausências que NÃO devem ser descontadas (maternidade, paternidade, acidente)
+      const absences = allAbsences.filter(absence => {
+        if (!absence.reason) return true; // Se não tem reason, considerar como falta
+        
+        const reasonLower = absence.reason.toLowerCase();
+        // Ausências que NÃO devem ser descontadas:
+        if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+            reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+            reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+          return false; // Não contar como falta
+        }
+        return true; // Contar como falta
       });
       
       // Para funcionários que não batem ponto, calcular folha completa do mês
@@ -202,22 +220,49 @@ export class PayrollService {
         monthStartDate // Sempre usar início do mês para funcionários que não batem ponto
       );
       
-      // Para funcionários que não batem ponto, considerar todos os dias úteis como presenças
-      // MAS subtrair as faltas registradas
-      const daysPresent = Math.max(0, totalWorkingDays - absences.length);
+      // Filtrar ausências que NÃO devem ser descontadas (maternidade, paternidade, acidente)
+      const absencesToDiscount = absences.filter(absence => {
+        if (!absence.reason) return true; // Se não tem reason, considerar como falta
+        
+        const reasonLower = absence.reason.toLowerCase();
+        // Ausências que NÃO devem ser descontadas:
+        if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+            reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+            reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+          return false; // Não contar como falta
+        }
+        return true; // Contar como falta
+      });
       
-      // Calcular VA e VT baseado nos dias presentes (úteis menos faltas) e valores diários
+      // Para funcionários que não batem ponto, considerar todos os dias úteis como presenças
+      // MAS subtrair apenas as faltas que devem ser descontadas
+      const daysPresent = Math.max(0, totalWorkingDays - absencesToDiscount.length);
+      
+      // Separar ausências que não devem descontar VT (maternidade, paternidade, acidente)
+      const absencesWithoutVT = absences.filter(absence => {
+        if (!absence.reason) return false;
+        const reasonLower = absence.reason.toLowerCase();
+        return reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+               reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+               reasonLower.includes('accident') || reasonLower.includes('acidente');
+      });
+      
+      // Calcular VA e VT:
+      // VA: conta todos os dias úteis (não desconta ausências de maternidade/paternidade/acidente)
+      // VT: conta apenas dias úteis menos ausências de maternidade/paternidade/acidente (não ganha VT se não veio trabalhar)
       const dailyVA = Number(employee.dailyFoodVoucher || 0);
       const dailyVT = Number(employee.dailyTransportVoucher || 0);
-      const totalVA = daysPresent * dailyVA;
-      const totalVT = daysPresent * dailyVT;
+      const daysForVA = totalWorkingDays; // VA conta todos os dias úteis
+      const daysForVT = Math.max(0, totalWorkingDays - absencesWithoutVT.length); // VT não conta dias de maternidade/paternidade/acidente
+      const totalVA = daysForVA * dailyVA;
+      const totalVT = daysForVT * dailyVT;
       
       return { 
         totalVA, 
         totalVT, 
         daysWorked: daysPresent, // Dias úteis menos faltas
         totalWorkingDays,
-        absences: absences.length // Retornar número de faltas para uso na folha
+        absences: absencesToDiscount.length // Retornar número de faltas (excluindo maternidade, paternidade, acidente)
       };
     }
 
@@ -241,7 +286,8 @@ export class PayrollService {
     
     // Buscar faltas registradas manualmente no período
     // Faltas registradas manualmente sempre têm approvedBy preenchido
-    const absences = await prisma.timeRecord.findMany({
+    // IMPORTANTE: Excluir ausências que não devem ser descontadas (maternidade, paternidade, acidente de trabalho)
+    const allAbsences = await prisma.timeRecord.findMany({
       where: {
         employeeId,
         timestamp: {
@@ -250,16 +296,38 @@ export class PayrollService {
         },
         type: 'ABSENCE_JUSTIFIED',
         approvedBy: { not: null }
+      },
+      select: {
+        id: true,
+        reason: true
       }
     });
     
-    const totalVA = timeRecords.reduce((sum: any, record: any) => 
-      sum + (record.foodVoucherAmount || 0), 0
-    );
+    // Filtrar ausências que NÃO devem ser descontadas
+    const absences = allAbsences.filter(absence => {
+      if (!absence.reason) return true; // Se não tem reason, considerar como falta
+      
+      const reasonLower = absence.reason.toLowerCase();
+      // Ausências que NÃO devem ser descontadas:
+      // - Maternidade (licença maternidade não desconta)
+      // - Paternidade (licença paternidade não desconta)
+      // - Acidente de trabalho (não desconta)
+      if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+          reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+          reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+        return false; // Não contar como falta
+      }
+      return true; // Contar como falta
+    });
     
-    const totalVT = timeRecords.reduce((sum: any, record: any) => 
-      sum + (record.transportVoucherAmount || 0), 0
-    );
+    // Separar ausências que não devem descontar VT (maternidade, paternidade, acidente)
+    const absencesWithoutVT = allAbsences.filter(absence => {
+      if (!absence.reason) return false;
+      const reasonLower = absence.reason.toLowerCase();
+      return reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+             reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+             reasonLower.includes('accident') || reasonLower.includes('acidente');
+    });
     
     // Calcular dias trabalhados e faltas de forma mais inteligente
     // Subtrair faltas registradas manualmente dos dias trabalhados
@@ -270,7 +338,33 @@ export class PayrollService {
       controlStartDate
     );
     
-    // Ajustar dias trabalhados subtraindo as faltas
+    // Buscar dados do funcionário para pegar valores diários de VA e VT
+    const employeeData = await prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: {
+        dailyFoodVoucher: true,
+        dailyTransportVoucher: true
+      }
+    });
+    
+    const dailyVA = Number(employeeData?.dailyFoodVoucher || 0);
+    const dailyVT = Number(employeeData?.dailyTransportVoucher || 0);
+    
+    // Calcular VA e VT:
+    // VA: soma dos registros de ponto + (dias de licença maternidade/paternidade/acidente * valor diário de VA)
+    // VT: apenas soma dos registros de ponto (não conta dias de licença maternidade/paternidade/acidente)
+    const vaFromRecords = timeRecords.reduce((sum: any, record: any) => 
+      sum + (record.foodVoucherAmount || 0), 0
+    );
+    // Adicionar VA dos dias de licença maternidade/paternidade/acidente
+    const totalVA = vaFromRecords + (absencesWithoutVT.length * dailyVA);
+    
+    // VT: apenas dos registros de ponto (não adiciona para dias de licença)
+    const totalVT = timeRecords.reduce((sum: any, record: any) => 
+      sum + (record.transportVoucherAmount || 0), 0
+    );
+    
+    // Ajustar dias trabalhados subtraindo apenas as faltas que devem ser descontadas
     const adjustedDaysWorked = Math.max(0, daysWorked - absences.length);
     
     return { 
@@ -278,7 +372,7 @@ export class PayrollService {
       totalVT, 
       daysWorked: adjustedDaysWorked,
       totalWorkingDays,
-      absences: absences.length // Retornar número de faltas para uso na folha
+      absences: absences.length // Retornar número de faltas (já filtradas, excluindo maternidade, paternidade, acidente)
     };
   }
 
@@ -665,7 +759,7 @@ export class PayrollService {
         const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
         const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
         
-        const absenceRecords = await prisma.timeRecord.findMany({
+        const allAbsenceRecords = await prisma.timeRecord.findMany({
           where: {
             employeeId: employee.id,
             timestamp: {
@@ -676,8 +770,23 @@ export class PayrollService {
             approvedBy: { not: null }
           },
           select: {
-            timestamp: true
+            timestamp: true,
+            reason: true
           }
+        });
+        
+        // Filtrar ausências que NÃO devem ser descontadas (maternidade, paternidade, acidente)
+        const absenceRecords = allAbsenceRecords.filter(record => {
+          if (!record.reason) return true; // Se não tem reason, considerar como falta
+          
+          const reasonLower = record.reason.toLowerCase();
+          // Ausências que NÃO devem ser descontadas:
+          if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+              reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+              reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+            return false; // Não contar como falta
+          }
+          return true; // Contar como falta
         });
         
         const absenceDates = absenceRecords.map(record => new Date(record.timestamp));
