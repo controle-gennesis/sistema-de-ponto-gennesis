@@ -235,8 +235,8 @@ export class PayrollService {
       });
       
       // Para funcionários que não batem ponto, considerar todos os dias úteis como presenças
-      // MAS subtrair apenas as faltas que devem ser descontadas
-      const daysPresent = Math.max(0, totalWorkingDays - absencesToDiscount.length);
+      // Ausências justificadas NÃO contam como falta para desconto salarial
+      const daysPresent = totalWorkingDays;
       
       // Calcular VA e VT:
       // VA e VT: TODAS as ausências justificadas descontam VA e VT
@@ -251,9 +251,9 @@ export class PayrollService {
       return { 
         totalVA, 
         totalVT, 
-        daysWorked: daysPresent, // Dias úteis menos faltas
+        daysWorked: daysPresent, // Não descontar ausências justificadas do salário
         totalWorkingDays,
-        absences: absencesToDiscount.length // Retornar número de faltas (excluindo maternidade, paternidade, acidente)
+        absences: 0 // Ausências justificadas não devem ser tratadas como faltas
       };
     }
 
@@ -342,15 +342,15 @@ export class PayrollService {
       sum + (record.transportVoucherAmount || 0), 0
     );
     
-    // Ajustar dias trabalhados subtraindo apenas as faltas que devem ser descontadas
-    const adjustedDaysWorked = Math.max(0, daysWorked - absences.length);
+    // Ausências justificadas NÃO contam como falta para desconto salarial
+    const adjustedDaysWorked = daysWorked;
     
     return { 
       totalVA, 
       totalVT, 
       daysWorked: adjustedDaysWorked,
       totalWorkingDays,
-      absences: absences.length // Retornar número de faltas (já filtradas, excluindo maternidade, paternidade, acidente)
+      absences: 0 // Ausências justificadas não devem ser tratadas como faltas
     };
   }
 
