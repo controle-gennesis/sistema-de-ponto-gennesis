@@ -213,7 +213,7 @@ export class PayrollService {
       // Para funcionários que não batem ponto, calcular folha completa do mês
       // (não usar createdAt, usar início do mês para funcionários antigos)
       const monthStartDate = new Date(year, month - 1, 1);
-      const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
+      const { totalWorkingDays } = await this.calculateWorkingDays(
         0, // Não há registros de ponto
         month, 
         year, 
