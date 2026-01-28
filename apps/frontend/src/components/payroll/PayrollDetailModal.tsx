@@ -203,7 +203,9 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const periculosidade = employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0;
   const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
   const salarioFamilia = employee.familySalary || 0;
-  const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
+  // Usar absences do backend (sempre 0 para ausências justificadas) ao invés de calcular pela diferença
+  // O backend já retorna absences: 0 quando há apenas ausências justificadas (folgas)
+  const faltas = employee.absences !== undefined ? employee.absences : 0;
   
   // Calcular número de dias do mês para desconto de faltas
   // Usa 30 como padrão, ou 31 apenas se for o mês de admissão E o mês de admissão tiver 31 dias
@@ -1630,7 +1632,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Faltas</span>
                   </div>
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                    {employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0}
+                    {faltas || 0}
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">
                     Total de Faltas

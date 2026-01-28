@@ -925,6 +925,7 @@ export class PayrollService {
           totalDiscounts,
           daysWorked: totals.daysWorked,
           totalWorkingDays: totals.totalWorkingDays,
+          absences: totals.absences !== undefined ? totals.absences : 0, // Ausências justificadas não contam como faltas
           // Horas Extras
           he50Hours: hoursExtras.he50Hours,
           he50Value: hoursExtras.he50Value,
@@ -1456,6 +1457,7 @@ export class PayrollService {
       totalDiscounts,
       daysWorked: totals.daysWorked,
       totalWorkingDays: totals.totalWorkingDays,
+      absences: totals.absences !== undefined ? totals.absences : 0, // Ausências justificadas não contam como faltas
       // Horas Extras
       he50Hours: hoursExtras.he50Hours,
       he50Value: hoursExtras.he50Value,
