@@ -221,14 +221,17 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
       if (cert.employee.company !== filters.company) return false;
     }
 
-    // Filtro de mês e ano
-    if (filters.month || filters.year) {
+    // Filtro de mês e ano (só aplicar se o filtro for diferente de 0)
+    if (filters.month && filters.month !== 0) {
       const startDate = new Date(cert.startDate);
       const certMonth = startDate.getMonth() + 1;
+      if (certMonth !== filters.month) return false;
+    }
+    
+    if (filters.year && filters.year !== 0) {
+      const startDate = new Date(cert.startDate);
       const certYear = startDate.getFullYear();
-      
-      if (filters.month && certMonth !== filters.month) return false;
-      if (filters.year && certYear !== filters.year) return false;
+      if (certYear !== filters.year) return false;
     }
 
     return true;
