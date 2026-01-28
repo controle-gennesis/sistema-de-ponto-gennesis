@@ -1283,7 +1283,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       IRRF MENSAL
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2025'}
+                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2026'}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
@@ -1302,7 +1302,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       IRRF FÉRIAS
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2025'}
+                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2026'}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -

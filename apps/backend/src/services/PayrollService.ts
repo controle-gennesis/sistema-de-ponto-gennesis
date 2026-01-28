@@ -238,23 +238,13 @@ export class PayrollService {
       // MAS subtrair apenas as faltas que devem ser descontadas
       const daysPresent = Math.max(0, totalWorkingDays - absencesToDiscount.length);
       
-      // Separar ausências que não devem descontar VT (maternidade, paternidade, acidente)
-      // IMPORTANTE: usar allAbsences (não absences) para pegar todas as ausências incluindo maternidade
-      const absencesWithoutVT = allAbsences.filter(absence => {
-        if (!absence.reason) return false;
-        const reasonLower = absence.reason.toLowerCase();
-        return reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
-               reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
-               reasonLower.includes('accident') || reasonLower.includes('acidente');
-      });
-      
       // Calcular VA e VT:
-      // VA: conta todos os dias úteis (não desconta ausências de maternidade/paternidade/acidente)
-      // VT: conta apenas dias úteis menos ausências de maternidade/paternidade/acidente (não ganha VT se não veio trabalhar)
+      // VA e VT: TODAS as ausências justificadas descontam VA e VT
       const dailyVA = Number(employee.dailyFoodVoucher || 0);
       const dailyVT = Number(employee.dailyTransportVoucher || 0);
-      const daysForVA = totalWorkingDays; // VA conta todos os dias úteis
-      const daysForVT = Math.max(0, totalWorkingDays - absencesWithoutVT.length); // VT não conta dias de maternidade/paternidade/acidente
+      // Ambos VA e VT descontam TODAS as ausências justificadas
+      const daysForVA = Math.max(0, totalWorkingDays - allAbsences.length);
+      const daysForVT = Math.max(0, totalWorkingDays - allAbsences.length);
       const totalVA = daysForVA * dailyVA;
       const totalVT = daysForVT * dailyVT;
       
@@ -321,15 +311,6 @@ export class PayrollService {
       return true; // Contar como falta
     });
     
-    // Separar ausências que não devem descontar VT (maternidade, paternidade, acidente)
-    const absencesWithoutVT = allAbsences.filter(absence => {
-      if (!absence.reason) return false;
-      const reasonLower = absence.reason.toLowerCase();
-      return reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
-             reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
-             reasonLower.includes('accident') || reasonLower.includes('acidente');
-    });
-    
     // Calcular dias trabalhados e faltas de forma mais inteligente
     // Subtrair faltas registradas manualmente dos dias trabalhados
     const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
@@ -352,15 +333,11 @@ export class PayrollService {
     const dailyVT = Number(employeeData?.dailyTransportVoucher || 0);
     
     // Calcular VA e VT:
-    // VA: soma dos registros de ponto + (dias de licença maternidade/paternidade/acidente * valor diário de VA)
-    // VT: apenas soma dos registros de ponto (não conta dias de licença maternidade/paternidade/acidente)
-    const vaFromRecords = timeRecords.reduce((sum: any, record: any) => 
+    // VA e VT: apenas dos registros de ponto (TODAS as ausências já têm VA=0 e VT=0 nos registros)
+    const totalVA = timeRecords.reduce((sum: any, record: any) => 
       sum + (record.foodVoucherAmount || 0), 0
     );
-    // Adicionar VA dos dias de licença maternidade/paternidade/acidente
-    const totalVA = vaFromRecords + (absencesWithoutVT.length * dailyVA);
     
-    // VT: apenas dos registros de ponto (não adiciona para dias de licença)
     const totalVT = timeRecords.reduce((sum: any, record: any) => 
       sum + (record.transportVoucherAmount || 0), 0
     );
