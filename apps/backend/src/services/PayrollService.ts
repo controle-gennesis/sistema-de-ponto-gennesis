@@ -1099,18 +1099,32 @@ export class PayrollService {
    */
   private calculateINSS(baseINSS: number): number {
     if (baseINSS <= 0) return 0;
-    
-    if (baseINSS <= 1518) {
-      return baseINSS * 0.075; // 7,5%
-    } else if (baseINSS <= 2793) {
-      return (1518 * 0.075) + ((baseINSS - 1518) * 0.09); // 7,5% até 1518 + 9% do excedente
-    } else if (baseINSS <= 4190) {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12); // 7,5% até 1518 + 9% até 2793 + 12% do excedente
-    } else if (baseINSS <= 8157) {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14); // 7,5% até 1518 + 9% até 2793 + 12% até 4190 + 14% do excedente
-    } else {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14); // Teto máximo
+
+    // Tabela progressiva (alinhada com a planilha do cliente)
+    // Faixas: 7,5% / 9% / 12% / 14% com teto
+    const faixa1 = 1621.0;
+    const faixa2 = 2902.84;
+    const faixa3 = 4354.27;
+    const teto = 8475.55;
+
+    const base = Math.min(baseINSS, teto);
+
+    if (base <= faixa1) {
+      return base * 0.075;
     }
+    if (base <= faixa2) {
+      return (faixa1 * 0.075) + ((base - faixa1) * 0.09);
+    }
+    if (base <= faixa3) {
+      return (faixa1 * 0.075)
+        + ((faixa2 - faixa1) * 0.09)
+        + ((base - faixa2) * 0.12);
+    }
+    // base <= teto
+    return (faixa1 * 0.075)
+      + ((faixa2 - faixa1) * 0.09)
+      + ((faixa3 - faixa2) * 0.12)
+      + ((base - faixa3) * 0.14);
   }
 
   /**
