@@ -231,7 +231,9 @@ export class UserController {
               unhealthyPay: employeeData.unhealthyPay !== undefined ? employeeData.unhealthyPay : null,
               // Novos campos - Polo e Categoria Financeira
               polo: employeeData.polo || null,
-              categoriaFinanceira: employeeData.categoriaFinanceira || null
+              categoriaFinanceira: employeeData.categoriaFinanceira || null,
+              // Campo para controlar se precisa bater ponto
+              requiresTimeClock: employeeData.requiresTimeClock !== undefined ? employeeData.requiresTimeClock : true
             }
           });
 
