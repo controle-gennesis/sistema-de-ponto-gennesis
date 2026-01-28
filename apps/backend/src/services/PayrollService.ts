@@ -93,6 +93,7 @@ export interface PayrollEmployee {
   totalDiscounts: number;
   daysWorked: number;
   totalWorkingDays: number;
+  absences: number; // Ausências justificadas não contam como faltas
   // Horas Extras
   he50Hours: number;
   he50Value: number;
