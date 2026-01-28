@@ -247,9 +247,24 @@ export class AuthController {
       // Enviar email
       try {
         await emailService.sendPasswordResetEmail(user.email, user.name, token, resetUrl);
-      } catch (emailError) {
-        console.error('Erro ao enviar email de reset:', emailError);
+        console.log(`✅ Email de recuperação de senha enviado para: ${user.email}`);
+      } catch (emailError: any) {
+        console.error('❌ Erro ao enviar email de reset:', emailError);
+        console.error('Detalhes do erro:', {
+          message: emailError?.message,
+          code: emailError?.code,
+          stack: emailError?.stack
+        });
+        
+        // Se for erro de configuração SMTP, logar aviso mais claro
+        if (emailError?.message?.includes('Transporter') || !process.env.SMTP_HOST) {
+          console.error('⚠️ ATENÇÃO: Configurações SMTP não encontradas ou inválidas!');
+          console.error('Variáveis necessárias: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS');
+          console.error('Verifique as variáveis de ambiente em produção.');
+        }
+        
         // Não falhar a requisição se o email falhar, apenas logar o erro
+        // Mas em produção, isso deve ser monitorado
       }
 
       return res.json({

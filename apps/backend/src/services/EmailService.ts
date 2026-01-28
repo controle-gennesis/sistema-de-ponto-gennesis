@@ -18,43 +18,97 @@ class EmailService {
     const smtpPass = process.env.SMTP_PASS;
 
     if (smtpHost && smtpPort && smtpUser && smtpPass) {
+      const port = parseInt(smtpPort);
+      const isSecure = port === 465;
+      
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
-        port: parseInt(smtpPort),
-        secure: parseInt(smtpPort) === 465, // true para 465, false para outras portas
+        port: port,
+        secure: isSecure, // true para 465, false para outras portas
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
-        // Configurações adicionais para Gmail
+        // Configurações de timeout e conexão
+        connectionTimeout: 20000, // 20 segundos para conectar
+        greetingTimeout: 20000, // 20 segundos para greeting
+        socketTimeout: 20000, // 20 segundos para socket
+        // Configurações TLS/SSL
         tls: {
-          rejectUnauthorized: false
-        }
+          rejectUnauthorized: false,
+          minVersion: 'TLSv1.2'
+        },
+        // Para portas não-seguras, usar STARTTLS
+        requireTLS: !isSecure && port === 587,
+        // Configurações adicionais para Gmail
+        pool: false, // Não usar pool de conexões
+        maxConnections: 1,
+        maxMessages: 1
       });
       
-      // Testar conexão ao inicializar
-      this.transporter.verify((error, success) => {
-        if (error) {
+      // Testar conexão ao inicializar (com timeout)
+      const verifyPromise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timeout ao verificar conexão SMTP'));
+        }, 15000); // 15 segundos para verificação
+        
+        this.transporter!.verify((error, success) => {
+          clearTimeout(timeout);
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      });
+      
+      verifyPromise
+        .then(() => {
+          console.log('✅ Configuração SMTP válida');
+        })
+        .catch((error: any) => {
           console.error('❌ Erro na configuração SMTP:', error.message);
-          if (error.message.includes('Invalid login') || error.message.includes('BadCredentials')) {
+          if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
+            console.error('⏱️ Timeout ao conectar ao servidor SMTP:');
+            console.error('   - O Railway pode estar bloqueando conexões SMTP de saída');
+            console.error('   - Tente usar um serviço de email alternativo (SendGrid, Mailgun, etc.)');
+            console.error('   - Ou verifique se o Gmail está bloqueando conexões do Railway');
+          } else if (error.message.includes('Invalid login') || error.message.includes('BadCredentials')) {
             console.error('📧 Para Gmail, você precisa usar uma SENHA DE APP:');
             console.error('   1. Acesse: https://myaccount.google.com/apppasswords');
             console.error('   2. Gere uma senha de app para "Mail"');
             console.error('   3. Use essa senha no SMTP_PASS (não use a senha normal da conta)');
             console.error('   4. Certifique-se de que a autenticação de 2 fatores está habilitada');
           }
-        } else {
-          console.log('✅ Configuração SMTP válida');
-        }
-      });
+        });
     } else {
-      console.warn('⚠️ Configurações de SMTP não encontradas. Emails não serão enviados.');
+      const missingVars = [];
+      if (!smtpHost) missingVars.push('SMTP_HOST');
+      if (!smtpPort) missingVars.push('SMTP_PORT');
+      if (!smtpUser) missingVars.push('SMTP_USER');
+      if (!smtpPass) missingVars.push('SMTP_PASS');
+      
+      console.error('⚠️ Configurações de SMTP não encontradas. Emails não serão enviados.');
+      console.error(`Variáveis faltando: ${missingVars.join(', ')}`);
+      console.error('Configure essas variáveis de ambiente para habilitar o envio de emails.');
+      
+      if (process.env.NODE_ENV === 'production') {
+        console.error('🚨 ATENÇÃO: Você está em PRODUÇÃO e o serviço de email não está configurado!');
+        console.error('Isso afetará funcionalidades como recuperação de senha.');
+      }
     }
   }
 
   async sendEmail(options: EmailOptions): Promise<void> {
     if (!this.transporter) {
-      console.warn('⚠️ Transporter de email não configurado. Email não enviado:', options);
+      const errorMsg = '⚠️ Transporter de email não configurado. Email não enviado.';
+      console.error(errorMsg);
+      console.error('📧 Email que seria enviado:');
+      console.error('Para:', options.to);
+      console.error('Assunto:', options.subject);
+      console.error('Variáveis SMTP necessárias: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS');
+      console.error('Verifique se todas as variáveis estão configuradas no ambiente de produção.');
+      
       // Em desenvolvimento, apenas logar o email que seria enviado
       if (process.env.NODE_ENV === 'development') {
         console.log('📧 Email que seria enviado:');
@@ -62,7 +116,9 @@ class EmailService {
         console.log('Assunto:', options.subject);
         console.log('Conteúdo:', options.text || options.html);
       }
-      return;
+      
+      // Lançar erro para que seja capturado e logado no controller
+      throw new Error('Serviço de email não configurado. Verifique as variáveis de ambiente SMTP.');
     }
 
     try {
@@ -85,10 +141,12 @@ class EmailService {
         console.error('   - Verifique se está usando uma SENHA DE APP do Gmail (não a senha normal)');
         console.error('   - Para Gmail: https://myaccount.google.com/apppasswords');
         console.error('   - Certifique-se de que a autenticação de 2 fatores está habilitada');
-      } else if (error.code === 'ECONNECTION') {
-        console.error('🌐 Erro de conexão SMTP:');
+      } else if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
+        console.error('🌐 Erro de conexão/timeout SMTP:');
         console.error('   - Verifique SMTP_HOST e SMTP_PORT');
-        console.error('   - Verifique sua conexão com a internet');
+        console.error('   - O Railway pode estar bloqueando conexões SMTP de saída');
+        console.error('   - Considere usar um serviço de email alternativo (SendGrid, Mailgun, Resend)');
+        console.error('   - Ou verifique se o firewall do Gmail está bloqueando conexões');
       }
       
       throw error;
