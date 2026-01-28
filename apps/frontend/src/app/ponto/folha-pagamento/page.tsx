@@ -402,25 +402,35 @@ export default function FolhaPagamentoPage() {
         ? 0 
         : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
       
-      // Função para calcular INSS
+      // Função para calcular INSS (mesma tabela do detalhamento)
       const calcularINSS = (baseINSS: number): number => {
         if (baseINSS <= 0) return 0;
-        if (baseINSS <= 1518) {
-          return baseINSS * 0.075;
-        } else if (baseINSS <= 2793) {
-          return (1518 * 0.075) + ((baseINSS - 1518) * 0.09);
-        } else if (baseINSS <= 4190) {
-          return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12);
-        } else if (baseINSS <= 8157) {
-          return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14);
-        } else {
-          return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14);
+
+        // Tabela progressiva (alinhada com a planilha do cliente)
+        const faixa1 = 1621.0;
+        const faixa2 = 2902.84;
+        const faixa3 = 4354.27;
+        const teto = 8475.55;
+
+        const base = Math.min(baseINSS, teto);
+
+        if (base <= faixa1) {
+          return base * 0.075;
         }
+        if (base <= faixa2) {
+          return (faixa1 * 0.075) + ((base - faixa1) * 0.09);
+        }
+        if (base <= faixa3) {
+          return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((base - faixa2) * 0.12);
+        }
+        return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((faixa3 - faixa2) * 0.12) + ((base - faixa3) * 0.14);
       };
       
       const inssMensal = calcularINSS(baseINSSMensal);
       const irrfMensal = employee.irrfMensal || 0;
-      const totalProventos = salarioBase + employee.familySalary + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
+      // Usar salarioFamilia ao invés de employee.familySalary para manter consistência com o detalhamento
+      const salarioFamilia = employee.familySalary || 0;
+      const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
       const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
       const liquidoReceber = totalProventos - totalDescontos;
       const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
@@ -1192,18 +1202,25 @@ export default function FolhaPagamentoPage() {
                               
                               const calcularINSS = (baseINSS: number): number => {
                                 if (baseINSS <= 0) return 0;
-                                
-                                if (baseINSS <= 1518) {
-                                  return baseINSS * 0.075;
-                                } else if (baseINSS <= 2793) {
-                                  return (1518 * 0.075) + ((baseINSS - 1518) * 0.09);
-                                } else if (baseINSS <= 4190) {
-                                  return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12);
-                                } else if (baseINSS <= 8157) {
-                                  return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14);
-                                } else {
-                                  return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14);
+
+                                // Tabela progressiva (alinhada com a planilha do cliente)
+                                const faixa1 = 1621.0;
+                                const faixa2 = 2902.84;
+                                const faixa3 = 4354.27;
+                                const teto = 8475.55;
+
+                                const base = Math.min(baseINSS, teto);
+
+                                if (base <= faixa1) {
+                                  return base * 0.075;
                                 }
+                                if (base <= faixa2) {
+                                  return (faixa1 * 0.075) + ((base - faixa1) * 0.09);
+                                }
+                                if (base <= faixa3) {
+                                  return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((base - faixa2) * 0.12);
+                                }
+                                return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((faixa3 - faixa2) * 0.12) + ((base - faixa3) * 0.14);
                               };
 
                               const inssMensal = calcularINSS(baseINSSMensal);
