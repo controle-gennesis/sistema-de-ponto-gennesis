@@ -10,7 +10,9 @@ export class UserController {
   async getAllUsers(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { page = 1, limit = 10, search, role, department, status } = req.query;
-      const skip = (Number(page) - 1) * Number(limit);
+      // Limitar o máximo de registros por página para evitar sobrecarga
+      const limitNum = Math.min(Number(limit), 1000); // Máximo de 1000 registros por página
+      const skip = (Number(page) - 1) * limitNum;
 
       const where: any = {};
 
@@ -52,7 +54,7 @@ export class UserController {
         prisma.user.findMany({
           where,
           skip,
-          take: Number(limit),
+          take: limitNum,
           include: {
             employee: {
               select: {
@@ -101,9 +103,9 @@ export class UserController {
         data: users,
         pagination: {
           page: Number(page),
-          limit: Number(limit),
+          limit: limitNum,
           total,
-          totalPages: Math.ceil(total / Number(limit))
+          totalPages: Math.ceil(total / limitNum)
         }
       });
     } catch (error) {
