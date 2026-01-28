@@ -1128,12 +1128,12 @@ export class PayrollService {
   }
 
   /**
-   * Calcula o IRRF Mensal baseado na tabela progressiva 2026
+   * Calcula o IRRF Mensal baseado na Tabela 2026
    */
   private calculateIRRF(baseIRRF: number): number {
     if (baseIRRF <= 0) return 0;
     
-    // Tabela progressiva do IRRF 2026
+    // Tabela 2026
     if (baseIRRF <= 5000.00) {
       return 0; // Isento
     } else if (baseIRRF <= 7423.07) {
