@@ -376,8 +376,10 @@ export default function FolhaPagamentoPage() {
         ? Number(employee.dsrPorFalta) 
         : dsrPorFaltaCalculado;
       
-      // VA%: Se não for MEI, então (25,2 × dias trabalhados) × 0,09
-      const percentualVA = employee.modality !== 'MEI' ? (25.2 * employee.daysWorked) * 0.09 : 0;
+      // VA%: Se não for MEI, então (25,2 × dias úteis do próximo mês) × 0,09
+      // VA/VT são correspondentes ao próximo mês
+      const nextMonthWorkingDays = employee.nextMonthWorkingDays || employee.totalWorkingDays || 0;
+      const percentualVA = employee.modality !== 'MEI' ? (25.2 * nextMonthWorkingDays) * 0.09 : 0;
       const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
       
       // Usar valor manual de horas extras se existir, senão usar o calculado
@@ -1173,8 +1175,10 @@ export default function FolhaPagamentoPage() {
                                 : dsrPorFaltaCalculado;
                               
                               // Cálculos de %VA e %VT baseados no polo
-                              // VA%: Se não for MEI, então (25,2 × dias trabalhados) × 0,09
-      const percentualVA = employee.modality !== 'MEI' ? (25.2 * employee.daysWorked) * 0.09 : 0;
+                              // VA%: Se não for MEI, então (25,2 × dias úteis do próximo mês) × 0,09
+                              // VA/VT são correspondentes ao próximo mês
+                              const nextMonthWorkingDays = employee.nextMonthWorkingDays || employee.totalWorkingDays || 0;
+                              const percentualVA = employee.modality !== 'MEI' ? (25.2 * nextMonthWorkingDays) * 0.09 : 0;
                               const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
                               
                               const totalHorasExtras = (employee.he50Hours || 0) + (employee.he100Hours || 0);

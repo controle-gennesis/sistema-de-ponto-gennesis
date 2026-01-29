@@ -239,13 +239,24 @@ export class PayrollService {
       // Folgas (ausências justificadas) descontam dos dias trabalhados e VA/VT, mas NÃO contam como falta
       const daysWorked = Math.max(0, totalWorkingDays - allAbsences.length); // Desconta folgas dos dias trabalhados
       
+      // Calcular dias úteis do próximo mês para VA/VT (benefícios são correspondentes ao próximo mês)
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextYear = month === 12 ? year + 1 : year;
+      const nextMonthStartDate = new Date(nextYear, nextMonth - 1, 1);
+      const { totalWorkingDays: nextMonthWorkingDays } = await this.calculateWorkingDays(
+        0, // Não há registros de ponto para o próximo mês
+        nextMonth,
+        nextYear,
+        nextMonthStartDate
+      );
+      
       // Calcular VA e VT:
-      // VA e VT: TODAS as ausências justificadas descontam VA e VT
+      // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
       const dailyVA = Number(employee.dailyFoodVoucher || 0);
       const dailyVT = Number(employee.dailyTransportVoucher || 0);
-      // Ambos VA e VT descontam TODAS as ausências justificadas
-      const daysForVA = Math.max(0, totalWorkingDays - allAbsences.length);
-      const daysForVT = Math.max(0, totalWorkingDays - allAbsences.length);
+      // Ambos VA e VT usam os dias úteis do próximo mês
+      const daysForVA = nextMonthWorkingDays;
+      const daysForVT = nextMonthWorkingDays;
       const totalVA = daysForVA * dailyVA;
       const totalVT = daysForVT * dailyVT;
       
@@ -254,6 +265,7 @@ export class PayrollService {
         totalVT, 
         daysWorked, // Desconta folgas dos dias trabalhados
         totalWorkingDays,
+        nextMonthWorkingDays, // Dias úteis do próximo mês (para VA/VT)
         absences: 0 // Ausências justificadas não devem ser tratadas como faltas
       };
     }
@@ -333,15 +345,21 @@ export class PayrollService {
     const dailyVA = Number(employeeData?.dailyFoodVoucher || 0);
     const dailyVT = Number(employeeData?.dailyTransportVoucher || 0);
     
-    // Calcular VA e VT:
-    // VA e VT: apenas dos registros de ponto (TODAS as ausências já têm VA=0 e VT=0 nos registros)
-    const totalVA = timeRecords.reduce((sum: any, record: any) => 
-      sum + (record.foodVoucherAmount || 0), 0
+    // Calcular dias úteis do próximo mês para VA/VT (benefícios são correspondentes ao próximo mês)
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonthStartDate = new Date(nextYear, nextMonth - 1, 1);
+    const { totalWorkingDays: nextMonthWorkingDays } = await this.calculateWorkingDays(
+      0, // Não há registros de ponto para o próximo mês
+      nextMonth,
+      nextYear,
+      nextMonthStartDate
     );
     
-    const totalVT = timeRecords.reduce((sum: any, record: any) => 
-      sum + (record.transportVoucherAmount || 0), 0
-    );
+    // Calcular VA e VT:
+    // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
+    const totalVA = nextMonthWorkingDays * dailyVA;
+    const totalVT = nextMonthWorkingDays * dailyVT;
     
     // Folgas (ausências justificadas) descontam dos dias trabalhados, mas NÃO contam como falta
     // daysWorked já vem do calculateWorkingDays baseado nos registros de ponto (ENTRY)
@@ -352,6 +370,7 @@ export class PayrollService {
       totalVT, 
       daysWorked, // Já descontado automaticamente (ausências não têm registro ENTRY)
       totalWorkingDays,
+      nextMonthWorkingDays, // Dias úteis do próximo mês (para VA/VT)
       absences: 0 // Ausências justificadas não devem ser tratadas como faltas
     };
   }
@@ -926,6 +945,7 @@ export class PayrollService {
           totalDiscounts,
           daysWorked: totals.daysWorked,
           totalWorkingDays: totals.totalWorkingDays,
+          nextMonthWorkingDays: totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays, // Dias úteis do próximo mês (para VA/VT)
           absences: totals.absences !== undefined ? totals.absences : 0, // Ausências justificadas não contam como faltas
           // Horas Extras
           he50Hours: hoursExtras.he50Hours,

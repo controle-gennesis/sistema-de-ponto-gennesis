@@ -334,8 +334,10 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const dsrPorFaltaFinal = (dsrPorFalta !== null && dsrPorFalta !== undefined) ? Number(dsrPorFalta) : dsrPorFaltaCalculado;
   
   // Cálculos de %VA e %VT baseados no polo
-  // VA%: Se não for MEI, então (25,2 × dias trabalhados) × 0,09
-  const percentualVA = employee.modality !== 'MEI' ? (25.2 * employee.daysWorked) * 0.09 : 0;
+  // VA%: Se não for MEI, então (25,2 × dias úteis do próximo mês) × 0,09
+  // VA/VT são correspondentes ao próximo mês
+  const nextMonthWorkingDays = employee.nextMonthWorkingDays || employee.totalWorkingDays || 0;
+  const percentualVA = employee.modality !== 'MEI' ? (25.2 * nextMonthWorkingDays) * 0.09 : 0;
   const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
   
   // Cálculo do DSR H.E (Descanso Semanal Remunerado sobre Horas Extras)
@@ -674,7 +676,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE ALIMENTAÇÃO
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.daysWorked} dias
+                      {nextMonthWorkingDays} dias
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -693,7 +695,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE TRANSPORTE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.daysWorked} dias
+                      {nextMonthWorkingDays} dias
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1001,7 +1003,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VA%
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality !== 'MEI' ? `(25,2 × ${employee.daysWorked} dias) × 9%` : 'Não aplicável'}
+                      {employee.modality !== 'MEI' ? `(25,2 × ${nextMonthWorkingDays} dias) × 9%` : 'Não aplicável'}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
@@ -1612,17 +1614,17 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   </div>
                 </div>
                 
-                {/* Dias Trabalhados */}
+                {/* Dias Úteis do Próximo Mês (para VA/VT) */}
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center justify-between mb-3">
                     <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Trabalhados</span>
                   </div>
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                    {employee.daysWorked}
+                    {nextMonthWorkingDays}
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">
-                    Dias Trabalhados
+                    Dias Úteis (Próximo Mês)
                   </div>
                 </div>
 
