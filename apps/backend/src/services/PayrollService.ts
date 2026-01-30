@@ -94,6 +94,9 @@ export interface PayrollEmployee {
   daysWorked: number;
   totalWorkingDays: number;
   absences: number; // Ausências justificadas não contam como faltas
+  nextMonthWorkingDays?: number; // Dias úteis do próximo mês (para VA/VT)
+  daysForVA?: number; // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+  daysForVT?: number; // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
   // Horas Extras
   he50Hours: number;
   he50Value: number;
@@ -240,7 +243,8 @@ export class PayrollService {
       const daysWorked = Math.max(0, totalWorkingDays - allAbsences.length); // Desconta folgas dos dias trabalhados
       
       // Calcular faltas não justificadas (dias úteis - dias trabalhados)
-      const faltas = Math.max(0, totalWorkingDays - daysWorked);
+      // Para funcionários que não batem ponto, faltas = 0 (não há como ter falta sem bater ponto)
+      const faltas = 0;
       
       // Calcular dias úteis do próximo mês para VA/VT (benefícios são correspondentes ao próximo mês)
       const nextMonth = month === 12 ? 1 : month + 1;
@@ -255,12 +259,13 @@ export class PayrollService {
       
       // Calcular VA e VT:
       // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
-      // MAS descontar as ausências E faltas do mês atual
+      // MAS descontar as ausências do mês atual
       const dailyVA = Number(employee.dailyFoodVoucher || 0);
       const dailyVT = Number(employee.dailyTransportVoucher || 0);
-      // Descontar ausências e faltas do mês atual dos dias úteis do próximo mês
-      const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
-      const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+      // Descontar apenas ausências do mês atual dos dias úteis do próximo mês
+      // Para funcionários que não batem ponto, não há faltas, apenas ausências
+      const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length);
+      const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length);
       const totalVA = daysForVA * dailyVA;
       const totalVT = daysForVT * dailyVT;
       
@@ -270,6 +275,8 @@ export class PayrollService {
         daysWorked, // Desconta folgas dos dias trabalhados
         totalWorkingDays,
         nextMonthWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+        daysForVA, // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+        daysForVT, // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
         absences: 0 // Ausências justificadas não devem ser tratadas como faltas
       };
     }
@@ -366,8 +373,12 @@ export class PayrollService {
     // Calcular VA e VT:
     // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
     // MAS descontar as ausências E faltas do mês atual
+    // IMPORTANTE: O cálculo deve usar EXATAMENTE o mesmo valor que aparece na referência do frontend
+    // Frontend mostra: nextMonthWorkingDays - totalAbsences - faltas
+    // Então precisamos usar a mesma fórmula para garantir que o cálculo use os mesmos dias da referência
     const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
     const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+    // Multiplicar pela quantidade de dias que aparece na referência (deve ser exatamente daysForVA)
     const totalVA = daysForVA * dailyVA;
     const totalVT = daysForVT * dailyVT;
     
@@ -381,6 +392,8 @@ export class PayrollService {
       daysWorked, // Já descontado automaticamente (ausências não têm registro ENTRY)
       totalWorkingDays,
       nextMonthWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+      daysForVA, // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+      daysForVT, // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
       absences: 0 // Ausências justificadas não devem ser tratadas como faltas
     };
   }
@@ -949,6 +962,8 @@ export class PayrollService {
           daysWorked: totals.daysWorked,
           totalWorkingDays: totals.totalWorkingDays,
           nextMonthWorkingDays: totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+          daysForVA: totals.daysForVA !== undefined ? totals.daysForVA : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VA
+          daysForVT: totals.daysForVT !== undefined ? totals.daysForVT : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VT
           absences: totals.absences !== undefined ? totals.absences : 0, // Ausências justificadas não contam como faltas
           // Horas Extras
           he50Hours: hoursExtras.he50Hours,
@@ -1481,6 +1496,9 @@ export class PayrollService {
       totalDiscounts,
       daysWorked: totals.daysWorked,
       totalWorkingDays: totals.totalWorkingDays,
+      nextMonthWorkingDays: totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+      daysForVA: totals.daysForVA !== undefined ? totals.daysForVA : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VA
+      daysForVT: totals.daysForVT !== undefined ? totals.daysForVT : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VT
       absences: totals.absences !== undefined ? totals.absences : 0, // Ausências justificadas não contam como faltas
       // Horas Extras
       he50Hours: hoursExtras.he50Hours,

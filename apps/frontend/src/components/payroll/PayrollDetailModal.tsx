@@ -679,7 +679,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help underline decoration-dotted">
-                          {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                          {employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
                         </span>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
@@ -716,7 +716,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help underline decoration-dotted">
-                          {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                          {employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
                         </span>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">

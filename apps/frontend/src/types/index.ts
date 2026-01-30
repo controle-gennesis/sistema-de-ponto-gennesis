@@ -407,6 +407,8 @@ export interface PayrollEmployee {
   daysWorked: number;
   totalWorkingDays: number;
   nextMonthWorkingDays?: number; // Dias úteis do próximo mês (para VA/VT)
+  daysForVA?: number; // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+  daysForVT?: number; // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
   absences?: number; // Ausências justificadas não contam como faltas
   // Horas Extras
   he50Hours: number;
