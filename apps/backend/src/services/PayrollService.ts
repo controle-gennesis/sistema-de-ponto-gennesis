@@ -239,6 +239,9 @@ export class PayrollService {
       // Folgas (ausências justificadas) descontam dos dias trabalhados e VA/VT, mas NÃO contam como falta
       const daysWorked = Math.max(0, totalWorkingDays - allAbsences.length); // Desconta folgas dos dias trabalhados
       
+      // Calcular faltas não justificadas (dias úteis - dias trabalhados)
+      const faltas = Math.max(0, totalWorkingDays - daysWorked);
+      
       // Calcular dias úteis do próximo mês para VA/VT (benefícios são correspondentes ao próximo mês)
       const nextMonth = month === 12 ? 1 : month + 1;
       const nextYear = month === 12 ? year + 1 : year;
@@ -252,11 +255,12 @@ export class PayrollService {
       
       // Calcular VA e VT:
       // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
+      // MAS descontar as ausências E faltas do mês atual
       const dailyVA = Number(employee.dailyFoodVoucher || 0);
       const dailyVT = Number(employee.dailyTransportVoucher || 0);
-      // Ambos VA e VT usam os dias úteis do próximo mês
-      const daysForVA = nextMonthWorkingDays;
-      const daysForVT = nextMonthWorkingDays;
+      // Descontar ausências e faltas do mês atual dos dias úteis do próximo mês
+      const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+      const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
       const totalVA = daysForVA * dailyVA;
       const totalVT = daysForVT * dailyVT;
       
@@ -333,6 +337,9 @@ export class PayrollService {
       controlStartDate
     );
     
+    // Calcular faltas não justificadas (dias úteis - dias trabalhados)
+    const faltas = Math.max(0, totalWorkingDays - daysWorked);
+    
     // Buscar dados do funcionário para pegar valores diários de VA e VT
     const employeeData = await prisma.employee.findUnique({
       where: { id: employeeId },
@@ -358,8 +365,11 @@ export class PayrollService {
     
     // Calcular VA e VT:
     // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
-    const totalVA = nextMonthWorkingDays * dailyVA;
-    const totalVT = nextMonthWorkingDays * dailyVT;
+    // MAS descontar as ausências E faltas do mês atual
+    const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+    const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+    const totalVA = daysForVA * dailyVA;
+    const totalVT = daysForVT * dailyVT;
     
     // Folgas (ausências justificadas) descontam dos dias trabalhados, mas NÃO contam como falta
     // daysWorked já vem do calculateWorkingDays baseado nos registros de ponto (ENTRY)

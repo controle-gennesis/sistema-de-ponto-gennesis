@@ -121,6 +121,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   });
 
   const absenceDates = absencesData?.data?.map((record: any) => new Date(record.timestamp)) || [];
+  const totalAbsences = absenceDates.length;
   
   // Função para salvar os valores manuais
   const handleSaveManualValues = async () => {
@@ -676,7 +677,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE ALIMENTAÇÃO
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {nextMonthWorkingDays} dias
+                      {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -695,7 +696,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE TRANSPORTE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {nextMonthWorkingDays} dias
+                      {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
