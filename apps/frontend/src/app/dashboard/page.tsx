@@ -21,8 +21,8 @@ export default function DashboardPage() {
       console.log('User data from API:', res.data);
       return res.data;
     },
-    staleTime: 0, // Sempre buscar dados frescos
-    gcTime: 0 // Não cachear
+    staleTime: 5 * 60 * 1000, // Cache por 5 minutos
+    gcTime: 10 * 60 * 1000 // Manter no cache por 10 minutos
   });
 
   const handleLogout = () => {

@@ -116,13 +116,37 @@ app.use(helmet({
 }));
 app.use(compression());
 
-// Rate limiting
+// Rate limiting geral
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 1000, // máximo 1000 requests por IP (mais permissivo para desenvolvimento)
   message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
+
+// Rate limiting mais permissivo para /auth/me (endpoint usado frequentemente)
+const authLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 100, // máximo 100 requests por minuto por IP
+  message: 'Muitas tentativas de acesso. Tente novamente em 1 minuto.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use(limiter);
+
+// Rate limiting mais permissivo para /auth/me (endpoint usado frequentemente)
+const authLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 100, // máximo 100 requests por minuto por IP
+  message: 'Muitas tentativas de acesso. Tente novamente em 1 minuto.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Aplicar rate limiter mais permissivo para /auth/me antes das rotas
+app.use('/api/auth/me', authLimiter);
 
 // Logging
 app.use(morgan('combined'));

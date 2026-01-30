@@ -117,8 +117,12 @@ export class AuthController {
 
   async getProfile(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user || !req.user.id) {
+        throw createError('Token inválido ou expirado', 401);
+      }
+
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: req.user.id },
         include: {
           employee: true,
         },
@@ -132,7 +136,8 @@ export class AuthController {
         success: true,
         data: user,
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Erro ao buscar perfil do usuário:', error);
       return next(error);
     }
   }
