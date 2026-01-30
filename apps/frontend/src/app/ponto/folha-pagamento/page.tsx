@@ -492,7 +492,7 @@ export default function FolhaPagamentoPage() {
         
         // Descontos
         'Desconto por Faltas': descontoPorFaltas,
-        'DSR por Falta': dsrPorFalta,
+        'DSR por Falta': dsrPorFaltaFinal,
         '% VA': percentualVA,
         '% VT': percentualVT,
         'INSS Mensal': inssMensal,
