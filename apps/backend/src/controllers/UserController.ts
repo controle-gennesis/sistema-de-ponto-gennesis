@@ -30,24 +30,39 @@ export class UserController {
       // Se não especificar role, mostrar apenas funcionários por padrão
       if (!role) {
         where.role = 'EMPLOYEE';
-      }
-
-      if (search) {
-        where.OR = [
-          { name: { contains: search as string, mode: 'insensitive' } },
-          { email: { contains: search as string, mode: 'insensitive' } },
-          { cpf: { contains: search as string } },
-        ];
-      }
-
-      if (role) {
+      } else {
         where.role = role;
       }
 
+      // Construir condições de busca
+      const searchConditions: any[] = [];
+      if (search) {
+        searchConditions.push(
+          { name: { contains: search as string, mode: 'insensitive' } },
+          { email: { contains: search as string, mode: 'insensitive' } },
+          { cpf: { contains: search as string } }
+        );
+      }
+
+      // Se houver busca, adicionar OR ao where
+      if (searchConditions.length > 0) {
+        where.OR = searchConditions;
+      }
+
+      // Filtro de departamento - precisa ser combinado corretamente com OR
       if (department) {
-        where.employee = {
-          department: { contains: department as string, mode: 'insensitive' }
-        };
+        if (where.OR) {
+          // Se já existe OR, precisamos combinar com AND
+          where.AND = [
+            { OR: where.OR },
+            { employee: { department: { contains: department as string, mode: 'insensitive' } } }
+          ];
+          delete where.OR;
+        } else {
+          where.employee = {
+            department: { contains: department as string, mode: 'insensitive' }
+          };
+        }
       }
 
       const [users, total] = await Promise.all([
@@ -108,8 +123,10 @@ export class UserController {
           totalPages: Math.ceil(total / limitNum)
         }
       });
-    } catch (error) {
-      next(error);
+    } catch (error: any) {
+      console.error('Erro ao buscar usuários:', error);
+      console.error('Stack trace:', error?.stack);
+      return next(createError(error?.message || 'Erro ao buscar usuários', 500));
     }
   }
 
