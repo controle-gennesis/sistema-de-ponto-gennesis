@@ -372,14 +372,16 @@ export default function FolhaPagamentoPage() {
       
       // Usar valor manual de dsrPorFalta se existir, senão calcular
       const dsrPorFaltaCalculado = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
-      const dsrPorFalta = (employee.dsrPorFalta !== null && employee.dsrPorFalta !== undefined) 
+      const dsrPorFaltaFinal = (employee.dsrPorFalta !== null && employee.dsrPorFalta !== undefined) 
         ? Number(employee.dsrPorFalta) 
         : dsrPorFaltaCalculado;
       
-      // VA%: Se não for MEI, então (25,2 × dias úteis do próximo mês) × 0,09
+      // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
       // VA/VT são correspondentes ao próximo mês
       const nextMonthWorkingDays = employee.nextMonthWorkingDays || employee.totalWorkingDays || 0;
-      const percentualVA = employee.modality !== 'MEI' ? (25.2 * nextMonthWorkingDays) * 0.09 : 0;
+      // Usar os mesmos dias da referência do VA (daysForVA) para o cálculo do VA%
+      const daysForVA = employee.daysForVA !== undefined ? employee.daysForVA : nextMonthWorkingDays;
+      const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
       const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
       
       // Usar valor manual de horas extras se existir, senão usar o calculado
@@ -402,7 +404,7 @@ export default function FolhaPagamentoPage() {
         : valorDSRHECalculado;
       const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
         ? 0 
-        : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+        : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFaltaFinal);
       
       // Função para calcular INSS (mesma tabela do detalhamento)
       const calcularINSS = (baseINSS: number): number => {
@@ -433,7 +435,7 @@ export default function FolhaPagamentoPage() {
       // Usar salarioFamilia ao invés de employee.familySalary para manter consistência com o detalhamento
       const salarioFamilia = employee.familySalary || 0;
       const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
-      const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
+      const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
       const liquidoReceber = totalProventos - totalDescontos;
       const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
 
@@ -1170,15 +1172,17 @@ export default function FolhaPagamentoPage() {
                               
                               // Usar valor manual de dsrPorFalta se existir, senão calcular
                               const dsrPorFaltaCalculado = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
-                              const dsrPorFalta = (employee.dsrPorFalta !== null && employee.dsrPorFalta !== undefined) 
+                              const dsrPorFaltaFinal = (employee.dsrPorFalta !== null && employee.dsrPorFalta !== undefined) 
                                 ? Number(employee.dsrPorFalta) 
                                 : dsrPorFaltaCalculado;
                               
                               // Cálculos de %VA e %VT baseados no polo
-                              // VA%: Se não for MEI, então (25,2 × dias úteis do próximo mês) × 0,09
+                              // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
                               // VA/VT são correspondentes ao próximo mês
                               const nextMonthWorkingDays = employee.nextMonthWorkingDays || employee.totalWorkingDays || 0;
-                              const percentualVA = employee.modality !== 'MEI' ? (25.2 * nextMonthWorkingDays) * 0.09 : 0;
+                              // Usar os mesmos dias da referência do VA (daysForVA) para o cálculo do VA%
+                              const daysForVA = employee.daysForVA !== undefined ? employee.daysForVA : nextMonthWorkingDays;
+                              const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
                               const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
                               
                               const totalHorasExtras = (employee.he50Hours || 0) + (employee.he100Hours || 0);
@@ -1202,7 +1206,7 @@ export default function FolhaPagamentoPage() {
                                 : valorHorasExtrasCalculado;
                               const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
                                 ? 0 
-                                : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+                                : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFaltaFinal);
                               
                               const calcularINSS = (baseINSS: number): number => {
                                 if (baseINSS <= 0) return 0;
@@ -1231,7 +1235,7 @@ export default function FolhaPagamentoPage() {
                               const irrfMensal = employee.irrfMensal || 0;
                               
                               const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
-                              const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
+                              const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
                               const liquidoReceber = totalProventos - totalDescontos;
                               const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
                               
