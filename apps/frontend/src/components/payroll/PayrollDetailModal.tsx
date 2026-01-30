@@ -376,7 +376,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Cálculo do INSS MENSAL (Tabela Progressiva)
   const calcularINSS = (baseINSS: number): number => {
     if (baseINSS <= 0) return 0;
-
+    
     // Tabela progressiva (alinhada com a planilha do cliente)
     const faixa1 = 1621.0;
     const faixa2 = 2902.84;
@@ -399,6 +399,12 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   
   const inssMensal = calcularINSS(baseINSSMensal);
   const irrfMensal = employee.irrfMensal || 0;
+  
+  // Calcular Base IRRF para tooltip
+  const salarioBruto = salarioBase + periculosidade + insalubridade + salarioFamilia;
+  const baseIRRF = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+    ? 0 
+    : Math.max(0, salarioBruto - 607.20);
   
   // Cálculo do DCTFWEB: (INSS Total + IRRF Total) - Salário Família
   const dctfweb = ((employee.inssTotal || 0) + (employee.irrfTotal || 0)) - salarioFamilia;
@@ -702,7 +708,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help">
-                          R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                         <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
@@ -756,7 +762,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help">
-                          R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                         <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
@@ -1076,13 +1082,50 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VA%
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality !== 'MEI' ? `(25,2 × ${daysForVA} dias) × 9%` : 'Não aplicável'}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {employee.modality !== 'MEI' ? `(25,2 × ${daysForVA} dias) × 9%` : 'Não aplicável'}
+                        </span>
+                        {employee.modality !== 'MEI' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do %VA:</div>
+                              <div className="space-y-1">
+                                <div>📊 Valor diário VA: <span className="font-bold text-blue-400">R$ 25,20</span></div>
+                                <div>📅 Dias de referência: <span className="font-bold text-green-400">{daysForVA} dias</span></div>
+                                <div>💰 Valor total VA: <span className="font-bold text-blue-400">R$ 25,20 × {daysForVA} = R$ {(25.2 * daysForVA).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Desconto 9%: <span className="font-bold text-green-400">R$ {(25.2 * daysForVA).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 9% = R$ {percentualVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {percentualVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do %VA:</div>
+                              <div className="space-y-1">
+                                <div>📊 Fórmula: <span className="font-bold text-blue-400">(25,2 × {daysForVA} dias) × 9%</span></div>
+                                <div>💰 Cálculo: <span className="font-bold text-green-400">R$ {(25.2 * daysForVA).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 9% = R$ {percentualVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Desconto de 9% sobre o valor total do VA</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -1123,10 +1166,56 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       BASE INSS MENSAL
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Mensal'}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Base de Cálculo do INSS:</div>
+                              <div className="space-y-1">
+                                <div>📊 A base INSS é calculada sobre:</div>
+                                <div className="ml-2 space-y-1">
+                                  <div>• Salário Base: <span className="font-bold text-green-400">R$ {salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  {periculosidade > 0 && <div>• Periculosidade: <span className="font-bold text-green-400">R$ {periculosidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {insalubridade > 0 && <div>• Insalubridade: <span className="font-bold text-green-400">R$ {insalubridade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {valorHorasExtras > 0 && <div>• Horas Extras: <span className="font-bold text-green-400">R$ {valorHorasExtras.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {valorDSRHE > 0 && <div>• DSR H.E: <span className="font-bold text-green-400">R$ {valorDSRHE.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {descontoPorFaltasFinal > 0 && <div>• Desconto Faltas: <span className="font-bold text-red-400">- R$ {descontoPorFaltasFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {dsrPorFaltaFinal > 0 && <div>• DSR Falta: <span className="font-bold text-red-400">- R$ {dsrPorFaltaFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                </div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Base INSS: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo da Base INSS:</div>
+                              <div className="space-y-1">
+                                <div>💰 Fórmula: <span className="font-bold text-blue-400">(Salário + Adicionais + HE + DSR HE) - Descontos</span></div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Base INSS: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Esta base será usada para calcular o INSS com a tabela progressiva</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -1142,13 +1231,87 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       INSS MENSAL
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela Progressiva'}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Tabela Progressiva INSS:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base INSS: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2 space-y-1">
+                                  {baseINSSMensal <= 1621.0 && (
+                                    <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                  )}
+                                  {baseINSSMensal > 1621.0 && baseINSSMensal <= 2902.84 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                      <div>• Faixa 2 (R$ 1.621,01 até R$ 2.902,84): <span className="font-bold text-blue-400">9%</span></div>
+                                    </>
+                                  )}
+                                  {baseINSSMensal > 2902.84 && baseINSSMensal <= 4354.27 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                      <div>• Faixa 2 (R$ 1.621,01 até R$ 2.902,84): <span className="font-bold text-blue-400">9%</span></div>
+                                      <div>• Faixa 3 (R$ 2.902,85 até R$ 4.354,27): <span className="font-bold text-blue-400">12%</span></div>
+                                    </>
+                                  )}
+                                  {baseINSSMensal > 4354.27 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                      <div>• Faixa 2 (R$ 1.621,01 até R$ 2.902,84): <span className="font-bold text-blue-400">9%</span></div>
+                                      <div>• Faixa 3 (R$ 2.902,85 até R$ 4.354,27): <span className="font-bold text-blue-400">12%</span></div>
+                                      <div>• Faixa 4 (R$ 4.354,28 até R$ 8.475,55): <span className="font-bold text-blue-400">14%</span></div>
+                                    </>
+                                  )}
+                                </div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ INSS Calculado: <span className="font-bold text-green-400">R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do INSS Mensal:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base INSS: <span className="font-bold text-blue-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2">
+                                  {baseINSSMensal <= 1621.0 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 7,5% = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseINSSMensal > 1621.0 && baseINSSMensal <= 2902.84 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ 1.621,00 × 7,5%) + (R$ {(baseINSSMensal - 1621.0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 9%) = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseINSSMensal > 2902.84 && baseINSSMensal <= 4354.27 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ 1.621,00 × 7,5%) + (R$ 1.281,84 × 9%) + (R$ {(baseINSSMensal - 2902.84).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 12%) = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseINSSMensal > 4354.27 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ 1.621,00 × 7,5%) + (R$ 1.281,84 × 9%) + (R$ 1.451,43 × 12%) + (R$ {Math.min(baseINSSMensal - 4354.27, 4121.28).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 14%) = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                </div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Teto máximo: R$ 8.475,55</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -1361,13 +1524,106 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       IRRF MENSAL
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2026'}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2026'}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Tabela IRRF 2026:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base IRRF: <span className="font-bold text-green-400">R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2 space-y-1">
+                                  <div>• Salário Bruto: <span className="font-bold text-blue-400">R$ {salarioBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  <div>• Dedução padrão: <span className="font-bold text-red-400">- R$ 607,20</span></div>
+                                  <div className="border-t border-gray-700 mt-1 pt-1">
+                                    <div>✅ Base IRRF: <span className="font-bold text-green-400">R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  </div>
+                                </div>
+                                <div className="text-xs mt-2 space-y-1">
+                                  {baseIRRF <= 5000.00 && (
+                                    <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                  )}
+                                  {baseIRRF > 5000.00 && baseIRRF <= 7423.07 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                    </>
+                                  )}
+                                  {baseIRRF > 7423.07 && baseIRRF <= 9850.63 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                      <div>• Faixa 3 (R$ 7.423,08 até R$ 9.850,63): <span className="font-bold text-blue-400">15% - R$ 738,46</span></div>
+                                    </>
+                                  )}
+                                  {baseIRRF > 9850.63 && baseIRRF <= 12249.92 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                      <div>• Faixa 3 (R$ 7.423,08 até R$ 9.850,63): <span className="font-bold text-blue-400">15% - R$ 738,46</span></div>
+                                      <div>• Faixa 4 (R$ 9.850,64 até R$ 12.249,92): <span className="font-bold text-blue-400">22,5% - R$ 1.284,59</span></div>
+                                    </>
+                                  )}
+                                  {baseIRRF > 12249.92 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                      <div>• Faixa 3 (R$ 7.423,08 até R$ 9.850,63): <span className="font-bold text-blue-400">15% - R$ 738,46</span></div>
+                                      <div>• Faixa 4 (R$ 9.850,64 até R$ 12.249,92): <span className="font-bold text-blue-400">22,5% - R$ 1.284,59</span></div>
+                                      <div>• Faixa 5 (acima de R$ 12.249,92): <span className="font-bold text-blue-400">27,5% - R$ 1.944,42</span></div>
+                                    </>
+                                  )}
+                                </div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ IRRF Calculado: <span className="font-bold text-green-400">R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do IRRF Mensal:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base IRRF: <span className="font-bold text-blue-400">R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2">
+                                  {baseIRRF <= 5000.00 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">Isento (base ≤ R$ 5.000,00)</span></div>
+                                  )}
+                                  {baseIRRF > 5000.00 && baseIRRF <= 7423.07 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 7,5%) - R$ 375,00 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseIRRF > 7423.07 && baseIRRF <= 9850.63 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 15%) - R$ 738,46 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseIRRF > 9850.63 && baseIRRF <= 12249.92 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 22,5%) - R$ 1.284,59 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseIRRF > 12249.92 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 27,5%) - R$ 1.944,42 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                </div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Base IRRF = Salário Bruto - R$ 607,20</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
