@@ -622,12 +622,8 @@ export class PayrollService {
       where.polo = { contains: polo, mode: 'insensitive' };
     }
 
-    // Adicionar filtro para funcionários que precisam bater ponto (apenas para relatório de alocação)
-    // Nota: Para folha de pagamento (forAllocation = false ou undefined), não filtramos por requiresTimeClock
-    // Mas para alocação (forAllocation = true), precisamos filtrar porque a alocação depende de registros de ponto
-    if (forAllocation) {
-      where.requiresTimeClock = true;
-    }
+    // Nota: Removido o filtro de requiresTimeClock para mostrar todos os funcionários na alocação
+    // A alocação agora mostra todos os funcionários, incluindo os que não batem ponto
 
     // Construir where clause para busca manual (aplicar filtros específicos)
     let manualWhere: any = {
@@ -655,10 +651,7 @@ export class PayrollService {
     if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
     if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
     if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
-    // Adicionar filtro para funcionários que precisam bater ponto (apenas para relatório de alocação)
-    if (forAllocation) {
-      manualWhere.requiresTimeClock = true;
-    }
+    // Nota: Removido o filtro de requiresTimeClock para mostrar todos os funcionários na alocação
 
     // Buscar funcionários
     let employees = await prisma.employee.findMany({
