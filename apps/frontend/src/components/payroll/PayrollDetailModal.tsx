@@ -680,7 +680,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
-                        <span className="cursor-help underline decoration-dotted">
+                        <span className="cursor-help">
                           {employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
                         </span>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
@@ -700,7 +700,24 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo do Valor:</div>
+                            <div className="space-y-1">
+                              <div>📊 Referência: <span className="font-bold text-green-400">{employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                              <div>💰 VA Diário: <span className="font-bold text-blue-400">R$ {(employee.dailyFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} × R$ {(employee.dailyFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -717,8 +734,8 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
-                        <span className="cursor-help underline decoration-dotted">
-                          {employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                        <span className="cursor-help">
+                          {employee.daysForVT !== undefined ? employee.daysForVT : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
                         </span>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
@@ -737,7 +754,24 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo do Valor:</div>
+                            <div className="space-y-1">
+                              <div>📊 Referência: <span className="font-bold text-green-400">{employee.daysForVT !== undefined ? employee.daysForVT : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                              <div>💰 VT Diário: <span className="font-bold text-blue-400">R$ {(employee.dailyTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{employee.daysForVT !== undefined ? employee.daysForVT : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} × R$ {(employee.dailyTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
