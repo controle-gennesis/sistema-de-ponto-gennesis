@@ -677,7 +677,25 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE ALIMENTAÇÃO
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                      <div className="relative group inline-block">
+                        <span className="cursor-help underline decoration-dotted">
+                          {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                        </span>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo de VA/VT:</div>
+                            <div className="space-y-1">
+                              <div>📅 Dias úteis (próximo mês): <span className="font-bold text-green-400">{nextMonthWorkingDays}</span></div>
+                              <div>❌ Faltas (mês atual): <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                              <div>🏥 Ausências (mês atual): <span className="font-bold text-yellow-400">{totalAbsences || 0}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -696,7 +714,25 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE TRANSPORTE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                      <div className="relative group inline-block">
+                        <span className="cursor-help underline decoration-dotted">
+                          {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                        </span>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo de VA/VT:</div>
+                            <div className="space-y-1">
+                              <div>📅 Dias úteis (próximo mês): <span className="font-bold text-green-400">{nextMonthWorkingDays}</span></div>
+                              <div>❌ Faltas (mês atual): <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                              <div>🏥 Ausências (mês atual): <span className="font-bold text-yellow-400">{totalAbsences || 0}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1615,17 +1651,17 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   </div>
                 </div>
                 
-                {/* Dias Úteis do Próximo Mês (para VA/VT) */}
+                {/* Dias Trabalhados do Mês Atual */}
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center justify-between mb-3">
                     <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Trabalhados</span>
                   </div>
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                    {nextMonthWorkingDays}
+                    {employee.daysWorked}
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">
-                    Dias Úteis (Próximo Mês)
+                    Dias Trabalhados
                   </div>
                 </div>
 
@@ -1643,18 +1679,17 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   </div>
                 </div>
 
-                {/* Percentual de Presença */}
-                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-6 text-white shadow-lg">
+                {/* Ausências */}
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center justify-between mb-3">
-                    <div className="w-3 h-3 bg-white rounded-full"></div>
-                    <span className="text-xs font-medium text-indigo-100 uppercase tracking-wide">Presença</span>
+                    <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Ausências</span>
                   </div>
-                  <div className="text-2xl font-bold text-white mb-1">
-                    {employee.totalWorkingDays ? 
-                      ((employee.daysWorked / employee.totalWorkingDays) * 100).toFixed(1) : 0}%
+                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
+                    {totalAbsences || 0}
                   </div>
-                  <div className="text-sm text-indigo-100">
-                    Taxa de Presença
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    Ausências Justificadas
                   </div>
                 </div>
               </div>
