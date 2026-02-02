@@ -427,6 +427,10 @@ export default function FolhaPagamentoPage() {
       // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
       // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
       const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+      const daysForVT = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+      // Calcular valores totais de VA e VT baseados nos dias calculados
+      const totalVA = daysForVA * (employee.dailyFoodVoucher || 0);
+      const totalVT = daysForVT * (employee.dailyTransportVoucher || 0);
       const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
       const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
       
@@ -480,7 +484,7 @@ export default function FolhaPagamentoPage() {
       const irrfMensal = employee.irrfMensal || 0;
       // Usar salarioFamilia ao invés de employee.familySalary para manter consistência com o detalhamento
       const salarioFamilia = employee.familySalary || 0;
-      const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
+      const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + totalVT;
       const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
       const liquidoReceber = totalProventos - totalDescontos;
       const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
@@ -527,9 +531,9 @@ export default function FolhaPagamentoPage() {
         // VA e VT
         'VA Diário': employee.dailyFoodVoucher || 0,
         'VT Diário': employee.dailyTransportVoucher || 0,
-        'Total VA': employee.totalFoodVoucher || 0,
-        'Total VT': employee.totalTransportVoucher || 0,
-        'Total VA+VT': (employee.totalFoodVoucher || 0) + (employee.totalTransportVoucher || 0),
+        'Total VA': totalVA,
+        'Total VT': totalVT,
+        'Total VA+VT': totalVA + totalVT,
         
         // Presença
         'Dias Trabalhados': employee.daysWorked || 0,
@@ -1234,6 +1238,10 @@ export default function FolhaPagamentoPage() {
                               // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
                               // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
                               const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+                              const daysForVT = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+                              // Calcular valores totais de VA e VT baseados nos dias calculados
+                              const totalVA = daysForVA * (employee.dailyFoodVoucher || 0);
+                              const totalVT = daysForVT * (employee.dailyTransportVoucher || 0);
                               const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
                               const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
                               
@@ -1286,7 +1294,7 @@ export default function FolhaPagamentoPage() {
                               const inssMensal = calcularINSS(baseINSSMensal);
                               const irrfMensal = employee.irrfMensal || 0;
                               
-                              const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
+                              const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + totalVT;
                               const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
                               const liquidoReceber = totalProventos - totalDescontos;
                               const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
