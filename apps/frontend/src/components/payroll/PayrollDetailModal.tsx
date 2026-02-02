@@ -16,7 +16,7 @@ interface PayrollDetailModalProps {
 const monthNames = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-};
+];
 
 // Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta)
 function calculateNextMonthWorkingDays(month: number, year: number): number {
