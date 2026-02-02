@@ -416,8 +416,7 @@ export default function FolhaPagamentoPage() {
       const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
         ? employee.nextMonthWorkingDays
         : calculateNextMonthWorkingDays(currentMonth, currentYear, holidays);
-      // Buscar ausências do funcionário para descontar
-      const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
+      // Usar as ausências já buscadas acima (employeeAbsenceDates) para descontar
       const totalAbsences = employeeAbsenceDates.length;
       // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
       // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
@@ -1224,8 +1223,7 @@ export default function FolhaPagamentoPage() {
                               const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
                                 ? employee.nextMonthWorkingDays
                                 : calculateNextMonthWorkingDays(filters.month, filters.year, holidays);
-                              // Buscar ausências do funcionário para descontar
-                              const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
+                              // Usar as ausências já buscadas acima (employeeAbsenceDates) para descontar
                               const totalAbsences = employeeAbsenceDates.length;
                               // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
                               // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
