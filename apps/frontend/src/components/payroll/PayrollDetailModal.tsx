@@ -25,9 +25,15 @@ function calculateNextMonthWorkingDays(month: number, year: number, holidays: an
   const nextYear = month === 12 ? year + 1 : year;
   const daysInMonth = new Date(nextYear, nextMonth, 0).getDate();
   
-  // Criar um Set com as datas dos feriados no formato YYYY-MM-DD
+  // Filtrar apenas feriados do próximo mês
+  const nextMonthHolidays = holidays.filter((h: any) => {
+    const d = new Date(h.date);
+    return d.getFullYear() === nextYear && d.getMonth() + 1 === nextMonth;
+  });
+  
+  // Criar um Set com as datas dos feriados do próximo mês no formato YYYY-MM-DD
   const holidaySet = new Set(
-    holidays.map((h: any) => {
+    nextMonthHolidays.map((h: any) => {
       const d = new Date(h.date);
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -371,10 +377,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Cálculos de %VA e %VT baseados no polo
   // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
   // VA/VT são correspondentes ao próximo mês
-  // Se o backend não retornar nextMonthWorkingDays, calcular manualmente (descontando feriados)
-  const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
-    ? employee.nextMonthWorkingDays
-    : calculateNextMonthWorkingDays(month, year, holidays);
+  // SEMPRE calcular no frontend para garantir que está correto (descontando feriados)
+  // O backend pode retornar valores incorretos, então sempre recalcular
+  const calculatedNextMonthWorkingDays = calculateNextMonthWorkingDays(month, year, holidays);
+  // Usar o valor calculado no frontend, que é mais confiável
+  const nextMonthWorkingDays = calculatedNextMonthWorkingDays;
   // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
   // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
   const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
