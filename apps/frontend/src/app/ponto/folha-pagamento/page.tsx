@@ -23,18 +23,33 @@ import {
 import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 
-// Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta)
-function calculateNextMonthWorkingDays(month: number, year: number): number {
+// Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta, descontando feriados)
+// Esta função é um fallback - o ideal é usar o valor do backend que já desconta feriados
+function calculateNextMonthWorkingDays(month: number, year: number, holidays: any[] = []): number {
   const nextMonth = month === 12 ? 1 : month + 1;
   const nextYear = month === 12 ? year + 1 : year;
   const daysInMonth = new Date(nextYear, nextMonth, 0).getDate();
+  
+  // Criar um Set com as datas dos feriados no formato YYYY-MM-DD
+  const holidaySet = new Set(
+    holidays.map((h: any) => {
+      const d = new Date(h.date);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    })
+  );
+  
   let workingDays = 0;
   
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(nextYear, nextMonth - 1, day);
     const dayOfWeek = date.getDay(); // 0 = domingo, 1 = segunda, ..., 6 = sábado
-    // Contar apenas dias úteis (1-5 = segunda a sexta)
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    
+    // Contar apenas dias úteis (1-5 = segunda a sexta), excluindo sábados, domingos e feriados
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && !holidaySet.has(dateKey)) {
       workingDays++;
     }
   }
@@ -119,10 +134,10 @@ export default function FolhaPagamentoPage() {
 
   // Buscar feriados do mês
   const { data: holidaysData } = useQuery({
-    queryKey: ['holidays', filters.year, filters.month],
+    queryKey: ['holidays', filters.year],
     queryFn: async () => {
       const params: any = { year: filters.year };
-      if (filters.month) params.month = filters.month;
+      // Não especificar mês para buscar todos os feriados do ano (incluindo próximo mês para cálculo de VA/VT)
       const res = await api.get('/holidays', { params });
       return res.data;
     },
@@ -397,12 +412,16 @@ export default function FolhaPagamentoPage() {
       
       // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
       // VA/VT são correspondentes ao próximo mês
-      // Se o backend não retornar nextMonthWorkingDays, calcular manualmente
+      // Se o backend não retornar nextMonthWorkingDays, calcular manualmente (descontando feriados)
       const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
         ? employee.nextMonthWorkingDays
-        : calculateNextMonthWorkingDays(currentMonth, currentYear);
-      // Usar os mesmos dias da referência do VA (daysForVA) para o cálculo do VA%
-      const daysForVA = employee.daysForVA !== undefined ? employee.daysForVA : nextMonthWorkingDays;
+        : calculateNextMonthWorkingDays(currentMonth, currentYear, holidays);
+      // Buscar ausências do funcionário para descontar
+      const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
+      const totalAbsences = employeeAbsenceDates.length;
+      // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
+      // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
+      const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
       const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
       const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
       
@@ -1201,12 +1220,16 @@ export default function FolhaPagamentoPage() {
                               // Cálculos de %VA e %VT baseados no polo
                               // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
                               // VA/VT são correspondentes ao próximo mês
-                              // Se o backend não retornar nextMonthWorkingDays, calcular manualmente
+                              // Se o backend não retornar nextMonthWorkingDays, calcular manualmente (descontando feriados)
                               const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
                                 ? employee.nextMonthWorkingDays
-                                : calculateNextMonthWorkingDays(filters.month, filters.year);
-                              // Usar os mesmos dias da referência do VA (daysForVA) para o cálculo do VA%
-                              const daysForVA = employee.daysForVA !== undefined ? employee.daysForVA : nextMonthWorkingDays;
+                                : calculateNextMonthWorkingDays(filters.month, filters.year, holidays);
+                              // Buscar ausências do funcionário para descontar
+                              const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
+                              const totalAbsences = employeeAbsenceDates.length;
+                              // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
+                              // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
+                              const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
                               const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
                               const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
                               

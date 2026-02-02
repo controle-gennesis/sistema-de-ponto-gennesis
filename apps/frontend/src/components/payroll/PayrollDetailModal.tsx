@@ -18,18 +18,33 @@ const monthNames = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
-// Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta)
-function calculateNextMonthWorkingDays(month: number, year: number): number {
+// Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta, descontando feriados)
+// Esta função é um fallback - o ideal é usar o valor do backend que já desconta feriados
+function calculateNextMonthWorkingDays(month: number, year: number, holidays: any[] = []): number {
   const nextMonth = month === 12 ? 1 : month + 1;
   const nextYear = month === 12 ? year + 1 : year;
   const daysInMonth = new Date(nextYear, nextMonth, 0).getDate();
+  
+  // Criar um Set com as datas dos feriados no formato YYYY-MM-DD
+  const holidaySet = new Set(
+    holidays.map((h: any) => {
+      const d = new Date(h.date);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    })
+  );
+  
   let workingDays = 0;
   
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(nextYear, nextMonth - 1, day);
     const dayOfWeek = date.getDay(); // 0 = domingo, 1 = segunda, ..., 6 = sábado
-    // Contar apenas dias úteis (1-5 = segunda a sexta)
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    
+    // Contar apenas dias úteis (1-5 = segunda a sexta), excluindo sábados, domingos e feriados
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && !holidaySet.has(dateKey)) {
       workingDays++;
     }
   }
@@ -101,13 +116,13 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     return undefined;
   };
 
-  // Buscar feriados do mês
+  // Buscar feriados do ano (incluindo próximo mês para cálculo de VA/VT)
   const employeeState = poloToState(employee.polo);
   const { data: holidaysData } = useQuery({
-    queryKey: ['holidays', year, month, employeeState],
+    queryKey: ['holidays', year, employeeState],
     queryFn: async () => {
       const params: any = { year };
-      if (month) params.month = month;
+      // Não especificar mês para buscar todos os feriados do ano (incluindo próximo mês)
       const res = await api.get('/holidays', { params });
       return res.data;
     },
@@ -356,12 +371,17 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Cálculos de %VA e %VT baseados no polo
   // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
   // VA/VT são correspondentes ao próximo mês
-  // Se o backend não retornar nextMonthWorkingDays, calcular manualmente
+  // Se o backend não retornar nextMonthWorkingDays, calcular manualmente (descontando feriados)
   const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
     ? employee.nextMonthWorkingDays
-    : calculateNextMonthWorkingDays(month, year);
-  // Usar os mesmos dias da referência do VA (daysForVA) para o cálculo do VA%
-  const daysForVA = employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+    : calculateNextMonthWorkingDays(month, year, holidays);
+  // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
+  // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
+  const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+  const daysForVT = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+  // Calcular valores totais de VA e VT baseados nos dias calculados
+  const totalVA = daysForVA * (employee.dailyFoodVoucher || 0);
+  const totalVT = daysForVT * (employee.dailyTransportVoucher || 0);
   const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
   const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
   
@@ -431,7 +451,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Cálculo do DCTFWEB: (INSS Total + IRRF Total) - Salário Família
   const dctfweb = ((employee.inssTotal || 0) + (employee.irrfTotal || 0)) - salarioFamilia;
   
-  const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
+  const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + totalVT;
   const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltasFinal + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
   const liquidoReceber = totalProventos - totalDescontos;
   
@@ -838,7 +858,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help">
-                          {employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                          {daysForVA} dias
                         </span>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
@@ -848,7 +868,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               <div>❌ Faltas (mês atual): <span className="font-bold text-red-400">{faltas || 0}</span></div>
                               <div>🏥 Ausências (mês atual): <span className="font-bold text-yellow-400">{totalAbsences || 0}</span></div>
                               <div className="border-t border-gray-700 mt-2 pt-2">
-                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {daysForVA} dias</span></div>
                               </div>
                             </div>
                             <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
@@ -859,16 +879,16 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help">
-                      R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {totalVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                         <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
                             <div className="font-semibold mb-2 text-yellow-400">Cálculo do Valor:</div>
                             <div className="space-y-1">
-                              <div>📊 Referência: <span className="font-bold text-green-400">{employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                              <div>📊 Referência: <span className="font-bold text-green-400">{daysForVA} dias</span></div>
                               <div>💰 VA Diário: <span className="font-bold text-blue-400">R$ {(employee.dailyFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                               <div className="border-t border-gray-700 mt-2 pt-2">
-                                <div>✅ Total: <span className="font-bold text-green-400">{employee.daysForVA !== undefined ? employee.daysForVA : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} × R$ {(employee.dailyFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div>✅ Total: <span className="font-bold text-green-400">{daysForVA} × R$ {(employee.dailyFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {totalVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                               </div>
                             </div>
                             <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
@@ -892,7 +912,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help">
-                          {employee.daysForVT !== undefined ? employee.daysForVT : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias
+                          {daysForVT} dias
                         </span>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
@@ -902,7 +922,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               <div>❌ Faltas (mês atual): <span className="font-bold text-red-400">{faltas || 0}</span></div>
                               <div>🏥 Ausências (mês atual): <span className="font-bold text-yellow-400">{totalAbsences || 0}</span></div>
                               <div className="border-t border-gray-700 mt-2 pt-2">
-                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {daysForVA} dias</span></div>
                               </div>
                             </div>
                             <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
@@ -913,16 +933,16 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
                       <div className="relative group inline-block">
                         <span className="cursor-help">
-                      R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {totalVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                         <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
                           <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
                             <div className="font-semibold mb-2 text-yellow-400">Cálculo do Valor:</div>
                             <div className="space-y-1">
-                              <div>📊 Referência: <span className="font-bold text-green-400">{employee.daysForVT !== undefined ? employee.daysForVT : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} dias</span></div>
+                              <div>📊 Referência: <span className="font-bold text-green-400">{daysForVT} dias</span></div>
                               <div>💰 VT Diário: <span className="font-bold text-blue-400">R$ {(employee.dailyTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                               <div className="border-t border-gray-700 mt-2 pt-2">
-                                <div>✅ Total: <span className="font-bold text-green-400">{employee.daysForVT !== undefined ? employee.daysForVT : Math.max(0, nextMonthWorkingDays - totalAbsences - faltas)} × R$ {(employee.dailyTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div>✅ Total: <span className="font-bold text-green-400">{daysForVT} × R$ {(employee.dailyTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {totalVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                               </div>
                             </div>
                             <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
