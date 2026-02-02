@@ -23,6 +23,25 @@ import {
 import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 
+// Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta)
+function calculateNextMonthWorkingDays(month: number, year: number): number {
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const daysInMonth = new Date(nextYear, nextMonth, 0).getDate();
+  let workingDays = 0;
+  
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(nextYear, nextMonth - 1, day);
+    const dayOfWeek = date.getDay(); // 0 = domingo, 1 = segunda, ..., 6 = sábado
+    // Contar apenas dias úteis (1-5 = segunda a sexta)
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      workingDays++;
+    }
+  }
+  
+  return workingDays;
+}
+
 export default function FolhaPagamentoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -378,7 +397,10 @@ export default function FolhaPagamentoPage() {
       
       // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
       // VA/VT são correspondentes ao próximo mês
-      const nextMonthWorkingDays = employee.nextMonthWorkingDays || employee.totalWorkingDays || 0;
+      // Se o backend não retornar nextMonthWorkingDays, calcular manualmente
+      const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
+        ? employee.nextMonthWorkingDays
+        : calculateNextMonthWorkingDays(currentMonth, currentYear);
       // Usar os mesmos dias da referência do VA (daysForVA) para o cálculo do VA%
       const daysForVA = employee.daysForVA !== undefined ? employee.daysForVA : nextMonthWorkingDays;
       const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
@@ -1179,7 +1201,10 @@ export default function FolhaPagamentoPage() {
                               // Cálculos de %VA e %VT baseados no polo
                               // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
                               // VA/VT são correspondentes ao próximo mês
-                              const nextMonthWorkingDays = employee.nextMonthWorkingDays || employee.totalWorkingDays || 0;
+                              // Se o backend não retornar nextMonthWorkingDays, calcular manualmente
+                              const nextMonthWorkingDays = employee.nextMonthWorkingDays !== undefined && employee.nextMonthWorkingDays > 0
+                                ? employee.nextMonthWorkingDays
+                                : calculateNextMonthWorkingDays(filters.month, filters.year);
                               // Usar os mesmos dias da referência do VA (daysForVA) para o cálculo do VA%
                               const daysForVA = employee.daysForVA !== undefined ? employee.daysForVA : nextMonthWorkingDays;
                               const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;

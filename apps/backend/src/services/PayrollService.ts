@@ -407,14 +407,21 @@ export class PayrollService {
     const currentYear = today.getFullYear();
     
     // Se for o mês atual, só contar até hoje
-    const endDay = (month === currentMonth && year === currentYear) 
+    // IMPORTANTE: Se for um mês futuro (próximo mês), contar todos os dias do mês
+    const isCurrentMonth = month === currentMonth && year === currentYear;
+    const isFutureMonth = year > currentYear || (year === currentYear && month > currentMonth);
+    
+    const endDay = isCurrentMonth
       ? today.getDate() 
       : new Date(year, month, 0).getDate();
     
     // Data de início: createdAt (data de criação no sistema) ou início do mês
-    const startDay = controlStartDate && controlStartDate.getMonth() + 1 === month && controlStartDate.getFullYear() === year
-      ? controlStartDate.getDate()
-      : 1;
+    // IMPORTANTE: Para meses futuros, sempre começar do dia 1
+    const startDay = (isFutureMonth || !controlStartDate) 
+      ? 1
+      : (controlStartDate.getMonth() + 1 === month && controlStartDate.getFullYear() === year
+        ? controlStartDate.getDate()
+        : 1);
     
     // Buscar feriados ativos no mês para desconsiderar da contagem de dias úteis
     const startDateRange = new Date(year, month - 1, startDay);
