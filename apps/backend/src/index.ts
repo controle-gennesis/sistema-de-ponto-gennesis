@@ -33,11 +33,16 @@ import dashboardRoutes from './routes/dashboard';
 import bankHoursRoutes from './routes/bankHours';
 import medicalCertificateRoutes from './routes/medicalCertificates';
 import payrollRoutes from './routes/payroll';
+import borderRoutes from './routes/border';
 import salaryAdjustmentRoutes from './routes/salaryAdjustments';
 import salaryDiscountRoutes from './routes/salaryDiscounts';
 import pointCorrectionRoutes from './routes/pointCorrections';
 import holidayRoutes from './routes/holidays';
 import chatRoutes from './routes/chats';
+import chatGPTRoutes from './routes/chatgpt';
+import materialRequestRoutes from './routes/materialRequests';
+import costCenterRoutes from './routes/costCenters';
+import constructionMaterialRoutes from './routes/constructionMaterials';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -49,12 +54,10 @@ const PORT = parseInt(process.env.PORT || '5000', 10);
 // Isso permite obter o IP real do cliente via X-Forwarded-For de forma segura
 app.set('trust proxy', 1);
 
-// CORS - DEVE VIR ANTES DO HELMET
-// Verificar se está em produção (Railway geralmente não define NODE_ENV, então verificamos pela URL)
 const isProduction = process.env.NODE_ENV === 'production' || 
                      process.env.RAILWAY_ENVIRONMENT === 'production' ||
-                     !process.env.NODE_ENV || // Se não está definido, assumir produção no Railway
-                     process.env.PORT; // Se tem PORT definido, provavelmente é produção
+                     !process.env.NODE_ENV ||
+                     !!process.env.PORT;
 
 const allowedOrigins = [
   'https://sistema-pontofrontend-production.up.railway.app',
@@ -63,103 +66,43 @@ const allowedOrigins = [
   'http://localhost:19006'
 ];
 
-console.log('🌐 CORS configurado para origens:', allowedOrigins);
-console.log('📊 Ambiente:', process.env.NODE_ENV || 'development');
-console.log('📊 RAILWAY_ENVIRONMENT:', process.env.RAILWAY_ENVIRONMENT);
-console.log('🔍 É produção?', isProduction);
-
-// Configuração de CORS mais robusta e permissiva
 const corsOptions = {
-  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    // Permitir requisições sem origin (ex: mobile apps, Postman, curl)
-    if (!origin) {
-      console.log('⚠️  Requisição sem origin - permitindo');
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin || allowedOrigins.includes(origin) || 
+        origin.includes('railway.app') || origin.includes('localhost') || 
+        !isProduction) {
       return callback(null, true);
     }
-    
-    // Verificar se a origem está na lista permitida
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else if (origin.includes('railway.app') || origin.includes('localhost')) {
-      // Permitir qualquer subdomínio do Railway ou localhost
-      console.log('✅ Origem Railway/localhost permitida:', origin);
-      callback(null, true);
-    } else if (!isProduction) {
-      // Em desenvolvimento, permitir qualquer origem
-      console.log('⚠️  Ambiente de desenvolvimento - permitindo origem:', origin);
-      callback(null, true);
-    } else {
-      // Em produção, mas permitir Railway mesmo assim (fallback de segurança)
-      if (origin.includes('railway') || origin.includes('localhost')) {
-        console.log('✅ Origem Railway permitida (fallback):', origin);
-        callback(null, true);
-      } else {
-        console.error('❌ Origem não permitida pelo CORS:', origin);
-        callback(new Error('Não permitido pelo CORS'));
-      }
-    }
+    console.error('❌ Origem não permitida pelo CORS:', origin);
+    callback(new Error('Não permitido pelo CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  preflightContinue: false,
   optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
-
-// Middleware de segurança - Configurado para não bloquear CORS
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   crossOriginEmbedderPolicy: false,
 }));
 app.use(compression());
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 1000, // máximo 1000 requests por IP (mais permissivo para desenvolvimento)
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
   message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
-});
-app.use(limiter);
-
-// Logging
+}));
 app.use(morgan('combined'));
-
-// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Servir uploads locais quando STORAGE_PROVIDER=local
 if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.env.AWS_ACCESS_KEY_ID) {
-  const uploadsPath = path.join(process.cwd(), 'apps', 'backend', 'uploads');
-  app.use('/uploads', express.static(uploadsPath));
+  app.use('/uploads', express.static(path.join(process.cwd(), 'apps', 'backend', 'uploads')));
 }
 
-// Handler para requisições OPTIONS (preflight CORS) - usando a mesma configuração
 app.options('*', cors(corsOptions));
-
-// Middleware adicional para garantir que CORS funcione mesmo se houver problemas
-app.use((req: express.Request, res: express.Response, next: express.NextFunction): void => {
-  const origin = req.headers.origin;
-  
-  // Se a origem for do Railway ou localhost, sempre permitir
-  if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  }
-  
-  // Se for uma requisição OPTIONS, responder imediatamente
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-    return;
-  }
-  
-  next();
-});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -185,11 +128,16 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/bank-hours', bankHoursRoutes);
 app.use('/api/medical-certificates', medicalCertificateRoutes);
 app.use('/api/payroll', payrollRoutes);
+app.use('/api/border', borderRoutes);
 app.use('/api/salary-adjustments', salaryAdjustmentRoutes);
 app.use('/api/salary-discounts', salaryDiscountRoutes);
 app.use('/api/solicitacoes', pointCorrectionRoutes);
 app.use('/api/holidays', holidayRoutes);
 app.use('/api/chats', chatRoutes);
+app.use('/api/chatgpt', chatGPTRoutes);
+app.use('/api/material-requests', materialRequestRoutes);
+app.use('/api/cost-centers', costCenterRoutes);
+app.use('/api/construction-materials', constructionMaterialRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

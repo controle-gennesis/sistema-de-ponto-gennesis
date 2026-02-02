@@ -1,11 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export class AuthController {
   async register(req: Request, res: Response, next: NextFunction) {
@@ -71,19 +69,38 @@ export class AuthController {
     try {
       const { email, password } = req.body;
 
+      // Validar campos obrigatórios
+      if (!email || !password) {
+        throw createError('Email e senha são obrigatórios', 400);
+      }
+
+      // Verificar se JWT_SECRET está configurado
+      if (!process.env.JWT_SECRET) {
+        console.error('❌ JWT_SECRET não está configurado');
+        throw createError('Erro de configuração do servidor', 500);
+      }
+
       // Buscar usuário
       const user = await prisma.user.findUnique({
-        where: { email },
+        where: { email: email.toLowerCase().trim() },
         include: {
           employee: true,
         }
       });
 
-      if (!user || !user.isActive) {
+      if (!user) {
         throw createError('Credenciais inválidas', 401);
       }
 
+      if (!user.isActive) {
+        throw createError('Usuário inativo. Entre em contato com o administrador.', 401);
+      }
+
       // Verificar senha
+      if (!user.password) {
+        throw createError('Credenciais inválidas', 401);
+      }
+
       const isPasswordValid = await bcrypt.compare(password, user.password);
       if (!isPasswordValid) {
         throw createError('Credenciais inválidas', 401);
@@ -92,7 +109,7 @@ export class AuthController {
       // Gerar token
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role },
-        process.env.JWT_SECRET as string,
+        process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
 
@@ -108,7 +125,9 @@ export class AuthController {
         },
         message: 'Login realizado com sucesso'
       });
-    } catch (error) {
+    } catch (error: any) {
+      // Log do erro para debug
+      console.error('Erro no login:', error);
       return next(error);
     }
   }

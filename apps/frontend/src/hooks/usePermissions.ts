@@ -95,6 +95,9 @@ export function usePermissions() {
   // Verificar se o usuário é do setor Projetos
   const isDepartmentProjetos = userDepartment?.toLowerCase().includes('projetos');
 
+  // Verificar se o usuário é do setor Financeiro
+  const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
+
   // Se for Departamento Pessoal, tem acesso total (exceto gerenciar solicitações)
   const finalPermissions = isDepartmentPessoal ? {
     canAccessPayroll: true,
@@ -114,6 +117,7 @@ export function usePermissions() {
     userDepartment,
     isDepartmentPessoal,
     isDepartmentProjetos,
+    isDepartmentFinanceiro,
     permissions: finalPermissions,
     isLoading,
     canAccessPayroll: finalPermissions.canAccessPayroll,
@@ -130,7 +134,7 @@ export function usePermissions() {
 
 // Hook para verificar permissão de rota específica
 export function useRoutePermission(route: string) {
-  const { permissions, isLoading, isDepartmentPessoal, isDepartmentProjetos, userPosition } = usePermissions();
+  const { permissions, isLoading, isDepartmentPessoal, isDepartmentProjetos, isDepartmentFinanceiro, userPosition } = usePermissions();
 
   if (isLoading) {
     return { hasAccess: false, isLoading: true };
@@ -153,6 +157,8 @@ export function useRoutePermission(route: string) {
     '/ponto/banco-horas': isAdministrator || isDepartmentPessoal || permissions.canManageBankHours,
     '/ponto/folha-pagamento': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
     '/relatorios/alocacao': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
+    '/ponto/centros-custo': isAdministrator || isDepartmentPessoal, // Apenas Administrador ou Departamento Pessoal
+    '/ponto/materiais-construcao': isAdministrator || isDepartmentPessoal, // Apenas Administrador ou Departamento Pessoal
   };
 
   return {

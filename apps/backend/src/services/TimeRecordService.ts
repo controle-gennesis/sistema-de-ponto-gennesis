@@ -1,8 +1,7 @@
-import { PrismaClient } from '@prisma/client';
 import moment from 'moment-timezone';
 import { HolidayService } from './HolidayService';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const holidayService = new HolidayService();
 
 export interface WorkHoursCalculation {

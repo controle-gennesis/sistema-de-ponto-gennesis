@@ -1,5 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { TimeRecordService } from '../services/TimeRecordService';
@@ -8,8 +7,8 @@ import { PhotoService } from '../services/PhotoService';
 import { HolidayService } from '../services/HolidayService';
 import { uploadPhoto, handleUploadError } from '../middleware/upload';
 import moment from 'moment-timezone';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const timeRecordService = new TimeRecordService();
 const locationService = new LocationService();
 const photoService = new PhotoService();

@@ -1,8 +1,7 @@
-import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
 import { HoursExtrasService } from './HoursExtrasService';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const hoursExtrasService = new HoursExtrasService();
 
 // Função para calcular a alocação final baseada no centro de custo mais frequente
