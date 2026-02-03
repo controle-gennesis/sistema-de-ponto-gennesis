@@ -1,15 +1,13 @@
 import express from 'express';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { PhotoService } from '../services/PhotoService';
-import { PrismaClient } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
-import { AuthRequest } from '../middleware/auth';
 import path from 'path';
 import fs from 'fs';
+import { prisma } from '../lib/prisma';
 
 const router = express.Router();
 const photoService = new PhotoService();
-const prisma = new PrismaClient();
 
 // Middleware de autenticação para todas as rotas
 router.use(authenticate);
@@ -22,7 +20,6 @@ router.get('/:photoKey', async (req: AuthRequest, res, next) => {
   try {
     const { photoKey } = req.params;
     const userId = req.user!.id;
-    const userRole = req.user!.role;
 
     // Verificar se a foto existe no banco de dados
     const timeRecord = await prisma.timeRecord.findFirst({
@@ -105,7 +102,6 @@ router.get('/record/:recordId', async (req: AuthRequest, res, next) => {
   try {
     const { recordId } = req.params;
     const userId = req.user!.id;
-    const userRole = req.user!.role;
 
     const timeRecord = await prisma.timeRecord.findUnique({
       where: { id: recordId },

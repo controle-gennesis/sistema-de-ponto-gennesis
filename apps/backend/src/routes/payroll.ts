@@ -40,4 +40,19 @@ router.post('/manual-inss', (req, res, next) =>
   payrollController.saveManualInssValues(req, res, next)
 );
 
+// Finalizar folha de pagamento (apenas DP)
+router.post('/finalize', (req, res, next) => 
+  payrollController.finalizePayroll(req, res, next)
+);
+
+// Obter status da folha de pagamento
+router.get('/status', (req, res, next) => 
+  payrollController.getPayrollStatus(req, res, next)
+);
+
+// Reabrir folha de pagamento (apenas Financeiro)
+router.post('/reopen', (req, res, next) => 
+  payrollController.reopenPayroll(req, res, next)
+);
+
 export default router;

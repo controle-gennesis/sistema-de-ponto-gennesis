@@ -1,9 +1,8 @@
 import express from 'express';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 router.use(authenticate);
 
@@ -746,6 +745,247 @@ router.get('/', async (req: AuthRequest, res, next) => {
           position: emp.employee?.position || ''
         }))
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Endpoint para retornar todos os módulos disponíveis no sistema
+router.get('/modules', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) => {
+  try {
+    // Buscar dados do usuário para verificar posição e departamento
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      include: {
+        employee: {
+          select: {
+            position: true,
+            department: true
+          }
+        }
+      }
+    });
+
+    const userPosition = user?.employee?.position || '';
+    const userDepartment = user?.employee?.department || '';
+    const isAdministrator = userPosition === 'Administrador';
+    const isDepartmentPessoal = userDepartment === 'DEPARTAMENTO PESSOAL';
+    const isDepartmentProjetos = userDepartment === 'PROJETOS';
+    const isDepartmentCompras = userDepartment === 'COMPRAS';
+
+    const modules = [
+      {
+        id: 'dashboard',
+        name: 'Dashboard',
+        description: 'Visão geral do sistema com métricas e estatísticas',
+        icon: 'LayoutDashboard',
+        href: '/ponto/dashboard',
+        category: 'Principal',
+        permissions: ['EMPLOYEE']
+      },
+      {
+        id: 'time-records',
+        name: 'Registros de Ponto',
+        description: 'Bater ponto e gerenciar registros de frequência',
+        icon: 'FolderClock',
+        href: '/ponto',
+        category: 'Registros de Ponto',
+        permissions: ['EMPLOYEE']
+      },
+      {
+        id: 'employees',
+        name: 'Gerenciar Funcionários',
+        description: 'Cadastrar, editar e gerenciar funcionários',
+        icon: 'Users',
+        href: '/ponto/funcionarios',
+        category: 'Funcionários',
+        permissions: ['ADMIN', 'DEPARTAMENTO_PESSOAL']
+      },
+      {
+        id: 'birthdays',
+        name: 'Aniversariantes',
+        description: 'Ver aniversariantes do mês',
+        icon: 'CalendarDays',
+        href: '/ponto/aniversariantes',
+        category: 'Funcionários',
+        permissions: ['ADMIN', 'DEPARTAMENTO_PESSOAL']
+      },
+      {
+        id: 'payroll',
+        name: 'Folha de Pagamento',
+        description: 'Gestão completa de folha de pagamento',
+        icon: 'FileSpreadsheet',
+        href: '/ponto/folha-pagamento',
+        category: 'Folha de Pagamento',
+        permissions: ['ADMIN', 'DEPARTAMENTO_PESSOAL']
+      },
+      {
+        id: 'financial',
+        name: 'Financeiro',
+        description: 'Gerar borderô e CNAB400 para pagamentos',
+        icon: 'DollarSign',
+        href: '/ponto/financeiro',
+        category: 'Financeiro',
+        permissions: ['ADMIN']
+      },
+      {
+        id: 'medical-certificates',
+        name: 'Registrar Ausência',
+        description: 'Enviar e acompanhar atestados médicos e ausências',
+        icon: 'BookPlus',
+        href: '/ponto/atestados',
+        category: 'Ausências',
+        permissions: ['EMPLOYEE']
+      },
+      {
+        id: 'manage-medical-certificates',
+        name: 'Gerenciar Ausências',
+        description: 'Aprovar e gerenciar todas as ausências dos funcionários',
+        icon: 'BookText',
+        href: '/ponto/gerenciar-atestados',
+        category: 'Ausências',
+        permissions: ['ADMIN', 'DEPARTAMENTO_PESSOAL']
+      },
+      {
+        id: 'point-corrections',
+        name: 'Correção de Ponto',
+        description: 'Solicitar correções nos registros de ponto',
+        icon: 'FileText',
+        href: '/ponto/solicitacoes',
+        category: 'Solicitações',
+        permissions: ['EMPLOYEE']
+      },
+      {
+        id: 'manage-point-corrections',
+        name: 'Gerenciar Solicitações',
+        description: 'Aprovar solicitações de correção de ponto',
+        icon: 'FileText',
+        href: '/ponto/gerenciar-solicitacoes',
+        category: 'Solicitações',
+        permissions: ['ADMIN', 'PROJETOS']
+      },
+      {
+        id: 'vacations',
+        name: 'Solicitar Férias',
+        description: 'Solicitar e acompanhar férias',
+        icon: 'ImagePlus',
+        href: '/ponto/ferias',
+        category: 'Férias',
+        permissions: ['EMPLOYEE']
+      },
+      {
+        id: 'manage-vacations',
+        name: 'Gerenciar Férias',
+        description: 'Gerenciar férias de todos os funcionários',
+        icon: 'BookImage',
+        href: '/ponto/gerenciar-ferias',
+        category: 'Férias',
+        permissions: ['ADMIN', 'DEPARTAMENTO_PESSOAL']
+      },
+      {
+        id: 'holidays',
+        name: 'Gerenciar Feriados',
+        description: 'Gerenciar calendário de feriados',
+        icon: 'CalendarDays',
+        href: '/ponto/gerenciar-feriados',
+        category: 'Férias',
+        permissions: ['ADMIN', 'DEPARTAMENTO_PESSOAL']
+      },
+      {
+        id: 'bank-hours',
+        name: 'Banco de Horas',
+        description: 'Controle de banco de horas dos funcionários',
+        icon: 'FolderClock',
+        href: '/ponto/banco-horas',
+        category: 'Relatórios',
+        permissions: ['ADMIN', 'DEPARTAMENTO_PESSOAL']
+      },
+      {
+        id: 'allocation',
+        name: 'Alocação',
+        description: 'Relatório de alocação de funcionários',
+        icon: 'Users',
+        href: '/relatorios/alocacao',
+        category: 'Relatórios',
+        permissions: ['ADMIN']
+      },
+      {
+        id: 'material-requests',
+        name: 'Solicitar Materiais',
+        description: 'Solicitar materiais para compra (Engenharia)',
+        icon: 'ShoppingCart',
+        href: '/ponto/solicitar-materiais',
+        category: 'Engenharia',
+        permissions: ['EMPLOYEE', 'ADMIN']
+      },
+      {
+        id: 'manage-material-requests',
+        name: 'Gerenciar Requisições de Materiais',
+        description: 'Aprovar e gerenciar requisições de materiais (Compras)',
+        icon: 'Package',
+        href: '/ponto/gerenciar-materiais',
+        category: 'Engenharia',
+        permissions: ['ADMIN', 'COMPRAS']
+      },
+      {
+        id: 'chat',
+        name: 'Chat entre Setores',
+        description: 'Comunicação entre setores',
+        icon: 'MessageSquare',
+        href: '#',
+        category: 'Comunicação',
+        permissions: ['EMPLOYEE']
+      }
+    ];
+
+    // Função para verificar se o usuário tem permissão para ver o módulo
+    const hasPermission = (modulePermissions: string[]): boolean => {
+      // Se o módulo permite EMPLOYEE, todos têm acesso
+      if (modulePermissions.includes('EMPLOYEE')) {
+        return true;
+      }
+      
+      // Verificar se é administrador
+      if (isAdministrator && modulePermissions.includes('ADMIN')) {
+        return true;
+      }
+      
+      // Verificar departamento
+      if (isDepartmentPessoal && modulePermissions.includes('DEPARTAMENTO_PESSOAL')) {
+        return true;
+      }
+      
+      if (isDepartmentProjetos && modulePermissions.includes('PROJETOS')) {
+        return true;
+      }
+      
+      if (isDepartmentCompras && modulePermissions.includes('COMPRAS')) {
+        return true;
+      }
+      
+      return false;
+    };
+
+    // Filtrar módulos baseado nas permissões do usuário
+    const filteredModules = modules.filter(module => hasPermission(module.permissions));
+
+    // Agrupar módulos por categoria
+    const modulesByCategory = filteredModules.reduce((acc, module) => {
+      if (!acc[module.category]) {
+        acc[module.category] = [];
+      }
+      acc[module.category].push(module);
+      return acc;
+    }, {} as Record<string, typeof modules>);
+
+    res.json({
+      success: true,
+      data: {
+        modules: filteredModules,
+        modulesByCategory,
+        totalModules: filteredModules.length
+      }
     });
   } catch (error) {
     next(error);

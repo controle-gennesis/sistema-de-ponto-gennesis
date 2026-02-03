@@ -11,6 +11,7 @@ interface PayrollDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   onEmployeeUpdate?: (updatedEmployee: PayrollEmployee) => void;
+  isPayrollFinalized?: boolean;
 }
 
 const monthNames = [
@@ -18,6 +19,7 @@ const monthNames = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
+export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate, isPayrollFinalized = false }: PayrollDetailModalProps) {
 // Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta, descontando feriados)
 // Esta função é um fallback - o ideal é usar o valor do backend que já desconta feriados
 function calculateNextMonthWorkingDays(month: number, year: number, holidays: any[] = []): number {
@@ -165,6 +167,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   
   // Função para salvar os valores manuais
   const handleSaveManualValues = async () => {
+    if (isPayrollFinalized) {
+      alert('Não é possível alterar valores de uma folha finalizada. Solicite ao setor financeiro que reabra a folha para correções.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -190,7 +197,8 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
       });
 
       if (!response.ok) {
-        throw new Error('Erro ao salvar valores manuais');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Erro ao salvar valores manuais');
       }
 
       // Recarregar dados do funcionário
@@ -1821,25 +1829,49 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             type="text"
                             value={inssRescisao === 0 ? '' : inssRescisao.toString()}
                             onChange={(e) => {
+                              if (isPayrollFinalized) return;
                               const value = e.target.value.replace(/[^0-9.,]/g, '');
                               setInssRescisao(parseFloat(value.replace(',', '.')) || 0);
                             }}
-                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            disabled={isPayrollFinalized}
+                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus
                           />
                           <button
+                            onClick={handleSaveManualValues}
+                            disabled={isSaving || isPayrollFinalized}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleSaveManualValues();
                             }}
                             disabled={isSaving}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
-                            title="Salvar"
+                            title={isPayrollFinalized ? 'Folha finalizada. Não é possível salvar.' : 'Salvar'}
                           >
                             <Save className="w-4 h-4" />
                           </button>
+                        </div>
+                      ) : inssRescisao > 0 ? (
+                        <div 
+                          className={`px-2 py-1 rounded text-right ${isPayrollFinalized ? 'text-gray-500 dark:text-gray-500 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                          onClick={() => !isPayrollFinalized && setEditingField('inssRescisao')}
+                          title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Clique para editar'}
+                        >
+                          R$ {inssRescisao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      ) : (
+                        <div className="flex justify-center">
+                          <button
+                            onClick={() => !isPayrollFinalized && setEditingField('inssRescisao')}
+                            disabled={isPayrollFinalized}
+                            className={`flex items-center justify-center gap-1 px-3 py-1 text-xs rounded-full transition-colors ${
+                              isPayrollFinalized 
+                                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed' 
+                                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
+                            }`}
+                            title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Adicionar valor'}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1888,25 +1920,49 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             type="text"
                             value={inss13 === 0 ? '' : inss13.toString()}
                             onChange={(e) => {
+                              if (isPayrollFinalized) return;
                               const value = e.target.value.replace(/[^0-9.,]/g, '');
                               setInss13(parseFloat(value.replace(',', '.')) || 0);
                             }}
-                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            disabled={isPayrollFinalized}
+                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus
                           />
                           <button
+                            onClick={handleSaveManualValues}
+                            disabled={isSaving || isPayrollFinalized}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleSaveManualValues();
                             }}
                             disabled={isSaving}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
-                            title="Salvar"
+                            title={isPayrollFinalized ? 'Folha finalizada. Não é possível salvar.' : 'Salvar'}
                           >
                             <Save className="w-4 h-4" />
                           </button>
+                        </div>
+                      ) : inss13 > 0 ? (
+                        <div 
+                          className={`px-2 py-1 rounded text-right ${isPayrollFinalized ? 'text-gray-500 dark:text-gray-500 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                          onClick={() => !isPayrollFinalized && setEditingField('inss13')}
+                          title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Clique para editar'}
+                        >
+                          R$ {inss13.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      ) : (
+                        <div className="flex justify-center">
+                          <button
+                            onClick={() => !isPayrollFinalized && setEditingField('inss13')}
+                            disabled={isPayrollFinalized}
+                            className={`flex items-center justify-center gap-1 px-3 py-1 text-xs rounded-full transition-colors ${
+                              isPayrollFinalized 
+                                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed' 
+                                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
+                            }`}
+                            title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Adicionar valor'}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

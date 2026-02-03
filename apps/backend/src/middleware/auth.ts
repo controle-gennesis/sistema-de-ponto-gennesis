@@ -1,9 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
 import { createError } from './errorHandler';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -25,6 +23,23 @@ export const authenticate = async (
       throw createError('Token de acesso necessário', 401);
     }
 
+    // Verificar se JWT_SECRET está configurado
+    if (!process.env.JWT_SECRET) {
+      console.error('❌ JWT_SECRET não está configurado');
+      throw createError('Erro de configuração do servidor', 500);
+    }
+
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET) as any;
+    } catch (error: any) {
+      if (error.name === 'TokenExpiredError') {
+        throw createError('Token expirado. Faça login novamente.', 401);
+      } else if (error.name === 'JsonWebTokenError') {
+        throw createError('Token inválido', 401);
+      }
+      throw error;
+    }
     // Verificar se o token está no formato correto (deve ter 3 partes separadas por ponto)
     if (!token || token.split('.').length !== 3) {
       throw createError('Token inválido', 401);
@@ -42,8 +57,12 @@ export const authenticate = async (
       },
     });
 
-    if (!user || !user.isActive) {
-      throw createError('Usuário não encontrado ou inativo', 401);
+    if (!user) {
+      throw createError('Usuário não encontrado', 401);
+    }
+
+    if (!user.isActive) {
+      throw createError('Usuário inativo', 401);
     }
 
     req.user = {

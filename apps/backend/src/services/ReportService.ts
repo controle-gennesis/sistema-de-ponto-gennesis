@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import moment from 'moment';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export interface ReportPeriod {
   startDate: Date;

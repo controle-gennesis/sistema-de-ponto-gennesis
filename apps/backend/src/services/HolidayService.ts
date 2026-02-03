@@ -1,7 +1,6 @@
-import { PrismaClient, Holiday, HolidayType } from '@prisma/client';
+import { Holiday, HolidayType } from '@prisma/client';
 import moment from 'moment-timezone';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export interface CreateHolidayInput {
   name: string;

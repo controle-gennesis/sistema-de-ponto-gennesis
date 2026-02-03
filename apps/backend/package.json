@@ -4,7 +4,8 @@
   "description": "Backend API para sistema de controle de ponto",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "nodemon src/index.ts",
+    "dev": "node dev.js",
+    "dev:nodemon": "nodemon --exec \"ts-node --transpile-only src/index.ts\"",
     "build": "npx prisma generate && tsc",
     "start": "node scripts/resolve-migrations.js && npx prisma migrate deploy && npx prisma db seed && node dist/index.js",
     "start:production": "node scripts/resolve-migrations.js && npx prisma migrate deploy && node dist/index.js",
@@ -19,9 +20,10 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
-    "@prisma/client": "^5.7.1",
+    "@prisma/client": "^5.22.0",
     "@types/bcrypt": "^6.0.0",
     "@types/moment": "^2.11.29",
+    "@types/pdfkit": "^0.17.4",
     "aws-sdk": "^2.1509.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^2.4.3",
@@ -40,6 +42,7 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
+    "pdfkit": "^0.17.2",
     "nodemailer": "^6.10.1",
     "resend": "^3.2.0",
     "uuid": "^9.0.1",

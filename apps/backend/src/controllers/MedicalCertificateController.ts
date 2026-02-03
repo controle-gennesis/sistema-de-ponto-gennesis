@@ -1,5 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { MedicalCertificateService } from '../services/MedicalCertificateService';
@@ -7,8 +6,8 @@ import { PhotoService } from '../services/PhotoService';
 import path from 'path';
 import fs from 'fs';
 import AWS from 'aws-sdk';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const medicalCertificateService = new MedicalCertificateService();
 
 export class MedicalCertificateController {
