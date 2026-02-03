@@ -504,21 +504,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
         {/* Navigation */}
         <nav className={`flex-1 space-y-2 p-4 ${isCollapsed ? 'overflow-visible' : 'overflow-y-auto overflow-x-hidden'}`}>
-          {/* Título "Principal" sempre no início, abaixo da barra de pesquisa */}
-          {!isCollapsed && (
-            <div className="px-3 pt-2 pb-2">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Principal</p>
-            </div>
-          )}
-          
           {(() => {
-            // Calcular se há itens principais antes do map para garantir consistência
-            const hasPrincipalItems = menuItems.some(cat => {
-              if (cat.id !== 'main' && cat.id !== 'payroll' && cat.id !== 'time-control') return false;
-              const catVisibleItems = cat.items.filter(item => item.permission);
-              return catVisibleItems.length > 0;
-            });
-            
             return menuItems.map((category, index) => {
             const CategoryIcon = category.icon;
             const hasActiveItem = category.items.some(item => isActive(item.href));
@@ -527,45 +513,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const isSingleItem = visibleItems.length === 1;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
-            // Verificar se é a categoria "Principal" (main)
-            const isMainCategory = category.id === 'main';
-            
-            // Verificar se é a categoria "Registros de Ponto" (time-control)
-            const isTimeControlCategory = category.id === 'time-control';
-            
-            // Verificar se é uma categoria principal (main, payroll, time-control)
-            const isPrincipalCategory = category.id === 'main' || category.id === 'payroll' || category.id === 'time-control';
-            
-            // Verificar se há categoria "time-control" visível
-            const hasTimeControl = menuItems.some(cat => cat.id === 'time-control' && cat.items.some(item => item.permission));
-            
-            // Verificar se há grupos (categorias com mais de um item visível) não principais visíveis
-            const hasNonMainGroups = menuItems.some(cat => {
-              if (cat.id === 'main' || cat.id === 'payroll' || cat.id === 'time-control') return false;
-              const catVisibleItems = cat.items.filter(item => item.permission);
-              return catVisibleItems.length > 1;
-            });
-            
-            // Verificar se é o último item principal visível
-            const remainingPrincipalCategories = menuItems.slice(index + 1).filter(cat => {
-              if (cat.id !== 'main' && cat.id !== 'payroll' && cat.id !== 'time-control') return false;
-              const catVisibleItems = cat.items.filter(item => item.permission);
-              return catVisibleItems.length > 0;
-            });
-            const isLastPrincipalItem = isPrincipalCategory && remainingPrincipalCategories.length === 0 && hasPrincipalItems;
-            
-            // Verificar se é o primeiro grupo não-"main" após a linha separadora (ou primeiro grupo se não houver time-control)
+            // Verificar se é o primeiro grupo (categoria com mais de um item visível)
             const previousCategories = menuItems.slice(0, index).filter(cat => {
               const catVisibleItems = cat.items.filter(item => item.permission);
               return catVisibleItems.length > 0;
             });
-            const previousNonMainGroups = previousCategories.filter(cat => {
-              if (cat.id === 'main' || cat.id === 'payroll' || cat.id === 'time-control') return false;
+            const previousGroups = previousCategories.filter(cat => {
               const catVisibleItems = cat.items.filter(item => item.permission);
               return catVisibleItems.length > 1;
             });
-            // Se há time-control, verifica se é o primeiro grupo após ele. Se não há time-control, verifica se é o primeiro grupo não-main
-            const isFirstGroupAfterDivider = previousNonMainGroups.length === 0 && !isPrincipalCategory && visibleItems.length > 1;
+            const isFirstGroup = previousGroups.length === 0 && visibleItems.length > 1;
             
             // Se tiver apenas um item, renderizar como link direto
             if (isSingleItem && singleItem) {
@@ -610,38 +567,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       </Link>
                     )}
                   </div>
-                  {/* Linha separadora após o último item principal */}
-                  {isLastPrincipalItem && (
-                    <>
-                      <div className="my-4 border-t border-gray-200 dark:border-gray-700"></div>
-                      {/* Título "Menu" sempre após a linha separadora */}
-                      {hasNonMainGroups && !isCollapsed && (
-                        <div className="px-3 pt-2 pb-2">
-                          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
-                        </div>
-                      )}
-                    </>
-                  )}
                 </div>
               );
             }
             
             return (
               <div key={category.id} className="overflow-hidden">
-                {/* Linha separadora após o último item principal (quando é um grupo) */}
-                {isLastPrincipalItem && (
-                  <>
-                    <div className="my-4 border-t border-gray-200 dark:border-gray-700"></div>
-                    {/* Título "Menu" sempre após a linha separadora */}
-                    {hasNonMainGroups && !isCollapsed && (
-                      <div className="px-3 pt-2 pb-2">
-                        <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
-                      </div>
-                    )}
-                  </>
-                )}
-                {/* Título "Menu" antes do primeiro grupo quando não há itens principais (só aparece se não foi renderizado após linha separadora) */}
-                {!hasPrincipalItems && !isPrincipalCategory && isFirstGroupAfterDivider && !isCollapsed && (
+                {/* Título "Menu" antes do primeiro grupo */}
+                {isFirstGroup && !isCollapsed && (
                   <div className="px-3 pt-2 pb-2">
                     <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
                   </div>
