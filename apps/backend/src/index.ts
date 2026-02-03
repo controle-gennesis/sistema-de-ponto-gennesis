@@ -73,28 +73,12 @@ const isOriginAllowed = (origin: string | undefined): boolean => {
   return allowedOrigins.includes(origin);
 };
 
-// Handler para requisições OPTIONS (preflight CORS) - DEVE estar ANTES de QUALQUER outro middleware
-// Isso garante que requisições OPTIONS sejam tratadas corretamente
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-  
-  if (isOriginAllowed(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-    res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
-    res.status(204).end();
-  } else {
-    res.status(403).end();
-  }
-});
-
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     // Em produção, permitir apenas origens específicas
     if (isProduction) {
       if (isOriginAllowed(origin)) {
+        console.log('✅ Origem permitida pelo CORS:', origin);
         return callback(null, true);
       }
       console.error('❌ Origem não permitida pelo CORS:', origin);
@@ -114,6 +98,23 @@ const corsOptions = {
 
 // Aplicar CORS ANTES de qualquer outro middleware
 app.use(cors(corsOptions));
+
+// Middleware adicional para garantir que requisições OPTIONS sejam tratadas corretamente
+app.use((req, res, next) => {
+  // Se for uma requisição OPTIONS, garantir que os headers CORS sejam enviados
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      return res.status(204).end();
+    }
+  }
+  next();
+});
 
 // Middleware de segurança - Configurado para não bloquear CORS
 app.use(helmet({
