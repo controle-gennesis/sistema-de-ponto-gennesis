@@ -86,6 +86,13 @@ export const errorHandler = (
   const statusCode = error.statusCode || 500;
   const message = error.message || 'Erro interno do servidor';
 
+  // 🔸 Garantir que headers CORS sejam enviados mesmo em caso de erro
+  const origin = req.headers.origin;
+  if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+
   // 🔸 Retorno padronizado
   res.status(statusCode).json({
     success: false,
