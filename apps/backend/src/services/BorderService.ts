@@ -38,14 +38,43 @@ export class BorderService {
     const payrollData = await payrollService.generateMonthlyPayroll(filters);
     
     const borderData: BorderData[] = payrollData.employees.map(employee => {
-      // Calcular valor total a ser pago (salário + ajustes - descontos)
-      const totalAmount = (employee.salary || 0) + 
-                         (employee.totalAdjustments || 0) - 
-                         (employee.totalDiscounts || 0) +
-                         (employee.totalFoodVoucher || 0) +
-                         (employee.totalTransportVoucher || 0) +
-                         (employee.he50Value || 0) +
-                         (employee.he100Value || 0);
+      // Calcular valor líquido a ser pago (mesma lógica do frontend)
+      // Proventos: salário base + salário família + insalubridade + periculosidade + horas extras + DSR HE + VT
+      const salarioBase = employee.salary || 0;
+      const salarioFamilia = employee.familySalary || 0;
+      const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
+      const periculosidade = employee.dangerPay ? (salarioBase * (employee.dangerPay / 100)) : 0;
+      
+      // Horas extras: usar valor manual se disponível, senão calcular
+      const valorHorasExtras = employee.horasExtrasValue !== undefined && employee.horasExtrasValue !== null
+        ? employee.horasExtrasValue
+        : (employee.he50Value || 0) + (employee.he100Value || 0);
+      
+      // DSR HE: usar valor manual se disponível (multiplicado pela taxa horária), senão calcular
+      // Se dsrHEValue for fornecido, ele é em horas, então multiplica pela taxa horária
+      const valorDSRHE = employee.dsrHEValue !== undefined && employee.dsrHEValue !== null
+        ? (employee.dsrHEValue * (employee.hourlyRate || 0))
+        : (employee.totalWorkingDays > 0 && employee.daysWorked > 0
+          ? (valorHorasExtras / employee.totalWorkingDays) * (employee.totalWorkingDays - employee.daysWorked)
+          : 0);
+      
+      const totalVT = employee.totalTransportVoucher || 0;
+      
+      const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + totalVT;
+      
+      // Descontos: descontos manuais + desconto por faltas + DSR por falta + VA + VT + INSS + IRRF
+      const descontoPorFaltas = employee.descontoPorFaltas || 0;
+      const dsrPorFalta = employee.dsrPorFalta || 0;
+      const percentualVA = employee.totalFoodVoucher || 0; // VA já vem como valor total
+      const percentualVT = 0; // VT já está nos proventos
+      const inssMensal = employee.inssTotal || 0;
+      const irrfMensal = employee.irrfMensal || 0;
+      
+      const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
+      
+      // Líquido = Proventos - Descontos + Ajustes
+      const liquidoReceber = totalProventos - totalDescontos;
+      const totalAmount = liquidoReceber + (employee.totalAdjustments || 0);
 
       return {
         date: moment().format('DD/MM/YYYY'),
@@ -281,5 +310,148 @@ export class BorderService {
         reject(error);
       }
     });
+  }
+
+  /**
+   * Gera arquivo CNAB400 (formato Itaú) para transferências bancárias
+   */
+  async generateCNAB400(filters: PayrollFilters): Promise<string> {
+    const borderData = await this.generateBorderData(filters);
+    
+    // Buscar configurações da empresa
+    const companySettings = await prisma.companySettings.findUnique({
+      where: { id: 'default' }
+    });
+
+    if (!companySettings) {
+      throw createError('Configurações da empresa não encontradas', 404);
+    }
+
+    const lines: string[] = [];
+    const currentDate = moment();
+    const paymentDate = moment({ year: filters.year, month: filters.month - 1 }).endOf('month');
+    
+    // Formatar valores para CNAB400
+    const formatNumber = (value: number, length: number, decimals: number = 2): string => {
+      const intValue = Math.round(value * Math.pow(10, decimals));
+      return intValue.toString().padStart(length, '0');
+    };
+
+    const formatText = (text: string, length: number): string => {
+      return (text || '').substring(0, length).padEnd(length, ' ');
+    };
+
+    const formatDate = (date: moment.Moment): string => {
+      return date.format('DDMMYY');
+    };
+
+    // Remover caracteres especiais do CPF/CNPJ
+    const cleanDocument = (doc: string): string => {
+      return (doc || '').replace(/[^0-9]/g, '');
+    };
+
+    // Header do arquivo (Registro 0) - 400 caracteres
+    const cnpj = cleanDocument(companySettings.cnpj || '');
+    const header = 
+      '0' + // Tipo de registro (1)
+      '1' + // Operação (1 = Remessa) (1)
+      formatText('REMESSA', 7) + // Literal remessa (7)
+      '01' + // Código do serviço (2)
+      formatText(companySettings.name || 'EMPRESA', 15) + // Nome da empresa (15)
+      '341' + // Código do banco Itaú (3)
+      formatText('ITAU', 15) + // Nome do banco (15)
+      formatDate(currentDate) + // Data de geração (6)
+      ' ' + // Branco (1)
+      formatText('', 8) + // Identificação da empresa (8)
+      formatText(cnpj, 14) + // CNPJ da empresa (14)
+      formatText('', 20) + // Branco (20)
+      '0001' + // Agência (4)
+      '00' + // Dígito da agência (2)
+      formatText('', 5) + // Conta (5)
+      formatText('', 1) + // Dígito da conta (1)
+      formatText('', 8) + // Branco (8)
+      formatText('', 7) + // Branco (7)
+      '000001'; // Número sequencial (6)
+    
+    // Garantir que o header tenha exatamente 400 caracteres
+    const headerPadded = header.padEnd(400, ' ');
+    lines.push(headerPadded);
+
+    // Detalhes (Registro 1) - um para cada pagamento
+    let sequence = 2;
+    borderData.forEach((item, index) => {
+      if (!item.bank || !item.agency || !item.account) {
+        return; // Pular funcionários sem dados bancários completos
+      }
+
+      const cpf = cleanDocument(item.cpf);
+      const amount = formatNumber(item.amount, 13, 2);
+      const agency = item.agency.replace(/[^0-9]/g, '').padStart(5, '0');
+      const account = item.account.replace(/[^0-9]/g, '').padStart(12, '0');
+      const accountDigit = item.digit || '0';
+      const name = item.name.substring(0, 30).toUpperCase();
+
+      // Detalhe (Registro 1) - 400 caracteres
+      // Formato simplificado para transferência de salário
+      const detail = 
+        '1' + // Tipo de registro (1)
+        formatText('', 16) + // Branco (16)
+        '000' + // Agência debitada (3)
+        '00' + // Dígito da agência debitada (2)
+        formatText('', 5) + // Conta debitada (5)
+        formatText('', 1) + // Dígito da conta debitada (1)
+        formatText('', 5) + // Branco (5)
+        '000' + // Carteira (3)
+        '000' + // Agência/Código do cedente (3)
+        formatText('', 5) + // Conta corrente (5)
+        formatText('', 1) + // Dígito da conta (1)
+        '00000000000000000000' + // Nosso número (20)
+        formatDate(paymentDate) + // Data de vencimento (6)
+        amount + // Valor do título (13)
+        '341' + // Código do banco Itaú (3)
+        '00000' + // Agência depositária (5)
+        '01' + // Espécie (2 = Duplicata) (2)
+        'N' + // Aceite (1)
+        formatDate(paymentDate) + // Data de emissão (6)
+        '06' + // Instrução 1 - Crédito em conta corrente (2)
+        '00' + // Instrução 2 (2)
+        formatNumber(0, 13, 2) + // Valor a ser cobrado por dia de atraso (13)
+        formatDate(paymentDate) + // Data limite para desconto (6)
+        formatNumber(0, 13, 2) + // Valor do desconto (13)
+        formatNumber(0, 13, 2) + // Valor do IOF (13)
+        formatNumber(0, 13, 2) + // Valor do abatimento (13)
+        formatText(cpf, 14) + // CPF/CNPJ do pagador (14)
+        formatText(name, 40) + // Nome do pagador (40)
+        formatText('', 40) + // Endereço do pagador (40)
+        formatText('', 12) + // Bairro do pagador (12)
+        formatText('00000000', 8) + // CEP (8)
+        formatText('', 15) + // Cidade do pagador (15)
+        formatText('', 2) + // UF do pagador (2)
+        formatText('', 40) + // Observações (40)
+        '00000000' + // Número de dias para protesto (8)
+        ' ' + // Branco (1)
+        sequence.toString().padStart(6, '0'); // Número sequencial (6)
+
+      // Garantir que o detalhe tenha exatamente 400 caracteres
+      const detailPadded = detail.padEnd(400, ' ');
+      lines.push(detailPadded);
+      sequence++;
+    });
+
+    // Trailer do arquivo (Registro 9) - 400 caracteres
+    const totalAmount = borderData.filter(item => item.bank && item.agency && item.account)
+      .reduce((sum, item) => sum + item.amount, 0);
+    const totalRecords = lines.length + 1; // +1 para incluir o trailer
+
+    const trailer = 
+      '9' + // Tipo de registro (1)
+      formatText('', 393) + // Branco (393)
+      totalRecords.toString().padStart(6, '0'); // Total de registros (6)
+
+    // Garantir que o trailer tenha exatamente 400 caracteres
+    const trailerPadded = trailer.padEnd(400, ' ');
+    lines.push(trailerPadded);
+
+    return lines.join('\r\n');
   }
 }

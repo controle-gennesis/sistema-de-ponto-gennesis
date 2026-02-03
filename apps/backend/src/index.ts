@@ -42,6 +42,7 @@ import chatRoutes from './routes/chats';
 import costCenterRoutes from './routes/costCenters';
 import constructionMaterialRoutes from './routes/constructionMaterials';
 import chatGPTRoutes from './routes/chatgpt';
+import borderRoutes from './routes/border';
 // import materialRequestRoutes from './routes/materialRequests';
 
 console.log('🚀 Iniciando aplicação...');
@@ -215,7 +216,6 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/bank-hours', bankHoursRoutes);
 app.use('/api/medical-certificates', medicalCertificateRoutes);
 app.use('/api/payroll', payrollRoutes);
-// app.use('/api/border', borderRoutes);
 app.use('/api/salary-adjustments', salaryAdjustmentRoutes);
 app.use('/api/salary-discounts', salaryDiscountRoutes);
 app.use('/api/solicitacoes', pointCorrectionRoutes);
@@ -224,6 +224,7 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/cost-centers', costCenterRoutes);
 app.use('/api/construction-materials', constructionMaterialRoutes);
 app.use('/api/chatgpt', chatGPTRoutes);
+app.use('/api/border', borderRoutes);
 // app.use('/api/material-requests', materialRequestRoutes);
 
 // Middleware de erro 404
