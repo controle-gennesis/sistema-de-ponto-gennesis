@@ -68,21 +68,27 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    if (!origin || allowedOrigins.includes(origin) || 
-        origin.includes('railway.app') || origin.includes('localhost') || 
-        !isProduction) {
-      return callback(null, true);
+    // Em produção, permitir apenas origens específicas
+    if (isProduction) {
+      if (!origin || allowedOrigins.includes(origin) || origin.includes('railway.app')) {
+        return callback(null, true);
+      }
+      console.error('❌ Origem não permitida pelo CORS:', origin);
+      callback(new Error('Não permitido pelo CORS'));
+    } else {
+      // Em desenvolvimento, permitir todas as origens
+      callback(null, true);
     }
-    console.error('❌ Origem não permitida pelo CORS:', origin);
-    callback(new Error('Não permitido pelo CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  optionsSuccessStatus: 204
+  optionsSuccessStatus: 204,
+  preflightContinue: false
 };
 
+// Aplicar CORS ANTES de qualquer outro middleware
 app.use(cors(corsOptions));
 
 // Handler para requisições OPTIONS (preflight CORS) - DEVE estar ANTES do rate limiter

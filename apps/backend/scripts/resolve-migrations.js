@@ -14,7 +14,13 @@ let prisma;
 
 try {
   PrismaClient = require('@prisma/client').PrismaClient;
-  prisma = new PrismaClient();
+  prisma = new PrismaClient({
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL,
+      },
+    },
+  });
 } catch (error) {
   console.log('⚠️  Prisma Client não encontrado. Gerando...');
   try {
@@ -23,7 +29,13 @@ try {
       cwd: path.join(__dirname, '..')
     });
     PrismaClient = require('@prisma/client').PrismaClient;
-    prisma = new PrismaClient();
+    prisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL,
+        },
+      },
+    });
   } catch (genError) {
     console.error('❌ Erro ao gerar Prisma Client:', genError.message);
     process.exit(1);
@@ -140,7 +152,23 @@ async function resolveFailedMigrations() {
     console.log('🔍 Verificando migrations falhadas...');
     
     // Verifica se a tabela manual_inss_values existe
-    let tableExists = await checkTableExists('manual_inss_values');
+    let tableExists = false;
+    try {
+      tableExists = await checkTableExists('manual_inss_values');
+    } catch (error) {
+      console.log('⚠️  Erro ao verificar tabela (pode ser problema de conexão):', error.message);
+      // Desconecta e tenta novamente
+      await prisma.$disconnect();
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Aguarda 1 segundo
+      prisma = new PrismaClient({
+        datasources: {
+          db: {
+            url: process.env.DATABASE_URL,
+          },
+        },
+      });
+      tableExists = await checkTableExists('manual_inss_values');
+    }
     
     if (!tableExists) {
       console.log('⚠️  Tabela manual_inss_values não encontrada. Criando...');
@@ -198,6 +226,10 @@ async function resolveFailedMigrations() {
       }
     }
     
+    // Desconecta ANTES de executar migrate deploy para liberar conexões
+    await prisma.$disconnect();
+    await new Promise(resolve => setTimeout(resolve, 500)); // Aguarda 500ms para garantir desconexão
+    
     // Agora tenta executar migrate deploy
     try {
       console.log('🔄 Executando prisma migrate deploy...');
@@ -239,7 +271,15 @@ async function resolveFailedMigrations() {
     // Continua mesmo assim para não bloquear o deploy
     return true;
   } finally {
-    await prisma.$disconnect();
+    // Sempre desconecta antes de sair
+    try {
+      await prisma.$disconnect();
+      console.log('✅ Conexão Prisma fechada');
+      // Aguarda um pouco para garantir que a conexão foi fechada
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (disconnectError) {
+      console.log('⚠️  Erro ao desconectar (não crítico):', disconnectError.message);
+    }
   }
 }
 
