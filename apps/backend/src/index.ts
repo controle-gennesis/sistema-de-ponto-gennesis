@@ -111,9 +111,12 @@ app.use((req, res, next) => {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
       res.setHeader('Access-Control-Max-Age', '86400');
       return res.status(204).end();
+    } else {
+      // Se a origem não for permitida, retornar 403
+      return res.status(403).end();
     }
   }
-  next();
+  return next();
 });
 
 // Middleware de segurança - Configurado para não bloquear CORS
