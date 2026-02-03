@@ -219,8 +219,7 @@ export default function ChatGPTPage() {
       <div className="space-y-6">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center justify-center gap-2">
-            <Bot className="w-6 h-6 sm:w-8 sm:h-8 text-red-600 dark:text-red-500" />
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
             Assistente Virtual
           </h1>
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
@@ -233,8 +232,7 @@ export default function ChatGPTPage() {
           <Card className="lg:col-span-1 flex flex-col overflow-hidden">
             <CardContent className="p-4 sm:p-6 flex flex-col h-full">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                  <History className="w-5 h-5 text-red-600 dark:text-red-500" />
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   Conversas
                 </h2>
                 <div className="flex items-center gap-2">
