@@ -4,13 +4,8 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { createError } from '../middleware/errorHandler';
-import { AuthRequest } from '../middleware/auth';
 import { emailService } from '../services/EmailService';
-
-const prisma = new PrismaClient();
 
 export class AuthController {
   async register(req: Request, res: Response, next: NextFunction) {

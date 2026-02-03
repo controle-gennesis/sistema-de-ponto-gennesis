@@ -10,10 +10,10 @@ const salaryDiscountController = new SalaryDiscountController();
 router.use(authenticate);
 
 // Rotas para descontos salariais
-router.post('/', salaryDiscountController.createDiscount);
-router.get('/employee/:employeeId', salaryDiscountController.getEmployeeDiscounts);
-router.get('/:id', salaryDiscountController.getDiscountById);
-router.put('/:id', salaryDiscountController.updateDiscount);
-router.delete('/:id', salaryDiscountController.deleteDiscount);
+router.post('/', (req, res, next) => salaryDiscountController.createDiscount(req, res, next));
+router.get('/employee/:employeeId', (req, res, next) => salaryDiscountController.getEmployeeDiscounts(req, res, next));
+router.get('/:id', (req, res, next) => salaryDiscountController.getDiscountById(req, res, next));
+router.put('/:id', (req, res, next) => salaryDiscountController.updateDiscount(req, res, next));
+router.delete('/:id', (req, res, next) => salaryDiscountController.deleteDiscount(req, res, next));
 
 export default router;

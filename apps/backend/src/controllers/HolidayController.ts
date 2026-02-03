@@ -43,7 +43,7 @@ export class HolidayController {
   /**
    * Lista feriados com filtros
    */
-  async getHolidays(req: Request, res: Response, next: NextFunction) {
+  async getHolidays(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { year, month, type, state, city, isActive, isRecurring } = req.query;
 
@@ -75,7 +75,7 @@ export class HolidayController {
   /**
    * Busca feriado por ID
    */
-  async getHolidayById(req: Request, res: Response, next: NextFunction) {
+  async getHolidayById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
 
@@ -97,7 +97,7 @@ export class HolidayController {
   /**
    * Verifica se uma data é feriado
    */
-  async checkIsHoliday(req: Request, res: Response, next: NextFunction) {
+  async checkIsHoliday(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { date, state } = req.query;
 
@@ -124,7 +124,7 @@ export class HolidayController {
   /**
    * Busca feriados de um período
    */
-  async getHolidaysByPeriod(req: Request, res: Response, next: NextFunction) {
+  async getHolidaysByPeriod(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { startDate, endDate, state } = req.query;
 
@@ -152,7 +152,7 @@ export class HolidayController {
   /**
    * Conta dias úteis em um período
    */
-  async countWorkingDays(req: Request, res: Response, next: NextFunction) {
+  async countWorkingDays(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { startDate, endDate, state } = req.query;
 

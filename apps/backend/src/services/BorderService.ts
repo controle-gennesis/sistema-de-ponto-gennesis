@@ -1,3 +1,4 @@
+// @ts-ignore - pdfkit types may not be fully compatible
 import PDFDocument from 'pdfkit';
 import moment from 'moment';
 import { PayrollService, PayrollFilters } from './PayrollService';

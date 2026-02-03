@@ -143,7 +143,7 @@ export default function FinanceiroPage() {
   const totalAmount = borderData?.data?.reduce((sum: number, item: any) => sum + item.amount, 0) || 0;
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute route="/ponto/financeiro">
       <MainLayout userRole="EMPLOYEE" userName="" onLogout={() => {}}>
         <div className="container mx-auto px-4 py-8">
           <div className="mb-6">

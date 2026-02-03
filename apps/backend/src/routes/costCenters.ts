@@ -1,13 +1,16 @@
 import { Router } from 'express';
-import { CostCenterController } from '../controllers/CostCenterController';
+// import { CostCenterController } from '../controllers/CostCenterController';
 import { authenticate } from '../middleware/auth';
-import { checkAdminOrPessoal } from '../middleware/adminOrPessoal';
+// import { checkAdminOrPessoal } from '../middleware/adminOrPessoal';
 
 const router = Router();
-const costCenterController = new CostCenterController();
+// const costCenterController = new CostCenterController();
 
 router.use(authenticate);
 
+// Rotas temporariamente desabilitadas - controllers não implementados
+// TODO: Implementar CostCenterController e adminOrPessoal middleware
+/*
 // Listar todos os centros de custo (todos podem ver)
 router.get('/', (req, res, next) => 
   costCenterController.getAllCostCenters(req, res, next)
@@ -32,5 +35,6 @@ router.patch('/:id', checkAdminOrPessoal, (req, res, next) =>
 router.delete('/:id', checkAdminOrPessoal, (req, res, next) => 
   costCenterController.deleteCostCenter(req, res, next)
 );
+*/
 
 export default router;

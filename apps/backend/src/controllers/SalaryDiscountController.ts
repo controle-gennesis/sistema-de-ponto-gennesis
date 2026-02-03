@@ -59,7 +59,7 @@ export class SalaryDiscountController {
   /**
    * Obtém todos os descontos de um funcionário
    */
-  async getEmployeeDiscounts(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getEmployeeDiscounts(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { employeeId } = req.params;
 
@@ -83,7 +83,7 @@ export class SalaryDiscountController {
   /**
    * Atualiza um desconto salarial
    */
-  async updateDiscount(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async updateDiscount(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
       const { type, description, amount } = req.body;
@@ -123,7 +123,7 @@ export class SalaryDiscountController {
   /**
    * Remove um desconto salarial
    */
-  async deleteDiscount(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async deleteDiscount(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
 
@@ -147,7 +147,7 @@ export class SalaryDiscountController {
   /**
    * Obtém um desconto por ID
    */
-  async getDiscountById(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getDiscountById(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
 

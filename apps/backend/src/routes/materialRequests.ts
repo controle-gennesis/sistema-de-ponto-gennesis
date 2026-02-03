@@ -1,15 +1,18 @@
 import { Router } from 'express';
-import { MaterialRequestController } from '../controllers/MaterialRequestController';
+// import { MaterialRequestController } from '../controllers/MaterialRequestController';
 import { authenticate } from '../middleware/auth';
-import { requireRole } from '../middleware/roleAuth';
+// import { requireRole } from '../middleware/roleAuth';
 
 const router = Router();
-const materialRequestController = new MaterialRequestController();
+// const materialRequestController = new MaterialRequestController();
 
 // Todas as rotas requerem autenticação
 router.use(authenticate);
-router.use(requireRole(['EMPLOYEE']));
+// router.use(requireRole(['EMPLOYEE']));
 
+// Rotas temporariamente desabilitadas - controllers não implementados
+// TODO: Implementar MaterialRequestController
+/*
 // Criar requisição de material
 router.post('/', (req, res, next) => 
   materialRequestController.createMaterialRequest(req, res, next)
@@ -56,5 +59,6 @@ router.get('/materials', (req, res, next) =>
 router.get('/categories', (req, res, next) => 
   materialRequestController.listMaterialCategories(req, res, next)
 );
+*/
 
 export default router;

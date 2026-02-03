@@ -60,8 +60,6 @@ function calculateNextMonthWorkingDays(month: number, year: number, holidays: an
 }
 
 export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate, isPayrollFinalized = false }: PayrollDetailModalProps) {
-  if (!isOpen) return null;
-
   const monthName = monthNames[month - 1];
   
   // Estados para os valores manuais editáveis
@@ -472,6 +470,8 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Cálculo com acréscimos
   const totalProventosComAcrescimos = totalProventos + (employee.totalAdjustments || 0);
   const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1839,13 +1839,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             autoFocus
                           />
                           <button
-                            onClick={handleSaveManualValues}
-                            disabled={isSaving || isPayrollFinalized}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleSaveManualValues();
                             }}
-                            disabled={isSaving}
+                            disabled={isSaving || isPayrollFinalized}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
                             title={isPayrollFinalized ? 'Folha finalizada. Não é possível salvar.' : 'Salvar'}
                           >
@@ -1871,6 +1869,9 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                                 : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
                             }`}
                             title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Adicionar valor'}
+                          >
+                            +
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1883,13 +1884,6 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             <X className="w-4 h-4" />
                           </button>
                         </div>
-                      ) : (
-                        <span>
-                          {inssRescisao > 0 
-                            ? `R$ ${inssRescisao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : 'R$ 0,00'
-                          }
-                        </span>
                       )}
                     </td>
                   </tr>
@@ -1930,13 +1924,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             autoFocus
                           />
                           <button
-                            onClick={handleSaveManualValues}
-                            disabled={isSaving || isPayrollFinalized}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleSaveManualValues();
                             }}
-                            disabled={isSaving}
+                            disabled={isSaving || isPayrollFinalized}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
                             title={isPayrollFinalized ? 'Folha finalizada. Não é possível salvar.' : 'Salvar'}
                           >
@@ -1962,6 +1954,9 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                                 : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
                             }`}
                             title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Adicionar valor'}
+                          >
+                            +
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1974,13 +1969,6 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             <X className="w-4 h-4" />
                           </button>
                         </div>
-                      ) : (
-                        <span>
-                          {inss13 > 0 
-                            ? `R$ ${inss13.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : 'R$ 0,00'
-                          }
-                        </span>
                       )}
                     </td>
                   </tr>

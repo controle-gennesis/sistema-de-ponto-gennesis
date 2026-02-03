@@ -256,12 +256,9 @@ export class PayrollController {
       }
 
       const result = await payrollService.saveManualInssValues({
-        employeeId: employeeId, // Já é string, não precisa converter
+        employeeId: employeeId,
         month: monthNum,
         year: yearNum,
-        employeeId: employeeId,
-        month: parseInt(month),
-        year: parseInt(year),
         inssRescisao: parseFloat(inssRescisao) || 0,
         inss13: parseFloat(inss13) || 0,
         descontoPorFaltas: descontoPorFaltas !== undefined ? parseFloat(descontoPorFaltas) : null,
