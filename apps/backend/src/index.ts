@@ -92,7 +92,18 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Handler para requisições OPTIONS (preflight CORS) - DEVE estar ANTES do rate limiter
-app.options('*', cors(corsOptions));
+// Isso garante que requisições OPTIONS sejam tratadas corretamente
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && (allowedOrigins.includes(origin) || origin.includes('railway.app') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
+  }
+  res.status(204).end();
+});
 
 // Middleware de segurança - Configurado para não bloquear CORS
 app.use(helmet({
@@ -163,9 +174,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.env.AWS_ACCESS_KEY_ID) {
   app.use('/uploads', express.static(path.join(process.cwd(), 'apps', 'backend', 'uploads')));
 }
-
-app.options('*', cors(corsOptions));
-// Handler OPTIONS já foi movido para antes do rate limiter acima
 
 // Health check
 app.get('/health', (req, res) => {
