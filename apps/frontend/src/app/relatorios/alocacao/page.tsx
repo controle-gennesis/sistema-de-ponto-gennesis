@@ -32,7 +32,7 @@ export default function AlocacaoPage() {
   
   const [filters, setFilters] = useState<PayrollFilters>({
     search: '',
-    department: '',
+    department: 'Departamento Pessoal',
     company: '',
     position: '',
     costCenter: '',
@@ -195,6 +195,42 @@ export default function AlocacaoPage() {
 
   const getFirstDayOfMonth = (year: number, month: number) => {
     return new Date(year, month, 1).getDay();
+  };
+
+  // Função para obter apenas os dias até hoje
+  const getDaysUntilToday = (year: number, month: number) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const totalDays = getDaysInMonth(year, month);
+    const days: number[] = [];
+    
+    // Verificar se o mês/ano selecionado é no futuro
+    const selectedMonth = new Date(year, month, 1);
+    const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    
+    // Se o mês selecionado é no futuro, não mostrar nenhum dia
+    if (selectedMonth > currentMonth) {
+      return [];
+    }
+    
+    // Se o mês selecionado é no passado, mostrar todos os dias
+    if (selectedMonth < currentMonth) {
+      for (let day = 1; day <= totalDays; day++) {
+        days.push(day);
+      }
+      return days;
+    }
+    
+    // Se é o mês atual, mostrar apenas até hoje
+    for (let day = 1; day <= totalDays; day++) {
+      const date = new Date(year, month, day);
+      date.setHours(0, 0, 0, 0);
+      if (date <= today) {
+        days.push(day);
+      }
+    }
+    
+    return days;
   };
 
   const getStatusColor = (status: string) => {
@@ -505,6 +541,12 @@ export default function AlocacaoPage() {
     return date.toLocaleDateString('pt-BR');
   };
 
+  // Limpar cache quando o mês/ano mudar
+  useEffect(() => {
+    // Limpar o cache quando o mês/ano mudar
+    setEmployeeDataMap({});
+  }, [filters.month, filters.year]);
+
   if (loadingUser) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -529,12 +571,6 @@ export default function AlocacaoPage() {
   console.log('📊 employees:', employees);
   console.log('📊 employees length:', employees?.length);
   console.log('❌ Erro alocação:', employeesError);
-
-    // Limpar cache quando o mês/ano mudar
-    useEffect(() => {
-      // Limpar o cache quando o mês/ano mudar
-      setEmployeeDataMap({});
-    }, [filters.month, filters.year]);
   
     // REMOVIDO: useEffect que buscava dados de todos os funcionários de uma vez
     // Isso estava causando muitas requisições simultâneas (erro 429)
@@ -921,9 +957,8 @@ export default function AlocacaoPage() {
                     <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700">
                       Funcionário
                     </th>
-                    {/* Colunas dos dias do mês */}
-                    {Array.from({ length: getDaysInMonth(filters.year, filters.month - 1) }, (_, i) => {
-                      const day = i + 1;
+                    {/* Colunas dos dias do mês - apenas até hoje */}
+                    {getDaysUntilToday(filters.year, filters.month - 1).map((day) => {
                       const date = new Date(filters.year, filters.month - 1, day);
                       const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
                       const dayName = dayNames[date.getDay()];
@@ -931,7 +966,7 @@ export default function AlocacaoPage() {
                       return (
                         <th key={day} className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-16">
                           <div>{dayName}</div>
-                          <div>({day}/{filters.month})</div>
+                          <div>({String(day).padStart(2, '0')}/{String(filters.month).padStart(2, '0')})</div>
                         </th>
                       );
                     })}
@@ -955,7 +990,7 @@ export default function AlocacaoPage() {
                           </p>
                         </div>
                       </td>
-                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1) + 1} className="px-3 sm:px-6 py-4 text-center">
+                      <td colSpan={getDaysUntilToday(filters.year, filters.month - 1).length + 1} className="px-3 sm:px-6 py-4 text-center">
                         <div className="text-red-600 dark:text-red-400">
                           <p className="text-xs mt-2 text-gray-500 dark:text-gray-400">
                             Verifique o console do navegador para mais detalhes.
@@ -971,7 +1006,7 @@ export default function AlocacaoPage() {
                             <span className="text-gray-600 dark:text-gray-400">Carregando...</span>
                         </div>
                       </td>
-                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-3 sm:px-6 py-4 text-center">
+                      <td colSpan={getDaysUntilToday(filters.year, filters.month - 1).length} className="px-3 sm:px-6 py-4 text-center">
                         <div className="flex items-center justify-center">
                           <div className="loading-spinner w-6 h-6 mr-2" />
                             <span className="text-gray-600 dark:text-gray-400">Carregando...</span>
@@ -992,7 +1027,7 @@ export default function AlocacaoPage() {
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
                         </div>
                       </td>
-                      <td colSpan={getDaysInMonth(filters.year, filters.month - 1)} className="px-3 sm:px-6 py-4 text-center">
+                      <td colSpan={getDaysUntilToday(filters.year, filters.month - 1).length} className="px-3 sm:px-6 py-4 text-center">
                         <div className="text-gray-500 dark:text-gray-400">
                           <p>Nenhum funcionário encontrado.</p>
                           <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
@@ -1017,32 +1052,24 @@ export default function AlocacaoPage() {
                               {employee.department || 'N/A'}
                             </div>
                             <div className="text-xs text-gray-400 dark:text-gray-500">
-                              {employee.polo || 'N/A'}
+                              {employee.position || 'N/A'}
                             </div>
                           </div>
                         </td>
-                        {/* Células dos dias do mês - DADOS REAIS DO FUNCIONÁRIO */}
-                        {Array.from({ length: getDaysInMonth(filters.year, filters.month - 1) }, (_, i) => {
-                          const day = i + 1;
+                        {/* Células dos dias do mês - DADOS REAIS DO FUNCIONÁRIO - apenas até hoje */}
+                        {getDaysUntilToday(filters.year, filters.month - 1).map((day) => {
                           const month = filters.month - 1;
                           const year = filters.year;
                           const date = new Date(year, month, day);
-                          const today = new Date();
                           const dateString = date.toISOString().split('T')[0];
                           
                           let cellClass = 'px-3 sm:px-6 py-4 text-center text-xs ';
                           let cellContent = '';
                           
-                          // Verificar se é futuro
-                          if (date > today) {
-                            cellClass += 'text-gray-400 dark:text-gray-600';
-                            cellContent = '-';
-                          }
                           // Para todos os dias, usar dados reais baseados no funcionário
-                          else {
-                            // Buscar dados reais do funcionário usando chave composta (id-mês-ano)
-                            const cacheKey = `${employee.id}-${filters.month}-${filters.year}`;
-                            const employeeData = employeeDataMap[cacheKey];
+                          // Buscar dados reais do funcionário usando chave composta (id-mês-ano)
+                          const cacheKey = `${employee.id}-${filters.month}-${filters.year}`;
+                          const employeeData = employeeDataMap[cacheKey];
                             
                             // Verificar se funcionário estava admitido na data
                             const admissionDate = employeeData?.data?.employee?.admissionDate ? 
@@ -1077,8 +1104,8 @@ export default function AlocacaoPage() {
                                     }
                                     // Verificar se está em férias (prioridade sobre final de semana)
                                     else if (dayData.isOnVacation) {
-                                      cellClass += 'text-green-600 dark:text-green-400';
-                                      cellContent = 'FÉRIAS';
+                                      cellClass += 'text-green-600 dark:text-green-400 font-semibold';
+                                      cellContent = 'Férias';
                                     }
                                     // Verificar se é final de semana
                                     else if (date.getDay() === 0 || date.getDay() === 6) {
@@ -1133,8 +1160,8 @@ export default function AlocacaoPage() {
                                   }
                                   // Verificar se está em férias (prioridade sobre final de semana)
                                   else if (dayData.isOnVacation) {
-                                    cellClass += 'text-green-600 dark:text-green-400';
-                                    cellContent = 'FÉRIAS';
+                                    cellClass += 'text-green-600 dark:text-green-400 font-semibold';
+                                    cellContent = 'Férias';
                                   }
                                   // Verificar se é final de semana
                                   else if (date.getDay() === 0 || date.getDay() === 6) {
@@ -1170,7 +1197,6 @@ export default function AlocacaoPage() {
                                 fetchEmployeeData(employee.id);
                               }
                             }
-                          }
                           
                           return (
                             <td key={day} className={cellClass}>
@@ -1279,39 +1305,47 @@ export default function AlocacaoPage() {
                   </div>
                 ))}
                 
-                {/* Dias do mês */}
-                {Array.from({ length: getFirstDayOfMonth(modalCurrentYear, modalCurrentMonth) }, (_, i) => (
-                  <div key={`empty-${i}`} className="p-2 h-12"></div>
-                ))}
-                
-                {Array.from({ length: getDaysInMonth(modalCurrentYear, modalCurrentMonth) }, (_, i) => {
-                  const day = i + 1;
-                  const date = new Date(modalCurrentYear, modalCurrentMonth, day);
-                  
-                  // Usar dados reais do funcionário
-                  const dayStatus = getDayStatus(day, modalCurrentMonth, modalCurrentYear);
-                  
-                  // Debug: verificar status do dia
-                  console.log('Day:', day, 'Status:', dayStatus.status, 'CostCenter:', dayStatus.costCenter);
+                {/* Dias do mês - apenas até hoje */}
+                {(() => {
+                  const daysUntilToday = getDaysUntilToday(modalCurrentYear, modalCurrentMonth);
+                  const firstDay = getFirstDayOfMonth(modalCurrentYear, modalCurrentMonth);
+                  const firstDayInRange = daysUntilToday.length > 0 ? new Date(modalCurrentYear, modalCurrentMonth, daysUntilToday[0]).getDay() : firstDay;
                   
                   return (
-                    <div
-                      key={day}
-                      className={`p-1 h-16 border border-gray-200 dark:border-gray-700 rounded-lg flex flex-col items-center justify-center text-xs font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
-                        dayStatus.status === 'NAO_ADMITIDO' ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600' : ''
-                      } ${
-                        dayStatus.status === 'FINAL_DE_SEMANA' ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600' : ''
-                      }`}
-                      title={`${day} - ${getStatusLabel(dayStatus.status)}${dayStatus.costCenter ? ` (${dayStatus.costCenter})` : ''}`}
-                    >
-                      <div className="text-gray-600 dark:text-gray-400 mb-1">{day}</div>
-                      <div className={`text-xs text-center leading-tight ${getTextColor(dayStatus.costCenter || dayStatus.status)}`}>
-                        {dayStatus.status === 'NAO_ADMITIDO' ? 'Não Admitido' : 
-                         (dayStatus.costCenter || getStatusLabel(dayStatus.status))}
-                      </div>
-                    </div>
+                    <>
+                      {/* Espaços vazios antes do primeiro dia */}
+                      {Array.from({ length: firstDayInRange }, (_, i) => (
+                        <div key={`empty-${i}`} className="p-2 h-12"></div>
+                      ))}
+                      
+                      {/* Dias até hoje */}
+                      {daysUntilToday.map((day) => {
+                        const date = new Date(modalCurrentYear, modalCurrentMonth, day);
+                        
+                        // Usar dados reais do funcionário
+                        const dayStatus = getDayStatus(day, modalCurrentMonth, modalCurrentYear);
+                        
+                        return (
+                          <div
+                            key={day}
+                            className={`p-1 h-16 border border-gray-200 dark:border-gray-700 rounded-lg flex flex-col items-center justify-center text-xs font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                              dayStatus.status === 'NAO_ADMITIDO' ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600' : ''
+                            } ${
+                              dayStatus.status === 'FINAL_DE_SEMANA' ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600' : ''
+                            }`}
+                            title={`${day} - ${getStatusLabel(dayStatus.status)}${dayStatus.costCenter ? ` (${dayStatus.costCenter})` : ''}`}
+                          >
+                            <div className="text-gray-600 dark:text-gray-400 mb-1">{day}</div>
+                            <div className={`text-xs text-center leading-tight ${getTextColor(dayStatus.costCenter || dayStatus.status)}`}>
+                              {dayStatus.status === 'NAO_ADMITIDO' ? 'Não Admitido' : 
+                               (dayStatus.costCenter || getStatusLabel(dayStatus.status))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
                   );
-                })}
+                })()}
                 </div>
               )}
 

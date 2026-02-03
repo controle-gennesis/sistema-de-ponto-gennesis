@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Edit, X, Save, AlertCircle, CheckCircle } from 'lucide-react';
+import { Edit, X, Save, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
@@ -242,6 +242,8 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+  const emailCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [hasOperation, setHasOperation] = useState<boolean>(() => {
     const op = employee.employee?.operation || '';
     return !!(op && op !== 'N/A' && op.trim() !== '');
@@ -300,6 +302,98 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
     return emailRegex.test(email);
   };
 
+  // Função para verificar se o email já existe
+  const checkEmailExists = async (email: string) => {
+    // Não verificar se o email não mudou
+    if (email === employee.email) {
+      // Limpar erro se o email voltou ao original
+      if (errors.email && errors.email.includes('já está em uso')) {
+        setErrors(prev => {
+          const newErrors = { ...prev };
+          delete newErrors.email;
+          return newErrors;
+        });
+      }
+      return;
+    }
+
+    // Validar formato básico de email
+    if (!email || !isValidEmail(email)) {
+      // Limpar erro se o email não estiver em formato válido
+      if (errors.email && errors.email.includes('já está em uso')) {
+        setErrors(prev => {
+          const newErrors = { ...prev };
+          delete newErrors.email;
+          return newErrors;
+        });
+      }
+      return;
+    }
+
+    setIsCheckingEmail(true);
+    try {
+      const response = await api.get('/users/check-email', {
+        params: { email: email.trim() }
+      });
+
+      if (response.data.exists) {
+        setErrors(prev => ({
+          ...prev,
+          email: 'Este email já está em uso'
+        }));
+      } else {
+        // Limpar erro se o email não existir
+        if (errors.email && errors.email.includes('já está em uso')) {
+          setErrors(prev => {
+            const newErrors = { ...prev };
+            delete newErrors.email;
+            return newErrors;
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao verificar email:', error);
+      // Não mostrar erro para o usuário se a verificação falhar
+    } finally {
+      setIsCheckingEmail(false);
+    }
+  };
+
+  const handleEmailChange = (value: string) => {
+    handleInputChange('email', value);
+    
+    // Limpar timeout anterior se existir
+    if (emailCheckTimeoutRef.current) {
+      clearTimeout(emailCheckTimeoutRef.current);
+    }
+    
+    // Limpar erro se o email não estiver em formato válido
+    if (!value.trim() || !isValidEmail(value.trim())) {
+      if (errors.email && errors.email.includes('já está em uso')) {
+        setErrors(prev => {
+          const newErrors = { ...prev };
+          delete newErrors.email;
+          return newErrors;
+        });
+      }
+      return;
+    }
+    
+    // Usar debounce para evitar muitas requisições
+    emailCheckTimeoutRef.current = setTimeout(() => {
+      checkEmailExists(value);
+    }, 500);
+  };
+
+  // Limpar timeout ao desmontar
+  useEffect(() => {
+    return () => {
+      if (emailCheckTimeoutRef.current) {
+        clearTimeout(emailCheckTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Função para validar formulário
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -312,6 +406,9 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
       newErrors.email = 'Email é obrigatório';
     } else if (!isValidEmail(formData.email)) {
       newErrors.email = 'Email inválido';
+    } else if (errors.email && errors.email.includes('já está em uso')) {
+      // Manter o erro de email já em uso se existir
+      newErrors.email = errors.email;
     }
 
     if (!formData.cpf.trim()) {
@@ -356,12 +453,48 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
       [field]: value
     }));
 
-    // Limpar erro do campo quando o usuário começar a digitar
-    if (errors[field]) {
+    // Limpar erro do campo quando o usuário começar a digitar (exceto CPF que tem validação especial)
+    if (errors[field] && field !== 'cpf') {
       setErrors(prev => ({
         ...prev,
         [field]: ''
       }));
+    }
+  };
+
+  // Função para lidar com mudanças no CPF
+  const handleCPFChange = (value: string) => {
+    const formatted = formatCPF(value);
+    handleInputChange('cpf', formatted);
+    
+    // Verificar CPF imediatamente quando tiver 11 dígitos
+    const cpfNumbers = formatted.replace(/\D/g, '');
+    if (cpfNumbers.length === 11) {
+      // Validar CPF inválido
+      if (!isValidCPF(cpfNumbers)) {
+        setErrors(prev => ({
+          ...prev,
+          cpf: 'CPF inválido'
+        }));
+      } else {
+        // Se o CPF for válido, limpar erro de inválido
+        if (errors.cpf && errors.cpf === 'CPF inválido') {
+          setErrors(prev => {
+            const newErrors = { ...prev };
+            delete newErrors.cpf;
+            return newErrors;
+          });
+        }
+      }
+    } else {
+      // Limpar erro se o CPF não estiver completo
+      if (errors.cpf && errors.cpf === 'CPF inválido') {
+        setErrors(prev => {
+          const newErrors = { ...prev };
+          delete newErrors.cpf;
+          return newErrors;
+        });
+      }
     }
   };
 
@@ -494,6 +627,12 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Verificar se há erro de email já em uso antes de validar
+    if (errors.email && errors.email.includes('já está em uso')) {
+      toast.error('Não é possível salvar: Este email já está em uso');
+      return;
+    }
+    
     if (!validateForm()) {
       toast.error('Por favor, corrija os erros no formulário');
       return;
@@ -566,15 +705,31 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Email
                     </label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => handleInputChange('email', e.target.value)}
-                      className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
-                        errors.email ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                      }`}
-                      placeholder="email@exemplo.com"
-                    />
+                    <div className="relative">
+                      <input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => handleEmailChange(e.target.value)}
+                        className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                          errors.email 
+                            ? 'border-red-500 dark:border-red-400 bg-white dark:bg-gray-700 focus:ring-red-500' 
+                            : !isCheckingEmail && formData.email && isValidEmail(formData.email.trim()) && !errors.email
+                            ? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 focus:ring-green-500'
+                            : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-blue-500'
+                        }`}
+                        placeholder="email@exemplo.com"
+                      />
+                      {isCheckingEmail && formData.email && isValidEmail(formData.email.trim()) && formData.email !== employee.email && (
+                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                        </div>
+                      )}
+                      {!isCheckingEmail && formData.email && isValidEmail(formData.email.trim()) && !errors.email && (
+                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                          <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400" />
+                        </div>
+                      )}
+                    </div>
                     {errors.email && (
                       <p className="text-red-500 dark:text-red-400 text-sm mt-1 flex items-center">
                         <AlertCircle className="w-4 h-4 mr-1" />
@@ -587,19 +742,27 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       CPF
                     </label>
-                    <input
-                      type="text"
-                      value={formatCPF(formData.cpf)}
-                      onChange={(e) => {
-                        const formattedValue = formatCPF(e.target.value);
-                        handleInputChange('cpf', formattedValue);
-                      }}
-                      className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
-                        errors.cpf ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                      }`}
-                      placeholder="000.000.000-00"
-                      maxLength={14}
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={formatCPF(formData.cpf)}
+                        onChange={(e) => handleCPFChange(e.target.value)}
+                        className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                          errors.cpf 
+                            ? 'border-red-500 dark:border-red-400 bg-white dark:bg-gray-700 focus:ring-red-500' 
+                            : formData.cpf.replace(/\D/g, '').length === 11 && isValidCPF(formData.cpf.replace(/\D/g, '')) && !errors.cpf
+                            ? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 focus:ring-green-500'
+                            : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-blue-500'
+                        }`}
+                        placeholder="000.000.000-00"
+                        maxLength={14}
+                      />
+                      {formData.cpf.replace(/\D/g, '').length === 11 && isValidCPF(formData.cpf.replace(/\D/g, '')) && !errors.cpf && (
+                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                          <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400" />
+                        </div>
+                      )}
+                    </div>
                     {errors.cpf && (
                       <p className="text-red-500 dark:text-red-400 text-sm mt-1 flex items-center">
                         <AlertCircle className="w-4 h-4 mr-1" />

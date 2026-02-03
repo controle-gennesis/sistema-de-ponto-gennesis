@@ -22,7 +22,7 @@ class AuthService {
   private tokenKey = 'token';
   private userKey = 'user';
 
-  async login(credentials: LoginCredentials): Promise<AuthResponse> {
+  async login(credentials: LoginCredentials, rememberMe: boolean = true): Promise<AuthResponse> {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
     const response = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',
@@ -48,8 +48,8 @@ class AuthService {
     try {
       const data = await clone.json();
       if (data?.success && data?.data) {
-        this.setToken(data.data.token);
-        this.setUser(data.data.user);
+        this.setToken(data.data.token, rememberMe);
+        this.setUser(data.data.user, rememberMe);
         return data.data as AuthResponse;
       }
       throw new Error('Resposta inválida do servidor');
@@ -178,28 +178,77 @@ class AuthService {
     }
   }
 
-  setToken(token: string): void {
-    localStorage.setItem(this.tokenKey, token);
+  async forgotPassword(email: string): Promise<void> {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    
+    try {
+      const response = await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        const clone = response.clone();
+        try {
+          const error = await clone.json();
+          throw new Error(error?.error || error?.message || 'Erro ao solicitar recuperação de senha');
+        } catch (parseError) {
+          const text = await response.text();
+          throw new Error(text || `Erro ao solicitar recuperação de senha (${response.status})`);
+        }
+      }
+
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || 'Erro ao solicitar recuperação de senha');
+      }
+    } catch (error: any) {
+      // Se for erro de rede, fornecer mensagem mais clara
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error('Erro de conexão. Verifique sua internet e tente novamente.');
+      }
+      throw error;
+    }
+  }
+
+  setToken(token: string, rememberMe: boolean = true): void {
+    if (rememberMe) {
+      localStorage.setItem(this.tokenKey, token);
+    } else {
+      sessionStorage.setItem(this.tokenKey, token);
+    }
   }
 
   getToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(this.tokenKey);
+    // Tenta primeiro localStorage, depois sessionStorage
+    return localStorage.getItem(this.tokenKey) || sessionStorage.getItem(this.tokenKey);
   }
 
-  setUser(user: User): void {
-    localStorage.setItem(this.userKey, JSON.stringify(user));
+  setUser(user: User, rememberMe: boolean = true): void {
+    if (rememberMe) {
+      localStorage.setItem(this.userKey, JSON.stringify(user));
+    } else {
+      sessionStorage.setItem(this.userKey, JSON.stringify(user));
+    }
   }
 
   getUser(): User | null {
     if (typeof window === 'undefined') return null;
-    const userStr = localStorage.getItem(this.userKey);
+    // Tenta primeiro localStorage, depois sessionStorage
+    const userStr = localStorage.getItem(this.userKey) || sessionStorage.getItem(this.userKey);
     return userStr ? JSON.parse(userStr) : null;
   }
 
   clearAuth(): void {
     localStorage.removeItem(this.tokenKey);
     localStorage.removeItem(this.userKey);
+    sessionStorage.removeItem(this.tokenKey);
+    sessionStorage.removeItem(this.userKey);
   }
 
   isAuthenticated(): boolean {

@@ -84,6 +84,11 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Handler para requisições OPTIONS (preflight CORS) - DEVE estar ANTES do rate limiter
+app.options('*', cors(corsOptions));
+
+// Middleware de segurança - Configurado para não bloquear CORS
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   crossOriginEmbedderPolicy: false,
@@ -94,6 +99,57 @@ app.use(rateLimit({
   max: 1000,
   message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
 }));
+
+// Rate limiting geral - ignorar requisições OPTIONS (preflight CORS)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 1000, // máximo 1000 requests por IP (mais permissivo para desenvolvimento)
+  message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS', // Ignorar requisições OPTIONS (preflight)
+  handler: (req, res) => {
+    // Garantir que headers CORS sejam enviados mesmo quando rate limit é atingido
+    const origin = req.headers.origin;
+    if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.status(429).json({
+      success: false,
+      message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.'
+    });
+  }
+});
+
+// Rate limiting mais permissivo para /auth/me (endpoint usado frequentemente)
+const authLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 100, // máximo 100 requests por minuto por IP
+  message: 'Muitas tentativas de acesso. Tente novamente em 1 minuto.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS', // Ignorar requisições OPTIONS (preflight)
+  handler: (req, res) => {
+    // Garantir que headers CORS sejam enviados mesmo quando rate limit é atingido
+    const origin = req.headers.origin;
+    if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.status(429).json({
+      success: false,
+      message: 'Muitas tentativas de acesso. Tente novamente em 1 minuto.'
+    });
+  }
+});
+
+app.use(limiter);
+
+// Aplicar rate limiter mais permissivo para /auth/me antes das rotas
+app.use('/api/auth/me', authLimiter);
+
+// Logging
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -103,6 +159,7 @@ if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.e
 }
 
 app.options('*', cors(corsOptions));
+// Handler OPTIONS já foi movido para antes do rate limiter acima
 
 // Health check
 app.get('/health', (req, res) => {

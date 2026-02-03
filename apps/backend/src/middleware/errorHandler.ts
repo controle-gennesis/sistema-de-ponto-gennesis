@@ -15,11 +15,31 @@ export const errorHandler = (
   error.message = err.message;
 
   // Log detalhado no servidor (importante para debug)
-  console.error('❌ Erro capturado:', {
-    name: err.name,
-    message: err.message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-  });
+  // Não logar erros 401 esperados (como "Token de acesso necessário") como erros críticos
+  const isExpected401 = (err.statusCode === 401 && (
+    err.message?.includes('Token de acesso necessário') ||
+    err.message?.includes('Token inválido') ||
+    err.message?.includes('Token expirado') ||
+    err.message?.includes('Token inválido ou expirado')
+  )) || err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError';
+
+  if (isExpected401) {
+    // Log apenas em modo debug para erros 401 esperados
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔐 Requisição sem autenticação:', {
+        path: req.path,
+        method: req.method,
+        message: err.message,
+      });
+    }
+  } else {
+    // Log normal para outros erros
+    console.error('❌ Erro capturado:', {
+      name: err.name,
+      message: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+    });
+  }
 
   // 🔸 Erros do Prisma
   if (err.name === 'PrismaClientValidationError') {

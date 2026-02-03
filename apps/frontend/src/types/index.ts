@@ -406,6 +406,10 @@ export interface PayrollEmployee {
   totalDiscounts: number;
   daysWorked: number;
   totalWorkingDays: number;
+  nextMonthWorkingDays?: number; // Dias úteis do próximo mês (para VA/VT)
+  daysForVA?: number; // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+  daysForVT?: number; // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
+  absences?: number; // Ausências justificadas não contam como faltas
   // Horas Extras
   he50Hours: number;
   he50Value: number;
@@ -419,6 +423,10 @@ export interface PayrollEmployee {
   // Valores Manuais
   inssRescisao: number;
   inss13: number;
+  descontoPorFaltas?: number;
+  dsrPorFalta?: number;
+  horasExtrasValue?: number;
+  dsrHEValue?: number;
   // FGTS
   fgts: number;
   fgtsFerias: number;

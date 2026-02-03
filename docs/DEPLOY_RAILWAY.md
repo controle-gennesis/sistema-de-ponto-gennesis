@@ -79,6 +79,22 @@ Este guia te ajudará a fazer o deploy do Sistema de Ponto Genesis no Railway se
    MAX_OVERTIME_HOURS=2
    ```
 
+   **Configurações de Email (OBRIGATÓRIO para recuperação de senha):**
+   ```
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=seu_email@gmail.com
+   SMTP_PASS=sua_senha_app
+   ```
+   
+   **⚠️ IMPORTANTE - Configuração do Gmail:**
+   - Para Gmail, você **NÃO pode usar sua senha normal**
+   - É necessário criar uma **Senha de App**:
+     1. Acesse: https://myaccount.google.com/apppasswords
+     2. Certifique-se de que a autenticação de 2 fatores está habilitada
+     3. Gere uma senha de app para "Mail"
+     4. Use essa senha no `SMTP_PASS` (não a senha normal da conta)
+   
    **Outras configurações:**
    ```
    SKIP_LOCATION_VALIDATION=true
@@ -87,6 +103,11 @@ Este guia te ajudará a fazer o deploy do Sistema de Ponto Genesis no Railway se
    DEFAULT_LATITUDE=-15.835840
    DEFAULT_LONGITUDE=-47.873407
    MAX_DISTANCE_METERS=1000
+   ```
+   
+   **URL do Frontend (para links de recuperação de senha):**
+   ```
+   FRONTEND_URL=https://seu-frontend.railway.app
    ```
 
 ### 4. Executar Migrações do Banco
@@ -130,7 +151,15 @@ Este guia te ajudará a fazer o deploy do Sistema de Ponto Genesis no Railway se
    - Confirme se todas as variáveis obrigatórias estão configuradas
    - Verifique se não há espaços extras nas variáveis
 
-4. **Erro de CORS:**
+4. **Email não está sendo enviado (Recuperação de senha não funciona):**
+   - ⚠️ **Verifique se as variáveis SMTP estão configuradas:**
+     - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
+   - Para Gmail, use uma **Senha de App** (não a senha normal)
+   - Verifique os logs do Railway para ver mensagens de erro do SMTP
+   - Teste a configuração SMTP localmente primeiro
+   - Se estiver usando Gmail, certifique-se de que a autenticação de 2 fatores está habilitada
+
+5. **Erro de CORS:**
    - Atualize a configuração de CORS no backend para incluir o domínio do Railway
 
 ### Logs Úteis:

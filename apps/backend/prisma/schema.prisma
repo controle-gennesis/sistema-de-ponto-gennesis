@@ -44,6 +44,7 @@ model User {
   materialRequestsApproved  MaterialRequest[]       @relation("MaterialRequestApprover")
   materialRequestsRejected   MaterialRequest[]      @relation("MaterialRequestRejecter")
   chatGPTConversations      ChatGPTConversation[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
 }
@@ -522,6 +523,10 @@ model ManualInssValue {
   year       Int      // Ano
   inssRescisao Decimal @default(0) // INSS RESCISÃO
   inss13     Decimal  @default(0)  // INSS 13°
+  descontoPorFaltas Decimal? // Ajuste manual do desconto por faltas
+  dsrPorFalta Decimal? // Ajuste manual do DSR por falta
+  horasExtrasValue Decimal? // Ajuste manual do valor de horas extras
+  dsrHEValue Decimal? // Ajuste manual do DSR por horas extras
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -946,4 +951,19 @@ model ChatGPTMessage {
   @@index([conversationId])
   @@index([createdAt])
   @@map("chatgpt_messages")
+// Modelo para tokens de reset de senha
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_reset_tokens")
 }

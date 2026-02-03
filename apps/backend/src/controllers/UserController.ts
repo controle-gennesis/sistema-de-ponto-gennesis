@@ -8,7 +8,9 @@ export class UserController {
   async getAllUsers(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { page = 1, limit = 10, search, role, department, status } = req.query;
-      const skip = (Number(page) - 1) * Number(limit);
+      // Limitar o máximo de registros por página para evitar sobrecarga
+      const limitNum = Math.min(Number(limit), 1000); // Máximo de 1000 registros por página
+      const skip = (Number(page) - 1) * limitNum;
 
       const where: any = {};
 
@@ -26,31 +28,46 @@ export class UserController {
       // Se não especificar role, mostrar apenas funcionários por padrão
       if (!role) {
         where.role = 'EMPLOYEE';
-      }
-
-      if (search) {
-        where.OR = [
-          { name: { contains: search as string, mode: 'insensitive' } },
-          { email: { contains: search as string, mode: 'insensitive' } },
-          { cpf: { contains: search as string } },
-        ];
-      }
-
-      if (role) {
+      } else {
         where.role = role;
       }
 
+      // Construir condições de busca
+      const searchConditions: any[] = [];
+      if (search) {
+        searchConditions.push(
+          { name: { contains: search as string, mode: 'insensitive' } },
+          { email: { contains: search as string, mode: 'insensitive' } },
+          { cpf: { contains: search as string } }
+        );
+      }
+
+      // Se houver busca, adicionar OR ao where
+      if (searchConditions.length > 0) {
+        where.OR = searchConditions;
+      }
+
+      // Filtro de departamento - precisa ser combinado corretamente com OR
       if (department) {
-        where.employee = {
-          department: { contains: department as string, mode: 'insensitive' }
-        };
+        if (where.OR) {
+          // Se já existe OR, precisamos combinar com AND
+          where.AND = [
+            { OR: where.OR },
+            { employee: { department: { contains: department as string, mode: 'insensitive' } } }
+          ];
+          delete where.OR;
+        } else {
+          where.employee = {
+            department: { contains: department as string, mode: 'insensitive' }
+          };
+        }
       }
 
       const [users, total] = await Promise.all([
         prisma.user.findMany({
           where,
           skip,
-          take: Number(limit),
+          take: limitNum,
           include: {
             employee: {
               select: {
@@ -99,13 +116,15 @@ export class UserController {
         data: users,
         pagination: {
           page: Number(page),
-          limit: Number(limit),
+          limit: limitNum,
           total,
-          totalPages: Math.ceil(total / Number(limit))
+          totalPages: Math.ceil(total / limitNum)
         }
       });
-    } catch (error) {
-      next(error);
+    } catch (error: any) {
+      console.error('Erro ao buscar usuários:', error);
+      console.error('Stack trace:', error?.stack);
+      return next(createError(error?.message || 'Erro ao buscar usuários', 500));
     }
   }
 
@@ -229,7 +248,9 @@ export class UserController {
               unhealthyPay: employeeData.unhealthyPay !== undefined ? employeeData.unhealthyPay : null,
               // Novos campos - Polo e Categoria Financeira
               polo: employeeData.polo || null,
-              categoriaFinanceira: employeeData.categoriaFinanceira || null
+              categoriaFinanceira: employeeData.categoriaFinanceira || null,
+              // Campo para controlar se precisa bater ponto
+              requiresTimeClock: employeeData.requiresTimeClock !== undefined ? employeeData.requiresTimeClock : true
             }
           });
 
@@ -611,6 +632,47 @@ export class UserController {
         success: true,
         exists: true,
         user: { id: existingUser.id, name: existingUser.name }
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async checkEmailExists(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { email } = req.query;
+
+      if (!email || typeof email !== 'string') {
+        return res.json({
+          success: true,
+          exists: false
+        });
+      }
+
+      // Validar formato básico de email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.json({
+          success: true,
+          exists: false
+        });
+      }
+
+      // Buscar email no banco (case-insensitive)
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          email: {
+            equals: email,
+            mode: 'insensitive'
+          }
+        },
+        select: { id: true, name: true }
+      });
+
+      return res.json({
+        success: true,
+        exists: !!existingUser,
+        user: existingUser ? { id: existingUser.id, name: existingUser.name } : null
       });
     } catch (error) {
       return next(error);

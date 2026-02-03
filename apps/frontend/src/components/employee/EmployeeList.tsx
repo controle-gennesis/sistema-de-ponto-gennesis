@@ -322,6 +322,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     XLSX.writeFile(wb, fileName);
   };
 
+  // Verificar se há token antes de fazer requisições
+  const hasToken = typeof window !== 'undefined' && !!(localStorage.getItem('token') || sessionStorage.getItem('token'));
+
   // Buscar funcionários - buscar todos para filtrar no frontend
   const { data: employeesData, isLoading, error } = useQuery({
     queryKey: ['employees', statusFilter],
@@ -335,7 +338,9 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       });
       return res.data;
     },
-    enabled: true, // Permitir que todos os usuários vejam a lista
+    enabled: hasToken, // Só executar se houver token
+    retry: false, // Não tentar novamente em caso de erro
+    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
 
   // Buscar registros de ponto do funcionário selecionado
@@ -1459,7 +1464,21 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         </div>
 
         {/* Lista de funcionários */}
-        {isLoading ? (
+        {!hasToken ? (
+          <div className="text-center py-8">
+            <AlertTriangle className="w-12 h-12 text-yellow-400 dark:text-yellow-500 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Token de autenticação não encontrado</p>
+            <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Faça login novamente</p>
+          </div>
+        ) : error ? (
+          <div className="text-center py-8">
+            <AlertTriangle className="w-12 h-12 text-red-400 dark:text-red-500 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Erro ao carregar funcionários</p>
+            <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+              {error instanceof Error ? error.message : 'Erro desconhecido'}
+            </p>
+          </div>
+        ) : isLoading ? (
           <div className="text-center py-8">
             <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
             <p className="text-gray-600 dark:text-gray-400">Carregando funcionários...</p>
@@ -1468,6 +1487,11 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
           <div className="text-center py-8">
             <Users className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
             <p className="text-gray-600 dark:text-gray-400">Nenhum funcionário encontrado</p>
+            {employees.length === 0 && (
+              <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                Não há funcionários cadastrados no sistema
+              </p>
+            )}
           </div>
         ) : (
           <>

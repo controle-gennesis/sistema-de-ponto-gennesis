@@ -24,6 +24,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,13 +32,13 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const loginResponse = await authService.login(formData);
+      const loginResponse = await authService.login(formData, rememberMe);
       // Limpar cache do React Query
       queryClient.clear();
       toast.success('Login realizado com sucesso!');
       
-      // Verificar se o token foi salvo antes de fazer a chamada
-      const token = localStorage.getItem('token');
+      // Verificar se o token foi salvo antes de fazer a chamada (localStorage ou sessionStorage)
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       if (!token) {
         // Se não tem token, redirecionar para /ponto por padrão
         setTimeout(() => {
@@ -46,18 +47,20 @@ export default function LoginPage() {
         return;
       }
       
-      // Buscar dados do usuário para verificar se precisa bater ponto
+      // Buscar dados do usuário para verificar cargo e se precisa bater ponto
       // Usar um pequeno delay para garantir que o token está disponível
       setTimeout(async () => {
         try {
           const userRes = await api.get('/auth/me');
           const userData = userRes.data?.data;
+          const userPosition = userData?.employee?.position;
           const requiresTimeClock = userData?.employee?.requiresTimeClock !== false;
           
-          // Se não precisa bater ponto, redirecionar para dashboard
-          if (!requiresTimeClock) {
+          // Se for Administrador, redirecionar para dashboard
+          if (userPosition === 'Administrador') {
             router.push('/ponto/dashboard');
           } else {
+            // Outros funcionários vão para /ponto (a página mostra mensagem se não precisa bater ponto)
             router.push('/ponto');
           }
         } catch (userError: any) {
@@ -199,6 +202,39 @@ export default function LoginPage() {
                 className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <label className="flex items-center space-x-3 cursor-pointer group">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="sr-only"
+                  />
+                  <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
+                    rememberMe 
+                      ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500' 
+                      : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
+                  }`}>
+                    {rememberMe && (
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
+                  Permanecer conectado
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => router.push('/auth/forgot-password')}
+                className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500 font-medium transition-colors"
+              >
+                Esqueceu a senha?
               </button>
             </div>
           </div>

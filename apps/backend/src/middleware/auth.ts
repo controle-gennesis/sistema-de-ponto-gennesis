@@ -40,6 +40,12 @@ export const authenticate = async (
       }
       throw error;
     }
+    // Verificar se o token está no formato correto (deve ter 3 partes separadas por ponto)
+    if (!token || token.split('.').length !== 3) {
+      throw createError('Token inválido', 401);
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
     
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
@@ -66,7 +72,11 @@ export const authenticate = async (
     };
 
     next();
-  } catch (error) {
+  } catch (error: any) {
+    // Se for erro de JWT, retornar erro de autenticação
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return next(createError('Token inválido ou expirado', 401));
+    }
     next(error);
   }
 };

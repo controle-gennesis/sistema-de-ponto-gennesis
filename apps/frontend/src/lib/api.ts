@@ -37,7 +37,8 @@ const processQueue = (error: any, token: string | null = null) => {
 // Interceptor para adicionar token de autenticação e configurar Content-Type
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    // Buscar token tanto do localStorage quanto do sessionStorage
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -86,13 +87,16 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const token = localStorage.getItem('token');
+      // Buscar token tanto do localStorage quanto do sessionStorage
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
 
       // Se não tem token, redireciona para login
       if (!token) {
         isRefreshing = false;
         localStorage.removeItem('token');
         localStorage.removeItem('user');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('user');
         window.location.href = '/auth/login';
         return Promise.reject(error);
       }
@@ -112,8 +116,13 @@ api.interceptors.response.use(
         const newToken = refreshResponse.data?.data?.token;
 
         if (newToken) {
-          // Atualizar token no localStorage
-          localStorage.setItem('token', newToken);
+          // Atualizar token no mesmo storage onde estava (localStorage ou sessionStorage)
+          const currentToken = localStorage.getItem('token') || sessionStorage.getItem('token');
+          if (localStorage.getItem('token')) {
+            localStorage.setItem('token', newToken);
+          } else {
+            sessionStorage.setItem('token', newToken);
+          }
 
           // Atualizar header da requisição original
           if (originalRequest.headers) {
@@ -137,6 +146,8 @@ api.interceptors.response.use(
 
         localStorage.removeItem('token');
         localStorage.removeItem('user');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('user');
         window.location.href = '/auth/login';
         return Promise.reject(refreshError);
       }

@@ -92,6 +92,10 @@ export interface PayrollEmployee {
   totalDiscounts: number;
   daysWorked: number;
   totalWorkingDays: number;
+  absences: number; // Ausências justificadas não contam como faltas
+  nextMonthWorkingDays?: number; // Dias úteis do próximo mês (para VA/VT)
+  daysForVA?: number; // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+  daysForVT?: number; // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
   // Horas Extras
   he50Hours: number;
   he50Value: number;
@@ -105,6 +109,10 @@ export interface PayrollEmployee {
   // Valores Manuais
   inssRescisao: number;
   inss13: number;
+  descontoPorFaltas?: number;
+  dsrPorFalta?: number;
+  horasExtrasValue?: number;
+  dsrHEValue?: number;
   // FGTS
   fgts: number;
   fgtsFerias: number;
@@ -153,14 +161,15 @@ export class PayrollService {
   /**
    * Calcula os totais mensais de VA e VT para um funcionário
    */
-  private async calculateMonthlyTotals(employeeId: string, month: number, year: number, hireDate?: Date) {
+  private async calculateMonthlyTotals(employeeId: string, month: number, year: number, controlStartDate?: Date) {
     // Buscar dados do funcionário para verificar se precisa bater ponto
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       select: {
         requiresTimeClock: true,
         dailyFoodVoucher: true,
-        dailyTransportVoucher: true
+        dailyTransportVoucher: true,
+        createdAt: true // Usar createdAt para cálculos de folha
       }
     });
 
@@ -174,7 +183,7 @@ export class PayrollService {
       
       // Buscar faltas registradas manualmente no período (também para quem não bate ponto)
       // Faltas registradas manualmente sempre têm approvedBy preenchido
-      const absences = await prisma.timeRecord.findMany({
+      const allAbsences = await prisma.timeRecord.findMany({
         where: {
           employeeId,
           timestamp: {
@@ -183,33 +192,91 @@ export class PayrollService {
           },
           type: 'ABSENCE_JUSTIFIED',
           approvedBy: { not: null }
+        },
+        select: {
+          id: true,
+          reason: true
         }
       });
       
-      // Calcular dias úteis do mês
-      const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
+      // Filtrar ausências que NÃO devem ser descontadas (maternidade, paternidade, acidente)
+      const absences = allAbsences.filter(absence => {
+        if (!absence.reason) return true; // Se não tem reason, considerar como falta
+        
+        const reasonLower = absence.reason.toLowerCase();
+        // Ausências que NÃO devem ser descontadas:
+        if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+            reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+            reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+          return false; // Não contar como falta
+        }
+        return true; // Contar como falta
+      });
+      
+      // Para funcionários que não batem ponto, calcular folha completa do mês
+      // (não usar createdAt, usar início do mês para funcionários antigos)
+      const monthStartDate = new Date(year, month - 1, 1);
+      const { totalWorkingDays } = await this.calculateWorkingDays(
         0, // Não há registros de ponto
         month, 
         year, 
-        hireDate
+        monthStartDate // Sempre usar início do mês para funcionários que não batem ponto
       );
       
-      // Para funcionários que não batem ponto, considerar todos os dias úteis como presenças
-      // MAS subtrair as faltas registradas
-      const daysPresent = Math.max(0, totalWorkingDays - absences.length);
+      // Filtrar ausências que NÃO devem ser descontadas (maternidade, paternidade, acidente)
+      const absencesToDiscount = absences.filter(absence => {
+        if (!absence.reason) return true; // Se não tem reason, considerar como falta
+        
+        const reasonLower = absence.reason.toLowerCase();
+        // Ausências que NÃO devem ser descontadas:
+        if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+            reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+            reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+          return false; // Não contar como falta
+        }
+        return true; // Contar como falta
+      });
       
-      // Calcular VA e VT baseado nos dias presentes (úteis menos faltas) e valores diários
+      // Para funcionários que não batem ponto:
+      // Folgas (ausências justificadas) descontam dos dias trabalhados e VA/VT, mas NÃO contam como falta
+      const daysWorked = Math.max(0, totalWorkingDays - allAbsences.length); // Desconta folgas dos dias trabalhados
+      
+      // Calcular faltas não justificadas (dias úteis - dias trabalhados)
+      // Para funcionários que não batem ponto, faltas = 0 (não há como ter falta sem bater ponto)
+      const faltas = 0;
+      
+      // Calcular dias úteis do próximo mês para VA/VT (benefícios são correspondentes ao próximo mês)
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextYear = month === 12 ? year + 1 : year;
+      const nextMonthStartDate = new Date(nextYear, nextMonth - 1, 1);
+      const { totalWorkingDays: nextMonthWorkingDays } = await this.calculateWorkingDays(
+        0, // Não há registros de ponto para o próximo mês
+        nextMonth,
+        nextYear,
+        nextMonthStartDate
+      );
+      
+      // Calcular VA e VT:
+      // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
+      // MAS descontar as ausências do mês atual
       const dailyVA = Number(employee.dailyFoodVoucher || 0);
       const dailyVT = Number(employee.dailyTransportVoucher || 0);
-      const totalVA = daysPresent * dailyVA;
-      const totalVT = daysPresent * dailyVT;
+      // Descontar apenas ausências do mês atual dos dias úteis do próximo mês
+      // Para funcionários que não batem ponto, não há faltas, apenas ausências
+      const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length);
+      const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length);
+      const totalVA = daysForVA * dailyVA;
+      const totalVT = daysForVT * dailyVT;
       
       return { 
         totalVA, 
         totalVT, 
-        daysWorked: daysPresent, // Dias úteis menos faltas
+        daysWorked, // Desconta folgas dos dias trabalhados
         totalWorkingDays,
-        absences: absences.length // Retornar número de faltas para uso na folha
+        nextMonthWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+        daysForVA, // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+        daysForVT, // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
+        absences: 0 // Ausências justificadas não devem ser tratadas como faltas
       };
     }
 
@@ -233,7 +300,8 @@ export class PayrollService {
     
     // Buscar faltas registradas manualmente no período
     // Faltas registradas manualmente sempre têm approvedBy preenchido
-    const absences = await prisma.timeRecord.findMany({
+    // IMPORTANTE: Excluir ausências que não devem ser descontadas (maternidade, paternidade, acidente de trabalho)
+    const allAbsences = await prisma.timeRecord.findMany({
       where: {
         employeeId,
         timestamp: {
@@ -242,16 +310,29 @@ export class PayrollService {
         },
         type: 'ABSENCE_JUSTIFIED',
         approvedBy: { not: null }
+      },
+      select: {
+        id: true,
+        reason: true
       }
     });
     
-    const totalVA = timeRecords.reduce((sum: any, record: any) => 
-      sum + (record.foodVoucherAmount || 0), 0
-    );
-    
-    const totalVT = timeRecords.reduce((sum: any, record: any) => 
-      sum + (record.transportVoucherAmount || 0), 0
-    );
+    // Filtrar ausências que NÃO devem ser descontadas
+    const absences = allAbsences.filter(absence => {
+      if (!absence.reason) return true; // Se não tem reason, considerar como falta
+      
+      const reasonLower = absence.reason.toLowerCase();
+      // Ausências que NÃO devem ser descontadas:
+      // - Maternidade (licença maternidade não desconta)
+      // - Paternidade (licença paternidade não desconta)
+      // - Acidente de trabalho (não desconta)
+      if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+          reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+          reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+        return false; // Não contar como falta
+      }
+      return true; // Contar como falta
+    });
     
     // Calcular dias trabalhados e faltas de forma mais inteligente
     // Subtrair faltas registradas manualmente dos dias trabalhados
@@ -259,38 +340,87 @@ export class PayrollService {
       timeRecords.length, 
       month, 
       year, 
-      hireDate
+      controlStartDate
     );
     
-    // Ajustar dias trabalhados subtraindo as faltas
-    const adjustedDaysWorked = Math.max(0, daysWorked - absences.length);
+    // Calcular faltas não justificadas (dias úteis - dias trabalhados)
+    const faltas = Math.max(0, totalWorkingDays - daysWorked);
+    
+    // Buscar dados do funcionário para pegar valores diários de VA e VT
+    const employeeData = await prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: {
+        dailyFoodVoucher: true,
+        dailyTransportVoucher: true
+      }
+    });
+    
+    const dailyVA = Number(employeeData?.dailyFoodVoucher || 0);
+    const dailyVT = Number(employeeData?.dailyTransportVoucher || 0);
+    
+    // Calcular dias úteis do próximo mês para VA/VT (benefícios são correspondentes ao próximo mês)
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonthStartDate = new Date(nextYear, nextMonth - 1, 1);
+    const { totalWorkingDays: nextMonthWorkingDays } = await this.calculateWorkingDays(
+      0, // Não há registros de ponto para o próximo mês
+      nextMonth,
+      nextYear,
+      nextMonthStartDate
+    );
+    
+    // Calcular VA e VT:
+    // VA e VT: usar dias úteis do próximo mês (benefícios são correspondentes ao próximo mês)
+    // MAS descontar as ausências E faltas do mês atual
+    // IMPORTANTE: O cálculo deve usar EXATAMENTE o mesmo valor que aparece na referência do frontend
+    // Frontend mostra: nextMonthWorkingDays - totalAbsences - faltas
+    // Então precisamos usar a mesma fórmula para garantir que o cálculo use os mesmos dias da referência
+    const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+    const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+    // Multiplicar pela quantidade de dias que aparece na referência (deve ser exatamente daysForVA)
+    const totalVA = daysForVA * dailyVA;
+    const totalVT = daysForVT * dailyVT;
+    
+    // Folgas (ausências justificadas) descontam dos dias trabalhados, mas NÃO contam como falta
+    // daysWorked já vem do calculateWorkingDays baseado nos registros de ponto (ENTRY)
+    // Se teve ausência justificada, não teve ENTRY naquele dia, então já está descontado
     
     return { 
       totalVA, 
       totalVT, 
-      daysWorked: adjustedDaysWorked,
+      daysWorked, // Já descontado automaticamente (ausências não têm registro ENTRY)
       totalWorkingDays,
-      absences: absences.length // Retornar número de faltas para uso na folha
+      nextMonthWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+      daysForVA, // Dias usados no cálculo de VA (deve ser exatamente o que aparece na referência)
+      daysForVT, // Dias usados no cálculo de VT (deve ser exatamente o que aparece na referência)
+      absences: 0 // Ausências justificadas não devem ser tratadas como faltas
     };
   }
 
   /**
    * Calcula dias trabalhados e faltas de forma inteligente
    */
-  private async calculateWorkingDays(daysWorked: number, month: number, year: number, hireDate?: Date) {
+  private async calculateWorkingDays(daysWorked: number, month: number, year: number, controlStartDate?: Date) {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentYear = today.getFullYear();
     
     // Se for o mês atual, só contar até hoje
-    const endDay = (month === currentMonth && year === currentYear) 
+    // IMPORTANTE: Se for um mês futuro (próximo mês), contar todos os dias do mês
+    const isCurrentMonth = month === currentMonth && year === currentYear;
+    const isFutureMonth = year > currentYear || (year === currentYear && month > currentMonth);
+    
+    const endDay = isCurrentMonth
       ? today.getDate() 
       : new Date(year, month, 0).getDate();
     
-    // Data de início: data de admissão ou início do mês
-    const startDay = hireDate && hireDate.getMonth() + 1 === month && hireDate.getFullYear() === year
-      ? hireDate.getDate()
-      : 1;
+    // Data de início: createdAt (data de criação no sistema) ou início do mês
+    // IMPORTANTE: Para meses futuros, sempre começar do dia 1
+    const startDay = (isFutureMonth || !controlStartDate) 
+      ? 1
+      : (controlStartDate.getMonth() + 1 === month && controlStartDate.getFullYear() === year
+        ? controlStartDate.getDate()
+        : 1);
     
     // Buscar feriados ativos no mês para desconsiderar da contagem de dias úteis
     const startDateRange = new Date(year, month - 1, startDay);
@@ -404,13 +534,13 @@ export class PayrollService {
     
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { hireDate: true }
+      select: { createdAt: true } // Usar createdAt para verificar se está ativo no período
     });
 
     if (!employee) return false;
 
-    // Funcionário deve ter sido admitido antes ou durante o período
-    return employee.hireDate <= endDate;
+    // Funcionário deve ter sido criado no sistema antes ou durante o período
+    return employee.createdAt <= endDate;
   }
 
   /**
@@ -511,12 +641,8 @@ export class PayrollService {
       where.polo = { contains: polo, mode: 'insensitive' };
     }
 
-    // Adicionar filtro para funcionários que precisam bater ponto (apenas para relatório de alocação)
-    // Nota: Para folha de pagamento (forAllocation = false ou undefined), não filtramos por requiresTimeClock
-    // Mas para alocação (forAllocation = true), precisamos filtrar porque a alocação depende de registros de ponto
-    if (forAllocation) {
-      where.requiresTimeClock = true;
-    }
+    // Nota: Removido o filtro de requiresTimeClock para mostrar todos os funcionários na alocação
+    // A alocação agora mostra todos os funcionários, incluindo os que não batem ponto
 
     // Construir where clause para busca manual (aplicar filtros específicos)
     let manualWhere: any = {
@@ -544,10 +670,7 @@ export class PayrollService {
     if (bank) manualWhere.bank = { contains: bank, mode: 'insensitive' };
     if (accountType) manualWhere.accountType = { contains: accountType, mode: 'insensitive' };
     if (polo) manualWhere.polo = { contains: polo, mode: 'insensitive' };
-    // Adicionar filtro para funcionários que precisam bater ponto (apenas para relatório de alocação)
-    if (forAllocation) {
-      manualWhere.requiresTimeClock = true;
-    }
+    // Nota: Removido o filtro de requiresTimeClock para mostrar todos os funcionários na alocação
 
     // Buscar funcionários
     let employees = await prisma.employee.findMany({
@@ -614,19 +737,22 @@ export class PayrollService {
     // Calcular totais para cada funcionário e filtrar apenas os ativos no período
     const employeesWithTotals = await Promise.all(
       employees.map(async (employee: any) => {
-        // Excluir administradores da folha de pagamento
-        if (employee.position === 'Administrador') {
-          return null; // Administrador não deve aparecer na folha
-        }
-        
-        // Verificar se o funcionário estava ativo no período
-        const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
-        
-        if (!isActiveInPeriod) {
-          return null; // Funcionário não estava ativo no período
-        }
+        try {
+          // Excluir administradores da folha de pagamento
+          if (employee.position === 'Administrador') {
+            return null; // Administrador não deve aparecer na folha
+          }
+          
+          // Verificar se o funcionário estava ativo no período
+          const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
+          
+          if (!isActiveInPeriod) {
+            return null; // Funcionário não estava ativo no período
+          }
 
-        const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
+        // Usar createdAt (data de criação no sistema) para cálculos de folha
+        const employeeControlDate = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : undefined;
+        const totals = await this.calculateMonthlyTotals(employee.id, month, year, employeeControlDate);
         const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
         const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
         const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
@@ -649,10 +775,75 @@ export class PayrollService {
         // Calcular faltas: usar o número de faltas retornado ou calcular pela diferença
         const faltas = totals.absences !== undefined ? totals.absences : (totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0);
         
+        // Buscar datas das faltas para cálculo correto de DSR
+        const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+        const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
+        
+        const allAbsenceRecords = await prisma.timeRecord.findMany({
+          where: {
+            employeeId: employee.id,
+            timestamp: {
+              gte: startDate,
+              lte: endDate
+            },
+            type: 'ABSENCE_JUSTIFIED',
+            approvedBy: { not: null }
+          },
+          select: {
+            timestamp: true,
+            reason: true
+          }
+        });
+        
+        // Filtrar ausências que NÃO devem ser descontadas (maternidade, paternidade, acidente)
+        const absenceRecords = allAbsenceRecords.filter(record => {
+          if (!record.reason) return true; // Se não tem reason, considerar como falta
+          
+          const reasonLower = record.reason.toLowerCase();
+          // Ausências que NÃO devem ser descontadas:
+          if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+              reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+              reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+            return false; // Não contar como falta
+          }
+          return true; // Contar como falta
+        });
+        
+        const absenceDates = absenceRecords.map(record => new Date(record.timestamp));
+        
+        // Buscar feriados do mês
+        const holidays = await prisma.holiday.findMany({
+          where: {
+            date: {
+              gte: startDate,
+              lte: endDate
+            },
+            isActive: true
+          }
+        });
+        
         // Calcular número de dias do mês
         const diasDoMes = new Date(year, month, 0).getDate();
-        const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasDoMes) * faltas;
-        const dsrPorFalta = (salarioBase / diasDoMes) * faltas;
+        // Calcular dias para desconto (30 ou 31 se for mês de criação no sistema)
+        let diasParaDesconto = 30;
+        const employeeControlDateForDiscount = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : null;
+        if (employeeControlDateForDiscount) {
+          const mesCriacao = employeeControlDateForDiscount.getMonth() + 1;
+          const anoCriacao = employeeControlDateForDiscount.getFullYear();
+          if (month === mesCriacao && year === anoCriacao) {
+            const diasMesCriacao = new Date(anoCriacao, mesCriacao, 0).getDate();
+            if (diasMesCriacao === 31) {
+              diasParaDesconto = 31;
+            }
+          }
+        }
+        
+        // Evitar divisão por zero
+        const descontoPorFaltas = diasParaDesconto > 0 ? ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas : 0;
+        
+        // Calcular DSR por faltas considerando feriados por semana
+        const dsrPorFalta = this.calculateDSRPorFaltas(salarioBase, faltas, holidays, absenceDates);
         
         // Calcular DSR H.E
         const totalHorasExtras = hoursExtras.he50Hours + hoursExtras.he100Hours;
@@ -685,6 +876,15 @@ export class PayrollService {
             }
           }
         });
+        
+        // Usar valores manuais de descontoPorFaltas e dsrPorFalta se existirem
+        const descontoPorFaltasFinal = manualInss?.descontoPorFaltas !== null && manualInss?.descontoPorFaltas !== undefined
+          ? Number(manualInss.descontoPorFaltas)
+          : descontoPorFaltas;
+        
+        const dsrPorFaltaFinal = manualInss?.dsrPorFalta !== null && manualInss?.dsrPorFalta !== undefined
+          ? Number(manualInss.dsrPorFalta)
+          : dsrPorFalta;
         
         // Calcular FGTS: 8% sobre a base de cálculo (mesma base do INSS)
         const baseFGTS = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
@@ -727,6 +927,12 @@ export class PayrollService {
         // Calcular IRRF Total: Soma IRRF Mensal + IRRF Férias
         const irrfTotal = irrfMensal + irrfFerias;
         
+        // Verificar se employee.user existe para evitar erros
+        if (!employee.user) {
+          console.error(`Funcionário ${employee.id} não tem usuário associado`);
+          return null;
+        }
+
         return {
           id: employee.id,
           name: employee.user.name,
@@ -761,6 +967,10 @@ export class PayrollService {
           totalDiscounts,
           daysWorked: totals.daysWorked,
           totalWorkingDays: totals.totalWorkingDays,
+          nextMonthWorkingDays: totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+          daysForVA: totals.daysForVA !== undefined ? totals.daysForVA : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VA
+          daysForVT: totals.daysForVT !== undefined ? totals.daysForVT : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VT
+          absences: totals.absences !== undefined ? totals.absences : 0, // Ausências justificadas não contam como faltas
           // Horas Extras
           he50Hours: hoursExtras.he50Hours,
           he50Value: hoursExtras.he50Value,
@@ -774,6 +984,8 @@ export class PayrollService {
           // Valores Manuais
           inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
           inss13: manualInss ? Number(manualInss.inss13) : 0,
+          descontoPorFaltas: descontoPorFaltasFinal,
+          dsrPorFalta: dsrPorFaltaFinal,
           // FGTS
           fgts,
           fgtsFerias,
@@ -785,6 +997,10 @@ export class PayrollService {
           irrfFerias,
           irrfTotal
         } as PayrollEmployee;
+        } catch (error) {
+          console.error(`Erro ao processar funcionário ${employee.id}:`, error);
+          return null; // Retornar null em caso de erro para não quebrar toda a folha
+        }
       })
     );
 
@@ -832,41 +1048,130 @@ export class PayrollService {
   }
 
   /**
-   * Calcula o INSS usando a tabela progressiva
+   * Calcula DSR por faltas considerando feriados por semana
+   * Nova lógica: Se faltar em uma semana que tem feriado, perde 1 DSR pela falta + 1 DSR por cada feriado daquela semana
    */
-  private calculateINSS(baseINSS: number): number {
-    if (baseINSS <= 0) return 0;
-    
-    if (baseINSS <= 1518) {
-      return baseINSS * 0.075; // 7,5%
-    } else if (baseINSS <= 2793) {
-      return (1518 * 0.075) + ((baseINSS - 1518) * 0.09); // 7,5% até 1518 + 9% do excedente
-    } else if (baseINSS <= 4190) {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12); // 7,5% até 1518 + 9% até 2793 + 12% do excedente
-    } else if (baseINSS <= 8157) {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14); // 7,5% até 1518 + 9% até 2793 + 12% até 4190 + 14% do excedente
+  private calculateDSRPorFaltas(
+    salarioBase: number,
+    faltas: number,
+    holidays: any[],
+    absenceDates: Date[]
+  ): number {
+    if (faltas <= 0) return 0;
+
+    // Filtrar apenas feriados úteis (segunda a sábado)
+    const feriadosUteis = holidays.filter((holiday: any) => {
+      const holidayDate = new Date(holiday.date);
+      const dayOfWeek = holidayDate.getDay();
+      return dayOfWeek >= 1 && dayOfWeek <= 6; // Segunda a sábado
+    });
+
+    // Função para obter o início da semana (domingo) de uma data
+    const getWeekStart = (date: Date): Date => {
+      const dateCopy = new Date(date);
+      const dayOfWeek = dateCopy.getDay();
+      const weekStart = new Date(dateCopy);
+      weekStart.setDate(dateCopy.getDate() - dayOfWeek);
+      weekStart.setHours(0, 0, 0, 0);
+      return weekStart;
+    };
+
+    // Se temos as datas das faltas, calcular DSR por semana com falta
+    if (absenceDates.length > 0 && absenceDates.length === faltas) {
+      // Agrupar faltas por semana
+      const semanasComFaltas = new Map<string, number>(); // semana -> quantidade de faltas
+      absenceDates.forEach((absenceDate: Date) => {
+        const weekStart = getWeekStart(absenceDate);
+        const weekKey = weekStart.toISOString();
+        semanasComFaltas.set(weekKey, (semanasComFaltas.get(weekKey) || 0) + 1);
+      });
+
+      let totalDSR = 0;
+
+      // Para cada semana com falta, calcular DSR
+      semanasComFaltas.forEach((numFaltasNaSemana, weekKey) => {
+        const weekStart = new Date(weekKey);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6); // Fim da semana (sábado)
+
+        // Contar quantos feriados estão nesta semana específica
+        const feriadosNaSemana = feriadosUteis.filter((holiday: any) => {
+          const holidayDate = new Date(holiday.date);
+          return holidayDate >= weekStart && holidayDate <= weekEnd;
+        }).length;
+
+        // DSR = 1 pela semana (independente de quantas faltas) + 1 por cada feriado da semana
+        // Exemplo: 2 faltas na mesma semana + 1 feriado = 1 DSR (semana) + 1 DSR (feriado) = 2 DSR
+        // Exemplo: 1 falta semana 1 (com 1 feriado) + 1 falta semana 2 = 1 DSR (semana 1) + 1 DSR (feriado semana 1) + 1 DSR (semana 2) = 3 DSR
+        const dsrDaSemana = 1 + feriadosNaSemana;
+        totalDSR += dsrDaSemana;
+      });
+
+      return (salarioBase / 30) * totalDSR;
     } else {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14); // Teto máximo
+      // Fallback: se não temos as datas exatas, assumir que estão em semanas diferentes
+      // Contar todos os feriados do mês
+      const quantidadeFeriados = feriadosUteis.length;
+      // 1 DSR por falta + 1 DSR por cada feriado (assumindo que pode estar na mesma semana)
+      const totalDSR = faltas + quantidadeFeriados;
+      return (salarioBase / 30) * totalDSR;
     }
   }
 
   /**
-   * Calcula o IRRF Mensal baseado na tabela progressiva atualizada
+   * Calcula o INSS usando a tabela progressiva
+   */
+  private calculateINSS(baseINSS: number): number {
+    if (baseINSS <= 0) return 0;
+
+    // Tabela progressiva (alinhada com a planilha do cliente)
+    // Faixas: 7,5% / 9% / 12% / 14% com teto
+    const faixa1 = 1621.0;
+    const faixa2 = 2902.84;
+    const faixa3 = 4354.27;
+    const teto = 8475.55;
+
+    const base = Math.min(baseINSS, teto);
+
+    if (base <= faixa1) {
+      return base * 0.075;
+    }
+    if (base <= faixa2) {
+      return (faixa1 * 0.075) + ((base - faixa1) * 0.09);
+    }
+    if (base <= faixa3) {
+      return (faixa1 * 0.075)
+        + ((faixa2 - faixa1) * 0.09)
+        + ((base - faixa2) * 0.12);
+    }
+    // base <= teto
+    return (faixa1 * 0.075)
+      + ((faixa2 - faixa1) * 0.09)
+      + ((faixa3 - faixa2) * 0.12)
+      + ((base - faixa3) * 0.14);
+  }
+
+  /**
+   * Calcula o IRRF Mensal baseado na Tabela 2026
    */
   private calculateIRRF(baseIRRF: number): number {
     if (baseIRRF <= 0) return 0;
     
-    // Aplicar tabela progressiva do IRRF atualizada
-    if (baseIRRF <= 2428.80) {
+    // Tabela 2026
+    if (baseIRRF <= 5000.00) {
       return 0; // Isento
-    } else if (baseIRRF <= 2826.65) {
-      return (baseIRRF * 0.075) - 182.16; // 7,5% - parcela a deduzir
-    } else if (baseIRRF <= 3751.05) {
-      return (baseIRRF * 0.15) - 394.16; // 15% - parcela a deduzir
-    } else if (baseIRRF <= 4664.68) {
-      return (baseIRRF * 0.225) - 675.49; // 22,5% - parcela a deduzir
+    } else if (baseIRRF <= 7423.07) {
+      // 7,5% - parcela a deduzir = 5000 × 0.075 = 375
+      return (baseIRRF * 0.075) - 375.00;
+    } else if (baseIRRF <= 9850.63) {
+      // 15% - parcela a deduzir = 5000 × 0.075 + (7423.07 - 5000) × 0.15 = 738.46
+      return (baseIRRF * 0.15) - 738.46;
+    } else if (baseIRRF <= 12249.92) {
+      // 22,5% - parcela a deduzir = 5000 × 0.075 + (7423.07 - 5000) × 0.15 + (9850.63 - 7423.07) × 0.225 = 1284.59
+      return (baseIRRF * 0.225) - 1284.59;
     } else {
-      return (baseIRRF * 0.275) - 908.73; // 27,5% - parcela a deduzir
+      // 27,5% - parcela a deduzir = 5000 × 0.075 + (7423.07 - 5000) × 0.15 + (9850.63 - 7423.07) × 0.225 + (12249.92 - 9850.63) × 0.275 = 1944.42
+      return (baseIRRF * 0.275) - 1944.42;
     }
   }
 
@@ -955,7 +1260,8 @@ export class PayrollService {
    * Obtém dados de um funcionário específico para folha
    */
   async getEmployeePayrollData(employeeId: string, month: number, year: number): Promise<PayrollEmployee | null> {
-    const employee = await prisma.employee.findUnique({
+    try {
+      const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       include: {
         user: {
@@ -977,7 +1283,15 @@ export class PayrollService {
       return null;
     }
 
-    const totals = await this.calculateMonthlyTotals(employee.id, month, year, employee.hireDate);
+    // Verificar se employee.user existe
+    if (!employee.user) {
+      console.error(`Funcionário ${employee.id} não tem usuário associado`);
+      return null;
+    }
+
+    // Usar createdAt (data de criação no sistema) para cálculos de folha
+    const employeeControlDateForPayroll = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : undefined;
+    const totals = await this.calculateMonthlyTotals(employee.id, month, year, employeeControlDateForPayroll);
     const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
     const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
     const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
@@ -997,20 +1311,21 @@ export class PayrollService {
     const periculosidade = Number(employee.dangerPay || 0);
     const insalubridade = Number(employee.unhealthyPay || 0);
     const salarioFamilia = Number(employee.familySalary || 0);
-    const faltas = totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0;
+    // Calcular faltas: usar o número de faltas retornado ou calcular pela diferença
+    const faltas = totals.absences !== undefined ? totals.absences : (totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0);
     
     // Calcular número de dias do mês para desconto de faltas
-    // Usa 30 como padrão, ou 31 apenas se for o mês de admissão E o mês de admissão tiver 31 dias
+    // Usa 30 como padrão, ou 31 apenas se for o mês de criação no sistema E o mês tiver 31 dias
     let diasParaDesconto = 30; // Padrão
-    if (employee.hireDate) {
-      const hireDate = new Date(employee.hireDate);
-      const mesAdmissao = hireDate.getMonth() + 1; // getMonth() retorna 0-11
-      const anoAdmissao = hireDate.getFullYear();
+    const employeeControlDateForDiscount = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : null;
+    if (employeeControlDateForDiscount) {
+      const mesCriacao = employeeControlDateForDiscount.getMonth() + 1; // getMonth() retorna 0-11
+      const anoCriacao = employeeControlDateForDiscount.getFullYear();
       
-      // Só usa 31 dias se for o mês de admissão e o mês tiver 31 dias
-      if (month === mesAdmissao && year === anoAdmissao) {
-        const diasMesAdmissao = new Date(anoAdmissao, mesAdmissao, 0).getDate();
-        if (diasMesAdmissao === 31) {
+      // Só usa 31 dias se for o mês de criação no sistema e o mês tiver 31 dias
+      if (month === mesCriacao && year === anoCriacao) {
+        const diasMesCriacao = new Date(anoCriacao, mesCriacao, 0).getDate();
+        if (diasMesCriacao === 31) {
           diasParaDesconto = 31;
         }
       }
@@ -1018,31 +1333,8 @@ export class PayrollService {
     
     // Calcular número de dias do mês atual (para outros cálculos)
     const diasDoMes = new Date(year, month, 0).getDate();
-    const descontoPorFaltas = ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas;
-    const dsrPorFalta = (salarioBase / diasParaDesconto) * faltas;
     
-    // Calcular DSR H.E
-    const totalHorasExtras = hoursExtras.he50Hours + hoursExtras.he100Hours;
-    const diasUteis = totals.totalWorkingDays || 0;
-    const diasNaoUteis = diasDoMes - diasUteis;
-    const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
-    
-    // Calcular valor do DSR H.E considerando as diferentes taxas
-    // hoursExtras.he50Hours e hoursExtras.he100Hours já vêm multiplicados do HoursExtrasService
-    const valorDSRHE = diasUteis > 0 ? 
-      ((hoursExtras.he50Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate) +  // DSR sobre HE 50% (já multiplicado)
-      ((hoursExtras.he100Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate)   // DSR sobre HE 100% (já multiplicado)
-      : 0;
-    
-    // Calcular BASE INSS MENSAL
-    const valorHorasExtras = hoursExtras.he50Value + hoursExtras.he100Value;
-    const baseInssMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
-      ? 0 
-      : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
-    
-    const { vacationDays, baseInssFerias, inssFerias } = await this.calculateBaseInssFerias(employee.id, month, year, baseInssMensal);
-    
-    // Buscar valores manuais de INSS
+    // Buscar valores manuais de faltas e DSR (se existirem)
     const manualInss = await prisma.manualInssValue.findUnique({
       where: {
         employeeId_month_year: {
@@ -1052,6 +1344,88 @@ export class PayrollService {
         }
       }
     });
+    
+    // Buscar datas das faltas para cálculo correto de DSR
+    const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
+    
+    const absenceRecords = await prisma.timeRecord.findMany({
+      where: {
+        employeeId: employee.id,
+        timestamp: {
+          gte: startDate,
+          lte: endDate
+        },
+        type: 'ABSENCE_JUSTIFIED',
+        approvedBy: { not: null }
+      },
+      select: {
+        timestamp: true
+      }
+    });
+    
+    const absenceDates = absenceRecords.map(record => new Date(record.timestamp));
+    
+    // Buscar feriados do mês
+    const holidays = await prisma.holiday.findMany({
+      where: {
+        date: {
+          gte: startDate,
+          lte: endDate
+        },
+        isActive: true
+      }
+    });
+    
+    // Usar valores manuais se existirem, senão calcular
+    // Evitar divisão por zero
+    const descontoPorFaltas = manualInss?.descontoPorFaltas !== null && manualInss?.descontoPorFaltas !== undefined
+      ? Number(manualInss.descontoPorFaltas)
+      : diasParaDesconto > 0 ? ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas : 0;
+    
+    // Calcular DSR por faltas considerando feriados por semana
+    const dsrPorFaltaCalculado = this.calculateDSRPorFaltas(salarioBase, faltas, holidays, absenceDates);
+    const dsrPorFalta = manualInss?.dsrPorFalta !== null && manualInss?.dsrPorFalta !== undefined
+      ? Number(manualInss.dsrPorFalta)
+      : dsrPorFaltaCalculado;
+    
+    // Calcular DSR H.E
+    const totalHorasExtras = hoursExtras.he50Hours + hoursExtras.he100Hours;
+    const diasUteis = totals.totalWorkingDays || 0;
+    const diasNaoUteis = diasDoMes - diasUteis;
+    const dsrHECalculado = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+    
+    // Usar valor manual de DSR HE se existir, senão usar o calculado
+    const dsrHE = manualInss?.dsrHEValue !== null && manualInss?.dsrHEValue !== undefined
+      ? Number(manualInss.dsrHEValue)
+      : dsrHECalculado;
+    
+    // Calcular valor do DSR H.E considerando as diferentes taxas
+    // hoursExtras.he50Hours e hoursExtras.he100Hours já vêm multiplicados do HoursExtrasService
+    const valorDSRHECalculado = diasUteis > 0 ? 
+      ((hoursExtras.he50Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate) +  // DSR sobre HE 50% (já multiplicado)
+      ((hoursExtras.he100Hours / diasUteis) * diasNaoUteis * hoursExtras.hourlyRate)   // DSR sobre HE 100% (já multiplicado)
+      : 0;
+    
+    // Usar valor manual se existir, senão usar o calculado
+    const valorDSRHE = manualInss?.dsrHEValue !== null && manualInss?.dsrHEValue !== undefined
+      ? (Number(manualInss.dsrHEValue) * hoursExtras.hourlyRate)
+      : valorDSRHECalculado;
+    
+    // Calcular BASE INSS MENSAL
+    // Usar valor manual de horas extras se existir, senão usar o calculado
+    const valorHorasExtrasCalculado = hoursExtras.he50Value + hoursExtras.he100Value;
+    const valorHorasExtras = manualInss?.horasExtrasValue !== null && manualInss?.horasExtrasValue !== undefined
+      ? Number(manualInss.horasExtrasValue)
+      : valorHorasExtrasCalculado;
+    const baseInssMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+      ? 0 
+      : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+    
+    const { vacationDays, baseInssFerias, inssFerias } = await this.calculateBaseInssFerias(employee.id, month, year, baseInssMensal);
+    
+    // Usar o manualInss já buscado acima
 
     // Calcular FGTS: 8% sobre a base de cálculo (mesma base do INSS)
     const baseFGTS = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
@@ -1128,6 +1502,10 @@ export class PayrollService {
       totalDiscounts,
       daysWorked: totals.daysWorked,
       totalWorkingDays: totals.totalWorkingDays,
+      nextMonthWorkingDays: totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays, // Dias úteis do próximo mês (para VA/VT)
+      daysForVA: totals.daysForVA !== undefined ? totals.daysForVA : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VA
+      daysForVT: totals.daysForVT !== undefined ? totals.daysForVT : (totals.nextMonthWorkingDays !== undefined ? totals.nextMonthWorkingDays : totals.totalWorkingDays), // Dias usados no cálculo de VT
+      absences: totals.absences !== undefined ? totals.absences : 0, // Ausências justificadas não contam como faltas
       // Horas Extras
       he50Hours: hoursExtras.he50Hours,
       he50Value: hoursExtras.he50Value,
@@ -1141,6 +1519,10 @@ export class PayrollService {
       // Valores Manuais
       inssRescisao: manualInss ? Number(manualInss.inssRescisao) : 0,
       inss13: manualInss ? Number(manualInss.inss13) : 0,
+      descontoPorFaltas: manualInss?.descontoPorFaltas !== null && manualInss?.descontoPorFaltas !== undefined ? Number(manualInss.descontoPorFaltas) : undefined,
+      dsrPorFalta: manualInss?.dsrPorFalta !== null && manualInss?.dsrPorFalta !== undefined ? Number(manualInss.dsrPorFalta) : undefined,
+      horasExtrasValue: manualInss?.horasExtrasValue !== null && manualInss?.horasExtrasValue !== undefined ? Number(manualInss.horasExtrasValue) : undefined,
+      dsrHEValue: manualInss?.dsrHEValue !== null && manualInss?.dsrHEValue !== undefined ? Number(manualInss.dsrHEValue) : undefined,
       // FGTS
       fgts,
       fgtsFerias,
@@ -1152,6 +1534,11 @@ export class PayrollService {
       irrfFerias,
       irrfTotal
     };
+    } catch (error: any) {
+      console.error(`Erro ao obter dados de folha para funcionário ${employeeId}:`, error);
+      console.error('Stack trace:', error?.stack);
+      throw error; // Re-lançar o erro para que o controller possa tratá-lo
+    }
   }
 
   /**
@@ -1219,8 +1606,12 @@ export class PayrollService {
     year: number;
     inssRescisao: number;
     inss13: number;
+    descontoPorFaltas?: number | null;
+    dsrPorFalta?: number | null;
+    horasExtrasValue?: number | null;
+    dsrHEValue?: number | null;
   }) {
-    const { employeeId, month, year, inssRescisao, inss13 } = data;
+    const { employeeId, month, year, inssRescisao, inss13, descontoPorFaltas, dsrPorFalta, horasExtrasValue, dsrHEValue } = data;
 
     // Verificar se o funcionário existe
     const employee = await prisma.employee.findUnique({
@@ -1243,6 +1634,10 @@ export class PayrollService {
       update: {
         inssRescisao,
         inss13,
+        descontoPorFaltas: descontoPorFaltas !== undefined ? descontoPorFaltas : null,
+        dsrPorFalta: dsrPorFalta !== undefined ? dsrPorFalta : null,
+        horasExtrasValue: horasExtrasValue !== undefined ? horasExtrasValue : null,
+        dsrHEValue: dsrHEValue !== undefined ? dsrHEValue : null,
         updatedAt: new Date()
       },
       create: {
@@ -1250,7 +1645,11 @@ export class PayrollService {
         month,
         year,
         inssRescisao,
-        inss13
+        inss13,
+        descontoPorFaltas: descontoPorFaltas !== undefined ? descontoPorFaltas : null,
+        dsrPorFalta: dsrPorFalta !== undefined ? dsrPorFalta : null,
+        horasExtrasValue: horasExtrasValue !== undefined ? horasExtrasValue : null,
+        dsrHEValue: dsrHEValue !== undefined ? dsrHEValue : null
       }
     });
 

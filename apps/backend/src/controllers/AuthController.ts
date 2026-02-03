@@ -4,6 +4,13 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { PrismaClient } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid';
+import { createError } from '../middleware/errorHandler';
+import { AuthRequest } from '../middleware/auth';
+import { emailService } from '../services/EmailService';
+
+const prisma = new PrismaClient();
 
 export class AuthController {
   async register(req: Request, res: Response, next: NextFunction) {
@@ -134,8 +141,12 @@ export class AuthController {
 
   async getProfile(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user || !req.user.id) {
+        throw createError('Token inválido ou expirado', 401);
+      }
+
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: req.user.id },
         include: {
           employee: true,
         },
@@ -149,7 +160,8 @@ export class AuthController {
         success: true,
         data: user,
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Erro ao buscar perfil do usuário:', error);
       return next(error);
     }
   }
@@ -216,6 +228,10 @@ export class AuthController {
     try {
       const { email } = req.body;
 
+      if (!email) {
+        throw createError('Email é obrigatório', 400);
+      }
+
       const user = await prisma.user.findUnique({
         where: { email }
       });
@@ -228,8 +244,58 @@ export class AuthController {
         });
       }
 
-      // Aqui você implementaria o envio de email
-      // Por enquanto, apenas retornamos sucesso
+      // Invalidar tokens anteriores não utilizados
+      await prisma.passwordResetToken.updateMany({
+        where: {
+          userId: user.id,
+          used: false,
+          expiresAt: { gt: new Date() }
+        },
+        data: {
+          used: true
+        }
+      });
+
+      // Gerar novo token de reset
+      const token = uuidv4();
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 1); // Token válido por 1 hora
+
+      await prisma.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          token,
+          expiresAt
+        }
+      });
+
+      // Construir URL de reset
+      const frontendUrl = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:3000';
+      const resetUrl = `${frontendUrl}/auth/reset-password?token=${token}`;
+
+      // Enviar email
+      try {
+        await emailService.sendPasswordResetEmail(user.email, user.name, token, resetUrl);
+        console.log(`✅ Email de recuperação de senha enviado para: ${user.email}`);
+      } catch (emailError: any) {
+        console.error('❌ Erro ao enviar email de reset:', emailError);
+        console.error('Detalhes do erro:', {
+          message: emailError?.message,
+          code: emailError?.code,
+          stack: emailError?.stack
+        });
+        
+        // Se for erro de configuração SMTP, logar aviso mais claro
+        if (emailError?.message?.includes('Transporter') || !process.env.SMTP_HOST) {
+          console.error('⚠️ ATENÇÃO: Configurações SMTP não encontradas ou inválidas!');
+          console.error('Variáveis necessárias: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS');
+          console.error('Verifique as variáveis de ambiente em produção.');
+        }
+        
+        // Não falhar a requisição se o email falhar, apenas logar o erro
+        // Mas em produção, isso deve ser monitorado
+      }
+
       return res.json({
         success: true,
         message: 'Se o email existir, você receberá instruções para redefinir sua senha'
@@ -243,8 +309,50 @@ export class AuthController {
     try {
       const { token, newPassword } = req.body;
 
-      // Aqui você validaria o token de reset
-      // Por enquanto, apenas retornamos sucesso
+      if (!token || !newPassword) {
+        throw createError('Token e nova senha são obrigatórios', 400);
+      }
+
+      if (newPassword.length < 6) {
+        throw createError('A senha deve ter no mínimo 6 caracteres', 400);
+      }
+
+      // Buscar token de reset
+      const resetToken = await prisma.passwordResetToken.findUnique({
+        where: { token },
+        include: { user: true }
+      });
+
+      if (!resetToken) {
+        throw createError('Token inválido ou expirado', 400);
+      }
+
+      if (resetToken.used) {
+        throw createError('Este token já foi utilizado', 400);
+      }
+
+      if (resetToken.expiresAt < new Date()) {
+        throw createError('Token expirado', 400);
+      }
+
+      // Hash da nova senha
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      // Atualizar senha do usuário
+      await prisma.user.update({
+        where: { id: resetToken.userId },
+        data: {
+          password: hashedPassword,
+          isFirstLogin: false // Marcar que não é mais primeiro login
+        }
+      });
+
+      // Marcar token como usado
+      await prisma.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data: { used: true }
+      });
+
       return res.json({
         success: true,
         message: 'Senha redefinida com sucesso'

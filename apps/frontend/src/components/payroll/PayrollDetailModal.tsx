@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon, Save, Plus } from 'lucide-react';
+import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon, Save } from 'lucide-react';
 import { PayrollEmployee } from '@/types';
 import api from '@/lib/api';
 
@@ -20,6 +20,47 @@ const monthNames = [
 ];
 
 export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate, isPayrollFinalized = false }: PayrollDetailModalProps) {
+// Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta, descontando feriados)
+// Esta função é um fallback - o ideal é usar o valor do backend que já desconta feriados
+function calculateNextMonthWorkingDays(month: number, year: number, holidays: any[] = []): number {
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const daysInMonth = new Date(nextYear, nextMonth, 0).getDate();
+  
+  // Filtrar apenas feriados do próximo mês
+  const nextMonthHolidays = holidays.filter((h: any) => {
+    const d = new Date(h.date);
+    return d.getFullYear() === nextYear && d.getMonth() + 1 === nextMonth;
+  });
+  
+  // Criar um Set com as datas dos feriados do próximo mês no formato YYYY-MM-DD
+  const holidaySet = new Set(
+    nextMonthHolidays.map((h: any) => {
+      const d = new Date(h.date);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    })
+  );
+  
+  let workingDays = 0;
+  
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(nextYear, nextMonth - 1, day);
+    const dayOfWeek = date.getDay(); // 0 = domingo, 1 = segunda, ..., 6 = sábado
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    
+    // Contar apenas dias úteis (1-5 = segunda a sexta), excluindo sábados, domingos e feriados
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && !holidaySet.has(dateKey)) {
+      workingDays++;
+    }
+  }
+  
+  return workingDays;
+}
+
+export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate }: PayrollDetailModalProps) {
   if (!isOpen) return null;
 
   const monthName = monthNames[month - 1];
@@ -27,14 +68,52 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Estados para os valores manuais editáveis
   const [inssRescisao, setInssRescisao] = useState(employee.inssRescisao || 0);
   const [inss13, setInss13] = useState(employee.inss13 || 0);
-  const [editingField, setEditingField] = useState<'inssRescisao' | 'inss13' | null>(null);
+  const [descontoPorFaltas, setDescontoPorFaltas] = useState<number | null>(null);
+  const [dsrPorFalta, setDsrPorFalta] = useState<number | null>(null);
+  const [horasExtrasValue, setHorasExtrasValue] = useState<number | null>(null);
+  const [dsrHEValue, setDsrHEValue] = useState<number | null>(null);
+  const [editingField, setEditingField] = useState<'inssRescisao' | 'inss13' | 'descontoPorFaltas' | 'dsrPorFalta' | 'horasExtras' | 'dsrHE' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Armazenar valores originais para cancelar edição
+  const [originalValues, setOriginalValues] = useState({
+    inssRescisao: employee.inssRescisao || 0,
+    inss13: employee.inss13 || 0,
+    descontoPorFaltas: employee.descontoPorFaltas !== undefined ? employee.descontoPorFaltas : null,
+    dsrPorFalta: employee.dsrPorFalta !== undefined ? employee.dsrPorFalta : null,
+    horasExtrasValue: null,
+    dsrHEValue: null
+  });
 
   // Atualizar estados quando o funcionário mudar
   useEffect(() => {
-    setInssRescisao(employee.inssRescisao || 0);
-    setInss13(employee.inss13 || 0);
+    const newValues = {
+      inssRescisao: employee.inssRescisao || 0,
+      inss13: employee.inss13 || 0,
+      descontoPorFaltas: employee.descontoPorFaltas !== undefined ? employee.descontoPorFaltas : null,
+      dsrPorFalta: employee.dsrPorFalta !== undefined ? employee.dsrPorFalta : null,
+      horasExtrasValue: null,
+      dsrHEValue: null
+    };
+    setOriginalValues(newValues);
+    setInssRescisao(newValues.inssRescisao);
+    setInss13(newValues.inss13);
+    setDescontoPorFaltas(newValues.descontoPorFaltas);
+    setDsrPorFalta(newValues.dsrPorFalta);
+    setHorasExtrasValue(newValues.horasExtrasValue);
+    setDsrHEValue(newValues.dsrHEValue);
   }, [employee]);
+
+  // Função para cancelar edição
+  const handleCancelEdit = () => {
+    setInssRescisao(originalValues.inssRescisao);
+    setInss13(originalValues.inss13);
+    setDescontoPorFaltas(originalValues.descontoPorFaltas);
+    setDsrPorFalta(originalValues.dsrPorFalta);
+    setHorasExtrasValue(originalValues.horasExtrasValue);
+    setDsrHEValue(originalValues.dsrHEValue);
+    setEditingField(null);
+  };
 
   // Converter polo para estado (para buscar feriados)
   const poloToState = (polo?: string | null): string | undefined => {
@@ -45,13 +124,13 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     return undefined;
   };
 
-  // Buscar feriados do mês
+  // Buscar feriados do ano (incluindo próximo mês para cálculo de VA/VT)
   const employeeState = poloToState(employee.polo);
   const { data: holidaysData } = useQuery({
-    queryKey: ['holidays', year, month, employeeState],
+    queryKey: ['holidays', year, employeeState],
     queryFn: async () => {
       const params: any = { year };
-      if (month) params.month = month;
+      // Não especificar mês para buscar todos os feriados do ano (incluindo próximo mês)
       const res = await api.get('/holidays', { params });
       return res.data;
     },
@@ -84,6 +163,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   });
 
   const absenceDates = absencesData?.data?.map((record: any) => new Date(record.timestamp)) || [];
+  const totalAbsences = absenceDates.length;
   
   // Função para salvar os valores manuais
   const handleSaveManualValues = async () => {
@@ -108,7 +188,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
           month,
           year,
           inssRescisao,
-          inss13
+          inss13,
+          descontoPorFaltas: descontoPorFaltas !== null ? descontoPorFaltas : undefined,
+          dsrPorFalta: dsrPorFalta !== null ? dsrPorFalta : undefined,
+          horasExtrasValue: horasExtrasValue !== null ? horasExtrasValue : undefined,
+          dsrHEValue: dsrHEValue !== null ? dsrHEValue : undefined
         })
       });
 
@@ -128,8 +212,24 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
         const updatedEmployeeData = await employeeResponse.json();
         if (updatedEmployeeData.success && updatedEmployeeData.data) {
           // Atualizar os estados locais
-          setInssRescisao(updatedEmployeeData.data.inssRescisao || 0);
-          setInss13(updatedEmployeeData.data.inss13 || 0);
+          const newValues = {
+            inssRescisao: updatedEmployeeData.data.inssRescisao || 0,
+            inss13: updatedEmployeeData.data.inss13 || 0,
+            descontoPorFaltas: updatedEmployeeData.data.descontoPorFaltas !== undefined ? updatedEmployeeData.data.descontoPorFaltas : null,
+            dsrPorFalta: updatedEmployeeData.data.dsrPorFalta !== undefined ? updatedEmployeeData.data.dsrPorFalta : null,
+            horasExtrasValue: updatedEmployeeData.data.horasExtrasValue !== undefined ? updatedEmployeeData.data.horasExtrasValue : null,
+            dsrHEValue: updatedEmployeeData.data.dsrHEValue !== undefined ? updatedEmployeeData.data.dsrHEValue : null
+          };
+          
+          setInssRescisao(newValues.inssRescisao);
+          setInss13(newValues.inss13);
+          setDescontoPorFaltas(newValues.descontoPorFaltas);
+          setDsrPorFalta(newValues.dsrPorFalta);
+          setHorasExtrasValue(newValues.horasExtrasValue);
+          setDsrHEValue(newValues.dsrHEValue);
+          
+          // Atualizar valores originais para o próximo cancelamento
+          setOriginalValues(newValues);
           
           // Notificar o componente pai sobre a atualização
           if (onEmployeeUpdate) {
@@ -152,7 +252,9 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const periculosidade = employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0;
   const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
   const salarioFamilia = employee.familySalary || 0;
-  const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
+  // Usar absences do backend (sempre 0 para ausências justificadas) ao invés de calcular pela diferença
+  // O backend já retorna absences: 0 quando há apenas ausências justificadas (folgas)
+  const faltas = employee.absences !== undefined ? employee.absences : 0;
   
   // Calcular número de dias do mês para desconto de faltas
   // Usa 30 como padrão, ou 31 apenas se for o mês de admissão E o mês de admissão tiver 31 dias
@@ -174,15 +276,18 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   // Calcular número de dias do mês atual (para outros cálculos)
   const diasDoMes = new Date(year, month, 0).getDate(); // Último dia do mês
   
-  const descontoPorFaltas = (salarioBase / 30) * faltas;
+  // Calcular desconto por faltas (usar valor manual se existir)
+  // Usar a mesma fórmula do backend: (salarioBase + periculosidade + insalubridade) / diasParaDesconto * faltas
+  const descontoPorFaltasCalculado = diasParaDesconto > 0 ? ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas : 0;
+  const descontoPorFaltasFinal = (descontoPorFaltas !== null && descontoPorFaltas !== undefined) ? Number(descontoPorFaltas) : descontoPorFaltasCalculado;
   
   // Debug: verificar valores
   if (faltas > 0) {
     console.log('🔍 Debug DSR por Falta:', {
       salarioBase,
       faltas,
-      descontoPorFaltas: descontoPorFaltas.toFixed(2),
-      calculo: `(${salarioBase} / 30) * ${faltas} = ${descontoPorFaltas.toFixed(2)}`
+      descontoPorFaltas: (descontoPorFaltasFinal || 0).toFixed(2),
+      calculo: `(${salarioBase} / 30) * ${faltas} = ${(descontoPorFaltasFinal || 0).toFixed(2)}`
     });
   }
   
@@ -190,13 +295,11 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const descontoPericInsalub = ((periculosidade + insalubridade) / 30) * faltas;
   
   // Cálculo do DSR por Falta considerando feriados
-  // Lógica:
-  // - Se faltas estão na mesma semana: conta apenas 1 DSR total pelas faltas
-  // - Se faltas estão em semanas diferentes: conta 1 DSR por cada falta
-  // - Cada feriado do mês sempre adiciona 1 DSR (independente da semana)
-  // Exemplo: 2 faltas mesma semana + 2 feriados = 1 DSR (faltas) + 2 DSR (feriados) = 3 DSR
-  // Exemplo: 2 faltas semanas diferentes + 2 feriados = 2 DSR (faltas) + 2 DSR (feriados) = 4 DSR
-  let dsrPorFalta = 0;
+  // Nova lógica:
+  // - Se faltar em uma semana que tem feriado, perde: 1 DSR pela falta + 1 DSR por cada feriado daquela semana
+  // - Exemplo: 1 falta em semana com 2 feriados = 1 DSR (falta) + 2 DSR (feriados) = 3 DSR
+  // - Exemplo: 2 faltas em semanas diferentes, uma com 1 feriado = 1 DSR (falta semana 1) + 1 DSR (feriado semana 1) + 1 DSR (falta semana 2) = 3 DSR
+  let dsrPorFaltaCalculado = 0;
   let referenciaDSR = '';
   
   if (faltas > 0) {
@@ -206,8 +309,6 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
       const dayOfWeek = holidayDate.getDay();
       return dayOfWeek >= 1 && dayOfWeek <= 6; // Segunda a sábado
     });
-
-    const quantidadeFeriados = feriadosUteis.length;
 
     // Função para obter o início da semana (domingo) de uma data
     const getWeekStart = (date: Date): Date => {
@@ -219,40 +320,54 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
       return weekStart;
     };
 
-    // Se temos as datas das faltas, verificar quantas semanas diferentes têm faltas
+    // Se temos as datas das faltas, calcular DSR por semana com falta
     if (absenceDates.length > 0 && absenceDates.length === faltas) {
       // Agrupar faltas por semana
-      const semanasComFaltas = new Set<string>();
+      const semanasComFaltas = new Map<string, number>(); // semana -> quantidade de faltas
       absenceDates.forEach((absenceDate: Date) => {
         const weekStart = getWeekStart(absenceDate);
-        semanasComFaltas.add(weekStart.toISOString());
+        const weekKey = weekStart.toISOString();
+        semanasComFaltas.set(weekKey, (semanasComFaltas.get(weekKey) || 0) + 1);
       });
 
-      const numSemanasComFaltas = semanasComFaltas.size;
+      let totalDSR = 0;
+      const detalhesSemanas: string[] = [];
 
-      // DSR das faltas: 1 DSR por semana com faltas (não importa quantas faltas na semana)
-      const dsrDasFaltas = (salarioBase / 30) * numSemanasComFaltas;
+      // Para cada semana com falta, calcular DSR
+      semanasComFaltas.forEach((numFaltasNaSemana, weekKey) => {
+        const weekStart = new Date(weekKey);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6); // Fim da semana (sábado)
 
-      // Cada feriado do mês sempre adiciona 1 DSR
-      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados;
-      
-      dsrPorFalta = dsrDasFaltas + dsrDosFeriados;
+        // Contar quantos feriados estão nesta semana específica
+        const feriadosNaSemana = feriadosUteis.filter((holiday: any) => {
+          const holidayDate = new Date(holiday.date);
+          return holidayDate >= weekStart && holidayDate <= weekEnd;
+        }).length;
 
-      if (quantidadeFeriados === 0) {
-        referenciaDSR = numSemanasComFaltas === 1
-          ? `${faltas} falta(s) em 1 semana (1 DSR)`
-          : `${faltas} falta(s) em ${numSemanasComFaltas} semanas diferentes (${numSemanasComFaltas} DSR)`;
-      } else {
-        referenciaDSR = numSemanasComFaltas === 1
-          ? `${faltas} falta(s) em 1 semana (1 DSR) + ${quantidadeFeriados} feriado(s) (${quantidadeFeriados} DSR)`
-          : `${faltas} falta(s) em ${numSemanasComFaltas} semanas (${numSemanasComFaltas} DSR) + ${quantidadeFeriados} feriado(s) (${quantidadeFeriados} DSR)`;
-      }
+        // DSR = 1 pela semana (independente de quantas faltas) + 1 por cada feriado da semana
+        // Exemplo: 2 faltas na mesma semana + 1 feriado = 1 DSR (semana) + 1 DSR (feriado) = 2 DSR
+        // Exemplo: 1 falta semana 1 (com 1 feriado) + 1 falta semana 2 = 1 DSR (semana 1) + 1 DSR (feriado semana 1) + 1 DSR (semana 2) = 3 DSR
+        const dsrDaSemana = 1 + feriadosNaSemana;
+        totalDSR += dsrDaSemana;
+
+        // Montar detalhe para exibição
+        if (feriadosNaSemana > 0) {
+          detalhesSemanas.push(`${numFaltasNaSemana} falta(s) na semana + ${feriadosNaSemana} feriado(s) (${dsrDaSemana} DSR)`);
+        } else {
+          detalhesSemanas.push(`${numFaltasNaSemana} falta(s) na semana (1 DSR)`);
+        }
+      });
+
+      dsrPorFaltaCalculado = (salarioBase / 30) * totalDSR;
+      referenciaDSR = detalhesSemanas.join(' | ');
     } else {
       // Fallback: se não temos as datas exatas, assumir que estão em semanas diferentes
-      // (mais conservador: desconta mais)
-      const dsrDasFaltas = (salarioBase / 30) * faltas; // 1 DSR por falta
-      const dsrDosFeriados = (salarioBase / 30) * quantidadeFeriados; // 1 DSR por feriado
-      dsrPorFalta = dsrDasFaltas + dsrDosFeriados;
+      // Contar todos os feriados do mês
+      const quantidadeFeriados = feriadosUteis.length;
+      // 1 DSR por falta + 1 DSR por cada feriado (assumindo que pode estar na mesma semana)
+      const totalDSR = faltas + quantidadeFeriados;
+      dsrPorFaltaCalculado = (salarioBase / 30) * totalDSR;
 
       if (quantidadeFeriados === 0) {
         referenciaDSR = `${faltas} falta(s) - Sem feriado no mês (1 DSR por falta)`;
@@ -264,54 +379,95 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     referenciaDSR = '-';
   }
   
+  // Usar valor manual de DSR se existir, senão usar o calculado
+  const dsrPorFaltaFinal = (dsrPorFalta !== null && dsrPorFalta !== undefined) ? Number(dsrPorFalta) : dsrPorFaltaCalculado;
+  
   // Cálculos de %VA e %VT baseados no polo
-  const percentualVA = employee.polo === 'BRASÍLIA' ? (employee.totalFoodVoucher || 0) * 0.09 : 0;
+  // VA%: Se não for MEI, então (25,2 × dias da referência do VA) × 0,09
+  // VA/VT são correspondentes ao próximo mês
+  // SEMPRE calcular no frontend para garantir que está correto (descontando feriados)
+  // O backend pode retornar valores incorretos, então sempre recalcular
+  const calculatedNextMonthWorkingDays = calculateNextMonthWorkingDays(month, year, holidays);
+  // Usar o valor calculado no frontend, que é mais confiável
+  const nextMonthWorkingDays = calculatedNextMonthWorkingDays;
+  // SEMPRE calcular no frontend descontando faltas e ausências do mês atual
+  // Dias úteis do próximo mês - faltas do mês atual - ausências/folgas do mês atual
+  const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+  const daysForVT = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+  // Calcular valores totais de VA e VT baseados nos dias calculados
+  const totalVA = daysForVA * (employee.dailyFoodVoucher || 0);
+  const totalVT = daysForVT * (employee.dailyTransportVoucher || 0);
+  const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
   const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
   
   // Cálculo do DSR H.E (Descanso Semanal Remunerado sobre Horas Extras)
   const totalHorasExtras = (employee.he50Hours || 0) + (employee.he100Hours || 0);
   const diasUteis = employee.totalWorkingDays || 0; // Segunda a Sábado
   const diasNaoUteis = diasDoMes - diasUteis; // Domingo + feriados
-  const dsrHE = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+  const dsrHECalculado = diasUteis > 0 ? (totalHorasExtras / diasUteis) * diasNaoUteis : 0;
+  
+  // Usar valor manual de DSR HE se existir, senão usar o calculado
+  const dsrHE = (dsrHEValue !== null && dsrHEValue !== undefined) ? Number(dsrHEValue) : dsrHECalculado;
   
   // Cálculo do valor do DSR H.E considerando as diferentes taxas
   // he50Hours e he100Hours já vêm multiplicados do backend
-  const valorDSRHE = diasUteis > 0 ? 
+  const valorDSRHECalculado = diasUteis > 0 ? 
     ((employee.he50Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0) +  // DSR sobre HE 50% (já multiplicado)
     ((employee.he100Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0)   // DSR sobre HE 100% (já multiplicado)
     : 0;
   
+  // Usar valor manual se existir, senão usar o calculado
+  const valorDSRHE = (dsrHEValue !== null && dsrHEValue !== undefined) 
+    ? (dsrHEValue * (employee.hourlyRate || 0))
+    : valorDSRHECalculado;
+  
   // Cálculo da BASE INSS MENSAL
-  const valorHorasExtras = (employee.he50Value || 0) + (employee.he100Value || 0);
+  // Usar valor manual de horas extras se existir, senão usar o calculado
+  const valorHorasExtras = (horasExtrasValue !== null && horasExtrasValue !== undefined) 
+    ? Number(horasExtrasValue) 
+    : ((employee.he50Value || 0) + (employee.he100Value || 0));
   const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
     ? 0 
-    : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
+    : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltasFinal - dsrPorFaltaFinal);
   
   // Cálculo do INSS MENSAL (Tabela Progressiva)
   const calcularINSS = (baseINSS: number): number => {
     if (baseINSS <= 0) return 0;
     
-    if (baseINSS <= 1518) {
-      return baseINSS * 0.075; // 7,5%
-    } else if (baseINSS <= 2793) {
-      return (1518 * 0.075) + ((baseINSS - 1518) * 0.09); // 7,5% até 1518 + 9% do excedente
-    } else if (baseINSS <= 4190) {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((baseINSS - 2793) * 0.12); // 7,5% até 1518 + 9% até 2793 + 12% do excedente
-    } else if (baseINSS <= 8157) {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((baseINSS - 4190) * 0.14); // 7,5% até 1518 + 9% até 2793 + 12% até 4190 + 14% do excedente
-    } else {
-      return (1518 * 0.075) + ((2793 - 1518) * 0.09) + ((4190 - 2793) * 0.12) + ((8157 - 4190) * 0.14); // Teto máximo
+    // Tabela progressiva (alinhada com a planilha do cliente)
+    const faixa1 = 1621.0;
+    const faixa2 = 2902.84;
+    const faixa3 = 4354.27;
+    const teto = 8475.55;
+
+    const base = Math.min(baseINSS, teto);
+
+    if (base <= faixa1) {
+      return base * 0.075;
     }
+    if (base <= faixa2) {
+      return (faixa1 * 0.075) + ((base - faixa1) * 0.09);
+    }
+    if (base <= faixa3) {
+      return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((base - faixa2) * 0.12);
+    }
+    return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((faixa3 - faixa2) * 0.12) + ((base - faixa3) * 0.14);
   };
   
   const inssMensal = calcularINSS(baseINSSMensal);
   const irrfMensal = employee.irrfMensal || 0;
   
+  // Calcular Base IRRF para tooltip
+  const salarioBruto = salarioBase + periculosidade + insalubridade + salarioFamilia;
+  const baseIRRF = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+    ? 0 
+    : Math.max(0, salarioBruto - 607.20);
+  
   // Cálculo do DCTFWEB: (INSS Total + IRRF Total) - Salário Família
   const dctfweb = ((employee.inssTotal || 0) + (employee.irrfTotal || 0)) - salarioFamilia;
   
-  const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + (employee.totalTransportVoucher || 0);
-  const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFalta + percentualVA + percentualVT + inssMensal + irrfMensal;
+  const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + totalVT;
+  const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltasFinal + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
   const liquidoReceber = totalProventos - totalDescontos;
   
   // Cálculo com acréscimos
@@ -506,10 +662,42 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       SALÁRIO BASE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {employee.daysWorked} dias
+                        </span>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Dias Trabalhados:</div>
+                            <div className="space-y-1">
+                              <div>📅 Dias úteis do mês: <span className="font-bold text-green-400">{employee.totalWorkingDays || 0}</span></div>
+                              <div>❌ Faltas: <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                              <div>🏥 Ausências: <span className="font-bold text-yellow-400">{totalAbsences || 0}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Dias trabalhados: <span className="font-bold text-green-400">{employee.daysWorked} dias</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Salário Base:</div>
+                            <div className="space-y-1">
+                              <div>💰 Valor mensal: <span className="font-bold text-green-400">R$ {salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              <div className="text-gray-400 mt-2 text-xs">💡 Valor fixo do salário contratual do funcionário</div>
+                            </div>
+                            <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -525,17 +713,82 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       PERICULOSIDADE + INSALUBRIDADE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {employee.dangerPay || 0}% / {employee.unhealthyPay || 0}%
+                        </span>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo de Adicionais:</div>
+                            <div className="space-y-1">
+                              {employee.dangerPay > 0 && (
+                                <div>⚠️ Periculosidade: <span className="font-bold text-blue-400">{employee.dangerPay}% sobre salário</span></div>
+                              )}
+                              {employee.unhealthyPay > 0 && (
+                                <div>🏭 Insalubridade: <span className="font-bold text-blue-400">{employee.unhealthyPay}% sobre R$ 1.518,00</span></div>
+                              )}
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>💰 Periculosidade: <span className="font-bold text-green-400">R$ {periculosidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div>💰 Insalubridade: <span className="font-bold text-green-400">R$ {insalubridade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                {descontoPericInsalub > 0 && (
+                                  <div className="text-red-400 mt-1">❌ Desconto por faltas: R$ {descontoPericInsalub.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {Math.max(0, (periculosidade + insalubridade) - descontoPericInsalub).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Valor Líquido:</div>
+                            <div className="space-y-1">
+                              <div>💰 Periculosidade: <span className="font-bold text-green-400">R$ {periculosidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              <div>💰 Insalubridade: <span className="font-bold text-green-400">R$ {insalubridade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              {descontoPericInsalub > 0 && (
+                                <>
+                                  <div>❌ Desconto por faltas: <span className="font-bold text-red-400">- R$ {descontoPericInsalub.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  <div className="border-t border-gray-700 mt-2 pt-2">
+                                    <div>✅ Total: <span className="font-bold text-green-400">R$ {Math.max(0, (periculosidade + insalubridade) - descontoPericInsalub).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
                       {descontoPericInsalub > 0 ? (
-                        <>R$ {descontoPericInsalub.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
+                          <>
+                            <span className="cursor-help">
+                              R$ {descontoPericInsalub.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                              <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                                <div className="font-semibold mb-2 text-yellow-400">Desconto por Faltas:</div>
+                                <div className="space-y-1">
+                                  <div>📊 Fórmula: <span className="font-bold text-blue-400">(Periculosidade + Insalubridade) / 30 × Faltas</span></div>
+                                  <div className="border-t border-gray-700 mt-2 pt-2">
+                                    <div>✅ Desconto: <span className="font-bold text-red-400">R$ {descontoPericInsalub.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  </div>
+                                </div>
+                                <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                              </div>
+                            </div>
+                          </>
                       ) : (
                         <>-</>
                       )}
+                      </div>
                     </td>
                   </tr>
 
@@ -551,7 +804,23 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {salarioFamilia.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {salarioFamilia > 0 && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Salário Família:</div>
+                              <div className="space-y-1">
+                                <div>💰 Valor: <span className="font-bold text-green-400">R$ {salarioFamilia.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Benefício pago a trabalhadores com filhos menores de 14 anos ou inválidos</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -570,7 +839,23 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {(employee.totalAdjustments || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {(employee.totalAdjustments || 0) > 0 && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Acréscimos:</div>
+                              <div className="space-y-1">
+                                <div>💰 Total: <span className="font-bold text-green-400">R$ {(employee.totalAdjustments || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Valores adicionais cadastrados manualmente</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -586,10 +871,45 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE ALIMENTAÇÃO
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.daysWorked} dias
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {daysForVA} dias
+                        </span>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo de VA/VT:</div>
+                            <div className="space-y-1">
+                              <div>📅 Dias úteis (próximo mês): <span className="font-bold text-green-400">{nextMonthWorkingDays}</span></div>
+                              <div>❌ Faltas (mês atual): <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                              <div>🏥 Ausências (mês atual): <span className="font-bold text-yellow-400">{totalAbsences || 0}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {daysForVA} dias</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {(employee.totalFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                      R$ {totalVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo do Valor:</div>
+                            <div className="space-y-1">
+                              <div>📊 Referência: <span className="font-bold text-green-400">{daysForVA} dias</span></div>
+                              <div>💰 VA Diário: <span className="font-bold text-blue-400">R$ {(employee.dailyFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{daysForVA} × R$ {(employee.dailyFoodVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {totalVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -605,10 +925,45 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VALE TRANSPORTE
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.daysWorked} dias
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {daysForVT} dias
+                        </span>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo de VA/VT:</div>
+                            <div className="space-y-1">
+                              <div>📅 Dias úteis (próximo mês): <span className="font-bold text-green-400">{nextMonthWorkingDays}</span></div>
+                              <div>❌ Faltas (mês atual): <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                              <div>🏥 Ausências (mês atual): <span className="font-bold text-yellow-400">{totalAbsences || 0}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{nextMonthWorkingDays} - {faltas || 0} - {totalAbsences || 0} = {daysForVA} dias</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {(employee.totalTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                      R$ {totalVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                          <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                            <div className="font-semibold mb-2 text-yellow-400">Cálculo do Valor:</div>
+                            <div className="space-y-1">
+                              <div>📊 Referência: <span className="font-bold text-green-400">{daysForVT} dias</span></div>
+                              <div>💰 VT Diário: <span className="font-bold text-blue-400">R$ {(employee.dailyTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              <div className="border-t border-gray-700 mt-2 pt-2">
+                                <div>✅ Total: <span className="font-bold text-green-400">{daysForVT} × R$ {(employee.dailyTransportVoucher || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {totalVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                              </div>
+                            </div>
+                            <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -624,10 +979,99 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       HORAS EXTRAS
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {((employee.he50Hours || 0) + (employee.he100Hours || 0)).toFixed(2)}h
+                        </span>
+                        {((employee.he50Hours || 0) + (employee.he100Hours || 0)) > 0 && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Horas Extras:</div>
+                              <div className="space-y-1">
+                                {(employee.he50Hours || 0) > 0 && (
+                                  <div>⏰ HE 50%: <span className="font-bold text-blue-400">{(employee.he50Hours || 0).toFixed(2)}h</span></div>
+                                )}
+                                {(employee.he100Hours || 0) > 0 && (
+                                  <div>⏰ HE 100%: <span className="font-bold text-blue-400">{(employee.he100Hours || 0).toFixed(2)}h</span></div>
+                                )}
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Total: <span className="font-bold text-green-400">{((employee.he50Hours || 0) + (employee.he100Hours || 0)).toFixed(2)}h</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {((employee.he50Value || 0) + (employee.he100Value || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('horasExtras')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'horasExtras' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={horasExtrasValue === null || horasExtrasValue === 0 ? '' : horasExtrasValue.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setHorasExtrasValue(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative group inline-block">
+                          <span className="cursor-help">
+                          R$ {valorHorasExtras.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                          {valorHorasExtras > 0 && (
+                            <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                              <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                                <div className="font-semibold mb-2 text-yellow-400">Cálculo de Horas Extras:</div>
+                                <div className="space-y-1">
+                                  {(employee.he50Hours || 0) > 0 && (
+                                    <div>💰 HE 50%: <span className="font-bold text-blue-400">{(employee.he50Hours || 0).toFixed(2)}h × R$ {(employee.hourlyRate || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 1,5 = R$ {(employee.he50Value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {(employee.he100Hours || 0) > 0 && (
+                                    <div>💰 HE 100%: <span className="font-bold text-blue-400">{(employee.he100Hours || 0).toFixed(2)}h × R$ {(employee.hourlyRate || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 2,0 = R$ {(employee.he100Value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  <div className="border-t border-gray-700 mt-2 pt-2">
+                                    <div>✅ Total: <span className="font-bold text-green-400">R$ {valorHorasExtras.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  </div>
+                                </div>
+                                <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -643,10 +1087,92 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       DSR POR HORAS EXTRAS
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {dsrHE.toFixed(2)}h
+                        </span>
+                        {dsrHE > 0 && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do DSR H.E:</div>
+                              <div className="space-y-1">
+                                <div>📅 Total H.E: <span className="font-bold text-blue-400">{((employee.he50Hours || 0) + (employee.he100Hours || 0)).toFixed(2)}h</span></div>
+                                <div>📅 Dias úteis: <span className="font-bold text-green-400">{diasUteis} dias</span></div>
+                                <div>📅 Dias não úteis: <span className="font-bold text-yellow-400">{diasNaoUteis} dias</span></div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ DSR H.E: <span className="font-bold text-green-400">({((employee.he50Hours || 0) + (employee.he100Hours || 0)).toFixed(2)}h / {diasUteis}) × {diasNaoUteis} = {dsrHE.toFixed(2)}h</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {(dsrHE * (employee.hourlyRate || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('dsrHE')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'dsrHE' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={dsrHEValue === null || dsrHEValue === 0 ? '' : dsrHEValue.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setDsrHEValue(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative group inline-block">
+                          <span className="cursor-help">
+                          R$ {valorDSRHE.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                          {valorDSRHE > 0 && (
+                            <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                              <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                                <div className="font-semibold mb-2 text-yellow-400">Cálculo do Valor DSR H.E:</div>
+                                <div className="space-y-1">
+                                  <div>📊 DSR H.E: <span className="font-bold text-blue-400">{dsrHE.toFixed(2)}h</span></div>
+                                  <div>💰 Valor hora: <span className="font-bold text-blue-400">R$ {(employee.hourlyRate || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  <div className="border-t border-gray-700 mt-2 pt-2">
+                                    <div>✅ Total: <span className="font-bold text-green-400">{dsrHE.toFixed(2)}h × R$ {(employee.hourlyRate || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = R$ {valorDSRHE.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  </div>
+                                </div>
+                                <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -677,7 +1203,23 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {(employee.totalDiscounts || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {(employee.totalDiscounts || 0) > 0 && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Descontos:</div>
+                              <div className="space-y-1">
+                                <div>💰 Total: <span className="font-bold text-red-400">R$ {(employee.totalDiscounts || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Valores descontados cadastrados manualmente</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -690,13 +1232,92 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       FALTAS
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {faltas || 0} faltas
+                        </span>
+                        {faltas > 0 && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Faltas:</div>
+                              <div className="space-y-1">
+                                <div>❌ Total de faltas: <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Faltas não justificadas que resultam em desconto no salário</div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
-                      R$ {(descontoPorFaltas || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('descontoPorFaltas')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'descontoPorFaltas' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={descontoPorFaltas === null || descontoPorFaltas === 0 ? '' : descontoPorFaltas.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setDescontoPorFaltas(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative group inline-block">
+                          <span className="cursor-help">
+                          R$ {descontoPorFaltasFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                          {descontoPorFaltasFinal > 0 && (
+                            <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                              <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                                <div className="font-semibold mb-2 text-yellow-400">Cálculo do Desconto por Faltas:</div>
+                                <div className="space-y-1">
+                                  <div>📊 Faltas: <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                                  <div>💰 Salário + Adicionais: <span className="font-bold text-blue-400">R$ {(salarioBase + periculosidade + insalubridade).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  <div>📅 Dias para desconto: <span className="font-bold text-blue-400">{diasParaDesconto} dias</span></div>
+                                  <div className="border-t border-gray-700 mt-2 pt-2">
+                                    <div>✅ Desconto: <span className="font-bold text-red-400">(R$ {(salarioBase + periculosidade + insalubridade).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / {diasParaDesconto}) × {faltas} = R$ {descontoPorFaltasFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  </div>
+                                </div>
+                                <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
 
@@ -709,18 +1330,93 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       DSR POR FALTA
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
                       <div className="flex flex-col items-center">
-                        <span className="font-medium">{faltas || 0} falta(s)</span>
+                          <span className="font-medium cursor-help">{faltas || 0} falta(s)</span>
                         {referenciaDSR && referenciaDSR !== '-' && (
                           <span className="text-xs mt-1 text-gray-500 dark:text-gray-400">{referenciaDSR}</span>
+                          )}
+                        </div>
+                        {faltas > 0 && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">DSR por Falta:</div>
+                              <div className="space-y-1">
+                                <div>📊 Faltas: <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                                <div>📅 Referência: <span className="font-bold text-blue-400">{referenciaDSR || 'Calculado automaticamente'}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 DSR (Descanso Semanal Remunerado) proporcional às faltas</div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
                         )}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
-                      R$ {(dsrPorFalta || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('dsrPorFalta')}
+                      title="Clique para editar"
+                    >
+                      {editingField === 'dsrPorFalta' ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="text"
+                            value={dsrPorFalta === null || dsrPorFalta === 0 ? '' : dsrPorFalta.toString()}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.,]/g, '');
+                              setDsrPorFalta(value ? parseFloat(value.replace(',', '.')) : null);
+                            }}
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
+                            title="Salvar"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative group inline-block">
+                          <span className="cursor-help">
+                          R$ {dsrPorFaltaFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                          {dsrPorFaltaFinal > 0 && (
+                            <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                              <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                                <div className="font-semibold mb-2 text-yellow-400">Cálculo do DSR por Falta:</div>
+                                <div className="space-y-1">
+                                  <div>📊 Faltas: <span className="font-bold text-red-400">{faltas || 0}</span></div>
+                                  <div>💰 Desconto por faltas: <span className="font-bold text-blue-400">R$ {descontoPorFaltasFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  <div className="text-gray-400 mt-2 text-xs">💡 DSR proporcional calculado sobre o desconto de faltas</div>
+                                </div>
+                                <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
 
@@ -733,13 +1429,50 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VA%
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.polo === 'BRASÍLIA' ? '9% do VA' : 'Não aplicável'}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {employee.modality !== 'MEI' ? `(25,2 × ${daysForVA} dias) × 9%` : 'Não aplicável'}
+                        </span>
+                        {employee.modality !== 'MEI' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do %VA:</div>
+                              <div className="space-y-1">
+                                <div>📊 Valor diário VA: <span className="font-bold text-blue-400">R$ 25,20</span></div>
+                                <div>📅 Dias de referência: <span className="font-bold text-green-400">{daysForVA} dias</span></div>
+                                <div>💰 Valor total VA: <span className="font-bold text-blue-400">R$ 25,20 × {daysForVA} = R$ {(25.2 * daysForVA).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Desconto 9%: <span className="font-bold text-green-400">R$ {(25.2 * daysForVA).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 9% = R$ {percentualVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {percentualVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-72">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do %VA:</div>
+                              <div className="space-y-1">
+                                <div>📊 Fórmula: <span className="font-bold text-blue-400">(25,2 × {daysForVA} dias) × 9%</span></div>
+                                <div>💰 Cálculo: <span className="font-bold text-green-400">R$ {(25.2 * daysForVA).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 9% = R$ {percentualVA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Desconto de 9% sobre o valor total do VA</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -752,13 +1485,51 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       VT%
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {employee.polo === 'GOIÁS' ? '6% do salário' : 'Não aplicável'}
+                        </span>
+                        {employee.polo === 'GOIÁS' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do %VT:</div>
+                              <div className="space-y-1">
+                                <div>📊 Polo: <span className="font-bold text-blue-400">GOIÁS</span></div>
+                                <div>💰 Salário Base: <span className="font-bold text-green-400">R$ {salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Desconto 6%: <span className="font-bold text-green-400">R$ {salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 6% = R$ {percentualVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-semibold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {percentualVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.polo === 'GOIÁS' && percentualVT > 0 && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do %VT:</div>
+                              <div className="space-y-1">
+                                <div>📊 Fórmula: <span className="font-bold text-blue-400">Salário Base × 6%</span></div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Desconto: <span className="font-bold text-red-400">R$ {salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 6% = R$ {percentualVT.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Aplicável apenas para funcionários do polo GOIÁS</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -780,10 +1551,56 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       BASE INSS MENSAL
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Mensal'}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Base de Cálculo do INSS:</div>
+                              <div className="space-y-1">
+                                <div>📊 A base INSS é calculada sobre:</div>
+                                <div className="ml-2 space-y-1">
+                                  <div>• Salário Base: <span className="font-bold text-green-400">R$ {salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  {periculosidade > 0 && <div>• Periculosidade: <span className="font-bold text-green-400">R$ {periculosidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {insalubridade > 0 && <div>• Insalubridade: <span className="font-bold text-green-400">R$ {insalubridade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {valorHorasExtras > 0 && <div>• Horas Extras: <span className="font-bold text-green-400">R$ {valorHorasExtras.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {valorDSRHE > 0 && <div>• DSR H.E: <span className="font-bold text-green-400">R$ {valorDSRHE.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {descontoPorFaltasFinal > 0 && <div>• Desconto Faltas: <span className="font-bold text-red-400">- R$ {descontoPorFaltasFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                  {dsrPorFaltaFinal > 0 && <div>• DSR Falta: <span className="font-bold text-red-400">- R$ {dsrPorFaltaFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+                                </div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Base INSS: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo da Base INSS:</div>
+                              <div className="space-y-1">
+                                <div>💰 Fórmula: <span className="font-bold text-blue-400">(Salário + Adicionais + HE + DSR HE) - Descontos</span></div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ Base INSS: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Esta base será usada para calcular o INSS com a tabela progressiva</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -799,13 +1616,87 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       INSS MENSAL
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela Progressiva'}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Tabela Progressiva INSS:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base INSS: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2 space-y-1">
+                                  {baseINSSMensal <= 1621.0 && (
+                                    <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                  )}
+                                  {baseINSSMensal > 1621.0 && baseINSSMensal <= 2902.84 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                      <div>• Faixa 2 (R$ 1.621,01 até R$ 2.902,84): <span className="font-bold text-blue-400">9%</span></div>
+                                    </>
+                                  )}
+                                  {baseINSSMensal > 2902.84 && baseINSSMensal <= 4354.27 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                      <div>• Faixa 2 (R$ 1.621,01 até R$ 2.902,84): <span className="font-bold text-blue-400">9%</span></div>
+                                      <div>• Faixa 3 (R$ 2.902,85 até R$ 4.354,27): <span className="font-bold text-blue-400">12%</span></div>
+                                    </>
+                                  )}
+                                  {baseINSSMensal > 4354.27 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 1.621,00): <span className="font-bold text-blue-400">7,5%</span></div>
+                                      <div>• Faixa 2 (R$ 1.621,01 até R$ 2.902,84): <span className="font-bold text-blue-400">9%</span></div>
+                                      <div>• Faixa 3 (R$ 2.902,85 até R$ 4.354,27): <span className="font-bold text-blue-400">12%</span></div>
+                                      <div>• Faixa 4 (R$ 4.354,28 até R$ 8.475,55): <span className="font-bold text-blue-400">14%</span></div>
+                                    </>
+                                  )}
+                                </div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ INSS Calculado: <span className="font-bold text-green-400">R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do INSS Mensal:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base INSS: <span className="font-bold text-blue-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2">
+                                  {baseINSSMensal <= 1621.0 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">R$ {baseINSSMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 7,5% = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseINSSMensal > 1621.0 && baseINSSMensal <= 2902.84 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ 1.621,00 × 7,5%) + (R$ {(baseINSSMensal - 1621.0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 9%) = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseINSSMensal > 2902.84 && baseINSSMensal <= 4354.27 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ 1.621,00 × 7,5%) + (R$ 1.281,84 × 9%) + (R$ {(baseINSSMensal - 2902.84).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 12%) = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseINSSMensal > 4354.27 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ 1.621,00 × 7,5%) + (R$ 1.281,84 × 9%) + (R$ 1.451,43 × 12%) + (R$ {Math.min(baseINSSMensal - 4354.27, 4121.28).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 14%) = R$ {inssMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                </div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Teto máximo: R$ 8.475,55</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -818,10 +1709,43 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       BASE INSS FÉRIAS
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality === 'MEI' || employee.modality === 'ESTÁGIO' ? 'Não aplicável' : `${employee.vacationDays || 0} dias`}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {employee.modality === 'MEI' || employee.modality === 'ESTÁGIO' ? 'Não aplicável' : `${employee.vacationDays || 0} dias`}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTÁGIO' && (employee.vacationDays || 0) > 0 && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Base INSS Férias:</div>
+                              <div className="space-y-1">
+                                <div>📅 Dias de férias: <span className="font-bold text-green-400">{employee.vacationDays || 0} dias</span></div>
+                                <div>💰 Base: <span className="font-bold text-blue-400">R$ {(employee.baseInssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Base de cálculo do INSS sobre férias (1/3 de férias)</div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-green-700 dark:text-green-400 border-r border-gray-200 dark:border-gray-700">
-                      R$ {(employee.baseInssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          R$ {(employee.baseInssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTÁGIO' && (employee.baseInssFerias || 0) > 0 && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Base INSS Férias:</div>
+                              <div className="space-y-1">
+                                <div>💰 Valor: <span className="font-bold text-green-400">R$ {(employee.baseInssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Base para cálculo do INSS sobre férias</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500">
                       -
@@ -837,13 +1761,46 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       INSS FÉRIAS
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality === 'MEI' || employee.modality === 'ESTÁGIO' ? 'Não aplicável' : 'Sobre férias'}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {employee.modality === 'MEI' || employee.modality === 'ESTÁGIO' ? 'Não aplicável' : 'Sobre férias'}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTÁGIO' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">INSS Férias:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base INSS Férias: <span className="font-bold text-blue-400">R$ {(employee.baseInssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div>💰 INSS calculado: <span className="font-bold text-green-400">R$ {(employee.inssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 INSS calculado sobre a base de férias usando tabela progressiva</div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400">
-                      R$ {(employee.inssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          R$ {(employee.inssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTÁGIO' && (employee.inssFerias || 0) > 0 && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-64">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">INSS Férias:</div>
+                              <div className="space-y-1">
+                                <div>💰 Valor: <span className="font-bold text-red-400">R$ {(employee.inssFerias || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 INSS calculado sobre férias usando tabela progressiva</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -861,9 +1818,13 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-center text-sm font-bold text-red-700 dark:text-red-400">
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('inssRescisao')}
+                      title="Clique para editar"
+                    >
                       {editingField === 'inssRescisao' ? (
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <input
                             type="text"
                             value={inssRescisao === 0 ? '' : inssRescisao.toString()}
@@ -875,10 +1836,17 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             disabled={isPayrollFinalized}
                             className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                             placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
                           />
                           <button
                             onClick={handleSaveManualValues}
                             disabled={isSaving || isPayrollFinalized}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
                             title={isPayrollFinalized ? 'Folha finalizada. Não é possível salvar.' : 'Salvar'}
                           >
@@ -904,11 +1872,25 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                                 : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
                             }`}
                             title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Adicionar valor'}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
                           >
-                            <Plus className="w-3 h-3" />
-                            Adicionar
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
+                      ) : (
+                        <span>
+                          {inssRescisao > 0 
+                            ? `R$ ${inssRescisao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : 'R$ 0,00'
+                          }
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -927,9 +1909,13 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
-                    <td className="px-6 py-4 text-center text-sm font-bold text-red-700 dark:text-red-400">
+                    <td 
+                      className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                      onClick={() => setEditingField('inss13')}
+                      title="Clique para editar"
+                    >
                       {editingField === 'inss13' ? (
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <input
                             type="text"
                             value={inss13 === 0 ? '' : inss13.toString()}
@@ -941,10 +1927,17 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                             disabled={isPayrollFinalized}
                             className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                             placeholder="0"
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
                           />
                           <button
                             onClick={handleSaveManualValues}
                             disabled={isSaving || isPayrollFinalized}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveManualValues();
+                            }}
+                            disabled={isSaving}
                             className="p-1 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-500 disabled:opacity-50"
                             title={isPayrollFinalized ? 'Folha finalizada. Não é possível salvar.' : 'Salvar'}
                           >
@@ -970,11 +1963,25 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                                 : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
                             }`}
                             title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Adicionar valor'}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEdit();
+                            }}
+                            disabled={isSaving}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 disabled:opacity-50"
+                            title="Cancelar"
                           >
-                            <Plus className="w-3 h-3" />
-                            Adicionar
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
+                      ) : (
+                        <span>
+                          {inss13 > 0 
+                            ? `R$ ${inss13.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : 'R$ 0,00'
+                          }
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -1016,13 +2023,106 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       IRRF MENSAL
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2025'}
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
+                          {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2026'}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Tabela IRRF 2026:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base IRRF: <span className="font-bold text-green-400">R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2 space-y-1">
+                                  <div>• Salário Bruto: <span className="font-bold text-blue-400">R$ {salarioBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  <div>• Dedução padrão: <span className="font-bold text-red-400">- R$ 607,20</span></div>
+                                  <div className="border-t border-gray-700 mt-1 pt-1">
+                                    <div>✅ Base IRRF: <span className="font-bold text-green-400">R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  </div>
+                                </div>
+                                <div className="text-xs mt-2 space-y-1">
+                                  {baseIRRF <= 5000.00 && (
+                                    <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                  )}
+                                  {baseIRRF > 5000.00 && baseIRRF <= 7423.07 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                    </>
+                                  )}
+                                  {baseIRRF > 7423.07 && baseIRRF <= 9850.63 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                      <div>• Faixa 3 (R$ 7.423,08 até R$ 9.850,63): <span className="font-bold text-blue-400">15% - R$ 738,46</span></div>
+                                    </>
+                                  )}
+                                  {baseIRRF > 9850.63 && baseIRRF <= 12249.92 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                      <div>• Faixa 3 (R$ 7.423,08 até R$ 9.850,63): <span className="font-bold text-blue-400">15% - R$ 738,46</span></div>
+                                      <div>• Faixa 4 (R$ 9.850,64 até R$ 12.249,92): <span className="font-bold text-blue-400">22,5% - R$ 1.284,59</span></div>
+                                    </>
+                                  )}
+                                  {baseIRRF > 12249.92 && (
+                                    <>
+                                      <div>• Faixa 1 (até R$ 5.000,00): <span className="font-bold text-blue-400">Isento</span></div>
+                                      <div>• Faixa 2 (R$ 5.000,01 até R$ 7.423,07): <span className="font-bold text-blue-400">7,5% - R$ 375,00</span></div>
+                                      <div>• Faixa 3 (R$ 7.423,08 até R$ 9.850,63): <span className="font-bold text-blue-400">15% - R$ 738,46</span></div>
+                                      <div>• Faixa 4 (R$ 9.850,64 até R$ 12.249,92): <span className="font-bold text-blue-400">22,5% - R$ 1.284,59</span></div>
+                                      <div>• Faixa 5 (acima de R$ 12.249,92): <span className="font-bold text-blue-400">27,5% - R$ 1.944,42</span></div>
+                                    </>
+                                  )}
+                                </div>
+                                <div className="border-t border-gray-700 mt-2 pt-2">
+                                  <div>✅ IRRF Calculado: <span className="font-bold text-green-400">R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                </div>
+                              </div>
+                              <div className="absolute left-1/2 transform -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-700 dark:text-red-400">
+                      <div className="relative group inline-block">
+                        <span className="cursor-help">
                       R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        {employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && (
+                          <div className="absolute right-0 transform translate-x-0 bottom-full mb-2 hidden group-hover:block z-50 w-80">
+                            <div className="bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 border border-gray-700">
+                              <div className="font-semibold mb-2 text-yellow-400">Cálculo do IRRF Mensal:</div>
+                              <div className="space-y-1">
+                                <div>📊 Base IRRF: <span className="font-bold text-blue-400">R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                <div className="text-xs mt-2">
+                                  {baseIRRF <= 5000.00 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">Isento (base ≤ R$ 5.000,00)</span></div>
+                                  )}
+                                  {baseIRRF > 5000.00 && baseIRRF <= 7423.07 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 7,5%) - R$ 375,00 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseIRRF > 7423.07 && baseIRRF <= 9850.63 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 15%) - R$ 738,46 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseIRRF > 9850.63 && baseIRRF <= 12249.92 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 22,5%) - R$ 1.284,59 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                  {baseIRRF > 12249.92 && (
+                                    <div>💰 Cálculo: <span className="font-bold text-green-400">(R$ {baseIRRF.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × 27,5%) - R$ 1.944,42 = R$ {(employee.irrfMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                  )}
+                                </div>
+                                <div className="text-gray-400 mt-2 text-xs">💡 Base IRRF = Salário Bruto - R$ 607,20</div>
+                              </div>
+                              <div className="absolute right-4 transform translate-x-0 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-800"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -1035,7 +2135,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                       IRRF FÉRIAS
                     </td>
                     <td className="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700">
-                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2025'}
+                      {employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' ? 'Não aplicável' : 'Tabela 2026'}
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
                       -
@@ -1342,7 +2442,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   </div>
                 </div>
                 
-                {/* Dias Trabalhados */}
+                {/* Dias Trabalhados do Mês Atual */}
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center justify-between mb-3">
                     <div className="w-3 h-3 bg-green-500 rounded-full"></div>
@@ -1363,25 +2463,24 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Faltas</span>
                   </div>
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                    {employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0}
+                    {faltas || 0}
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">
                     Total de Faltas
                   </div>
                 </div>
 
-                {/* Percentual de Presença */}
-                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-6 text-white shadow-lg">
+                {/* Ausências */}
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center justify-between mb-3">
-                    <div className="w-3 h-3 bg-white rounded-full"></div>
-                    <span className="text-xs font-medium text-indigo-100 uppercase tracking-wide">Presença</span>
+                    <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Ausências</span>
                   </div>
-                  <div className="text-2xl font-bold text-white mb-1">
-                    {employee.totalWorkingDays ? 
-                      ((employee.daysWorked / employee.totalWorkingDays) * 100).toFixed(1) : 0}%
+                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
+                    {totalAbsences || 0}
                   </div>
-                  <div className="text-sm text-indigo-100">
-                    Taxa de Presença
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    Ausências Justificadas
                   </div>
                 </div>
               </div>
