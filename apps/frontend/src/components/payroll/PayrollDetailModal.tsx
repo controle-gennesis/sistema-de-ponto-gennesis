@@ -19,7 +19,6 @@ const monthNames = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
-export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate, isPayrollFinalized = false }: PayrollDetailModalProps) {
 // Função auxiliar para calcular dias úteis do próximo mês (segunda a sexta, descontando feriados)
 // Esta função é um fallback - o ideal é usar o valor do backend que já desconta feriados
 function calculateNextMonthWorkingDays(month: number, year: number, holidays: any[] = []): number {
@@ -60,7 +59,7 @@ function calculateNextMonthWorkingDays(month: number, year: number, holidays: an
   return workingDays;
 }
 
-export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate }: PayrollDetailModalProps) {
+export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate, isPayrollFinalized = false }: PayrollDetailModalProps) {
   if (!isOpen) return null;
 
   const monthName = monthNames[month - 1];

@@ -951,6 +951,8 @@ model ChatGPTMessage {
   @@index([conversationId])
   @@index([createdAt])
   @@map("chatgpt_messages")
+}
+
 // Modelo para tokens de reset de senha
 model PasswordResetToken {
   id        String   @id @default(cuid())
