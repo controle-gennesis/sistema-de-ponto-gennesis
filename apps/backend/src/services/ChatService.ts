@@ -1,10 +1,9 @@
-import { PrismaClient, ChatStatus } from '@prisma/client';
+import { ChatStatus } from '@prisma/client';
 import AWS from 'aws-sdk';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export interface CreateChatData {
   initiatorId: string;

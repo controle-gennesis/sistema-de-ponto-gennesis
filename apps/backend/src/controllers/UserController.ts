@@ -1,10 +1,8 @@
-import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export class UserController {
   async getAllUsers(req: AuthRequest, res: Response, next: NextFunction) {

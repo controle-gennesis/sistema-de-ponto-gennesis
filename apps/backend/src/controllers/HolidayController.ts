@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { HolidayService } from '../services/HolidayService';

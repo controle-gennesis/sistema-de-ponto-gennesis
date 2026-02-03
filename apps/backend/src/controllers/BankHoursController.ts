@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { TimeRecordService } from '../services/TimeRecordService';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const timeRecordService = new TimeRecordService();
 
 export class BankHoursController {

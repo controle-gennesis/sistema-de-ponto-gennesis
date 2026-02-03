@@ -1,9 +1,12 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { PayrollService, PayrollFilters } from '../services/PayrollService';
+import { PayrollStatusService } from '../services/PayrollStatusService';
+import { prisma } from '../lib/prisma';
 
 const payrollService = new PayrollService();
+const payrollStatusService = new PayrollStatusService();
 
 export class PayrollController {
   /**
@@ -243,7 +246,19 @@ export class PayrollController {
         throw createError('Valores de INSS não podem ser negativos', 400);
       }
 
+      const monthNum = parseInt(month);
+      const yearNum = parseInt(year);
+
+      // Verificar se a folha está finalizada
+      const isFinalized = await payrollStatusService.isPayrollFinalized(monthNum, yearNum);
+      if (isFinalized) {
+        throw createError('Não é possível alterar valores de uma folha finalizada. Solicite ao setor financeiro que reabra a folha para correções.', 403);
+      }
+
       const result = await payrollService.saveManualInssValues({
+        employeeId: employeeId, // Já é string, não precisa converter
+        month: monthNum,
+        year: yearNum,
         employeeId: employeeId,
         month: parseInt(month),
         year: parseInt(year),
@@ -259,6 +274,145 @@ export class PayrollController {
         success: true,
         message: 'Valores manuais salvos com sucesso',
         data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Finaliza a folha de pagamento (apenas DP)
+   */
+  async finalizePayroll(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { month, year } = req.body;
+
+      if (!month || !year) {
+        throw createError('Mês e ano são obrigatórios', 400);
+      }
+
+      const monthNum = parseInt(month);
+      const yearNum = parseInt(year);
+
+      if (monthNum < 1 || monthNum > 12) {
+        throw createError('Mês deve estar entre 1 e 12', 400);
+      }
+
+      if (yearNum < 2020 || yearNum > 2030) {
+        throw createError('Ano deve estar entre 2020 e 2030', 400);
+      }
+
+      if (!req.user?.id) {
+        throw createError('Usuário não autenticado', 401);
+      }
+
+      await payrollStatusService.finalizePayroll(monthNum, yearNum, req.user.id);
+
+      res.json({
+        success: true,
+        message: 'Folha de pagamento finalizada com sucesso',
+        data: {
+          month: monthNum,
+          year: yearNum,
+          finalizedAt: new Date()
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Obtém o status da folha de pagamento
+   */
+  async getPayrollStatus(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { month, year } = req.query;
+
+      if (!month || !year) {
+        throw createError('Mês e ano são obrigatórios', 400);
+      }
+
+      const monthNum = parseInt(month as string);
+      const yearNum = parseInt(year as string);
+
+      if (monthNum < 1 || monthNum > 12) {
+        throw createError('Mês deve estar entre 1 e 12', 400);
+      }
+
+      if (yearNum < 2020 || yearNum > 2030) {
+        throw createError('Ano deve estar entre 2020 e 2030', 400);
+      }
+
+      const status = await payrollStatusService.getPayrollStatus(monthNum, yearNum);
+
+      res.json({
+        success: true,
+        data: status || {
+          month: monthNum,
+          year: yearNum,
+          isFinalized: false
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Reabre a folha de pagamento (apenas Financeiro)
+   */
+  async reopenPayroll(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { month, year } = req.body;
+
+      if (!month || !year) {
+        throw createError('Mês e ano são obrigatórios', 400);
+      }
+
+      const monthNum = parseInt(month);
+      const yearNum = parseInt(year);
+
+      if (monthNum < 1 || monthNum > 12) {
+        throw createError('Mês deve estar entre 1 e 12', 400);
+      }
+
+      if (yearNum < 2020 || yearNum > 2030) {
+        throw createError('Ano deve estar entre 2020 e 2030', 400);
+      }
+
+      if (!req.user?.id) {
+        throw createError('Usuário não autenticado', 401);
+      }
+
+      // Verificar se o usuário é do setor financeiro ou administrador
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { employee: true }
+      });
+
+      if (!user) {
+        throw createError('Usuário não encontrado', 404);
+      }
+
+      const userDepartment = user.employee?.department?.toLowerCase() || '';
+      const isFinanceiro = userDepartment.includes('financeiro') || userDepartment.includes('financeiro');
+      const isAdministrator = user.employee?.position === 'Administrador';
+
+      if (!isFinanceiro && !isAdministrator) {
+        throw createError('Apenas o setor financeiro ou administrador pode reabrir a folha', 403);
+      }
+
+      await payrollStatusService.reopenPayroll(monthNum, yearNum);
+
+      res.json({
+        success: true,
+        message: 'Folha de pagamento reaberta com sucesso. O Departamento Pessoal pode fazer correções.',
+        data: {
+          month: monthNum,
+          year: yearNum,
+          reopenedAt: new Date()
+        }
       });
     } catch (error) {
       next(error);

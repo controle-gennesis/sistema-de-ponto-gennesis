@@ -3,11 +3,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText, ChevronDown, ChevronUp, X, ListPlus , RotateCcw } from 'lucide-react';
+import { DollarSign, Search, Filter, Download, Calculator, Calendar, Clock, BadgeDollarSign, FileSpreadsheet, Building2, FileText, ChevronDown, ChevronUp, X, ListPlus , RotateCcw, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PayrollDetailModal } from '@/components/payroll/PayrollDetailModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { PayrollEmployee, PayrollFilters, MonthlyPayrollData } from '@/types';
 import { 
@@ -152,6 +153,66 @@ export default function FolhaPagamentoPage() {
   });
 
   const holidays = holidaysData?.data || [];
+
+  // Buscar status da folha de pagamento
+  const { data: payrollStatus, refetch: refetchStatus } = useQuery({
+    queryKey: ['payroll-status', filters.month, filters.year],
+    queryFn: async () => {
+      const res = await api.get(`/payroll/status?month=${filters.month}&year=${filters.year}`);
+      return res.data;
+    }
+  });
+
+  const isFinalized = payrollStatus?.data?.isFinalized || false;
+  const { isDepartmentPessoal, isDepartmentFinanceiro, userPosition } = usePermissions();
+  
+  // Verificar se o usuário pode finalizar a folha (DP ou Administrador)
+  const canFinalizePayroll = isDepartmentPessoal || userPosition === 'Administrador';
+  
+  // Verificar se o usuário pode reabrir a folha (Financeiro ou Administrador)
+  const canReopenPayroll = isDepartmentFinanceiro || userPosition === 'Administrador';
+
+  // Função para finalizar a folha
+  const handleFinalizePayroll = async () => {
+    if (!confirm('Tem certeza que deseja finalizar esta folha de pagamento? Após finalizar, o setor financeiro poderá processar os pagamentos.')) {
+      return;
+    }
+
+    try {
+      await api.post('/payroll/finalize', {
+        month: filters.month,
+        year: filters.year
+      });
+      
+      await refetchStatus();
+      queryClient.invalidateQueries({ queryKey: ['payroll-status'] });
+      alert('Folha de pagamento finalizada com sucesso!');
+    } catch (error: any) {
+      console.error('Erro ao finalizar folha:', error);
+      alert(error.response?.data?.message || 'Erro ao finalizar folha de pagamento. Tente novamente.');
+    }
+  };
+
+  // Função para reabrir a folha
+  const handleReopenPayroll = async () => {
+    if (!confirm('Tem certeza que deseja reabrir esta folha de pagamento? O Departamento Pessoal poderá fazer correções.')) {
+      return;
+    }
+
+    try {
+      await api.post('/payroll/reopen', {
+        month: filters.month,
+        year: filters.year
+      });
+      
+      await refetchStatus();
+      queryClient.invalidateQueries({ queryKey: ['payroll-status'] });
+      alert('Folha de pagamento reaberta com sucesso! O Departamento Pessoal pode fazer correções.');
+    } catch (error: any) {
+      console.error('Erro ao reabrir folha:', error);
+      alert(error.response?.data?.message || 'Erro ao reabrir folha de pagamento. Tente novamente.');
+    }
+  };
 
   // Buscar todas as faltas do período para calcular DSR corretamente
   const { data: absencesData } = useQuery({
@@ -1057,6 +1118,49 @@ export default function FolhaPagamentoPage() {
                 </div>
               </div>
               <div className="flex items-center space-x-2">
+                {/* Indicador de Status */}
+                {isFinalized && (
+                  <div className="flex items-center space-x-2 px-3 py-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400" />
+                    <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                      Folha Finalizada
+                    </span>
+                  </div>
+                )}
+                {!isFinalized && (
+                  <div className="flex items-center space-x-2 px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+                    <Clock className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+                    <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
+                      Em Elaboração
+                    </span>
+                  </div>
+                )}
+                
+                {/* Botão de Finalização - Para DP e Administrador */}
+                {canFinalizePayroll && !isFinalized && (
+                  <button
+                    onClick={handleFinalizePayroll}
+                    disabled={!payrollData || payrollData.employees.length === 0}
+                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
+                    title="Finalizar folha de pagamento"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Finalizar Folha</span>
+                  </button>
+                )}
+                
+                {/* Botão de Reabertura - Para Financeiro e Administrador */}
+                {canReopenPayroll && isFinalized && (
+                  <button
+                    onClick={handleReopenPayroll}
+                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm sm:text-base"
+                    title="Reabrir folha de pagamento para correções"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Reabrir Folha</span>
+                  </button>
+                )}
+                
                 <button
                   onClick={exportToExcel}
                   disabled={!payrollData || payrollData.employees.length === 0}
@@ -1358,6 +1462,7 @@ export default function FolhaPagamentoPage() {
           year={filters.year}
           isOpen={isModalOpen}
           onClose={handleCloseModal}
+          isPayrollFinalized={isFinalized}
         />
       )}
       </MainLayout>

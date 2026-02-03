@@ -41,6 +41,7 @@ export default function DashboardPage() {
     }
   });
 
+
   
   // Modal de troca de senha
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
@@ -231,6 +232,7 @@ export default function DashboardPage() {
           </div>
         </CardContent>
       </Card>
+
       </div>
 
       {/* Modal de alterar senha */}

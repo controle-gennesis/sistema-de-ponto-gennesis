@@ -1,10 +1,9 @@
-import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { OvertimeService } from '../services/OvertimeService';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const overtimeService = new OvertimeService();
 
 export class OvertimeController {

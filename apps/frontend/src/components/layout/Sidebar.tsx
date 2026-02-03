@@ -34,7 +34,12 @@ import {
   Moon,
   Sun,
   AlertCircle,
-  MessageSquare
+  MessageSquare,
+  DollarSign,
+  Package,
+  ShoppingCart,
+  Building2,
+  Bot
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTheme } from '@/context/ThemeContext';
@@ -63,7 +68,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { permissions, isLoading, userPosition, user, isDepartmentPessoal, isDepartmentProjetos } = usePermissions();
+  const { permissions, isLoading, userPosition, user, isDepartmentPessoal, isDepartmentProjetos, userDepartment } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -73,6 +78,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   
   // Verificar se o funcionário precisa bater ponto
   const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
+  
+  // Verificar se é do departamento Compras
+  const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
 
   const handleLogout = () => {
     setShowUserMenu(false);
@@ -124,19 +132,26 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         name: 'Principal',
         icon: Home,
         items: [
-      {
-        name: 'Dashboard',
-        href: '/ponto/dashboard',
-        icon: LayoutDashboard,
-        description: 'Visão geral do sistema',
-        permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
+          {
+            name: 'Dashboard',
+            href: '/ponto/dashboard',
+            icon: LayoutDashboard,
+            description: 'Visão geral do sistema',
+            permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
+          },
+          {
+            name: 'Assistente Virtual',
+            href: '/ponto/chatgpt',
+            icon: Bot,
+            description: 'Tire suas dúvidas com o ChatGPT',
+            permission: true // Todos os usuários podem usar
           }
         ]
       },
       {
-        id: 'payroll',
-        name: 'Folha de Pagamento',
-        icon: FileSpreadsheet,
+        id: 'departamento-pessoal',
+        name: 'Departamento Pessoal',
+        icon: Users,
         items: [
           {
             name: 'Folha de Pagamento',
@@ -144,74 +159,25 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileSpreadsheet,
             description: 'Gestão de folha de pagamento',
             permission: isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll
-          }
-        ]
-      },
-      {
-        id: 'time-control',
-        name: 'Registros de Ponto',
-        icon: Clock,
-        items: [
+          },
           {
-            name: 'Registros de Ponto',
-            href: '/ponto',
-            icon: FolderClock,
-            description: 'Gerencie seus registros',
-            permission: (isAdministrator || isDepartmentPessoal || permissions.canRegisterTime) && requiresTimeClock
-          }
-        ]
-      },
-      {
-        id: 'employees',
-        name: 'Funcionários',
-        icon: Users,
-        items: [
-      {
-        name: 'Gerenciar Funcionários',
-        href: '/ponto/funcionarios',
-        icon: Users,
-        description: 'Gerenciar funcionários',
-        permission: isAdministrator || isDepartmentPessoal || permissions.canManageEmployees
-      },
+            name: 'Ausências',
+            href: '/ponto/atestados',
+            icon: CalendarX2,
+            description: 'Registrar e gerenciar ausências',
+            permission: true // Todos podem registrar suas próprias ausências
+          },
           {
-            name: 'Aniversariantes',
-            href: '/ponto/aniversariantes',
-            icon: CalendarDays,
-            description: 'Ver aniversariantes do mês',
-            permission: isAdministrator || isDepartmentPessoal // Apenas Administrador ou Departamento Pessoal
-          }
-        ]
-      },
-      {
-        id: 'attendance',
-        name: 'Ausências',
-        icon: CalendarX2,
-        items: [
-      {
-        name: 'Registrar Ausência',
-        href: '/ponto/atestados',
-        icon: BookPlus,
-        description: 'Enviar e acompanhar ausências',
-        permission: true // Todos podem registrar suas próprias ausências
-      },
-      {
-        name: 'Gerenciar Ausências',
-        href: '/ponto/gerenciar-atestados',
-        icon: BookText,
-        description: 'Gerenciar todas as ausências',
-        permission: isAdministrator || isDepartmentPessoal
-          }
-        ]
-      },
-      {
-        id: 'requests',
-        name: 'Solicitações',
-        icon: MailPlus,
-        items: [
+            name: 'Gerenciar Ausências',
+            href: '/ponto/gerenciar-atestados',
+            icon: BookText,
+            description: 'Gerenciar todas as ausências',
+            permission: isAdministrator || isDepartmentPessoal
+          },
           {
-            name: 'Correção de Ponto',
+            name: 'Solicitações',
             href: '/ponto/solicitacoes',
-            icon: FileText,
+            icon: MailPlus,
             description: 'Minhas solicitações de correção',
             permission: true // Todos podem ver suas próprias solicitações
           },
@@ -221,16 +187,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Aprovar solicitações de correção',
             permission: isAdministrator || isDepartmentProjetos // Administrador ou setor Projetos
-          }
-        ]
-      },
-      {
-        id: 'vacations',
-        name: 'Férias',
-        icon: ImagePlus,
-        items: [
+          },
           {
-            name: 'Solicitar Férias',
+            name: 'Férias',
             href: '/ponto/ferias',
             icon: ImagePlus,
             description: 'Solicitar e acompanhar férias',
@@ -249,28 +208,91 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: CalendarDays,
             description: 'Gerenciar calendário de feriados',
             permission: isAdministrator || isDepartmentPessoal || permissions.canManageVacations
+          },
+          {
+            name: 'Banco de Horas',
+            href: '/ponto/banco-horas',
+            icon: FolderClock,
+            description: 'Controle de banco de horas',
+            permission: isAdministrator || isDepartmentPessoal || permissions.canManageBankHours
+          },
+          {
+            name: 'Alocação',
+            href: '/relatorios/alocacao',
+            icon: Users,
+            description: 'Alocação de funcionários',
+            permission: isAdministrator || permissions.canAccessPayroll
           }
         ]
       },
       {
-        id: 'reports',
-        name: 'Relatórios',
-        icon: BarChart3,
+        id: 'financeiro',
+        name: 'Financeiro',
+        icon: DollarSign,
         items: [
-      {
-        name: 'Banco de Horas',
-        href: '/ponto/banco-horas',
-        icon: FolderClock,
-        description: 'Controle de banco de horas',
-        permission: isAdministrator || isDepartmentPessoal || permissions.canManageBankHours
+          {
+            name: 'Financeiro',
+            href: '/ponto/financeiro',
+            icon: DollarSign,
+            description: 'Gerar borderô e CNAB400 para pagamentos',
+            permission: isAdministrator // Apenas administrador
+          }
+        ]
       },
       {
-        name: 'Alocação',
-        href: '/relatorios/alocacao',
-        icon: Users,
-        description: 'Alocação de funcionários',
-        permission: isAdministrator || permissions.canAccessPayroll
-      }
+        id: 'suprimentos',
+        name: 'Suprimentos',
+        icon: Package,
+        items: [
+          {
+            name: 'Solicitar Materiais',
+            href: '/ponto/solicitar-materiais',
+            icon: ShoppingCart,
+            description: 'Solicitar materiais para compra',
+            permission: true // Todos podem solicitar materiais
+          },
+          {
+            name: 'Gerenciar Requisições de Materiais',
+            href: '/ponto/gerenciar-materiais',
+            icon: Package,
+            description: 'Aprovar e gerenciar requisições de materiais',
+            permission: isAdministrator || isDepartmentCompras // Administrador ou departamento Compras
+          }
+        ]
+      },
+      {
+        id: 'cadastros',
+        name: 'Cadastros',
+        icon: BarChart3,
+        items: [
+          {
+            name: 'Centros de Custo',
+            href: '/ponto/centros-custo',
+            icon: Building2,
+            description: 'Gerenciar centros de custo',
+            permission: isAdministrator || isDepartmentPessoal // Apenas Administrador ou Departamento Pessoal
+          },
+          {
+            name: 'Materiais de Construção',
+            href: '/ponto/materiais-construcao',
+            icon: Package,
+            description: 'Gerenciar materiais de construção civil',
+            permission: isAdministrator || isDepartmentPessoal // Apenas Administrador ou Departamento Pessoal
+          }
+        ]
+      },
+      {
+        id: 'time-control',
+        name: 'Registros de Ponto',
+        icon: Clock,
+        items: [
+          {
+            name: 'Registros de Ponto',
+            href: '/ponto',
+            icon: FolderClock,
+            description: 'Gerencie seus registros',
+            permission: (isAdministrator || isDepartmentPessoal || permissions.canRegisterTime) && requiresTimeClock
+          }
         ]
       }
     ];
