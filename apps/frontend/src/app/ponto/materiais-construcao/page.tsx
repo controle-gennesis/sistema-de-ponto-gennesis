@@ -189,7 +189,33 @@ export default function MateriaisConstrucaoPage() {
       return;
     }
     
-    const dataToSend = { ...formData };
+    // Limpar dados: remover campos vazios e manter apenas os necessários
+    const dataToSend: any = {
+      sinapiCode: formData.sinapiCode.trim(),
+      description: formData.description.trim(),
+      unit: formData.unit.trim(),
+      isActive: formData.isActive
+    };
+    
+    // Adicionar campos opcionais apenas se tiverem valor
+    if (formData.medianPrice && formData.medianPrice.toString().trim()) {
+      dataToSend.medianPrice = parseFloat(formData.medianPrice.toString()) || undefined;
+    }
+    if (formData.state && formData.state.trim()) {
+      dataToSend.state = formData.state.trim();
+    }
+    if (formData.referenceMonth && formData.referenceMonth.toString().trim()) {
+      dataToSend.referenceMonth = parseInt(formData.referenceMonth.toString()) || undefined;
+    }
+    if (formData.referenceYear && formData.referenceYear.toString().trim()) {
+      dataToSend.referenceYear = parseInt(formData.referenceYear.toString()) || undefined;
+    }
+    if (formData.categoryId && formData.categoryId.trim()) {
+      dataToSend.categoryId = formData.categoryId.trim();
+    }
+    if (formData.costCenterId && formData.costCenterId.trim()) {
+      dataToSend.costCenterId = formData.costCenterId.trim();
+    }
     
     console.log('Enviando dados:', dataToSend);
     
@@ -312,59 +338,59 @@ export default function MateriaisConstrucaoPage() {
         onLogout={handleLogout}
       >
         <div className="space-y-6">
-          {/* Cabeçalho */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-                Materiais de Construção
-              </h1>
-              <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-                Gerencie os materiais de construção civil
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleExport}
-                className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-700 dark:hover:bg-gray-600 flex items-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                Exportar
-              </button>
-              <button
-                onClick={() => {
-                  setShowImportModal(true);
-                  setImportData('');
-                }}
-                className="px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center gap-2"
-              >
-                <Upload className="w-4 h-4" />
-                Importar
-              </button>
-              <button
-                onClick={() => {
-                  resetForm();
-                  setShowForm(true);
-                }}
-                className="px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-600 flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Novo Material
-              </button>
-            </div>
+          {/* Header */}
+          <div className="text-center">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
+              Materiais de Construção
+            </h1>
+            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+              Gerencie os materiais de construção civil
+            </p>
           </div>
 
-          {/* Busca */}
+          {/* Busca e ações */}
           <Card>
-            <CardContent className="pt-6">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar por código SINAPI, descrição ou unidade..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                />
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por código SINAPI, descrição ou unidade..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={handleExport}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                  >
+                    <Download className="w-4 h-4" />
+                    Exportar
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowImportModal(true);
+                      setImportData('');
+                    }}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                  >
+                    <Upload className="w-4 h-4" />
+                    Importar
+                  </button>
+                  <button
+                    onClick={() => {
+                      resetForm();
+                      setShowForm(true);
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Novo Material
+                  </button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -372,17 +398,20 @@ export default function MateriaisConstrucaoPage() {
           {/* Formulário */}
           {showForm && (
             <Card>
-              <CardHeader>
+              <CardHeader className="border-b-0">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {editingMaterial ? 'Editar Material' : 'Novo Material'}
-                  </h3>
+                  <div className="flex items-center space-x-2">
+                    <Package className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {editingMaterial ? 'Editar Material' : 'Novo Material'}
+                    </h3>
+                  </div>
                   <button
                     onClick={() => {
                       setShowForm(false);
                       resetForm();
                     }}
-                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -399,7 +428,7 @@ export default function MateriaisConstrucaoPage() {
                       required
                       value={formData.sinapiCode}
                       onChange={(e) => setFormData({ ...formData, sinapiCode: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       placeholder="Ex: 12345"
                     />
                   </div>
@@ -413,7 +442,7 @@ export default function MateriaisConstrucaoPage() {
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       placeholder="Descrição do material..."
                     />
                   </div>
@@ -427,7 +456,7 @@ export default function MateriaisConstrucaoPage() {
                       required
                       value={formData.unit}
                       onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       placeholder="Ex: kg, m, m², un"
                     />
                   </div>
@@ -470,14 +499,14 @@ export default function MateriaisConstrucaoPage() {
                         setShowForm(false);
                         resetForm();
                       }}
-                      className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                      className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
                     >
                       Cancelar
                     </button>
                     <button
                       type="submit"
                       disabled={createMutation.isPending || updateMutation.isPending}
-                      className="px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
                     >
                       {createMutation.isPending || updateMutation.isPending
                         ? 'Salvando...'
@@ -493,10 +522,13 @@ export default function MateriaisConstrucaoPage() {
 
           {/* Lista de materiais */}
           <Card>
-            <CardHeader>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Materiais ({filteredMaterials.length})
-              </h3>
+            <CardHeader className="border-b-0">
+              <div className="flex items-center space-x-2">
+                <Package className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Materiais ({filteredMaterials.length})
+                </h3>
+              </div>
             </CardHeader>
             <CardContent>
               {loadingMaterials ? (
@@ -511,42 +543,42 @@ export default function MateriaisConstrucaoPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-gray-700">
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-800">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                           Código SINAPI
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                           Descrição
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                           Unidade
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                           Status
                         </th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                           Ações
                         </th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                       {filteredMaterials.map((material: ConstructionMaterial) => (
                         <tr
                           key={material.id}
-                          className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                         >
-                          <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100">
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                             {material.sinapiCode}
                           </td>
-                          <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                             {material.description || '-'}
                           </td>
-                          <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
                             {material.unit}
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="px-4 py-3 whitespace-nowrap text-center">
                             <span
                               className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                                 material.isActive
@@ -557,18 +589,18 @@ export default function MateriaisConstrucaoPage() {
                               {material.isActive ? 'Ativo' : 'Inativo'}
                             </span>
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="px-4 py-3 whitespace-nowrap text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 onClick={() => handleEdit(material)}
-                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
+                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                                 title="Editar"
                               >
                                 <Edit className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => setShowDeleteModal(material.id)}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                                 title="Excluir"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -587,25 +619,29 @@ export default function MateriaisConstrucaoPage() {
 
         {/* Modal de confirmação de exclusão */}
         {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                Confirmar Exclusão
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteModal(null)} />
+            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+              <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 text-center mb-2">
+                Excluir Material?
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
                 Tem certeza que deseja excluir este material? Esta ação não pode ser desfeita.
               </p>
-              <div className="flex justify-end gap-3">
+              <div className="flex items-center justify-center space-x-3">
                 <button
                   onClick={() => setShowDeleteModal(null)}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={() => handleDelete(showDeleteModal)}
                   disabled={deleteMutation.isPending}
-                  className="px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
                 >
                   {deleteMutation.isPending ? 'Excluindo...' : 'Excluir'}
                 </button>
@@ -616,18 +652,25 @@ export default function MateriaisConstrucaoPage() {
 
         {/* Modal de importação */}
         {showImportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => {
+              setShowImportModal(false);
+              setImportData('');
+            }} />
+            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Importar Materiais
-                </h3>
+                <div className="flex items-center space-x-2">
+                  <Upload className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Importar Materiais
+                  </h3>
+                </div>
                 <button
                   onClick={() => {
                     setShowImportModal(false);
                     setImportData('');
                   }}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -642,7 +685,7 @@ export default function MateriaisConstrucaoPage() {
                     type="file"
                     accept=".csv,.json"
                     onChange={handleFileUpload}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Formato CSV: nome,descrição,unidade,ativo (com cabeçalho na primeira linha)
@@ -669,14 +712,14 @@ export default function MateriaisConstrucaoPage() {
                       setShowImportModal(false);
                       setImportData('');
                     }}
-                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={handleImport}
                     disabled={!importData.trim() || importMutation.isPending}
-                    className="px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 disabled:opacity-50"
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
                   >
                     {importMutation.isPending ? 'Importando...' : 'Importar'}
                   </button>

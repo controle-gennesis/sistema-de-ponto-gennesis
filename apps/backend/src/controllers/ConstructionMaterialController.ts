@@ -16,7 +16,8 @@ export class ConstructionMaterialController {
       if (search) {
         where.OR = [
           { name: { contains: search as string, mode: 'insensitive' } },
-          { description: { contains: search as string, mode: 'insensitive' } }
+          { description: { contains: search as string, mode: 'insensitive' } },
+          { unit: { contains: search as string, mode: 'insensitive' } }
         ];
       }
 
@@ -29,9 +30,15 @@ export class ConstructionMaterialController {
         orderBy: { name: 'asc' }
       });
 
+      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
+      const mappedMaterials = materials.map(m => ({
+        ...m,
+        sinapiCode: m.name
+      }));
+
       res.json({
         success: true,
-        data: materials
+        data: mappedMaterials
       });
     } catch (error) {
       next(error);
@@ -53,9 +60,15 @@ export class ConstructionMaterialController {
         throw createError('Material não encontrado', 404);
       }
 
+      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
+      const mappedMaterial = {
+        ...material,
+        sinapiCode: material.name
+      };
+
       res.json({
         success: true,
-        data: material
+        data: mappedMaterial
       });
     } catch (error) {
       next(error);
@@ -67,27 +80,75 @@ export class ConstructionMaterialController {
    */
   async createMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { name, description, unit, isActive } = req.body;
+      console.log('📦 Dados recebidos para criar material:', req.body);
+      
+      const { name, sinapiCode, description, unit, isActive } = req.body;
 
-      if (!name || !unit) {
-        throw createError('Nome e unidade são obrigatórios', 400);
+      // Aceitar tanto 'name' quanto 'sinapiCode' (sinapiCode será usado como name)
+      const materialName = (name || sinapiCode)?.trim();
+
+      // Validar campos obrigatórios
+      if (!materialName) {
+        throw createError('Código SINAPI (ou nome) é obrigatório', 400);
       }
 
+      if (!unit || !unit.trim()) {
+        throw createError('Unidade de medida é obrigatória', 400);
+      }
+
+      if (!description || !description.trim()) {
+        throw createError('Descrição é obrigatória', 400);
+      }
+
+      // Preparar dados para criação
+      const materialData: any = {
+        name: materialName,
+        description: description.trim(),
+        unit: unit.trim(),
+        isActive: isActive !== undefined ? Boolean(isActive) : true
+      };
+
+      console.log('✅ Validação passou. Criando material com:', materialData);
+
       const material = await prisma.constructionMaterial.create({
-        data: {
-          name,
-          description: description || null,
-          unit,
-          isActive: isActive !== undefined ? isActive : true
-        }
+        data: materialData
       });
+
+      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
+      const mappedMaterial = {
+        ...material,
+        sinapiCode: material.name
+      };
 
       res.status(201).json({
         success: true,
-        data: material,
+        data: mappedMaterial,
         message: 'Material criado com sucesso'
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('❌ Erro ao criar material:', error);
+      
+      // Se for erro do Prisma, logar mais detalhes
+      if (error.code) {
+        console.error('Código do erro Prisma:', error.code);
+        console.error('Mensagem do erro Prisma:', error.meta);
+      }
+      
+      // Se já for um erro criado com createError, passar adiante
+      if (error.statusCode) {
+        return next(error);
+      }
+      
+      // Se for erro de validação do Prisma
+      if (error.name === 'PrismaClientValidationError') {
+        return next(createError('Dados inválidos fornecidos. Verifique os campos obrigatórios.', 400));
+      }
+      
+      // Se for erro de chave única (material já existe)
+      if (error.code === 'P2002') {
+        return next(createError('Já existe um material com este código SINAPI', 409));
+      }
+      
       next(error);
     }
   }
@@ -98,7 +159,7 @@ export class ConstructionMaterialController {
   async updateMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { name, description, unit, isActive } = req.body;
+      const { name, sinapiCode, description, unit, isActive } = req.body;
 
       // Verificar se o material existe
       const existing = await prisma.constructionMaterial.findUnique({
@@ -109,19 +170,28 @@ export class ConstructionMaterialController {
         throw createError('Material não encontrado', 404);
       }
 
+      // Aceitar tanto 'name' quanto 'sinapiCode' (sinapiCode será usado como name)
+      const materialName = name || sinapiCode;
+
       const material = await prisma.constructionMaterial.update({
         where: { id },
         data: {
-          ...(name && { name }),
+          ...(materialName && { name: materialName }),
           ...(description !== undefined && { description }),
           ...(unit && { unit }),
           ...(isActive !== undefined && { isActive })
         }
       });
 
+      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
+      const mappedMaterial = {
+        ...material,
+        sinapiCode: material.name
+      };
+
       res.json({
         success: true,
-        data: material,
+        data: mappedMaterial,
         message: 'Material atualizado com sucesso'
       });
     } catch (error) {

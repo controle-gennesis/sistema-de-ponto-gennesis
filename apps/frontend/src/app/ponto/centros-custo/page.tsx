@@ -184,43 +184,50 @@ export default function CentrosCustoPage() {
           </div>
 
           {/* Barra de pesquisa e botão novo */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Buscar por código, nome ou descrição..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-              />
-            </div>
-            <button
-              onClick={() => {
-                resetForm();
-                setShowForm(true);
-              }}
-              className="px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Centro de Custo
-            </button>
-          </div>
+          <Card>
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por código, nome ou descrição..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    resetForm();
+                    setShowForm(true);
+                  }}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  Novo Centro de Custo
+                </button>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Formulário */}
           {showForm && (
             <Card>
-              <CardHeader>
+              <CardHeader className="border-b-0">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {editingCostCenter ? 'Editar Centro de Custo' : 'Novo Centro de Custo'}
-                  </h3>
+                  <div className="flex items-center space-x-2">
+                    <Building2 className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {editingCostCenter ? 'Editar Centro de Custo' : 'Novo Centro de Custo'}
+                    </h3>
+                  </div>
                   <button
                     onClick={() => {
                       setShowForm(false);
                       resetForm();
                     }}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -238,7 +245,7 @@ export default function CentrosCustoPage() {
                         required
                         value={formData.code}
                         onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                         placeholder="Ex: SEDES"
                         disabled={!!editingCostCenter}
                       />
@@ -252,7 +259,7 @@ export default function CentrosCustoPage() {
                         required
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                         placeholder="Ex: SEDES"
                       />
                     </div>
@@ -305,14 +312,14 @@ export default function CentrosCustoPage() {
                         setShowForm(false);
                         resetForm();
                       }}
-                      className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                      className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
                     >
                       Cancelar
                     </button>
                     <button
                       type="submit"
                       disabled={createMutation.isPending || updateMutation.isPending}
-                      className="px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 disabled:opacity-50"
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
                     >
                       {createMutation.isPending || updateMutation.isPending
                         ? 'Salvando...'
@@ -328,10 +335,13 @@ export default function CentrosCustoPage() {
 
           {/* Lista de centros de custo */}
           <Card>
-            <CardHeader>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Centros de Custo ({costCenters.length})
-              </h3>
+            <CardHeader className="border-b-0">
+              <div className="flex items-center space-x-2">
+                <Building2 className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Centros de Custo ({costCenters.length})
+                </h3>
+              </div>
             </CardHeader>
             <CardContent>
               {loadingCostCenters ? (
@@ -346,24 +356,24 @@ export default function CentrosCustoPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-gray-700">
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Código</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Nome</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Descrição</th>
-                        <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Status</th>
-                        <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Ações</th>
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-800">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Código</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Nome</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Descrição</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Ações</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                       {costCenters.map((cc: CostCenter) => (
-                        <tr key={cc.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-                          <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100 font-mono">{cc.code}</td>
-                          <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100">{cc.name}</td>
-                          <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">{cc.description || '-'}</td>
-                          <td className="py-3 px-4 text-center">
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        <tr key={cc.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white font-mono">{cc.code}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white">{cc.name}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{cc.description || '-'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-center">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                               cc.isActive
                                 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                                 : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
@@ -371,7 +381,7 @@ export default function CentrosCustoPage() {
                               {cc.isActive ? 'Ativo' : 'Inativo'}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-right">
+                          <td className="px-4 py-3 whitespace-nowrap text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 onClick={() => handleEdit(cc)}
@@ -417,7 +427,7 @@ export default function CentrosCustoPage() {
                 <button
                   type="button"
                   onClick={() => setShowDeleteModal(null)}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
                 >
                   Cancelar
                 </button>
@@ -425,7 +435,7 @@ export default function CentrosCustoPage() {
                   type="button"
                   onClick={() => handleDelete(showDeleteModal)}
                   disabled={deleteMutation.isPending}
-                  className="px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
                 >
                   {deleteMutation.isPending ? 'Excluindo...' : 'Excluir'}
                 </button>
