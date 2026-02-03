@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node dev.js",
     "dev:nodemon": "nodemon --exec \"ts-node --transpile-only src/index.ts\"",
-    "build": "npx prisma generate && tsc",
+    "build": "npx prisma generate && echo 'Running TypeScript compiler from:' && pwd && echo 'TypeScript config outDir:' && cat tsconfig.json | grep outDir && tsc && echo 'TypeScript compilation completed' && echo 'Checking if dist/index.js exists...' && (test -f dist/index.js && echo '✅ dist/index.js found!' || (echo '❌ dist/index.js NOT found!' && echo 'Current directory:' && pwd && echo 'Listing dist directory:' && ls -la dist/ 2>&1 || echo 'dist directory does not exist' && echo 'Listing current directory:' && ls -la . 2>&1 && exit 1))",
     "start": "npm run build && node scripts/resolve-migrations.js && sleep 2 && npx prisma migrate deploy && sleep 2 && node dist/index.js",
     "start:production": "npm run build && node scripts/resolve-migrations.js && sleep 2 && npx prisma migrate deploy && sleep 2 && node dist/index.js",
     "lint": "eslint src/**/*.ts",
