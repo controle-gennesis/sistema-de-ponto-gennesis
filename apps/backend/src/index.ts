@@ -66,11 +66,35 @@ const allowedOrigins = [
   'http://localhost:19006'
 ];
 
+// Função para verificar se a origem é permitida
+const isOriginAllowed = (origin: string | undefined): boolean => {
+  if (!origin) return true; // Permitir requisições sem origem (ex: Postman)
+  if (origin.includes('railway.app') || origin.includes('localhost')) return true;
+  return allowedOrigins.includes(origin);
+};
+
+// Handler para requisições OPTIONS (preflight CORS) - DEVE estar ANTES de QUALQUER outro middleware
+// Isso garante que requisições OPTIONS sejam tratadas corretamente
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  
+  if (isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
+    res.status(204).end();
+  } else {
+    res.status(403).end();
+  }
+});
+
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     // Em produção, permitir apenas origens específicas
     if (isProduction) {
-      if (!origin || allowedOrigins.includes(origin) || origin.includes('railway.app')) {
+      if (isOriginAllowed(origin)) {
         return callback(null, true);
       }
       console.error('❌ Origem não permitida pelo CORS:', origin);
@@ -91,30 +115,18 @@ const corsOptions = {
 // Aplicar CORS ANTES de qualquer outro middleware
 app.use(cors(corsOptions));
 
-// Handler para requisições OPTIONS (preflight CORS) - DEVE estar ANTES do rate limiter
-// Isso garante que requisições OPTIONS sejam tratadas corretamente
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-  if (origin && (allowedOrigins.includes(origin) || origin.includes('railway.app') || origin.includes('localhost'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-    res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
-  }
-  res.status(204).end();
-});
-
 // Middleware de segurança - Configurado para não bloquear CORS
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   crossOriginEmbedderPolicy: false,
 }));
 app.use(compression());
+// Rate limiter que ignora requisições OPTIONS (preflight CORS)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000,
   message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
+  skip: (req) => req.method === 'OPTIONS', // Ignorar requisições OPTIONS
 }));
 
 // Rate limiting geral - ignorar requisições OPTIONS (preflight CORS)
