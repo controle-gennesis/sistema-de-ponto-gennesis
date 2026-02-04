@@ -441,6 +441,11 @@ export default function FolhaPagamentoPage() {
 
     const diasDoMes = new Date(filters.year, filters.month, 0).getDate();
 
+    // Função auxiliar para formatar valores monetários
+    const formatCurrency = (value: number): string => {
+      return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
     // Preparar dados para exportação - cada campo em coluna separada
     const exportData = payrollData.employees.map(employee => {
       // Cálculos auxiliares
@@ -551,155 +556,177 @@ export default function FolhaPagamentoPage() {
       const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
 
       return {
-        // Dados Pessoais
-        'Nome': employee.name || '',
+        // Colunas na ordem especificada
+        'NOME': employee.name || '',
+        'EMPRESA': employee.company || '',
+        'MODALIDADE': employee.modality || '',
         'CPF': employee.cpf || '',
-        'Matrícula': employee.employeeId || '',
-        'Função': employee.position || '',
-        'Setor': employee.department || '',
-        'Empresa': employee.company || '',
-        'Polo': employee.polo || '',
-        'Centro de Custo': employee.costCenter || '',
-        'Cliente': employee.client || '',
-        'Modalidade': employee.modality || '',
-        
-        // Dados Bancários (separados)
-        'Banco': employee.bank || '',
-        'Tipo de Conta': employee.accountType || '',
-        'Agência': employee.agency || '',
-        'Operação': employee.operation || '',
-        'Conta': employee.account || '',
-        'Dígito': employee.digit || '',
-        
-        // Dados PIX (separados)
-        'Tipo PIX': employee.pixKeyType || '',
-        'Chave PIX': employee.pixKey || '',
-        
-        // Valores Base
-        'Salário Base': salarioBase,
-        'Salário Família': employee.familySalary || 0,
-        'Periculosidade': periculosidade,
-        'Insalubridade': insalubridade,
-        
-        // Horas Extras
-        'HE 50% (Horas)': employee.he50Hours || 0,
-        'HE 50% (Valor)': employee.he50Value || 0,
-        'HE 100% (Horas)': employee.he100Hours || 0,
-        'HE 100% (Valor)': employee.he100Value || 0,
-        'DSR HE': valorDSRHE,
-        'Total Horas Extras': valorHorasExtras,
-        
-        // VA e VT
-        'VA Diário': employee.dailyFoodVoucher || 0,
-        'VT Diário': employee.dailyTransportVoucher || 0,
-        'Total VA': totalVA,
-        'Total VT': totalVT,
-        'Total VA+VT': totalVA + totalVT,
-        
-        // Presença
-        'Dias Trabalhados': employee.daysWorked || 0,
-        'Total Dias Úteis': employee.totalWorkingDays || 0,
-        'Faltas': faltas,
-        
-        // Descontos
-        'Desconto por Faltas': descontoPorFaltas,
-        'DSR por Falta': dsrPorFaltaFinal,
-        '% VA': percentualVA,
-        '% VT': percentualVT,
-        'INSS Mensal': inssMensal,
-        'IRRF Mensal': irrfMensal,
-        'Descontos Adicionais': employee.totalDiscounts || 0,
-        'Total Descontos': totalDescontos,
-        
-        // Acréscimos
-        'Acréscimos': employee.totalAdjustments || 0,
-        
-        // Totais
-        'Total Proventos': totalProventos,
-        
-        // FGTS
-        'FGTS': employee.fgts || 0,
-        'FGTS Férias': employee.fgtsFerias || 0,
-        'FGTS Total': employee.fgtsTotal || 0,
-        
-        // INSS Total
-        'INSS Total': employee.inssTotal || 0,
-        
-        // IRRF Total
-        'IRRF Total': employee.irrfTotal || 0,
-        
-        // Férias
-        'Dias de Férias': employee.vacationDays || 0,
-        'Base INSS Férias': employee.baseInssFerias || 0,
-        'INSS Férias': employee.inssFerias || 0,
-        
-        // Valores Líquidos (no final)
-        'Líquido': liquidoReceber,
-        'Líquido Total': liquidoComAcrescimos
+        'ALOCAÇÃO FINAL': employee.alocacaoFinal || '',
+        'BANCO': employee.bank || '',
+        'TIPO DE CONTA': employee.accountType || '',
+        'AGÊNCIA': employee.agency || '',
+        'OPERAÇÃO': employee.operation || '',
+        'CONTA': employee.account || '',
+        'DÍGITO': employee.digit || '',
+        'TIPO DE CHAVE PIX': employee.pixKeyType || '',
+        'CHAVE PIX': employee.pixKey || '',
+        'SALÁRIO BASE': formatCurrency(salarioBase),
+        'LÍQUIDO': formatCurrency(liquidoReceber),
+        'ACRÉSCIMOS TOTAIS': formatCurrency(employee.totalAdjustments || 0),
+        'LÍQUIDO TOTAL': formatCurrency(liquidoComAcrescimos)
       };
     });
+
+    // Calcular total do LÍQUIDO TOTAL (somar os valores numéricos antes de formatar)
+    const totalLiquidoTotal = payrollData.employees.reduce((sum, employee) => {
+      const salarioBase = employee.salary;
+      const periculosidade = employee.dangerPay ? (employee.salary * (employee.dangerPay / 100)) : 0;
+      const insalubridade = employee.unhealthyPay ? (1518 * (employee.unhealthyPay / 100)) : 0;
+      const faltas = employee.totalWorkingDays ? (employee.totalWorkingDays - employee.daysWorked) : 0;
+      const diasParaDesconto = 30;
+      const descontoPorFaltasCalculado = diasParaDesconto > 0 ? ((salarioBase + periculosidade + insalubridade) / diasParaDesconto) * faltas : 0;
+      const descontoPorFaltas = (employee.descontoPorFaltas !== null && employee.descontoPorFaltas !== undefined) 
+        ? Number(employee.descontoPorFaltas) 
+        : descontoPorFaltasCalculado;
+      
+      const employeeState = poloToState(employee.polo);
+      const employeeHolidays = employeeState 
+        ? holidays.filter((h: any) => !h.state || h.state === employeeState || h.state === null)
+        : holidays;
+      
+      const employeeAbsenceDates = absencesByEmployee.get(employee.id) || [];
+      const dsrPorFaltaCalculado = calcularDSRPorFaltas(salarioBase, faltas, employeeHolidays, diasDoMes, employeeAbsenceDates);
+      const dsrPorFaltaFinal = (employee.dsrPorFalta !== null && employee.dsrPorFalta !== undefined) 
+        ? Number(employee.dsrPorFalta) 
+        : dsrPorFaltaCalculado;
+      
+      const calculatedNextMonthWorkingDays = calculateNextMonthWorkingDays(currentMonth, currentYear, holidays);
+      const nextMonthWorkingDays = calculatedNextMonthWorkingDays;
+      const totalAbsences = employeeAbsenceDates.length;
+      const daysForVA = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+      const daysForVT = Math.max(0, nextMonthWorkingDays - totalAbsences - faltas);
+      const totalVA = daysForVA * (employee.dailyFoodVoucher || 0);
+      const totalVT = daysForVT * (employee.dailyTransportVoucher || 0);
+      const percentualVA = employee.modality !== 'MEI' ? (25.2 * daysForVA) * 0.09 : 0;
+      const percentualVT = employee.polo === 'GOIÁS' ? salarioBase * 0.06 : 0;
+      
+      const valorHorasExtrasCalculado = (employee.he50Value || 0) + (employee.he100Value || 0);
+      const valorHorasExtras = (employee.horasExtrasValue !== null && employee.horasExtrasValue !== undefined) 
+        ? Number(employee.horasExtrasValue) 
+        : valorHorasExtrasCalculado;
+      
+      const diasUteis = employee.totalWorkingDays || 0;
+      const diasNaoUteis = diasDoMes - diasUteis;
+      const valorDSRHECalculado = diasUteis > 0 ? 
+        ((employee.he50Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0) + 
+        ((employee.he100Hours || 0) / diasUteis) * diasNaoUteis * (employee.hourlyRate || 0)
+        : 0;
+      const valorDSRHE = (employee.dsrHEValue !== null && employee.dsrHEValue !== undefined) 
+        ? (Number(employee.dsrHEValue) * (employee.hourlyRate || 0))
+        : valorDSRHECalculado;
+      const baseINSSMensal = employee.modality === 'MEI' || employee.modality === 'ESTAGIÁRIO' 
+        ? 0 
+        : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFaltaFinal);
+      
+      const calcularINSS = (baseINSS: number): number => {
+        if (baseINSS <= 0) return 0;
+        const faixa1 = 1621.0;
+        const faixa2 = 2902.84;
+        const faixa3 = 4354.27;
+        const teto = 8475.55;
+        const base = Math.min(baseINSS, teto);
+        if (base <= faixa1) {
+          return base * 0.075;
+        }
+        if (base <= faixa2) {
+          return (faixa1 * 0.075) + ((base - faixa1) * 0.09);
+        }
+        if (base <= faixa3) {
+          return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((base - faixa2) * 0.12);
+        }
+        return (faixa1 * 0.075) + ((faixa2 - faixa1) * 0.09) + ((faixa3 - faixa2) * 0.12) + ((base - faixa3) * 0.14);
+      };
+      
+      const inssMensal = calcularINSS(baseINSSMensal);
+      const irrfMensal = employee.irrfMensal || 0;
+      const salarioFamilia = employee.familySalary || 0;
+      const totalProventos = salarioBase + salarioFamilia + insalubridade + periculosidade + valorHorasExtras + valorDSRHE + totalVT;
+      const totalDescontos = (employee.totalDiscounts || 0) + descontoPorFaltas + dsrPorFaltaFinal + percentualVA + percentualVT + inssMensal + irrfMensal;
+      const liquidoReceber = totalProventos - totalDescontos;
+      const liquidoComAcrescimos = liquidoReceber + (employee.totalAdjustments || 0);
+      
+      return sum + liquidoComAcrescimos;
+    }, 0);
+
+    // Adicionar 2 linhas vazias
+    const emptyRow1: any = {
+      'NOME': '',
+      'EMPRESA': '',
+      'MODALIDADE': '',
+      'CPF': '',
+      'ALOCAÇÃO FINAL': '',
+      'BANCO': '',
+      'TIPO DE CONTA': '',
+      'AGÊNCIA': '',
+      'OPERAÇÃO': '',
+      'CONTA': '',
+      'DÍGITO': '',
+      'TIPO DE CHAVE PIX': '',
+      'CHAVE PIX': '',
+      'SALÁRIO BASE': '',
+      'LÍQUIDO': '',
+      'ACRÉSCIMOS TOTAIS': '',
+      'LÍQUIDO TOTAL': ''
+    };
+    const emptyRow2: any = { ...emptyRow1 };
+    
+    exportData.push(emptyRow1);
+    exportData.push(emptyRow2);
+
+    // Adicionar linha de TOTAL com "TOTAL" na coluna ACRÉSCIMOS TOTAIS (ao lado esquerdo de LÍQUIDO TOTAL)
+    const totalRow: any = {
+      'NOME': '',
+      'EMPRESA': '',
+      'MODALIDADE': '',
+      'CPF': '',
+      'ALOCAÇÃO FINAL': '',
+      'BANCO': '',
+      'TIPO DE CONTA': '',
+      'AGÊNCIA': '',
+      'OPERAÇÃO': '',
+      'CONTA': '',
+      'DÍGITO': '',
+      'TIPO DE CHAVE PIX': '',
+      'CHAVE PIX': '',
+      'SALÁRIO BASE': '',
+      'LÍQUIDO': '',
+      'ACRÉSCIMOS TOTAIS': 'TOTAL',
+      'LÍQUIDO TOTAL': formatCurrency(totalLiquidoTotal)
+    };
+    exportData.push(totalRow);
 
     // Criar planilha
     const ws = XLSX.utils.json_to_sheet(exportData);
     
     // Ajustar largura das colunas
     const colWidths = [
-      { wch: 25 }, // Nome
+      { wch: 30 }, // NOME
+      { wch: 15 }, // EMPRESA
+      { wch: 15 }, // MODALIDADE
       { wch: 15 }, // CPF
-      { wch: 12 }, // Matrícula
-      { wch: 20 }, // Função
-      { wch: 20 }, // Setor
-      { wch: 20 }, // Empresa
-      { wch: 15 }, // Polo
-      { wch: 20 }, // Centro de Custo
-      { wch: 20 }, // Cliente
-      { wch: 15 }, // Modalidade
-      { wch: 20 }, // Banco
-      { wch: 15 }, // Tipo de Conta
-      { wch: 10 }, // Agência
-      { wch: 10 }, // Operação
-      { wch: 12 }, // Conta
-      { wch: 8 },  // Dígito
-      { wch: 15 }, // Tipo PIX
-      { wch: 30 }, // Chave PIX
-      { wch: 15 }, // Salário Base
-      { wch: 15 }, // Salário Família
-      { wch: 15 }, // Periculosidade
-      { wch: 15 }, // Insalubridade
-      { wch: 12 }, // HE 50% Horas
-      { wch: 15 }, // HE 50% Valor
-      { wch: 12 }, // HE 100% Horas
-      { wch: 15 }, // HE 100% Valor
-      { wch: 12 }, // DSR HE
-      { wch: 15 }, // Total Horas Extras
-      { wch: 12 }, // VA Diário
-      { wch: 12 }, // VT Diário
-      { wch: 12 }, // Total VA
-      { wch: 12 }, // Total VT
-      { wch: 12 }, // Total VA+VT
-      { wch: 12 }, // Dias Trabalhados
-      { wch: 12 }, // Total Dias Úteis
-      { wch: 10 }, // Faltas
-      { wch: 15 }, // Desconto por Faltas
-      { wch: 12 }, // DSR por Falta
-      { wch: 10 }, // % VA
-      { wch: 10 }, // % VT
-      { wch: 12 }, // INSS Mensal
-      { wch: 12 }, // IRRF Mensal
-      { wch: 15 }, // Descontos Adicionais
-      { wch: 15 }, // Total Descontos
-      { wch: 12 }, // Acréscimos
-      { wch: 15 }, // Total Proventos
-      { wch: 12 }, // FGTS
-      { wch: 12 }, // FGTS Férias
-      { wch: 12 }, // FGTS Total
-      { wch: 12 }, // INSS Total
-      { wch: 12 }, // IRRF Total
-      { wch: 12 }, // Dias de Férias
-      { wch: 15 }, // Base INSS Férias
-      { wch: 12 }, // INSS Férias
-      { wch: 15 }, // Líquido
-      { wch: 18 }  // Líquido Total
+      { wch: 30 }, // ALOCAÇÃO FINAL
+      { wch: 15 }, // BANCO
+      { wch: 15 }, // TIPO DE CONTA
+      { wch: 10 }, // AGÊNCIA
+      { wch: 10 }, // OPERAÇÃO
+      { wch: 12 }, // CONTA
+      { wch: 8 },  // DÍGITO
+      { wch: 15 }, // TIPO DE CHAVE PIX
+      { wch: 20 }, // CHAVE PIX
+      { wch: 15 }, // SALÁRIO BASE
+      { wch: 15 }, // LÍQUIDO
+      { wch: 18 }, // ACRÉSCIMOS TOTAIS
+      { wch: 18 }  // LÍQUIDO TOTAL
     ];
     ws['!cols'] = colWidths;
     
