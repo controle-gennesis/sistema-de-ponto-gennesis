@@ -119,7 +119,7 @@ export default function FinanceiroPage() {
       const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/plain; charset=ISO-8859-1' }));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `CNAB400-${filters.month.toString().padStart(2, '0')}-${filters.year}.txt`);
+      link.setAttribute('download', `CNAB400-${filters.month.toString().padStart(2, '0')}-${filters.year}.REM`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -352,11 +352,11 @@ export default function FinanceiroPage() {
           {/* Preview dos dados */}
           {showPreview && borderData?.data && borderData.data.length > 0 && (
             <Card>
-              <CardHeader className="border-b-0">
+              <CardHeader className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <DollarSign className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Preview dos Dados</h3>
+                  <div>
+                    <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Dados para Pagamento</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Visualize os funcionários e valores antes de gerar o arquivo</p>
                   </div>
                 </div>
               </CardHeader>

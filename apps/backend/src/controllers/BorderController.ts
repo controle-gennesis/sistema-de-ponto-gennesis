@@ -124,7 +124,7 @@ export class BorderController {
       const cnabContent = await borderService.generateCNAB400(filters);
 
       res.setHeader('Content-Type', 'text/plain; charset=ISO-8859-1');
-      res.setHeader('Content-Disposition', `attachment; filename="CNAB400-${monthNum.toString().padStart(2, '0')}-${yearNum}.txt"`);
+      res.setHeader('Content-Disposition', `attachment; filename="CNAB400-${monthNum.toString().padStart(2, '0')}-${yearNum}.REM"`);
       res.send(cnabContent);
     } catch (error) {
       next(error);

@@ -331,18 +331,24 @@ export class BorderService {
     const currentDate = moment();
     const paymentDate = moment({ year: filters.year, month: filters.month - 1 }).endOf('month');
     
-    // Formatar valores para CNAB400
+    // Formatar valores para CNAB400 - garantir tamanho exato
     const formatNumber = (value: number, length: number, decimals: number = 2): string => {
       const intValue = Math.round(value * Math.pow(10, decimals));
-      return intValue.toString().padStart(length, '0');
+      const str = intValue.toString();
+      // Garantir tamanho exato: truncar se maior, preencher com zeros se menor
+      return str.substring(0, length).padStart(length, '0');
     };
 
     const formatText = (text: string, length: number): string => {
-      return (text || '').substring(0, length).padEnd(length, ' ');
+      const str = (text || '').substring(0, length);
+      // Garantir tamanho exato: truncar se maior, preencher com espaços se menor
+      return str.padEnd(length, ' ');
     };
 
     const formatDate = (date: moment.Moment): string => {
-      return date.format('DDMMYY');
+      const str = date.format('DDMMYY');
+      // Garantir tamanho exato (6 caracteres)
+      return str.substring(0, 6).padStart(6, '0');
     };
 
     // Remover caracteres especiais do CPF/CNPJ
@@ -350,32 +356,43 @@ export class BorderService {
       return (doc || '').replace(/[^0-9]/g, '');
     };
 
+    // Função para garantir que um campo numérico tenha tamanho exato
+    const padNumber = (value: string | number, length: number): string => {
+      const str = value.toString().replace(/[^0-9]/g, '');
+      return str.substring(0, length).padStart(length, '0');
+    };
+
     // Header do arquivo (Registro 0) - 400 caracteres
     const cnpj = cleanDocument(companySettings.cnpj || '');
-    const header = 
-      '0' + // Tipo de registro (1)
-      '1' + // Operação (1 = Remessa) (1)
-      formatText('REMESSA', 7) + // Literal remessa (7)
-      '01' + // Código do serviço (2)
-      formatText(companySettings.name || 'EMPRESA', 15) + // Nome da empresa (15)
-      '341' + // Código do banco Itaú (3)
-      formatText('ITAU', 15) + // Nome do banco (15)
-      formatDate(currentDate) + // Data de geração (6)
-      ' ' + // Branco (1)
-      formatText('', 8) + // Identificação da empresa (8)
-      formatText(cnpj, 14) + // CNPJ da empresa (14)
-      formatText('', 20) + // Branco (20)
-      '0001' + // Agência (4)
-      '00' + // Dígito da agência (2)
-      formatText('', 5) + // Conta (5)
-      formatText('', 1) + // Dígito da conta (1)
-      formatText('', 8) + // Branco (8)
-      formatText('', 7) + // Branco (7)
-      '000001'; // Número sequencial (6)
+    const headerParts: string[] = [];
     
+    headerParts.push('0'.substring(0, 1).padStart(1, '0')); // 001-001: Tipo de registro (1)
+    headerParts.push('1'.substring(0, 1).padStart(1, '0')); // 002-002: Operação (1 = Remessa) (1)
+    headerParts.push(formatText('REMESSA', 7)); // 003-009: Literal remessa (7)
+    headerParts.push('01'.substring(0, 2).padStart(2, '0')); // 010-011: Código do serviço (2)
+    headerParts.push(formatText(companySettings.name || 'EMPRESA', 15)); // 012-026: Nome da empresa (15)
+    headerParts.push('341'.substring(0, 3).padStart(3, '0')); // 027-029: Código do banco Itaú (3)
+    headerParts.push(formatText('ITAU', 15)); // 030-044: Nome do banco (15)
+    headerParts.push(formatDate(currentDate)); // 045-050: Data de geração (6)
+    headerParts.push(formatText('', 1)); // 051-051: Branco (1)
+    headerParts.push(formatText('', 8)); // 052-059: Identificação da empresa (8)
+    headerParts.push(padNumber(cnpj, 14)); // 060-073: CNPJ da empresa (14)
+    headerParts.push(formatText('', 20)); // 074-093: Branco (20)
+    headerParts.push(padNumber('0001', 4)); // 094-097: Agência (4)
+    headerParts.push(padNumber('00', 2)); // 098-099: Dígito da agência (2)
+    headerParts.push(formatText('', 5)); // 100-104: Conta (5)
+    headerParts.push(formatText('', 1)); // 105-105: Dígito da conta (1)
+    headerParts.push(formatText('', 8)); // 106-113: Branco (8)
+    headerParts.push(formatText('', 7)); // 114-120: Branco (7)
+    headerParts.push(padNumber('1', 6)); // 121-126: Número sequencial (6)
+    headerParts.push(formatText('', 274)); // 127-400: Branco (274) - completar até 400
+    
+    const header = headerParts.join('');
     // Garantir que o header tenha exatamente 400 caracteres
-    const headerPadded = header.padEnd(400, ' ');
-    lines.push(headerPadded);
+    if (header.length !== 400) {
+      throw new Error(`Header deve ter 400 caracteres, mas tem ${header.length}. Partes: ${headerParts.map((p, i) => `${i}:${p.length}`).join(', ')}`);
+    }
+    lines.push(header);
 
     // Detalhes (Registro 1) - um para cada pagamento
     let sequence = 2;
@@ -386,71 +403,83 @@ export class BorderService {
 
       const cpf = cleanDocument(item.cpf);
       const amount = formatNumber(item.amount, 13, 2);
-      const agency = item.agency.replace(/[^0-9]/g, '').padStart(5, '0');
-      const account = item.account.replace(/[^0-9]/g, '').padStart(12, '0');
-      const accountDigit = item.digit || '0';
-      const name = item.name.substring(0, 30).toUpperCase();
+      // Dados bancários do favorecido
+      const agency = padNumber(item.agency || '', 5);
+      const account = padNumber(item.account || '', 12);
+      const accountDigit = (item.digit || '0').substring(0, 1);
+      const name = item.name.toUpperCase();
 
       // Detalhe (Registro 1) - 400 caracteres
-      // Formato simplificado para transferência de salário
-      const detail = 
-        '1' + // Tipo de registro (1)
-        formatText('', 16) + // Branco (16)
-        '000' + // Agência debitada (3)
-        '00' + // Dígito da agência debitada (2)
-        formatText('', 5) + // Conta debitada (5)
-        formatText('', 1) + // Dígito da conta debitada (1)
-        formatText('', 5) + // Branco (5)
-        '000' + // Carteira (3)
-        '000' + // Agência/Código do cedente (3)
-        formatText('', 5) + // Conta corrente (5)
-        formatText('', 1) + // Dígito da conta (1)
-        '00000000000000000000' + // Nosso número (20)
-        formatDate(paymentDate) + // Data de vencimento (6)
-        amount + // Valor do título (13)
-        '341' + // Código do banco Itaú (3)
-        '00000' + // Agência depositária (5)
-        '01' + // Espécie (2 = Duplicata) (2)
-        'N' + // Aceite (1)
-        formatDate(paymentDate) + // Data de emissão (6)
-        '06' + // Instrução 1 - Crédito em conta corrente (2)
-        '00' + // Instrução 2 (2)
-        formatNumber(0, 13, 2) + // Valor a ser cobrado por dia de atraso (13)
-        formatDate(paymentDate) + // Data limite para desconto (6)
-        formatNumber(0, 13, 2) + // Valor do desconto (13)
-        formatNumber(0, 13, 2) + // Valor do IOF (13)
-        formatNumber(0, 13, 2) + // Valor do abatimento (13)
-        formatText(cpf, 14) + // CPF/CNPJ do pagador (14)
-        formatText(name, 40) + // Nome do pagador (40)
-        formatText('', 40) + // Endereço do pagador (40)
-        formatText('', 12) + // Bairro do pagador (12)
-        formatText('00000000', 8) + // CEP (8)
-        formatText('', 15) + // Cidade do pagador (15)
-        formatText('', 2) + // UF do pagador (2)
-        formatText('', 40) + // Observações (40)
-        '00000000' + // Número de dias para protesto (8)
-        ' ' + // Branco (1)
-        sequence.toString().padStart(6, '0'); // Número sequencial (6)
+      // Construir campo por campo garantindo tamanho exato
+      const detailParts: string[] = [];
+      
+      detailParts.push('1'.substring(0, 1)); // 001-001: Tipo de registro (1)
+      detailParts.push(formatText('', 16)); // 002-017: Branco (16)
+      detailParts.push(padNumber('000', 3)); // 018-020: Agência debitada (3)
+      detailParts.push(padNumber('00', 2)); // 021-022: Dígito da agência debitada (2)
+      detailParts.push(formatText('', 5)); // 023-027: Conta debitada (5)
+      detailParts.push(formatText('', 1)); // 028-028: Dígito da conta debitada (1)
+      detailParts.push(formatText('', 5)); // 029-033: Branco (5)
+      detailParts.push(padNumber('000', 3)); // 034-036: Carteira (3)
+      detailParts.push(padNumber('000', 3)); // 037-039: Agência/Código do cedente (3)
+      detailParts.push(formatText('', 5)); // 040-044: Conta corrente (5)
+      detailParts.push(formatText('', 1)); // 045-045: Dígito da conta (1)
+      detailParts.push(padNumber('0', 20)); // 046-065: Nosso número (20)
+      detailParts.push(formatDate(paymentDate)); // 066-071: Data de vencimento (6)
+      detailParts.push(amount); // 072-084: Valor do título (13)
+      detailParts.push('341'.substring(0, 3).padStart(3, '0')); // 085-087: Código do banco Itaú (3)
+      // 088-092: Agência depositária - usar agência do favorecido (5 dígitos)
+      detailParts.push(agency.substring(0, 5).padStart(5, '0')); // 088-092: Agência depositária (5)
+      detailParts.push('01'.substring(0, 2).padStart(2, '0')); // 093-094: Espécie (2)
+      detailParts.push('N'.substring(0, 1)); // 095-095: Aceite (1)
+      detailParts.push(formatDate(paymentDate)); // 096-101: Data de emissão (6)
+      detailParts.push('06'.substring(0, 2).padStart(2, '0')); // 102-103: Instrução 1 (2)
+      detailParts.push('00'.substring(0, 2).padStart(2, '0')); // 104-105: Instrução 2 (2)
+      detailParts.push(formatNumber(0, 13, 2)); // 106-118: Valor a ser cobrado por dia de atraso (13)
+      detailParts.push(formatDate(paymentDate)); // 119-124: Data limite para desconto (6)
+      detailParts.push(formatNumber(0, 13, 2)); // 125-137: Valor do desconto (13)
+      detailParts.push(formatNumber(0, 13, 2)); // 138-150: Valor do IOF (13)
+      detailParts.push(formatNumber(0, 13, 2)); // 151-163: Valor do abatimento (13)
+      detailParts.push(padNumber(cpf, 14)); // 164-177: CPF/CNPJ do pagador (14)
+      detailParts.push(formatText(name, 40)); // 178-217: Nome do pagador (40)
+      // 218-232: Conta do favorecido (15 caracteres)
+      detailParts.push(account.substring(0, 15).padStart(15, '0')); // 218-232: Conta do favorecido (15)
+      // 233-233: Dígito da conta do favorecido (1)
+      detailParts.push(accountDigit.substring(0, 1).padStart(1, '0')); // 233-233: Dígito da conta (1)
+      detailParts.push(formatText('', 24)); // 234-257: Branco (24) - ajustado após conta e dígito
+      detailParts.push(formatText('', 12)); // 258-269: Bairro do pagador (12)
+      detailParts.push(padNumber('00000000', 8)); // 270-277: CEP (8)
+      detailParts.push(formatText('', 15)); // 278-292: Cidade do pagador (15)
+      detailParts.push(formatText('', 2)); // 293-294: UF do pagador (2)
+      detailParts.push(formatText('', 40)); // 295-334: Observações (40)
+      detailParts.push(padNumber('00000000', 8)); // 335-342: Número de dias para protesto (8)
+      detailParts.push(formatText('', 1)); // 343-343: Branco (1)
+      detailParts.push(padNumber(sequence.toString(), 6)); // 344-349: Número sequencial (6)
+      detailParts.push(formatText('', 51)); // 350-400: Branco (51) - completar até 400
 
+      const detail = detailParts.join('');
       // Garantir que o detalhe tenha exatamente 400 caracteres
-      const detailPadded = detail.padEnd(400, ' ');
-      lines.push(detailPadded);
+      if (detail.length !== 400) {
+        throw new Error(`Detalhe deve ter 400 caracteres, mas tem ${detail.length}. Sequencial: ${sequence}, Partes: ${detailParts.map((p, i) => `${i}:${p.length}`).join(', ')}`);
+      }
+      lines.push(detail);
       sequence++;
     });
 
     // Trailer do arquivo (Registro 9) - 400 caracteres
-    const totalAmount = borderData.filter(item => item.bank && item.agency && item.account)
-      .reduce((sum, item) => sum + item.amount, 0);
     const totalRecords = lines.length + 1; // +1 para incluir o trailer
 
-    const trailer = 
-      '9' + // Tipo de registro (1)
-      formatText('', 393) + // Branco (393)
-      totalRecords.toString().padStart(6, '0'); // Total de registros (6)
+    const trailerParts: string[] = [];
+    trailerParts.push('9'.substring(0, 1)); // 001-001: Tipo de registro (1)
+    trailerParts.push(formatText('', 393)); // 002-394: Branco (393)
+    trailerParts.push(padNumber(totalRecords.toString(), 6)); // 395-400: Total de registros (6)
 
+    const trailer = trailerParts.join('');
     // Garantir que o trailer tenha exatamente 400 caracteres
-    const trailerPadded = trailer.padEnd(400, ' ');
-    lines.push(trailerPadded);
+    if (trailer.length !== 400) {
+      throw new Error(`Trailer deve ter 400 caracteres, mas tem ${trailer.length}`);
+    }
+    lines.push(trailer);
 
     return lines.join('\r\n');
   }
