@@ -39,7 +39,8 @@ import {
   Package,
   ShoppingCart,
   Building2,
-  Bot
+  Bot,
+  Cake
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTheme } from '@/context/ThemeContext';
@@ -154,6 +155,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Users,
         items: [
           {
+            name: 'Gerenciar Funcionários',
+            href: '/ponto/funcionarios',
+            icon: Users,
+            description: 'Cadastrar e gerenciar funcionários',
+            permission: isAdministrator || isDepartmentPessoal
+          },
+          {
             name: 'Folha de Pagamento',
             href: '/ponto/folha-pagamento',
             icon: FileSpreadsheet,
@@ -222,6 +230,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: Users,
             description: 'Alocação de funcionários',
             permission: isAdministrator || permissions.canAccessPayroll
+          },
+          {
+            name: 'Aniversariantes',
+            href: '/ponto/aniversariantes',
+            icon: Cake,
+            description: 'Ver aniversariantes do mês',
+            permission: true // Todos podem ver aniversariantes
           }
         ]
       },
