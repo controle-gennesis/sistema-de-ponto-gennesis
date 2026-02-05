@@ -8,13 +8,20 @@ if (databaseUrl && !databaseUrl.includes('connection_limit')) {
   databaseUrl = `${databaseUrl}${separator}connection_limit=5&pool_timeout=10`;
 }
 
+// Configurar logs do Prisma
+// Se PRISMA_LOG_QUERIES=true, mostra todas as queries SQL (útil para debug)
+// Por padrão, mostra apenas erros e warnings
+const prismaLogLevels = process.env.PRISMA_LOG_QUERIES === 'true' 
+  ? ['query', 'error', 'warn'] 
+  : ['error', 'warn'];
+
 const prisma = new PrismaClient({
   datasources: {
     db: {
       url: databaseUrl || process.env.DATABASE_URL,
     },
   },
-  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  log: prismaLogLevels,
 });
 
 // Configurar pool de conexões para evitar "too many connections"

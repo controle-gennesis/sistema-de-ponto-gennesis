@@ -1,5 +1,6 @@
 import moment from 'moment';
 import { prisma } from '../lib/prisma';
+import { getCompanySettings } from '../lib/cache';
 
 export interface OvertimeBalance {
   totalHours: number;
@@ -43,7 +44,7 @@ export class OvertimeService {
    */
   async getOvertimeBalance(userId: string): Promise<OvertimeBalance> {
     // Buscar configurações da empresa
-    const companySettings = await prisma.companySettings.findFirst();
+    const companySettings = await getCompanySettings(prisma);
     const maxOvertimeHours = companySettings?.maxOvertimeHours || 2;
 
     // Buscar horas extras aprovadas
@@ -146,7 +147,7 @@ export class OvertimeService {
     }
 
     // Verificar limite máximo de horas por dia
-    const companySettings = await prisma.companySettings.findFirst();
+    const companySettings = await getCompanySettings(prisma);
     const maxHoursPerDay = companySettings?.maxOvertimeHours || 2;
 
     if (hours > maxHoursPerDay) {

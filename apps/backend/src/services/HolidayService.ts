@@ -1,6 +1,7 @@
 import { Holiday, HolidayType } from '@prisma/client';
 import moment from 'moment-timezone';
 import { prisma } from '../lib/prisma';
+import { cache } from '../lib/cache';
 
 export interface CreateHolidayInput {
   name: string;
@@ -517,6 +518,21 @@ export class HolidayService {
     const normalizedStart = moment(start).startOf('day').toDate();
     const normalizedEnd = moment(end).endOf('day').toDate();
 
+    // OTIMIZAÇÃO: Usar cache para feriados
+    const startMonth = moment(normalizedStart).month() + 1;
+    const startYear = moment(normalizedStart).year();
+    const endMonth = moment(normalizedEnd).month() + 1;
+    const endYear = moment(normalizedEnd).year();
+    
+    // Se for o mesmo mês, usar cache
+    if (startMonth === endMonth && startYear === endYear) {
+      const cacheKey = `holidays-${startYear}-${startMonth}${state ? `-${state}` : ''}`;
+      const cached = cache.get<Holiday[]>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     // Construir filtro de estado
     const stateFilter: any = state 
       ? {
@@ -581,9 +597,17 @@ export class HolidayService {
       }
     }
 
-    return [...fixedHolidays, ...recurringInPeriod].sort((a, b) => 
+    const result = [...fixedHolidays, ...recurringInPeriod].sort((a, b) => 
       moment(a.date).diff(moment(b.date))
     );
+
+    // OTIMIZAÇÃO: Cachear resultado se for do mesmo mês
+    if (startMonth === endMonth && startYear === endYear) {
+      const cacheKey = `holidays-${startYear}-${startMonth}${state ? `-${state}` : ''}`;
+      cache.set(cacheKey, result, 3600); // Cache por 1 hora
+    }
+
+    return result;
   }
 
   /**

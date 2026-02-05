@@ -174,6 +174,7 @@ export class HoursExtrasService {
 
   /**
    * Calcula horas extras para um funcionário em um mês específico
+   * OTIMIZADO: Busca todos os registros do mês de uma vez
    */
   async calculateHoursExtrasForMonth(
     userId: string, 
@@ -194,20 +195,53 @@ export class HoursExtrasService {
     const startDate = moment([year, month - 1, 1]).startOf('day').toDate();
     const endDate = moment([year, month - 1]).endOf('month').toDate();
     
+    // OTIMIZAÇÃO: Buscar todos os registros do mês de uma vez
+    const allRecords = await prisma.timeRecord.findMany({
+      where: {
+        userId,
+        timestamp: {
+          gte: startDate,
+          lte: endDate
+        },
+        isValid: true
+      },
+      orderBy: { timestamp: 'asc' }
+    });
+
+    // Buscar feriados do mês de uma vez
+    const holidays = await holidayService.getHolidaysByPeriod(startDate, endDate, state);
+    const holidayDates = new Set(
+      holidays.map(h => moment(h.date).format('YYYY-MM-DD'))
+    );
+    
     const hourlyRate = this.calculateHourlyRate(baseSalary, dangerPay, unhealthyPay);
     let totalHE50Hours = 0;
     let totalHE100Hours = 0;
 
+    // Agrupar registros por dia
+    const recordsByDay = new Map<string, typeof allRecords>();
+    allRecords.forEach(record => {
+      const dayKey = moment(record.timestamp).format('YYYY-MM-DD');
+      if (!recordsByDay.has(dayKey)) {
+        recordsByDay.set(dayKey, []);
+      }
+      recordsByDay.get(dayKey)!.push(record);
+    });
+
+    // Processar cada dia
     const cursor = moment(startDate);
     while (cursor.isSameOrBefore(endDate, 'day')) {
       const date = cursor.toDate();
+      const dayKey = cursor.format('YYYY-MM-DD');
       const dayOfWeek = cursor.day();
-      const isHoliday = await this.isHoliday(date, state);
-      const totalHours = await this.calculateDayHours(userId, date);
+      const isHoliday = holidayDates.has(dayKey);
+      
+      const dayRecords = recordsByDay.get(dayKey) || [];
+      const totalHours = this.calculateDayHoursFromRecords(dayRecords);
       
       if (totalHours > 0) {
         const he50Hours = this.calculateHE50ForDay(totalHours, dayOfWeek, isHoliday);
-        const he100Hours = await this.calculateHE100ForDay(userId, date, dayOfWeek, state);
+        const he100Hours = this.calculateHE100ForDayFromRecords(dayRecords, dayOfWeek, isHoliday);
         
         totalHE50Hours += he50Hours;
         totalHE100Hours += he100Hours;
@@ -223,6 +257,71 @@ export class HoursExtrasService {
       he100Value: Number(((totalHE100Hours * 2.0) * hourlyRate).toFixed(2)),
       hourlyRate: Number(hourlyRate.toFixed(2))
     };
+  }
+
+  /**
+   * Calcula horas trabalhadas a partir de registros já buscados (otimizado)
+   */
+  private calculateDayHoursFromRecords(records: any[]): number {
+    if (records.length < 2) return 0;
+
+    let totalMinutes = 0;
+    let entryTime: Date | null = null;
+
+    for (const record of records) {
+      if (record.type === 'ENTRY' || record.type === 'LUNCH_END' || record.type === 'BREAK_END') {
+        entryTime = record.timestamp;
+      } else if ((record.type === 'EXIT' || record.type === 'LUNCH_START' || record.type === 'BREAK_START') && entryTime) {
+        const diffMinutes = moment(record.timestamp).diff(moment(entryTime), 'minutes');
+        totalMinutes += diffMinutes;
+        entryTime = null;
+      }
+    }
+
+    return totalMinutes / 60; // Converter para horas
+  }
+
+  /**
+   * Calcula horas extras 100% a partir de registros já buscados (otimizado)
+   */
+  private calculateHE100ForDayFromRecords(records: any[], dayOfWeek: number, isHoliday: boolean): number {
+    // Domingo: todas as horas são extras 100%
+    if (dayOfWeek === 0) {
+      return this.calculateDayHoursFromRecords(records);
+    }
+
+    // Feriado: todas as horas são extras 100%
+    if (isHoliday) {
+      return this.calculateDayHoursFromRecords(records);
+    }
+
+    // Após 22h: calcular horas após 22h
+    let hoursAfter22h = 0;
+    let entryTime: Date | null = null;
+
+    for (const record of records) {
+      const recordHour = record.timestamp.getHours();
+      
+      if (record.type === 'ENTRY' || record.type === 'LUNCH_END' || record.type === 'BREAK_END') {
+        entryTime = record.timestamp;
+      } else if ((record.type === 'EXIT' || record.type === 'LUNCH_START' || record.type === 'BREAK_START') && entryTime) {
+        // Se a entrada foi antes das 22h mas a saída foi depois das 22h
+        if (entryTime.getHours() < 22 && recordHour >= 22) {
+          const after22hTime = new Date(entryTime);
+          after22hTime.setHours(22, 0, 0, 0);
+          const diffMinutes = moment(record.timestamp).diff(moment(after22hTime), 'minutes');
+          hoursAfter22h += diffMinutes / 60;
+        }
+        // Se tanto entrada quanto saída foram após 22h
+        else if (entryTime.getHours() >= 22) {
+          const diffMinutes = moment(record.timestamp).diff(moment(entryTime), 'minutes');
+          hoursAfter22h += diffMinutes / 60;
+        }
+        entryTime = null;
+      }
+    }
+
+    return hoursAfter22h;
   }
 
   /**

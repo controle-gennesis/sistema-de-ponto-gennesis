@@ -1,6 +1,7 @@
 import moment from 'moment-timezone';
 import { HolidayService } from './HolidayService';
 import { prisma } from '../lib/prisma';
+import { getCompanySettings } from '../lib/cache';
 
 const holidayService = new HolidayService();
 
@@ -247,8 +248,8 @@ export class TimeRecordService {
     let earlyDepartures = 0;
     const issues: string[] = [];
 
-    // Buscar configurações da empresa uma única vez
-    const companySettings = await prisma.companySettings.findFirst();
+    // Buscar configurações da empresa uma única vez (com cache)
+    const companySettings = await getCompanySettings(prisma);
 
     // Iterar por cada dia do período
     const currentDate = moment(startDate);
@@ -757,7 +758,7 @@ export class TimeRecordService {
     });
 
     // Buscar configurações da empresa para horário de entrada
-    const companySettings = await prisma.companySettings.findFirst();
+    const companySettings = await getCompanySettings(prisma);
     const workStartTime = companySettings?.workStartTime || '07:00';
     const toleranceMinutes = companySettings?.toleranceMinutes || 10;
     const [startHour, startMinute] = workStartTime.split(':').map(Number);

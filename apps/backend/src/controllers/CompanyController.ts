@@ -2,11 +2,20 @@ import { Request, Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { cache } from '../lib/cache';
 
 export class CompanyController {
   async getCompanySettings(req: Request, res: Response, next: NextFunction) {
     try {
-      let settings = await prisma.companySettings.findFirst();
+      // OTIMIZAÇÃO: Usar cache para configurações da empresa
+      let settings = cache.get<any>('company_settings');
+      if (!settings) {
+        settings = await prisma.companySettings.findFirst();
+        if (settings) {
+          // Cache por 1 hora (configurações raramente mudam)
+          cache.set('company_settings', settings, 3600);
+        }
+      }
 
       // Se não existir configurações, criar com valores padrão
       if (!settings) {
@@ -91,8 +100,14 @@ export class CompanyController {
         throw createError('Horário de fim do almoço inválido (formato HH:MM)', 400);
       }
 
-      // Verificar se já existe configuração
-      let settings = await prisma.companySettings.findFirst();
+      // Verificar se já existe configuração (com cache)
+      let settings = cache.get<any>('company_settings');
+      if (!settings) {
+        settings = await prisma.companySettings.findFirst();
+        if (settings) {
+          cache.set('company_settings', settings, 3600);
+        }
+      }
 
       if (settings) {
         // Atualizar configuração existente

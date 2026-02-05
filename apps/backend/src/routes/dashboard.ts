@@ -222,37 +222,18 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
     ]);
     const presentToday = presentUserIds.size;
     
-    // Buscar dados dos funcionários presentes (excluindo administradores)
-    const presentEmployeesData = await prisma.user.findMany({
-      where: {
-        id: { in: Array.from(presentUserIds) },
-        role: 'EMPLOYEE',
-        isActive: true,
-        AND: [
-          { employee: { isNot: null } },
-          { employee: { position: { not: 'Administrador' } } }
-        ]
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        employee: {
-          select: {
-            department: true,
-            position: true,
-            requiresTimeClock: true
-          }
-        }
-      }
-    });
+    // OTIMIZAÇÃO: Buscar todos os funcionários de uma vez (presentes + todos para ausentes)
+    // Incluir também os pendentes para evitar query separada depois
+    const allEmployeeIdsForQuery = Array.from(new Set([
+      ...Array.from(presentUserIds),
+      ...(userIds.length > 0 ? userIds : [])
+    ]));
 
-    // Buscar todos os funcionários ativos (excluindo administradores)
     const allEmployees = await prisma.user.findMany({
-      where: userIds.length > 0 ? {
+      where: allEmployeeIdsForQuery.length > 0 ? {
+        id: { in: allEmployeeIdsForQuery },
         role: 'EMPLOYEE',
         isActive: true,
-        id: { in: userIds },
         AND: [
           { employee: { isNot: null } },
           { employee: { position: { not: 'Administrador' } } }
@@ -279,7 +260,8 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
       }
     });
 
-    // Funcionários ausentes (todos menos os presentes)
+    // Processar em memória
+    const presentEmployeesData = allEmployees.filter(emp => presentUserIds.has(emp.id));
     const absentEmployeesData = allEmployees.filter(emp => !presentUserIds.has(emp.id));
 
     const absentToday = Math.max(totalEmployees - presentToday, 0);
@@ -312,30 +294,11 @@ router.get('/admin', authorize('EMPLOYEE'), async (req: AuthRequest, res, next) 
       }
     });
 
-    // Buscar dados dos funcionários pendentes (excluindo administradores e os que não precisam bater ponto)
-    const pendingEmployeesData = await prisma.user.findMany({
-      where: {
-        id: { in: pendingUserIds },
-        role: 'EMPLOYEE',
-        isActive: true,
-        AND: [
-          { employee: { isNot: null } },
-          { employee: { position: { not: 'Administrador' } } },
-          { employee: { requiresTimeClock: true } } // Apenas os que precisam bater ponto podem estar pendentes
-        ]
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        employee: {
-          select: {
-            department: true,
-            position: true
-          }
-        }
-      }
-    });
+    // OTIMIZAÇÃO: Filtrar pendentes dos dados já buscados em vez de fazer query separada
+    const pendingEmployeesData = allEmployees.filter(emp => 
+      pendingUserIds.includes(emp.id) && 
+      emp.employee?.requiresTimeClock === true
+    );
 
     const pendingToday = pendingUserIds.length;
 
@@ -595,37 +558,18 @@ router.get('/', async (req: AuthRequest, res, next) => {
     ]);
     const presentToday = presentUserIds.size;
     
-    // Buscar dados dos funcionários presentes (excluindo administradores)
-    const presentEmployeesData = await prisma.user.findMany({
-      where: {
-        id: { in: Array.from(presentUserIds) },
-        role: 'EMPLOYEE',
-        isActive: true,
-        AND: [
-          { employee: { isNot: null } },
-          { employee: { position: { not: 'Administrador' } } }
-        ]
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        employee: {
-          select: {
-            department: true,
-            position: true,
-            requiresTimeClock: true
-          }
-        }
-      }
-    });
+    // OTIMIZAÇÃO: Buscar todos os funcionários de uma vez (presentes + todos para ausentes)
+    // Incluir também os pendentes para evitar query separada depois
+    const allEmployeeIdsForQuery = Array.from(new Set([
+      ...Array.from(presentUserIds),
+      ...(userIds.length > 0 ? userIds : [])
+    ]));
 
-    // Buscar todos os funcionários ativos (excluindo administradores)
     const allEmployees = await prisma.user.findMany({
-      where: userIds.length > 0 ? {
+      where: allEmployeeIdsForQuery.length > 0 ? {
+        id: { in: allEmployeeIdsForQuery },
         role: 'EMPLOYEE',
         isActive: true,
-        id: { in: userIds },
         AND: [
           { employee: { isNot: null } },
           { employee: { position: { not: 'Administrador' } } }
@@ -652,7 +596,8 @@ router.get('/', async (req: AuthRequest, res, next) => {
       }
     });
 
-    // Funcionários ausentes (todos menos os presentes)
+    // Processar em memória
+    const presentEmployeesData = allEmployees.filter(emp => presentUserIds.has(emp.id));
     const absentEmployeesData = allEmployees.filter(emp => !presentUserIds.has(emp.id));
 
     const absentToday = Math.max(totalEmployees - presentToday, 0);
@@ -685,30 +630,11 @@ router.get('/', async (req: AuthRequest, res, next) => {
       }
     });
 
-    // Buscar dados dos funcionários pendentes (excluindo administradores e os que não precisam bater ponto)
-    const pendingEmployeesData = await prisma.user.findMany({
-      where: {
-        id: { in: pendingUserIds },
-        role: 'EMPLOYEE',
-        isActive: true,
-        AND: [
-          { employee: { isNot: null } },
-          { employee: { position: { not: 'Administrador' } } },
-          { employee: { requiresTimeClock: true } } // Apenas os que precisam bater ponto podem estar pendentes
-        ]
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        employee: {
-          select: {
-            department: true,
-            position: true
-          }
-        }
-      }
-    });
+    // OTIMIZAÇÃO: Filtrar pendentes dos dados já buscados em vez de fazer query separada
+    const pendingEmployeesData = allEmployees.filter(emp => 
+      pendingUserIds.includes(emp.id) && 
+      emp.employee?.requiresTimeClock === true
+    );
 
     const pendingToday = pendingUserIds.length;
 

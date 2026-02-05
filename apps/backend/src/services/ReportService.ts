@@ -1,5 +1,6 @@
 import moment from 'moment';
 import { prisma } from '../lib/prisma';
+import { getCompanySettings } from '../lib/cache';
 
 export interface ReportPeriod {
   startDate: Date;
@@ -446,7 +447,7 @@ export class ReportService {
 
   private async calculateLateArrivals(records: any[]): Promise<number> {
     // Buscar configurações da empresa para horário de entrada
-    const companySettings = await prisma.companySettings.findFirst();
+    const companySettings = await getCompanySettings(prisma);
     const workStartTime = companySettings?.workStartTime || '07:00';
     const toleranceMinutes = companySettings?.toleranceMinutes || 10;
     const [startHour, startMinute] = workStartTime.split(':').map(Number);

@@ -1,6 +1,7 @@
 import moment from 'moment';
 import { HoursExtrasService } from './HoursExtrasService';
 import { prisma } from '../lib/prisma';
+import { cache } from '../lib/cache';
 
 const hoursExtrasService = new HoursExtrasService();
 
@@ -159,7 +160,122 @@ export interface PayrollFilters {
 
 export class PayrollService {
   /**
-   * Calcula os totais mensais de VA e VT para um funcionário
+   * Calcula os totais mensais de VA e VT usando dados já buscados (otimizado)
+   */
+  private async calculateMonthlyTotalsOptimized(
+    employeeId: string,
+    month: number,
+    year: number,
+    controlStartDate: Date | undefined,
+    employeeData: any,
+    timeRecords: any[],
+    allAbsences: any[]
+  ) {
+    if (!employeeData) {
+      // Fallback: buscar do banco se não tiver dados
+      return this.calculateMonthlyTotals(employeeId, month, year, controlStartDate);
+    }
+
+    // Se o funcionário não precisa bater ponto, calcular baseado nos dias úteis
+    if (employeeData.requiresTimeClock === false) {
+      const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
+      
+      // Filtrar ausências que NÃO devem ser descontadas
+      const absences = allAbsences.filter(absence => {
+        if (!absence.reason) return true;
+        const reasonLower = absence.reason.toLowerCase();
+        if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+            reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+            reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+          return false;
+        }
+        return true;
+      });
+      
+      const monthStartDate = new Date(year, month - 1, 1);
+      const { totalWorkingDays } = await this.calculateWorkingDays(0, month, year, monthStartDate);
+      
+      const daysWorked = Math.max(0, totalWorkingDays - allAbsences.length);
+      const faltas = 0;
+      
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextYear = month === 12 ? year + 1 : year;
+      const nextMonthStartDate = new Date(nextYear, nextMonth - 1, 1);
+      const { totalWorkingDays: nextMonthWorkingDays } = await this.calculateWorkingDays(0, nextMonth, nextYear, nextMonthStartDate);
+      
+      const dailyVA = Number(employeeData.dailyFoodVoucher || 0);
+      const dailyVT = Number(employeeData.dailyTransportVoucher || 0);
+      const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length);
+      const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length);
+      const totalVA = daysForVA * dailyVA;
+      const totalVT = daysForVT * dailyVT;
+      
+      return { 
+        totalVA, 
+        totalVT, 
+        daysWorked,
+        totalWorkingDays,
+        nextMonthWorkingDays,
+        daysForVA,
+        daysForVT,
+        absences: 0
+      };
+    }
+
+    // Para funcionários que batem ponto
+    const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
+    
+    // Filtrar ausências que NÃO devem ser descontadas
+    const absences = allAbsences.filter(absence => {
+      if (!absence.reason) return true;
+      const reasonLower = absence.reason.toLowerCase();
+      if (reasonLower.includes('maternity') || reasonLower.includes('maternidade') ||
+          reasonLower.includes('paternity') || reasonLower.includes('paternidade') ||
+          reasonLower.includes('accident') || reasonLower.includes('acidente')) {
+        return false;
+      }
+      return true;
+    });
+    
+    const { daysWorked, totalWorkingDays } = await this.calculateWorkingDays(
+      timeRecords.length,
+      month,
+      year,
+      controlStartDate
+    );
+    
+    const faltas = Math.max(0, totalWorkingDays - daysWorked);
+    const dailyVA = Number(employeeData.dailyFoodVoucher || 0);
+    const dailyVT = Number(employeeData.dailyTransportVoucher || 0);
+    
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonthStartDate = new Date(nextYear, nextMonth - 1, 1);
+    const { totalWorkingDays: nextMonthWorkingDays } = await this.calculateWorkingDays(0, nextMonth, nextYear, nextMonthStartDate);
+    
+    const daysForVA = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+    const daysForVT = Math.max(0, nextMonthWorkingDays - allAbsences.length - faltas);
+    const totalVA = daysForVA * dailyVA;
+    const totalVT = daysForVT * dailyVT;
+    
+    return { 
+      totalVA, 
+      totalVT, 
+      daysWorked,
+      totalWorkingDays,
+      nextMonthWorkingDays,
+      daysForVA,
+      daysForVT,
+      absences: 0
+    };
+  }
+
+  /**
+   * Calcula os totais mensais de VA e VT para um funcionário (versão original - mantida para compatibilidade)
    */
   private async calculateMonthlyTotals(employeeId: string, month: number, year: number, controlStartDate?: Date) {
     // Buscar dados do funcionário para verificar se precisa bater ponto
@@ -423,17 +539,25 @@ export class PayrollService {
         : 1);
     
     // Buscar feriados ativos no mês para desconsiderar da contagem de dias úteis
+    // OTIMIZAÇÃO: Usar cache para evitar buscar feriados repetidamente
     const startDateRange = new Date(year, month - 1, startDay);
     const endDateRange = new Date(year, month - 1, endDay, 23, 59, 59);
-    const holidays = await prisma.holiday.findMany({
-      where: {
-        isActive: true,
-        date: {
-          gte: startDateRange,
-          lte: endDateRange
+    const cacheKey = `holidays-${year}-${month}`;
+    
+    let holidays = cache.get<any[]>(cacheKey);
+    if (!holidays) {
+      holidays = await prisma.holiday.findMany({
+        where: {
+          isActive: true,
+          date: {
+            gte: startDateRange,
+            lte: endDateRange
+          }
         }
-      }
-    });
+      });
+      // Cache por 1 hora (feriados raramente mudam)
+      cache.set(cacheKey, holidays, 3600);
+    }
     const holidaySet = new Set(
       holidays.map((h) => {
         const d = new Date(h.date);
@@ -734,6 +858,207 @@ export class PayrollService {
     // Nota: O filtro de requiresTimeClock já foi aplicado na query do Prisma acima
     // Então não precisamos filtrar novamente aqui
 
+    // OTIMIZAÇÃO CRÍTICA: Buscar todos os dados de uma vez antes do loop
+    // Isso reduz de ~800-1000 queries para ~10-15 queries
+    const employeeIds = employees.map(emp => emp.id);
+    const userIds = employees.map(emp => emp.userId).filter(Boolean);
+    
+    const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
+    
+    // Cache key para feriados
+    const holidaysCacheKey = `holidays-${year}-${month}`;
+    let holidays = cache.get<any[]>(holidaysCacheKey);
+    if (!holidays) {
+      holidays = await prisma.holiday.findMany({
+        where: {
+          date: { gte: startDate, lte: endDate },
+          isActive: true
+        }
+      });
+      cache.set(holidaysCacheKey, holidays, 3600); // Cache por 1 hora
+    }
+
+    // Buscar todos os dados de uma vez
+    const [
+      allAdjustments,
+      allDiscounts,
+      allAbsenceRecords,
+      allTimeRecordsForAllocation,
+      allManualInss,
+      allVacations,
+      allEmployeesData,
+      allTimeRecordsForTotals,
+      allEmployeeDataForTotals
+    ] = await Promise.all([
+      // Ajustes fixos e não fixos
+      prisma.salaryAdjustment.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          OR: [
+            { isFixed: true },
+            {
+              isFixed: false,
+              createdAt: { gte: startDate, lte: endDate }
+            }
+          ]
+        }
+      }),
+      // Descontos do mês
+      prisma.salaryDiscount.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          createdAt: { gte: startDate, lte: endDate }
+        }
+      }),
+      // Ausências do mês
+      prisma.timeRecord.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          timestamp: { gte: startDate, lte: endDate },
+          type: 'ABSENCE_JUSTIFIED',
+          approvedBy: { not: null }
+        },
+        select: {
+          employeeId: true,
+          timestamp: true,
+          reason: true
+        }
+      }),
+      // Registros de ponto para alocação (centro de custo)
+      prisma.timeRecord.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          timestamp: { gte: startDate, lte: endDate },
+          costCenter: { not: null }
+        },
+        select: {
+          employeeId: true,
+          costCenter: true
+        }
+      }),
+      // Valores manuais de INSS
+      prisma.manualInssValue.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          month: month,
+          year: year
+        }
+      }),
+      // Férias do mês
+      prisma.vacation.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          startDate: { lte: endDate },
+          endDate: { gte: startDate },
+          status: 'APPROVED'
+        }
+      }),
+      // Dados dos funcionários para verificar se estão ativos
+      prisma.employee.findMany({
+        where: { id: { in: employeeIds } },
+        select: { id: true, createdAt: true }
+      }),
+      // OTIMIZAÇÃO: Buscar todos os registros de ponto (ENTRY) de uma vez para calculateMonthlyTotals
+      prisma.timeRecord.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          timestamp: { gte: startDate, lte: endDate },
+          type: 'ENTRY'
+        },
+        select: {
+          employeeId: true,
+          timestamp: true
+        }
+      }),
+      // OTIMIZAÇÃO: Buscar dados dos funcionários (VA/VT) de uma vez
+      prisma.employee.findMany({
+        where: { id: { in: employeeIds } },
+        select: {
+          id: true,
+          requiresTimeClock: true,
+          dailyFoodVoucher: true,
+          dailyTransportVoucher: true,
+          createdAt: true
+        }
+      })
+    ]);
+
+    // Criar índices em memória para acesso rápido
+    const adjustmentsByEmployee = new Map<string, any[]>();
+    const discountsByEmployee = new Map<string, any[]>();
+    const absencesByEmployee = new Map<string, any[]>();
+    const timeRecordsByEmployee = new Map<string, any[]>();
+    const manualInssByEmployee = new Map<string, any>();
+    const vacationsByEmployee = new Map<string, any[]>();
+    const employeesActiveMap = new Map<string, boolean>();
+
+    // Organizar ajustes por funcionário
+    allAdjustments.forEach(adj => {
+      if (!adjustmentsByEmployee.has(adj.employeeId)) {
+        adjustmentsByEmployee.set(adj.employeeId, []);
+      }
+      adjustmentsByEmployee.get(adj.employeeId)!.push(adj);
+    });
+
+    // Organizar descontos por funcionário
+    allDiscounts.forEach(disc => {
+      if (!discountsByEmployee.has(disc.employeeId)) {
+        discountsByEmployee.set(disc.employeeId, []);
+      }
+      discountsByEmployee.get(disc.employeeId)!.push(disc);
+    });
+
+    // Organizar ausências por funcionário
+    allAbsenceRecords.forEach(abs => {
+      if (!absencesByEmployee.has(abs.employeeId)) {
+        absencesByEmployee.set(abs.employeeId, []);
+      }
+      absencesByEmployee.get(abs.employeeId)!.push(abs);
+    });
+
+    // Organizar registros de ponto por funcionário (para alocação)
+    allTimeRecordsForAllocation.forEach(tr => {
+      if (!timeRecordsByEmployee.has(tr.employeeId)) {
+        timeRecordsByEmployee.set(tr.employeeId, []);
+      }
+      timeRecordsByEmployee.get(tr.employeeId)!.push(tr);
+    });
+
+    // Organizar valores manuais de INSS por funcionário
+    allManualInss.forEach(manual => {
+      manualInssByEmployee.set(manual.employeeId, manual);
+    });
+
+    // Organizar férias por funcionário
+    allVacations.forEach(vac => {
+      if (!vacationsByEmployee.has(vac.employeeId)) {
+        vacationsByEmployee.set(vac.employeeId, []);
+      }
+      vacationsByEmployee.get(vac.employeeId)!.push(vac);
+    });
+
+    // Verificar quais funcionários estavam ativos no período
+    allEmployeesData.forEach(emp => {
+      employeesActiveMap.set(emp.id, emp.createdAt <= endDate);
+    });
+
+    // OTIMIZAÇÃO: Organizar registros de ponto (ENTRY) por funcionário
+    const timeRecordsByEmployeeForTotals = new Map<string, any[]>();
+    allTimeRecordsForTotals.forEach(tr => {
+      if (!timeRecordsByEmployeeForTotals.has(tr.employeeId)) {
+        timeRecordsByEmployeeForTotals.set(tr.employeeId, []);
+      }
+      timeRecordsByEmployeeForTotals.get(tr.employeeId)!.push(tr);
+    });
+
+    // OTIMIZAÇÃO: Organizar dados dos funcionários por ID
+    const employeeDataMap = new Map<string, any>();
+    allEmployeeDataForTotals.forEach(emp => {
+      employeeDataMap.set(emp.id, emp);
+    });
+
     // Calcular totais para cada funcionário e filtrar apenas os ativos no período
     const employeesWithTotals = await Promise.all(
       employees.map(async (employee: any) => {
@@ -743,8 +1068,8 @@ export class PayrollService {
             return null; // Administrador não deve aparecer na folha
           }
           
-          // Verificar se o funcionário estava ativo no período
-          const isActiveInPeriod = await this.isEmployeeActiveInPeriod(employee.id, month, year);
+          // Verificar se o funcionário estava ativo no período (usando dados já buscados)
+          const isActiveInPeriod = employeesActiveMap.get(employee.id) ?? false;
           
           if (!isActiveInPeriod) {
             return null; // Funcionário não estava ativo no período
@@ -752,10 +1077,53 @@ export class PayrollService {
 
         // Usar createdAt (data de criação no sistema) para cálculos de folha
         const employeeControlDate = employee.createdAt ? new Date(employee.createdAt) : employee.hireDate ? new Date(employee.hireDate) : undefined;
-        const totals = await this.calculateMonthlyTotals(employee.id, month, year, employeeControlDate);
-        const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
-        const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
-        const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
+        
+        // OTIMIZAÇÃO: Usar dados já buscados para calculateMonthlyTotals
+        const employeeDataForTotals = employeeDataMap.get(employee.id);
+        const employeeTimeRecords = timeRecordsByEmployeeForTotals.get(employee.id) || [];
+        const employeeAbsencesForTotals = absencesByEmployee.get(employee.id) || [];
+        
+        const totals = await this.calculateMonthlyTotalsOptimized(
+          employee.id,
+          month,
+          year,
+          employeeControlDate,
+          employeeDataForTotals,
+          employeeTimeRecords,
+          employeeAbsencesForTotals
+        );
+        
+        // OTIMIZAÇÃO: Usar dados já buscados em vez de fazer queries individuais
+        const employeeAdjustments = adjustmentsByEmployee.get(employee.id) || [];
+        const fixedAdjustments = employeeAdjustments.filter(a => a.isFixed);
+        const nonFixedAdjustments = employeeAdjustments.filter(a => !a.isFixed);
+        const totalAdjustments = 
+          fixedAdjustments.reduce((sum, adj) => sum + Number(adj.amount), 0) +
+          nonFixedAdjustments.reduce((sum, adj) => sum + Number(adj.amount), 0);
+        
+        const employeeDiscounts = discountsByEmployee.get(employee.id) || [];
+        const totalDiscounts = employeeDiscounts.reduce((sum, disc) => sum + Number(disc.amount), 0);
+        
+        // Calcular alocação final usando dados já buscados
+        const employeeTimeRecordsForAllocation = timeRecordsByEmployee.get(employee.id) || [];
+        let alocacaoFinal = employee.costCenter || null;
+        if (employeeTimeRecordsForAllocation.length > 0) {
+          const costCenterCount: { [key: string]: number } = {};
+          employeeTimeRecordsForAllocation.forEach(record => {
+            if (record.costCenter) {
+              costCenterCount[record.costCenter] = (costCenterCount[record.costCenter] || 0) + 1;
+            }
+          });
+          let mostFrequentCostCenter = null;
+          let maxCount = 0;
+          for (const [costCenter, count] of Object.entries(costCenterCount)) {
+            if (count > maxCount) {
+              maxCount = count;
+              mostFrequentCostCenter = costCenter;
+            }
+          }
+          alocacaoFinal = mostFrequentCostCenter || employee.costCenter || null;
+        }
         
         // Calcular horas extras
         const hoursExtras = await hoursExtrasService.calculateHoursExtrasForMonth(
@@ -775,29 +1143,11 @@ export class PayrollService {
         // Calcular faltas: usar o número de faltas retornado ou calcular pela diferença
         const faltas = totals.absences !== undefined ? totals.absences : (totals.totalWorkingDays ? (totals.totalWorkingDays - totals.daysWorked) : 0);
         
-        // Buscar datas das faltas para cálculo correto de DSR
-        const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-        const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-        const endDate = new Date(Date.UTC(year, month - 1, lastDay, 23, 59, 59));
-        
-        const allAbsenceRecords = await prisma.timeRecord.findMany({
-          where: {
-            employeeId: employee.id,
-            timestamp: {
-              gte: startDate,
-              lte: endDate
-            },
-            type: 'ABSENCE_JUSTIFIED',
-            approvedBy: { not: null }
-          },
-          select: {
-            timestamp: true,
-            reason: true
-          }
-        });
+        // OTIMIZAÇÃO: Usar ausências já buscadas
+        const employeeAbsences = absencesByEmployee.get(employee.id) || [];
         
         // Filtrar ausências que NÃO devem ser descontadas (maternidade, paternidade, acidente)
-        const absenceRecords = allAbsenceRecords.filter(record => {
+        const absenceRecords = employeeAbsences.filter(record => {
           if (!record.reason) return true; // Se não tem reason, considerar como falta
           
           const reasonLower = record.reason.toLowerCase();
@@ -812,16 +1162,7 @@ export class PayrollService {
         
         const absenceDates = absenceRecords.map(record => new Date(record.timestamp));
         
-        // Buscar feriados do mês
-        const holidays = await prisma.holiday.findMany({
-          where: {
-            date: {
-              gte: startDate,
-              lte: endDate
-            },
-            isActive: true
-          }
-        });
+        // OTIMIZAÇÃO: Feriados já foram buscados e estão em cache
         
         // Calcular número de dias do mês
         const diasDoMes = new Date(year, month, 0).getDate();
@@ -864,18 +1205,12 @@ export class PayrollService {
           ? 0 
           : Math.max(0, (salarioBase + periculosidade + insalubridade + valorHorasExtras + valorDSRHE) - descontoPorFaltas - dsrPorFalta);
         
-        const { vacationDays, baseInssFerias, inssFerias } = await this.calculateBaseInssFerias(employee.id, month, year, baseInssMensal);
+        // OTIMIZAÇÃO: Usar férias já buscadas
+        const employeeVacations = vacationsByEmployee.get(employee.id) || [];
+        const { vacationDays, baseInssFerias, inssFerias } = this.calculateBaseInssFeriasFromData(employeeVacations, month, year, baseInssMensal, employee);
         
-        // Buscar valores manuais de INSS
-        const manualInss = await prisma.manualInssValue.findUnique({
-          where: {
-            employeeId_month_year: {
-              employeeId: employee.id,
-              month: month,
-              year: year
-            }
-          }
-        });
+        // OTIMIZAÇÃO: Usar valores manuais de INSS já buscados
+        const manualInss = manualInssByEmployee.get(employee.id);
         
         // Usar valores manuais de descontoPorFaltas e dsrPorFalta se existirem
         const descontoPorFaltasFinal = manualInss?.descontoPorFaltas !== null && manualInss?.descontoPorFaltas !== undefined
@@ -1176,26 +1511,46 @@ export class PayrollService {
   }
 
   /**
-   * Calcula a BASE INSS FÉRIAS e INSS FÉRIAS para um funcionário
+   * Calcula a BASE INSS FÉRIAS e INSS FÉRIAS para um funcionário (versão original - mantida para compatibilidade)
    */
   private async calculateBaseInssFerias(employeeId: string, month: number, year: number, baseInssMensal: number): Promise<{ vacationDays: number; baseInssFerias: number; inssFerias: number }> {
     try {
-      // Buscar férias do funcionário no mês especificado
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
 
       const vacations = await prisma.vacation.findMany({
         where: {
           employeeId,
-          startDate: {
-            lte: endDate
-          },
-          endDate: {
-            gte: startDate
-          },
-          status: 'APPROVED' // Apenas férias aprovadas
+          startDate: { lte: endDate },
+          endDate: { gte: startDate },
+          status: 'APPROVED'
         }
       });
+
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: {
+          salary: true,
+          dangerPay: true,
+          unhealthyPay: true,
+          modality: true
+        }
+      });
+
+      return this.calculateBaseInssFeriasFromData(vacations, month, year, baseInssMensal, employee);
+    } catch (error) {
+      console.error('Erro ao calcular BASE INSS FÉRIAS:', error);
+      return { vacationDays: 0, baseInssFerias: 0, inssFerias: 0 };
+    }
+  }
+
+  /**
+   * Calcula a BASE INSS FÉRIAS e INSS FÉRIAS usando dados já buscados (otimizado)
+   */
+  private calculateBaseInssFeriasFromData(vacations: any[], month: number, year: number, baseInssMensal: number, employee?: any): { vacationDays: number; baseInssFerias: number; inssFerias: number } {
+    try {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
 
       // Calcular total de dias de férias no mês
       let totalVacationDays = 0;
@@ -1216,21 +1571,11 @@ export class PayrollService {
         }
       }
 
-      // Buscar dados do funcionário para calcular a base
-      const employee = await prisma.employee.findUnique({
-        where: { id: employeeId },
-        include: { user: true }
-      });
-
-      if (!employee) {
-        return { vacationDays: 0, baseInssFerias: 0, inssFerias: 0 };
-      }
-
       // Calcular BASE INSS FÉRIAS e INSS FÉRIAS
       let baseInssFerias = 0;
       let inssFerias = 0;
       
-      if (employee.modality !== 'MEI' && employee.modality !== 'ESTÁGIO' && totalVacationDays > 0) {
+      if (employee && employee.modality !== 'MEI' && employee.modality !== 'ESTAGIÁRIO' && totalVacationDays > 0) {
         const salarioBase = Number(employee.salary);
         const periculosidade = Number(employee.dangerPay || 0);
         const insalubridade = Number(employee.unhealthyPay || 0);

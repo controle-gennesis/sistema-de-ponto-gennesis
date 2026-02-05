@@ -1,5 +1,6 @@
 import moment from 'moment';
 import { prisma } from '../lib/prisma';
+import { getCompanySettings } from '../lib/cache';
 
 export interface VacationBalance {
   totalDays: number;
@@ -81,7 +82,7 @@ export class VacationService {
     }
 
     // Buscar configurações da empresa
-    const companySettings = await prisma.companySettings.findFirst();
+    const companySettings = await getCompanySettings(prisma);
     const vacationDaysPerYear = companySettings?.vacationDaysPerYear || 30;
 
     // Calcular período aquisitivo (12 meses a partir da data de contratação)
@@ -429,7 +430,7 @@ export class VacationService {
     const isExpired = daysBeforeExpiration === 0; // Se for 0, busca os já vencidos
 
     // Buscar configurações da empresa
-    const companySettings = await prisma.companySettings.findFirst();
+    const companySettings = await getCompanySettings(prisma);
     const vacationDaysPerYear = companySettings?.vacationDaysPerYear || 30;
 
     // Buscar funcionários com férias próximas do vencimento

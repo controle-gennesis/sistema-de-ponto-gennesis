@@ -107,6 +107,7 @@ export function ChatWidget() {
 
   const userId = userData?.data?.id;
 
+  // OTIMIZAÇÃO: Reduzir polling de 2-5s para 10-15s para reduzir carga no servidor
   const { data: pendingChatsResponse, refetch: refetchPendingChats } = useQuery({
     queryKey: ['chats-pending'],
     queryFn: async () => {
@@ -114,8 +115,8 @@ export function ChatWidget() {
       return res.data;
     },
     enabled: isOpen && !!userId,
-    refetchInterval: 5000,
-    staleTime: 0 // Sempre considerar os dados como stale
+    refetchInterval: 15000, // 15 segundos (era 5s)
+    staleTime: 5000 // Cache por 5 segundos
   });
 
   const { data: activeChatsResponse, refetch: refetchActiveChats } = useQuery({
@@ -125,8 +126,8 @@ export function ChatWidget() {
       return res.data;
     },
     enabled: isOpen && !!userId,
-    refetchInterval: 3000,
-    staleTime: 0 // Sempre considerar os dados como stale
+    refetchInterval: 12000, // 12 segundos (era 3s)
+    staleTime: 5000 // Cache por 5 segundos
   });
 
   const { data: closedChatsResponse, refetch: refetchClosedChats } = useQuery({
@@ -136,8 +137,8 @@ export function ChatWidget() {
       return res.data;
     },
     enabled: isOpen && !!userId && showClosedChats,
-    refetchInterval: 3000,
-    staleTime: 0 // Sempre considerar os dados como stale
+    refetchInterval: 12000, // 12 segundos (era 3s)
+    staleTime: 5000 // Cache por 5 segundos
   });
 
   const { data: chatResponse, refetch: refetchChat } = useQuery({
@@ -147,10 +148,11 @@ export function ChatWidget() {
       return res.data;
     },
     enabled: !!selectedChat?.id && isOpen,
-    refetchInterval: 2000,
-    staleTime: 0 // Sempre considerar os dados como stale
+    refetchInterval: 10000, // 10 segundos (era 2s)
+    staleTime: 3000 // Cache por 3 segundos
   });
 
+  // OTIMIZAÇÃO: Reduzir polling de contadores
   const { data: unreadCountResponse } = useQuery({
     queryKey: ['chats-unread-count'],
     queryFn: async () => {
@@ -158,7 +160,8 @@ export function ChatWidget() {
       return res.data;
     },
     enabled: hasToken && !!userId, // Só executar se houver token e userId
-    refetchInterval: 10000,
+    refetchInterval: 20000, // 20 segundos (era 10s)
+    staleTime: 10000, // Cache por 10 segundos
     retry: false, // Não tentar novamente em caso de erro
     throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });
@@ -170,7 +173,8 @@ export function ChatWidget() {
       return res.data;
     },
     enabled: hasToken && !!userId, // Só executar se houver token e userId
-    refetchInterval: 10000,
+    refetchInterval: 20000, // 20 segundos (era 10s)
+    staleTime: 10000, // Cache por 10 segundos
     retry: false, // Não tentar novamente em caso de erro
     throwOnError: false // Não lançar erro - silenciar erros 401 esperados
   });

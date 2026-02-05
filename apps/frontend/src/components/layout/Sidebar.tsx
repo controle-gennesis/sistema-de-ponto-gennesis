@@ -441,8 +441,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
                   <div className="transition-all duration-500 ease-in-out">
-                    <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Attendance</h1>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 transition-all duration-500">v1.0.2</p>
+                    <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Gennesis</h1>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 transition-all duration-500">Attendance</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
