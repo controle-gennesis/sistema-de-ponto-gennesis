@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 
 // Configurar DATABASE_URL com connection pool limit se não tiver
 let databaseUrl = process.env.DATABASE_URL || '';
@@ -11,7 +11,7 @@ if (databaseUrl && !databaseUrl.includes('connection_limit')) {
 // Configurar logs do Prisma
 // Se PRISMA_LOG_QUERIES=true, mostra todas as queries SQL (útil para debug)
 // Por padrão, mostra apenas erros e warnings
-const prismaLogLevels = process.env.PRISMA_LOG_QUERIES === 'true' 
+const prismaLogLevels: Prisma.LogLevel[] = process.env.PRISMA_LOG_QUERIES === 'true' 
   ? ['query', 'error', 'warn'] 
   : ['error', 'warn'];
 
