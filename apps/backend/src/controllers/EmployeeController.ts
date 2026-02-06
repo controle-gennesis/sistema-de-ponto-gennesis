@@ -329,7 +329,7 @@ export const updateEmployee = async (req: Request, res: Response) => {
           ...(bank !== undefined && { bank }),
           ...(accountType !== undefined && { accountType }),
           ...(agency !== undefined && { agency }),
-          ...(operation !== undefined && { operation }),
+          ...(operation !== undefined && { operation: operation && operation !== 'N/A' ? operation : null }),
           ...(account !== undefined && { account }),
           ...(digit !== undefined && { digit }),
           ...(pixKeyType !== undefined && { pixKeyType }),

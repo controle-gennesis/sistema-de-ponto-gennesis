@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --exec \"ts-node --transpile-only src/index.ts\"",
     "dev:nodemon": "nodemon --exec \"ts-node --transpile-only src/index.ts\"",
-    "build": "npx prisma generate && echo 'Running TypeScript compiler from:' && pwd && echo 'TypeScript config outDir:' && cat tsconfig.json | grep outDir && tsc && echo 'TypeScript compilation completed' && echo 'Checking if dist/index.js exists...' && (test -f dist/index.js && echo '✅ dist/index.js found!' || (echo '❌ dist/index.js NOT found!' && echo 'Current directory:' && pwd && echo 'Listing dist directory:' && ls -la dist/ 2>&1 || echo 'dist directory does not exist' && echo 'Listing current directory:' && ls -la . 2>&1 && exit 1))",
+    "build": "npx prisma generate && tsc",
     "start": "npm run build && node scripts/resolve-migrations.js && sleep 2 && npx prisma migrate deploy && sleep 2 && node dist/index.js",
     "start:production": "npm run build && node scripts/resolve-migrations.js && sleep 2 && npx prisma migrate deploy && sleep 2 && node dist/index.js",
     "lint": "eslint src/**/*.ts",
@@ -29,6 +29,7 @@
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
     "date-fns-tz": "^3.2.0",
     "dayjs": "^1.11.18",
     "dotenv": "^16.3.1",
@@ -46,6 +47,7 @@
     "pdfkit": "^0.17.2",
     "resend": "^3.2.0",
     "uuid": "^9.0.1",
+    "xlsx": "^0.18.5",
     "yn": "^3.1.1"
   },
   "devDependencies": {

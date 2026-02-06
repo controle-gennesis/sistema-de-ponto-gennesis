@@ -7,6 +7,7 @@ import { Clock, Calendar, Filter, Download, Search, Building2, User, CreditCard,
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
+import { Loading } from '@/components/ui/Loading';
 import { DEPARTMENTS_LIST, COST_CENTERS_LIST, CLIENTS_LIST, POLOS_LIST } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
@@ -286,12 +287,11 @@ export default function BankHoursPage() {
 
   if (loadingUser || !userData) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
-        </div>
-      </div>
+      <Loading 
+        message="Carregando banco de horas..."
+        fullScreen
+        size="lg"
+      />
     );
   }
 

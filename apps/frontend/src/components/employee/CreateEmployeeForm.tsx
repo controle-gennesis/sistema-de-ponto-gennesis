@@ -396,7 +396,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         bank: data.bank,
         accountType: data.accountType,
         agency: data.agency,
-        operation: hasOperation && data.operation ? data.operation : 'N/A',
+        operation: hasOperation && data.operation ? data.operation : null,
         account: data.account,
         digit: data.digit,
         pixKeyType: data.pixKeyType,
@@ -825,6 +825,38 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     if (errors.email && errors.email.includes('já está em uso')) {
       toast.error('Não é possível salvar: Este email já está em uso');
       return;
+    }
+
+    // Verificar se há erro de CPF já em uso antes de validar
+    if (errors.cpf && errors.cpf.includes('já está em uso')) {
+      toast.error('Não é possível salvar: Este CPF já está cadastrado');
+      return;
+    }
+
+    // Validação final de CPF antes de criar
+    const cpfNumbers = formData.cpf.replace(/\D/g, '');
+    if (cpfNumbers.length === 11 && isValidCPF(cpfNumbers)) {
+      setIsCheckingCpf(true);
+      try {
+        const response = await api.get('/users/check-cpf', {
+          params: { cpf: cpfNumbers }
+        });
+
+        if (response.data.exists) {
+          setErrors(prev => ({
+            ...prev,
+            cpf: 'Este CPF já está em uso'
+          }));
+          toast.error('Este CPF já está cadastrado no sistema');
+          setIsCheckingCpf(false);
+          return;
+        }
+      } catch (error) {
+        console.error('Erro ao verificar CPF:', error);
+        // Continuar mesmo se a verificação falhar (não bloquear criação)
+      } finally {
+        setIsCheckingCpf(false);
+      }
     }
     
     // Verificar se há erro de CPF já em uso antes de validar

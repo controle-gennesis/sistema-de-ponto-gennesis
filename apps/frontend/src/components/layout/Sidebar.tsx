@@ -117,7 +117,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const isEmployee = userRole === 'EMPLOYEE';
 
   // Função para extrair iniciais do nome do usuário (primeiro e segundo nome)
-  const getInitials = (name: string) => {
+  const getInitials = (name: string | undefined | null) => {
+    if (!name) return 'U';
     const parts = name.trim().split(/\s+/);
     if (parts.length >= 2) {
       return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -715,7 +716,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       ) : (
                         <div className="w-10 h-10 rounded-full bg-transparent border-2 border-red-500 flex items-center justify-center">
                           <span className="text-sm font-semibold text-red-500">
-                            {getInitials(user?.name || userName)}
+                            {getInitials(user?.name || userName || 'U')}
                           </span>
                         </div>
                       )}
@@ -724,7 +725,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     {/* Informações do usuário */}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {isAdministrator ? 'Administrador' : (user?.name || userName)}
+                        {isAdministrator ? 'Administrador' : (user?.name || userName || 'Usuário')}
                       </p>
                       {!isAdministrator && (
                         <p className="text-xs text-gray-500 dark:text-gray-400 truncate">

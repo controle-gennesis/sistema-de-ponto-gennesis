@@ -78,6 +78,19 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [reactivateConfirm, setReactivateConfirm] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(12);
+
+  // Função para formatar CPF
+  const formatCPF = (cpf: string): string => {
+    if (!cpf) return '';
+    // Remove tudo que não é dígito
+    const numbers = cpf.replace(/\D/g, '');
+    // Aplica a formatação: 000.000.000-00
+    if (numbers.length === 11) {
+      return numbers.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    }
+    // Se não tiver 11 dígitos, retorna o CPF original
+    return cpf;
+  };
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [positionFilter, setPositionFilter] = useState<string>('all');
@@ -322,10 +335,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     XLSX.writeFile(wb, fileName);
   };
 
-  // Verificar se há token antes de fazer requisições
-  const hasToken = typeof window !== 'undefined' && !!(localStorage.getItem('token') || sessionStorage.getItem('token'));
-
   // Buscar funcionários - buscar todos para filtrar no frontend
+  // O interceptor do axios já trata a autenticação e redireciona para login se necessário
   const { data: employeesData, isLoading, error } = useQuery({
     queryKey: ['employees', statusFilter],
     queryFn: async () => {
@@ -338,9 +349,8 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       });
       return res.data;
     },
-    enabled: hasToken, // Só executar se houver token
     retry: false, // Não tentar novamente em caso de erro
-    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
+    throwOnError: false // Não lançar erro - o interceptor do axios já trata autenticação
   });
 
   // Buscar registros de ponto do funcionário selecionado
@@ -1464,24 +1474,13 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         </div>
 
         {/* Lista de funcionários */}
-        {!hasToken ? (
-          <div className="text-center py-8">
-            <AlertTriangle className="w-12 h-12 text-yellow-400 dark:text-yellow-500 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">Token de autenticação não encontrado</p>
-            <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Faça login novamente</p>
-          </div>
-        ) : error ? (
+        {error ? (
           <div className="text-center py-8">
             <AlertTriangle className="w-12 h-12 text-red-400 dark:text-red-500 mx-auto mb-4" />
             <p className="text-gray-600 dark:text-gray-400">Erro ao carregar funcionários</p>
             <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
               {error instanceof Error ? error.message : 'Erro desconhecido'}
             </p>
-          </div>
-        ) : isLoading ? (
-          <div className="text-center py-8">
-            <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">Carregando funcionários...</p>
           </div>
         ) : filteredEmployees.length === 0 ? (
           <div className="text-center py-8">
@@ -1533,7 +1532,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       <div className="space-y-3 text-xs bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
                         <div className="flex justify-between items-center">
                           <span className="text-gray-500 dark:text-gray-400 font-medium">CPF:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.cpf}</span>
+                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{formatCPF(employee.cpf)}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-500 dark:text-gray-400 font-medium">Cargo:</span>
@@ -1840,7 +1839,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
                       </div>
                       <div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">CPF</div>
-                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedEmployee.cpf}</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{formatCPF(selectedEmployee.cpf)}</div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">Email</div>

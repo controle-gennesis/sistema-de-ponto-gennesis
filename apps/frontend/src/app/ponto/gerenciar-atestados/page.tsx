@@ -8,6 +8,7 @@ import { MedicalCertificateList } from '@/components/medical-certificate/Medical
 import { RegisterAbsenceModal } from '@/components/absence/RegisterAbsenceModal';
 import { FileText, Users, Clock, CheckCircle, XCircle, Filter, Search, Calendar, ChevronDown, ChevronUp, RotateCcw, Building2, Plus, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { DEPARTMENTS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
@@ -121,12 +122,11 @@ export default function AtestadosPage() {
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="loading-spinner w-8 h-8 mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
-        </div>
-      </div>
+      <Loading 
+        message="Carregando atestados..."
+        fullScreen
+        size="lg"
+      />
     );
   }
 
