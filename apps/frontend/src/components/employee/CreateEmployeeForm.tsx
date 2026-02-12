@@ -6,6 +6,7 @@ import { UserPlus, X, Save, AlertCircle, CheckCircle, Eye, EyeOff, ChevronRight,
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
+import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -104,17 +105,9 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     'MÉTRICA'
   ];
 
-  // Lista de centros de custo
-  const costCenters = [
-    'SEDES',
-    'DF - ADM LOCAL',
-    'ITAMARATY - SERVIÇOS EVENTUAIS',
-    'ITAMARATY - MÃO DE OBRA',
-    'SES GDF - LOTE 14',
-    'SES GDF - LOTE 10',
-    'ADM CENTRAL ENGPAC',
-    'DIRETOR'
-  ];
+  // Buscar centros de custo da API
+  const { costCentersList, costCenters: costCentersData } = useCostCenters();
+  const costCenters = costCentersList;
 
   // Lista de bancos
   const banks = [
@@ -537,7 +530,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       
       if (!formData.costCenter.trim()) {
         newErrors.costCenter = 'Centro de custo é obrigatório';
-      } else if (!costCenters.includes(formData.costCenter)) {
+      } else if (!costCentersList.includes(formData.costCenter)) {
         newErrors.costCenter = 'Selecione um centro de custo válido da lista';
       }
       
@@ -768,7 +761,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     // Validação do centro de custo - verifica se está vazio ou se o texto digitado não corresponde a nenhum centro
     if (!formData.costCenter.trim()) {
       newErrors.costCenter = 'Centro de custo é obrigatório';
-    } else if (costCenterSearch.trim() && !costCenters.includes(costCenterSearch)) {
+    } else if (costCenterSearch.trim() && !costCentersList.includes(costCenterSearch)) {
       newErrors.costCenter = 'Selecione um centro de custo válido da lista';
     }
 

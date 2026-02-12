@@ -18,10 +18,10 @@ import {
   MODALITIES_LIST, 
   BANKS_LIST, 
   ACCOUNT_TYPES_LIST,
-  COST_CENTERS_LIST,
   CLIENTS_LIST,
   POLOS_LIST
 } from '@/constants/payrollFilters';
+import { useCostCenters } from '@/hooks/useCostCenters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 
@@ -66,6 +66,7 @@ function calculateNextMonthWorkingDays(month: number, year: number, holidays: an
 }
 
 export default function FolhaPagamentoPage() {
+  const { costCentersList } = useCostCenters();
   const router = useRouter();
   const queryClient = useQueryClient();
   
@@ -1003,7 +1004,7 @@ export default function FolhaPagamentoPage() {
                             className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                           >
                             <option value="">Todos os centros</option>
-                            {COST_CENTERS_LIST.map(center => (
+                            {costCentersList.map(center => (
                               <option key={center} value={center}>
                                 {center}
                               </option>

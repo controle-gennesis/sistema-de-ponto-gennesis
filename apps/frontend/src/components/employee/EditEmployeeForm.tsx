@@ -6,6 +6,7 @@ import { Edit, X, Save, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
+import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -115,6 +116,8 @@ interface EditEmployeeFormProps {
 }
 
 export function EditEmployeeForm({ employee, onClose, visibleSections, onEmployeeUpdated }: EditEmployeeFormProps) {
+  const { costCentersList } = useCostCenters();
+  
   // Lista de setores disponíveis
   const sectors = [
     'Projetos',
@@ -912,14 +915,11 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
                       className="w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
                     >
                       <option value="">Selecione um centro de custo</option>
-                      <option value="SEDES">SEDES</option>
-                      <option value="DF - ADM LOCAL">DF - ADM LOCAL</option>
-                      <option value="ITAMARATY - SERVIÇOS EVENTUAIS">ITAMARATY - SERVIÇOS EVENTUAIS</option>
-                      <option value="ITAMARATY - MÃO DE OBRA">ITAMARATY - MÃO DE OBRA</option>
-                      <option value="SES GDF - LOTE 14">SES GDF - LOTE 14</option>
-                      <option value="SES GDF - LOTE 10">SES GDF - LOTE 10</option>
-                      <option value="ADM CENTRAL ENGPAC">ADM CENTRAL ENGPAC</option>
-                      <option value="DIRETOR">DIRETOR</option>
+                      {costCentersList.map((center) => (
+                        <option key={center} value={center}>
+                          {center}
+                        </option>
+                      ))}
                     </select>
                   </div>
 

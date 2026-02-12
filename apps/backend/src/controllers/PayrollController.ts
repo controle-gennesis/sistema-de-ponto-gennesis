@@ -226,7 +226,7 @@ export class PayrollController {
    */
   async saveManualInssValues(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { employeeId, month, year, inssRescisao, inss13, descontoPorFaltas, dsrPorFalta, horasExtrasValue, dsrHEValue } = req.body;
+      const { employeeId, month, year, inssRescisao, inss13, descontoPorFaltas, dsrPorFalta, horasExtrasValue, dsrHEValue, alocacaoFinal } = req.body;
 
       // Validar parâmetros obrigatórios
       if (!employeeId || !month || !year) {
@@ -264,7 +264,8 @@ export class PayrollController {
         descontoPorFaltas: descontoPorFaltas !== undefined ? parseFloat(descontoPorFaltas) : null,
         dsrPorFalta: dsrPorFalta !== undefined ? parseFloat(dsrPorFalta) : null,
         horasExtrasValue: horasExtrasValue !== undefined ? parseFloat(horasExtrasValue) : null,
-        dsrHEValue: dsrHEValue !== undefined ? parseFloat(dsrHEValue) : null
+        dsrHEValue: dsrHEValue !== undefined ? parseFloat(dsrHEValue) : null,
+        alocacaoFinal: alocacaoFinal !== undefined && alocacaoFinal !== null ? String(alocacaoFinal).trim() : null
       });
 
       res.json({

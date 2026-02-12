@@ -527,6 +527,7 @@ model ManualInssValue {
   dsrPorFalta Decimal? // Ajuste manual do DSR por falta
   horasExtrasValue Decimal? // Ajuste manual do valor de horas extras
   dsrHEValue Decimal? // Ajuste manual do DSR por horas extras
+  alocacaoFinal String? // Alocação final editável manualmente
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

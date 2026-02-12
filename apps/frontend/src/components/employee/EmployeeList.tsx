@@ -10,11 +10,11 @@ import {
   DEPARTMENTS_LIST,
   COMPANIES_LIST,
   MODALITIES_LIST,
-  COST_CENTERS_LIST,
   CLIENTS_LIST,
   POLOS_LIST,
   CATEGORIAS_FINANCEIRAS_LIST
 } from '@/constants/payrollFilters';
+import { useCostCenters } from '@/hooks/useCostCenters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import { AdjustmentsList } from './AdjustmentsList';
 import { AdjustmentForm } from './AdjustmentForm';
@@ -73,6 +73,7 @@ interface EmployeeListProps {
 }
 
 export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeListProps) {
+  const { costCentersList } = useCostCenters();
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [reactivateConfirm, setReactivateConfirm] = useState<string | null>(null);
@@ -158,7 +159,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
 
   const positions = ['Todos', ...CARGOS_LIST];
 
-  const costCenters = ['Todos', ...COST_CENTERS_LIST];
+  const costCenters = ['Todos', ...costCentersList];
 
   const clients = ['Todos', ...CLIENTS_LIST];
 

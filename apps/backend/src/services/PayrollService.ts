@@ -1105,24 +1105,31 @@ export class PayrollService {
         const totalDiscounts = employeeDiscounts.reduce((sum, disc) => sum + Number(disc.amount), 0);
         
         // Calcular alocação final usando dados já buscados
-        const employeeTimeRecordsForAllocation = timeRecordsByEmployee.get(employee.id) || [];
-        let alocacaoFinal = employee.costCenter || null;
-        if (employeeTimeRecordsForAllocation.length > 0) {
-          const costCenterCount: { [key: string]: number } = {};
-          employeeTimeRecordsForAllocation.forEach(record => {
-            if (record.costCenter) {
-              costCenterCount[record.costCenter] = (costCenterCount[record.costCenter] || 0) + 1;
+        // Primeiro verificar se há uma alocação final editada manualmente
+        const manualInss = manualInssByEmployee.get(employee.id);
+        let alocacaoFinal = manualInss?.alocacaoFinal || null;
+        
+        // Se não houver alocação final editada, calcular automaticamente
+        if (!alocacaoFinal) {
+          const employeeTimeRecordsForAllocation = timeRecordsByEmployee.get(employee.id) || [];
+          alocacaoFinal = employee.costCenter || null;
+          if (employeeTimeRecordsForAllocation.length > 0) {
+            const costCenterCount: { [key: string]: number } = {};
+            employeeTimeRecordsForAllocation.forEach(record => {
+              if (record.costCenter) {
+                costCenterCount[record.costCenter] = (costCenterCount[record.costCenter] || 0) + 1;
+              }
+            });
+            let mostFrequentCostCenter = null;
+            let maxCount = 0;
+            for (const [costCenter, count] of Object.entries(costCenterCount)) {
+              if (count > maxCount) {
+                maxCount = count;
+                mostFrequentCostCenter = costCenter;
+              }
             }
-          });
-          let mostFrequentCostCenter = null;
-          let maxCount = 0;
-          for (const [costCenter, count] of Object.entries(costCenterCount)) {
-            if (count > maxCount) {
-              maxCount = count;
-              mostFrequentCostCenter = costCenter;
-            }
+            alocacaoFinal = mostFrequentCostCenter || employee.costCenter || null;
           }
-          alocacaoFinal = mostFrequentCostCenter || employee.costCenter || null;
         }
         
         // Calcular horas extras
@@ -1209,10 +1216,8 @@ export class PayrollService {
         const employeeVacations = vacationsByEmployee.get(employee.id) || [];
         const { vacationDays, baseInssFerias, inssFerias } = this.calculateBaseInssFeriasFromData(employeeVacations, month, year, baseInssMensal, employee);
         
-        // OTIMIZAÇÃO: Usar valores manuais de INSS já buscados
-        const manualInss = manualInssByEmployee.get(employee.id);
-        
         // Usar valores manuais de descontoPorFaltas e dsrPorFalta se existirem
+        // (manualInss já foi declarado acima na linha 1109)
         const descontoPorFaltasFinal = manualInss?.descontoPorFaltas !== null && manualInss?.descontoPorFaltas !== undefined
           ? Number(manualInss.descontoPorFaltas)
           : descontoPorFaltas;
@@ -1639,7 +1644,23 @@ export class PayrollService {
     const totals = await this.calculateMonthlyTotals(employee.id, month, year, employeeControlDateForPayroll);
     const totalAdjustments = await this.calculateMonthlyAdjustments(employee.id, month, year);
     const totalDiscounts = await this.calculateMonthlyDiscounts(employee.id, month, year);
-    const alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
+    
+    // Buscar valores manuais primeiro para verificar se há alocação final editada
+    const manualInssForAllocation = await prisma.manualInssValue.findUnique({
+      where: {
+        employeeId_month_year: {
+          employeeId: employee.id,
+          month: month,
+          year: year
+        }
+      }
+    });
+    
+    // Se houver alocação final editada, usar ela; caso contrário, calcular automaticamente
+    let alocacaoFinal = manualInssForAllocation?.alocacaoFinal || null;
+    if (!alocacaoFinal) {
+      alocacaoFinal = await calculateAlocacaoFinal(employee.id, month, year, employee.costCenter);
+    }
     
     // Calcular horas extras
     const hoursExtras = await hoursExtrasService.calculateHoursExtrasForMonth(
@@ -1955,8 +1976,9 @@ export class PayrollService {
     dsrPorFalta?: number | null;
     horasExtrasValue?: number | null;
     dsrHEValue?: number | null;
+    alocacaoFinal?: string | null;
   }) {
-    const { employeeId, month, year, inssRescisao, inss13, descontoPorFaltas, dsrPorFalta, horasExtrasValue, dsrHEValue } = data;
+    const { employeeId, month, year, inssRescisao, inss13, descontoPorFaltas, dsrPorFalta, horasExtrasValue, dsrHEValue, alocacaoFinal } = data;
 
     // Verificar se o funcionário existe
     const employee = await prisma.employee.findUnique({
@@ -1983,6 +2005,7 @@ export class PayrollService {
         dsrPorFalta: dsrPorFalta !== undefined ? dsrPorFalta : null,
         horasExtrasValue: horasExtrasValue !== undefined ? horasExtrasValue : null,
         dsrHEValue: dsrHEValue !== undefined ? dsrHEValue : null,
+        alocacaoFinal: alocacaoFinal !== undefined ? alocacaoFinal : null,
         updatedAt: new Date()
       },
       create: {
@@ -1994,7 +2017,8 @@ export class PayrollService {
         descontoPorFaltas: descontoPorFaltas !== undefined ? descontoPorFaltas : null,
         dsrPorFalta: dsrPorFalta !== undefined ? dsrPorFalta : null,
         horasExtrasValue: horasExtrasValue !== undefined ? horasExtrasValue : null,
-        dsrHEValue: dsrHEValue !== undefined ? dsrHEValue : null
+        dsrHEValue: dsrHEValue !== undefined ? dsrHEValue : null,
+        alocacaoFinal: alocacaoFinal !== undefined ? alocacaoFinal : null
       }
     });
 

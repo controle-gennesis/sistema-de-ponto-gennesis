@@ -131,8 +131,8 @@ export default function CentrosCustoPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validação básica
-    if (!formData.code.trim() || !formData.name.trim()) {
+    // Validação básica - código não é mais obrigatório na criação
+    if (!formData.name.trim()) {
       return;
     }
     
@@ -140,10 +140,10 @@ export default function CentrosCustoPage() {
       updateMutation.mutate({ id: editingCostCenter.id, data: formData });
     } else {
       createMutation.mutate({
-        ...formData,
-        code: formData.code.trim().toUpperCase(),
+        // Código será gerado automaticamente no backend
         name: formData.name.trim(),
-        description: formData.description.trim() || undefined
+        description: formData.description.trim() || undefined,
+        isActive: formData.isActive
       });
     }
   };
@@ -205,7 +205,7 @@ export default function CentrosCustoPage() {
                   className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4" />
-                  Novo Centro de Custo
+                  Cadastrar Centro de Custo
                 </button>
               </div>
             </CardContent>
@@ -216,12 +216,9 @@ export default function CentrosCustoPage() {
             <Card>
               <CardHeader className="border-b-0">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Building2 className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {editingCostCenter ? 'Editar Centro de Custo' : 'Novo Centro de Custo'}
-                    </h3>
-                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {editingCostCenter ? 'Editar Centro de Custo' : 'Centro de Custo'}
+                  </h3>
                   <button
                     onClick={() => {
                       setShowForm(false);
@@ -236,21 +233,23 @@ export default function CentrosCustoPage() {
               <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Código *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.code}
-                        onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                        placeholder="Ex: SEDES"
-                        disabled={!!editingCostCenter}
-                      />
-                    </div>
-                    <div>
+                    {editingCostCenter && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Código
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.code}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed"
+                          disabled
+                        />
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          O código é gerado automaticamente e não pode ser alterado
+                        </p>
+                      </div>
+                    )}
+                    <div className={editingCostCenter ? '' : 'md:col-span-2'}>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Nome *
                       </label>
@@ -260,7 +259,7 @@ export default function CentrosCustoPage() {
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                        placeholder="Ex: SEDES"
+                        placeholder="Ex: Secretaria de Estado de Desenvolvimento Social"
                       />
                     </div>
                   </div>
@@ -272,20 +271,34 @@ export default function CentrosCustoPage() {
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       placeholder="Descrição do centro de custo..."
                     />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="isActive"
-                      checked={formData.isActive}
-                      onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="isActive" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Centro de custo ativo
+                  <div className="flex items-center">
+                    <label className="flex items-center space-x-3 cursor-pointer group">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={formData.isActive}
+                          onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                          className="sr-only"
+                        />
+                        <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
+                          formData.isActive 
+                            ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500' 
+                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
+                        }`}>
+                          {formData.isActive && (
+                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
+                        Ativo
+                      </span>
                     </label>
                   </div>
                   {(createMutation.isError || updateMutation.isError) && (
@@ -336,11 +349,18 @@ export default function CentrosCustoPage() {
           {/* Lista de centros de custo */}
           <Card>
             <CardHeader className="border-b-0">
-              <div className="flex items-center space-x-2">
-                <Building2 className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Centros de Custo ({costCenters.length})
-                </h3>
+              <div className="flex items-center">
+                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                  <Building2 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div className="ml-3 sm:ml-4 min-w-0">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Centros de Custo
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {costCenters.length} {costCenters.length === 1 ? 'centro de custo cadastrado' : 'centros de custo cadastrados'}
+                  </p>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -441,10 +461,21 @@ export default function CentrosCustoPage() {
                 </button>
               </div>
               {deleteMutation.isError && (
-                <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                  <p className="text-sm text-red-700 dark:text-red-300 text-center">
-                    {(deleteMutation.error as any)?.response?.data?.message || 'Erro ao excluir centro de custo'}
-                  </p>
+                <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+                        Não é possível excluir este centro de custo
+                      </p>
+                      <div className="text-sm text-red-700 dark:text-red-300 whitespace-pre-line leading-relaxed">
+                        {(deleteMutation.error as any)?.response?.data?.error || 
+                         (deleteMutation.error as any)?.response?.data?.message || 
+                         (deleteMutation.error as any)?.message || 
+                         'Erro ao excluir centro de custo'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

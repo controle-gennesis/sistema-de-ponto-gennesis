@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCard, Moon, Save } from 'lucide-react';
 import { PayrollEmployee } from '@/types';
 import api from '@/lib/api';
+import { useCostCenters } from '@/hooks/useCostCenters';
 
 interface PayrollDetailModalProps {
   employee: PayrollEmployee;
@@ -61,6 +62,24 @@ function calculateNextMonthWorkingDays(month: number, year: number, holidays: an
 
 export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onEmployeeUpdate, isPayrollFinalized = false }: PayrollDetailModalProps) {
   const monthName = monthNames[month - 1];
+  const { costCentersList, costCenters, isLoading: loadingCostCenters } = useCostCenters();
+  
+  // Função para encontrar o nome do centro de custo baseado no código ou valor salvo
+  const getCostCenterLabel = (value: string | null): string | null => {
+    if (!value) return null;
+    // Se está no formato "CÓDIGO - NOME", extrair apenas o nome
+    if (value.includes(' - ')) {
+      const parts = value.split(' - ');
+      return parts.length > 1 ? parts[1] : value;
+    }
+    // Se é apenas o código, buscar o nome correspondente (se os dados já carregaram)
+    if (costCenters.length > 0) {
+      const found = costCenters.find(cc => cc.code === value);
+      if (found) return found.name;
+    }
+    // Se não encontrou ou ainda não carregou, retornar o valor original
+    return value;
+  };
   
   // Estados para os valores manuais editáveis
   const [inssRescisao, setInssRescisao] = useState(employee.inssRescisao || 0);
@@ -69,7 +88,8 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
   const [dsrPorFalta, setDsrPorFalta] = useState<number | null>(null);
   const [horasExtrasValue, setHorasExtrasValue] = useState<number | null>(null);
   const [dsrHEValue, setDsrHEValue] = useState<number | null>(null);
-  const [editingField, setEditingField] = useState<'inssRescisao' | 'inss13' | 'descontoPorFaltas' | 'dsrPorFalta' | 'horasExtras' | 'dsrHE' | null>(null);
+  const [alocacaoFinal, setAlocacaoFinal] = useState<string | null>(employee.alocacaoFinal || null);
+  const [editingField, setEditingField] = useState<'inssRescisao' | 'inss13' | 'descontoPorFaltas' | 'dsrPorFalta' | 'horasExtras' | 'dsrHE' | 'alocacaoFinal' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Armazenar valores originais para cancelar edição
@@ -79,18 +99,22 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     descontoPorFaltas: employee.descontoPorFaltas !== undefined ? employee.descontoPorFaltas : null,
     dsrPorFalta: employee.dsrPorFalta !== undefined ? employee.dsrPorFalta : null,
     horasExtrasValue: null,
-    dsrHEValue: null
+    dsrHEValue: null,
+    alocacaoFinal: employee.alocacaoFinal || null
   });
 
-  // Atualizar estados quando o funcionário mudar
+  // Atualizar estados quando o funcionário mudar ou quando os centros de custo carregarem
   useEffect(() => {
+    if (loadingCostCenters) return; // Aguardar carregar os centros de custo
+    
     const newValues = {
       inssRescisao: employee.inssRescisao || 0,
       inss13: employee.inss13 || 0,
       descontoPorFaltas: employee.descontoPorFaltas !== undefined ? employee.descontoPorFaltas : null,
       dsrPorFalta: employee.dsrPorFalta !== undefined ? employee.dsrPorFalta : null,
       horasExtrasValue: null,
-      dsrHEValue: null
+      dsrHEValue: null,
+      alocacaoFinal: getCostCenterLabel(employee.alocacaoFinal)
     };
     setOriginalValues(newValues);
     setInssRescisao(newValues.inssRescisao);
@@ -99,7 +123,8 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     setDsrPorFalta(newValues.dsrPorFalta);
     setHorasExtrasValue(newValues.horasExtrasValue);
     setDsrHEValue(newValues.dsrHEValue);
-  }, [employee]);
+    setAlocacaoFinal(newValues.alocacaoFinal);
+  }, [employee, loadingCostCenters, costCenters]);
 
   // Função para cancelar edição
   const handleCancelEdit = () => {
@@ -109,6 +134,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     setDsrPorFalta(originalValues.dsrPorFalta);
     setHorasExtrasValue(originalValues.horasExtrasValue);
     setDsrHEValue(originalValues.dsrHEValue);
+    setAlocacaoFinal(originalValues.alocacaoFinal);
     setEditingField(null);
   };
 
@@ -189,7 +215,10 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
           descontoPorFaltas: descontoPorFaltas !== null ? descontoPorFaltas : undefined,
           dsrPorFalta: dsrPorFalta !== null ? dsrPorFalta : undefined,
           horasExtrasValue: horasExtrasValue !== null ? horasExtrasValue : undefined,
-          dsrHEValue: dsrHEValue !== null ? dsrHEValue : undefined
+          dsrHEValue: dsrHEValue !== null ? dsrHEValue : undefined,
+          // Extrair apenas o código se estiver no formato "CÓDIGO - NOME"
+          // Salvar o nome do centro de custo (já está apenas o nome agora)
+          alocacaoFinal: alocacaoFinal !== null && alocacaoFinal !== '' ? alocacaoFinal : undefined
         })
       });
 
@@ -215,7 +244,8 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
             descontoPorFaltas: updatedEmployeeData.data.descontoPorFaltas !== undefined ? updatedEmployeeData.data.descontoPorFaltas : null,
             dsrPorFalta: updatedEmployeeData.data.dsrPorFalta !== undefined ? updatedEmployeeData.data.dsrPorFalta : null,
             horasExtrasValue: updatedEmployeeData.data.horasExtrasValue !== undefined ? updatedEmployeeData.data.horasExtrasValue : null,
-            dsrHEValue: updatedEmployeeData.data.dsrHEValue !== undefined ? updatedEmployeeData.data.dsrHEValue : null
+            dsrHEValue: updatedEmployeeData.data.dsrHEValue !== undefined ? updatedEmployeeData.data.dsrHEValue : null,
+            alocacaoFinal: getCostCenterLabel(updatedEmployeeData.data.alocacaoFinal || null)
           };
           
           setInssRescisao(newValues.inssRescisao);
@@ -224,6 +254,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
           setDsrPorFalta(newValues.dsrPorFalta);
           setHorasExtrasValue(newValues.horasExtrasValue);
           setDsrHEValue(newValues.dsrHEValue);
+          setAlocacaoFinal(newValues.alocacaoFinal);
           
           // Atualizar valores originais para o próximo cancelamento
           setOriginalValues(newValues);
@@ -567,9 +598,61 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   <span className="text-sm text-gray-600 dark:text-gray-400">Tomador:</span>
                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{employee.client || 'N/A'}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600 dark:text-gray-400">Alocação Final:</span>
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{employee.alocacaoFinal || 'N/A'}</span>
+                  {editingField === 'alocacaoFinal' ? (
+                    <div className="flex items-center justify-end gap-2">
+                      <select
+                        value={alocacaoFinal || ''}
+                        onChange={(e) => setAlocacaoFinal(e.target.value || null)}
+                        className="text-sm px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-gray-100 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            handleCancelEdit();
+                          }
+                        }}
+                      >
+                        <option value="">Selecione um centro de custo</option>
+                        {loadingCostCenters ? (
+                          <option disabled>Carregando centros de custo...</option>
+                        ) : costCentersList.length === 0 ? (
+                          <option disabled>Nenhum centro de custo disponível</option>
+                        ) : (
+                          costCentersList.map((center) => (
+                            <option key={center} value={center}>
+                              {center}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <button
+                        onClick={handleSaveManualValues}
+                        disabled={isSaving}
+                        className="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600 disabled:opacity-50"
+                        title="Salvar"
+                      >
+                        <Save className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className="px-2 py-1 bg-gray-500 text-white rounded text-xs hover:bg-gray-600"
+                        title="Cancelar"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => !isPayrollFinalized && setEditingField('alocacaoFinal')}
+                      className={`text-sm font-medium text-gray-900 dark:text-gray-100 ${
+                        !isPayrollFinalized ? 'cursor-pointer hover:text-blue-600 dark:hover:text-blue-400' : ''
+                      }`}
+                      title={isPayrollFinalized ? 'Folha finalizada. Solicite ao financeiro que reabra para editar.' : 'Clique para editar'}
+                    >
+                      {alocacaoFinal || 'N/A'}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

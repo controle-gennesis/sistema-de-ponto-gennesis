@@ -388,7 +388,7 @@ export default function MateriaisConstrucaoPage() {
                     className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
                   >
                     <Plus className="w-4 h-4" />
-                    Novo Material
+                    Cadastrar Material
                   </button>
                 </div>
               </div>
@@ -400,12 +400,9 @@ export default function MateriaisConstrucaoPage() {
             <Card>
               <CardHeader className="border-b-0">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Package className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {editingMaterial ? 'Editar Material' : 'Novo Material'}
-                    </h3>
-                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {editingMaterial ? 'Editar Material' : 'Material'}
+                  </h3>
                   <button
                     onClick={() => {
                       setShowForm(false);
@@ -462,15 +459,29 @@ export default function MateriaisConstrucaoPage() {
                   </div>
 
                   <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="isActive"
-                      checked={formData.isActive}
-                      onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
-                    />
-                    <label htmlFor="isActive" className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                      Material ativo
+                    <label className="flex items-center space-x-3 cursor-pointer group">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={formData.isActive}
+                          onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                          className="sr-only"
+                        />
+                        <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
+                          formData.isActive 
+                            ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500' 
+                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
+                        }`}>
+                          {formData.isActive && (
+                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
+                        Ativo
+                      </span>
                     </label>
                   </div>
 
@@ -523,11 +534,18 @@ export default function MateriaisConstrucaoPage() {
           {/* Lista de materiais */}
           <Card>
             <CardHeader className="border-b-0">
-              <div className="flex items-center space-x-2">
-                <Package className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Materiais ({filteredMaterials.length})
-                </h3>
+              <div className="flex items-center">
+                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                  <Package className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div className="ml-3 sm:ml-4 min-w-0">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Materiais de Construção
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {filteredMaterials.length} {filteredMaterials.length === 1 ? 'material cadastrado' : 'materiais cadastrados'}
+                  </p>
+                </div>
               </div>
             </CardHeader>
             <CardContent>

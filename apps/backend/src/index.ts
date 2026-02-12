@@ -43,7 +43,7 @@ import costCenterRoutes from './routes/costCenters';
 import constructionMaterialRoutes from './routes/constructionMaterials';
 import chatGPTRoutes from './routes/chatgpt';
 import borderRoutes from './routes/border';
-// import materialRequestRoutes from './routes/materialRequests';
+import materialRequestRoutes from './routes/materialRequests';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -225,7 +225,7 @@ app.use('/api/cost-centers', costCenterRoutes);
 app.use('/api/construction-materials', constructionMaterialRoutes);
 app.use('/api/chatgpt', chatGPTRoutes);
 app.use('/api/border', borderRoutes);
-// app.use('/api/material-requests', materialRequestRoutes);
+app.use('/api/material-requests', materialRequestRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

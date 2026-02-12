@@ -97,6 +97,7 @@ export const errorHandler = (
   res.status(statusCode).json({
     success: false,
     error: message,
+    message: message, // Incluir também em 'message' para compatibilidade
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 };
