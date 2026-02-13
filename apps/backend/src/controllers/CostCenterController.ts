@@ -67,7 +67,7 @@ export class CostCenterController {
    */
   async getAllCostCenters(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { search, isActive } = req.query;
+      const { search, isActive, page = 1, limit = 20 } = req.query;
 
       const where: any = {};
 
@@ -83,14 +83,29 @@ export class CostCenterController {
         where.isActive = isActive === 'true';
       }
 
-      const costCenters = await prisma.costCenter.findMany({
-        where,
-        orderBy: { code: 'asc' }
-      });
+      // Limitar o máximo de registros por página
+      const limitNum = Math.min(Number(limit), 100);
+      const skip = (Number(page) - 1) * limitNum;
+
+      const [costCenters, total] = await Promise.all([
+        prisma.costCenter.findMany({
+          where,
+          skip,
+          take: limitNum,
+          orderBy: { code: 'asc' }
+        }),
+        prisma.costCenter.count({ where })
+      ]);
 
       res.json({
         success: true,
-        data: costCenters
+        data: costCenters,
+        pagination: {
+          page: Number(page),
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum)
+        }
       });
     } catch (error) {
       next(error);
@@ -126,7 +141,7 @@ export class CostCenterController {
    */
   async createCostCenter(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { name, description, isActive } = req.body;
+      const { name, description, state, polo, company, isActive } = req.body;
 
       if (!name) {
         throw createError('Nome é obrigatório', 400);
@@ -140,6 +155,9 @@ export class CostCenterController {
           code: finalCode,
           name,
           description: description || null,
+          state: state || null,
+          polo: polo || null,
+          company: company || null,
           isActive: isActive !== undefined ? isActive : true
         }
       });
@@ -160,7 +178,7 @@ export class CostCenterController {
   async updateCostCenter(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { code, name, description, isActive } = req.body;
+      const { code, name, description, state, polo, company, isActive } = req.body;
 
       // Verificar se o centro de custo existe
       const existing = await prisma.costCenter.findUnique({
@@ -188,6 +206,9 @@ export class CostCenterController {
           ...(code && { code }),
           ...(name && { name }),
           ...(description !== undefined && { description }),
+          ...(state !== undefined && { state }),
+          ...(polo !== undefined && { polo }),
+          ...(company !== undefined && { company }),
           ...(isActive !== undefined && { isActive })
         }
       });
@@ -304,6 +325,111 @@ export class CostCenterController {
       res.json({
         success: true,
         message: 'Centro de custo deletado com sucesso'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Importar múltiplos centros de custo em massa
+   */
+  async importBulkCostCenters(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { costCenters } = req.body;
+
+      if (!Array.isArray(costCenters) || costCenters.length === 0) {
+        throw createError('Lista de centros de custo é obrigatória', 400);
+      }
+
+      const results = {
+        sucessos: 0,
+        erros: 0,
+        detalhes: [] as Array<{ linha: number; nome: string; sucesso: boolean; erro?: string }>
+      };
+
+      for (let i = 0; i < costCenters.length; i++) {
+        const ccData = costCenters[i];
+        const linha = i + 1;
+
+        try {
+          // Validações básicas
+          if (!ccData.Nome || !ccData.Nome.trim()) {
+            results.erros++;
+            results.detalhes.push({
+              linha,
+              nome: ccData.Nome || '(sem nome)',
+              sucesso: false,
+              erro: 'Nome é obrigatório'
+            });
+            continue;
+          }
+
+          const name = ccData.Nome.trim();
+          const description = ccData.Descrição ? ccData.Descrição.trim() : null;
+          const state = ccData.Estado ? ccData.Estado.trim() : null;
+          const polo = ccData.Polo ? ccData.Polo.trim() : null;
+          const company = ccData.Empresa ? ccData.Empresa.trim() : null;
+          const isActive = ccData.Status?.toLowerCase() === 'ativo' || ccData.Status === 'Ativo' || ccData.Status === true || ccData.Status === 'true' || ccData.Status === 1;
+
+          // Verificar se já existe um centro de custo com o mesmo nome
+          const existing = await prisma.costCenter.findFirst({
+            where: {
+              name: {
+                equals: name,
+                mode: 'insensitive'
+              }
+            }
+          });
+
+          if (existing) {
+            results.erros++;
+            results.detalhes.push({
+              linha,
+              nome: name,
+              sucesso: false,
+              erro: 'Já existe um centro de custo com este nome'
+            });
+            continue;
+          }
+
+          // Gerar código automaticamente
+          const code = await generateCostCenterCode();
+
+          // Criar centro de custo
+          await prisma.costCenter.create({
+            data: {
+              code,
+              name,
+              description,
+              state,
+              polo,
+              company,
+              isActive: isActive !== undefined ? isActive : true
+            }
+          });
+
+          results.sucessos++;
+          results.detalhes.push({
+            linha,
+            nome: name,
+            sucesso: true
+          });
+        } catch (error: any) {
+          results.erros++;
+          results.detalhes.push({
+            linha,
+            nome: ccData.Nome || '(sem nome)',
+            sucesso: false,
+            erro: error.message || 'Erro ao criar centro de custo'
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: results,
+        message: `${results.sucessos} centro(s) de custo importado(s) com sucesso, ${results.erros} erro(s)`
       });
     } catch (error) {
       next(error);

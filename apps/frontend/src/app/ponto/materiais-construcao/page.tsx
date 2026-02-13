@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Package, Plus, Edit, Trash2, Search, X, Check, AlertCircle, Upload, Download } from 'lucide-react';
+import { Package, Plus, Edit, Trash2, Search, X, Check, AlertCircle, Upload, Download, Filter, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -31,6 +31,8 @@ export default function MateriaisConstrucaoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
   const [showForm, setShowForm] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<ConstructionMaterial | null>(null);
   const [formData, setFormData] = useState({
@@ -48,6 +50,7 @@ export default function MateriaisConstrucaoPage() {
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importData, setImportData] = useState('');
+  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleLogout = () => {
@@ -67,12 +70,13 @@ export default function MateriaisConstrucaoPage() {
 
   // Buscar materiais
   const { data: materialsData, isLoading: loadingMaterials } = useQuery({
-    queryKey: ['construction-materials', searchTerm],
+    queryKey: ['construction-materials', searchTerm, currentPage, itemsPerPage],
     queryFn: async () => {
       const res = await api.get('/construction-materials', {
         params: {
           search: searchTerm || undefined,
-          limit: 100
+          page: currentPage,
+          limit: itemsPerPage
         }
       });
       return res.data;
@@ -106,6 +110,7 @@ export default function MateriaisConstrucaoPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      setShowForm(false);
       setEditingMaterial(null);
       resetForm();
       toast.success('Material atualizado com sucesso!');
@@ -305,15 +310,22 @@ export default function MateriaisConstrucaoPage() {
   };
 
   const materials = materialsData?.data || [];
-  const filteredMaterials = materials.filter((material: ConstructionMaterial) => {
-    if (!searchTerm) return true;
-    const search = searchTerm.toLowerCase();
-    return (
-      material.sinapiCode.toLowerCase().includes(search) ||
-      material.description?.toLowerCase().includes(search) ||
-      material.unit.toLowerCase().includes(search)
-    );
-  });
+  const pagination = materialsData?.pagination || {
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1
+  };
+
+  // Resetar página quando filtros mudarem
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  // Como a busca já é feita no backend, não precisamos filtrar no frontend
+  const filteredMaterials = useMemo(() => {
+    return materials;
+  }, [materials]);
 
   const user = userData?.data || {
     name: 'Usuário',
@@ -348,24 +360,97 @@ export default function MateriaisConstrucaoPage() {
             </p>
           </div>
 
-          {/* Busca e ações */}
+          {/* Filtros */}
           <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                  <input
-                    type="text"
-                    placeholder="Buscar por código SINAPI, descrição ou unidade..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  />
+            <CardHeader className="border-b-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+                </div>
+                <div className="flex items-center space-x-4">
+                  {!isFiltersMinimized && (
+                    <button
+                      onClick={() => {
+                        setSearchTerm('');
+                      }}
+                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                      title="Limpar filtros"
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
+                    className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
+                  >
+                    {isFiltersMinimized ? (
+                      <ChevronDown className="w-5 h-5" />
+                    ) : (
+                      <ChevronUp className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </CardHeader>
+            {!isFiltersMinimized && (
+              <CardContent className="p-4 sm:p-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Buscar
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por código SINAPI, descrição ou unidade..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            )}
+          </Card>
+
+          {/* Modal de Criar/Editar Material */}
+          <MaterialFormModal
+            isOpen={showForm}
+            onClose={() => {
+              setShowForm(false);
+              resetForm();
+            }}
+            editingMaterial={editingMaterial}
+            formData={formData}
+            setFormData={setFormData}
+            onSubmit={handleSubmit}
+            createMutation={createMutation}
+            updateMutation={updateMutation}
+          />
+
+          {/* Lista de materiais */}
+          <Card>
+            <CardHeader className="border-b-0">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center">
+                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                    <Package className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="ml-3 sm:ml-4 min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Materiais de Construção
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {pagination.total} {pagination.total === 1 ? 'material cadastrado' : 'materiais cadastrados'}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   <button
                     onClick={handleExport}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
                   >
                     <Download className="w-4 h-4" />
                     Exportar
@@ -375,7 +460,7 @@ export default function MateriaisConstrucaoPage() {
                       setShowImportModal(true);
                       setImportData('');
                     }}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
                   >
                     <Upload className="w-4 h-4" />
                     Importar
@@ -385,218 +470,77 @@ export default function MateriaisConstrucaoPage() {
                       resetForm();
                       setShowForm(true);
                     }}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
                   >
                     <Plus className="w-4 h-4" />
                     Cadastrar Material
                   </button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Formulário */}
-          {showForm && (
-            <Card>
-              <CardHeader className="border-b-0">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {editingMaterial ? 'Editar Material' : 'Material'}
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowForm(false);
-                      resetForm();
-                    }}
-                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Código SINAPI *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.sinapiCode}
-                      onChange={(e) => setFormData({ ...formData, sinapiCode: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                      placeholder="Ex: 12345"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Descrição *
-                    </label>
-                    <textarea
-                      required
-                      value={formData.description}
-                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                      placeholder="Descrição do material..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Unidade de Medida *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.unit}
-                      onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                      placeholder="Ex: kg, m, m², un"
-                    />
-                  </div>
-
-                  <div className="flex items-center">
-                    <label className="flex items-center space-x-3 cursor-pointer group">
-                      <div className="relative">
-                        <input
-                          type="checkbox"
-                          checked={formData.isActive}
-                          onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                          className="sr-only"
-                        />
-                        <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                          formData.isActive 
-                            ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500' 
-                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                        }`}>
-                          {formData.isActive && (
-                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </div>
-                      </div>
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
-                        Ativo
-                      </span>
-                    </label>
-                  </div>
-
-                  {(createMutation.isError || updateMutation.isError) && (
-                    <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
-                      <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-1">
-                          Erro ao salvar material
-                        </p>
-                        <p className="text-xs text-red-600 dark:text-red-400">
-                          {(createMutation.error as any)?.response?.data?.message || 
-                           (updateMutation.error as any)?.response?.data?.message || 
-                           (createMutation.error as any)?.message ||
-                           (updateMutation.error as any)?.message ||
-                           'Ocorreu um erro inesperado. Verifique os dados e tente novamente.'}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowForm(false);
-                        resetForm();
-                      }}
-                      className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={createMutation.isPending || updateMutation.isPending}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
-                    >
-                      {createMutation.isPending || updateMutation.isPending
-                        ? 'Salvando...'
-                        : editingMaterial
-                        ? 'Atualizar'
-                        : 'Criar'}
-                    </button>
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Lista de materiais */}
-          <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                  <Package className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Materiais de Construção
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {filteredMaterials.length} {filteredMaterials.length === 1 ? 'material cadastrado' : 'materiais cadastrados'}
-                  </p>
-                </div>
-              </div>
             </CardHeader>
-            <CardContent>
-              {loadingMaterials ? (
-                <div className="text-center py-8">
-                  <Loading message="Carregando materiais..." />
-                </div>
-              ) : filteredMaterials.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500 dark:text-gray-400">
-                    {searchTerm ? 'Nenhum material encontrado' : 'Nenhum material cadastrado'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead className="bg-gray-50 dark:bg-gray-800">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Código SINAPI
+                      </th>
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Descrição
+                      </th>
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Unidade
+                      </th>
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Ações
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {loadingMaterials ? (
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Código SINAPI
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Descrição
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Unidade
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Ações
-                        </th>
+                        <td colSpan={5} className="px-6 py-8 text-center">
+                          <div className="flex items-center justify-center">
+                            <div className="loading-spinner w-6 h-6 mr-2" />
+                            <span className="text-gray-600 dark:text-gray-400">Carregando materiais...</span>
+                          </div>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                      {filteredMaterials.map((material: ConstructionMaterial) => (
+                    ) : filteredMaterials.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center">
+                          <div className="text-gray-500 dark:text-gray-400">
+                            <p>Nenhum material encontrado.</p>
+                            <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredMaterials.map((material: ConstructionMaterial) => (
                         <tr
                           key={material.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                            {material.sinapiCode}
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                            <span className="text-sm text-gray-900 dark:text-gray-100">
+                              {material.sinapiCode}
+                            </span>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                            {material.description || '-'}
+                          <td className="px-3 sm:px-6 py-4">
+                            <span className="text-sm text-gray-600 dark:text-gray-400">
+                              {material.description || '-'}
+                            </span>
                           </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                            {material.unit}
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                            <span className="text-sm text-gray-900 dark:text-gray-100">
+                              {material.unit}
+                            </span>
                           </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-center">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
                             <span
                               className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                                 material.isActive
@@ -607,7 +551,7 @@ export default function MateriaisConstrucaoPage() {
                               {material.isActive ? 'Ativo' : 'Inativo'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-right">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 onClick={() => handleEdit(material)}
@@ -626,9 +570,69 @@ export default function MateriaisConstrucaoPage() {
                             </div>
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Paginação */}
+              {pagination.totalPages > 1 && (
+                <div className="px-4 sm:px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                      <span>
+                        Mostrando {((pagination.page - 1) * pagination.limit) + 1} a {Math.min(pagination.page * pagination.limit, pagination.total)} de {pagination.total} materiais
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Anterior
+                      </button>
+                      
+                      {/* Números das páginas */}
+                      {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                        let pageNumber: number;
+                        if (pagination.totalPages <= 5) {
+                          pageNumber = i + 1;
+                        } else if (currentPage <= 3) {
+                          pageNumber = i + 1;
+                        } else if (currentPage >= pagination.totalPages - 2) {
+                          pageNumber = pagination.totalPages - 4 + i;
+                        } else {
+                          pageNumber = currentPage - 2 + i;
+                        }
+                        
+                        const isActive = pageNumber === currentPage;
+                        
+                        return (
+                          <button
+                            key={pageNumber}
+                            onClick={() => setCurrentPage(pageNumber)}
+                            className={`px-3 py-2 text-sm font-medium rounded-md ${
+                              isActive
+                                ? 'bg-red-600 text-white'
+                                : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                            } transition-colors`}
+                          >
+                            {pageNumber}
+                          </button>
+                        );
+                      })}
+                      
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, pagination.totalPages))}
+                        disabled={currentPage === pagination.totalPages}
+                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Próxima
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -748,5 +752,182 @@ export default function MateriaisConstrucaoPage() {
         )}
       </MainLayout>
     </ProtectedRoute>
+  );
+}
+
+// Componente de Modal de Formulário
+function MaterialFormModal({
+  isOpen,
+  onClose,
+  editingMaterial,
+  formData,
+  setFormData,
+  onSubmit,
+  createMutation,
+  updateMutation
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  editingMaterial: ConstructionMaterial | null;
+  formData: {
+    sinapiCode: string;
+    description: string;
+    unit: string;
+    medianPrice: string;
+    state: string;
+    referenceMonth: string;
+    referenceYear: string;
+    categoryId: string;
+    costCenterId: string;
+    isActive: boolean;
+  };
+  setFormData: React.Dispatch<React.SetStateAction<{
+    sinapiCode: string;
+    description: string;
+    unit: string;
+    medianPrice: string;
+    state: string;
+    referenceMonth: string;
+    referenceYear: string;
+    categoryId: string;
+    costCenterId: string;
+    isActive: boolean;
+  }>>;
+  onSubmit: (e: React.FormEvent) => void;
+  createMutation: any;
+  updateMutation: any;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            {editingMaterial ? 'Editar Material' : 'Cadastrar Material'}
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+            aria-label="Fechar"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6">
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Código SINAPI *
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.sinapiCode}
+                onChange={(e) => setFormData({ ...formData, sinapiCode: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="Ex: 12345"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Descrição *
+              </label>
+              <textarea
+                required
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="Descrição do material..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Unidade de Medida *
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.unit}
+                onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="Ex: kg, m, m², un"
+              />
+            </div>
+
+            <div className="flex items-center">
+              <label className="flex items-center space-x-3 cursor-pointer group">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={formData.isActive}
+                    onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                    className="sr-only"
+                  />
+                  <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
+                    formData.isActive 
+                      ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500' 
+                      : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
+                  }`}>
+                    {formData.isActive && (
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
+                  Ativo
+                </span>
+              </label>
+            </div>
+
+            {(createMutation.isError || updateMutation.isError) && (
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-1">
+                    Erro ao salvar material
+                  </p>
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    {(createMutation.error as any)?.response?.data?.message || 
+                     (updateMutation.error as any)?.response?.data?.message || 
+                     (createMutation.error as any)?.message ||
+                     (updateMutation.error as any)?.message ||
+                     'Ocorreu um erro inesperado. Verifique os dados e tente novamente.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
+              >
+                {createMutation.isPending || updateMutation.isPending
+                  ? 'Salvando...'
+                  : editingMaterial
+                  ? 'Atualizar'
+                  : 'Criar'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }

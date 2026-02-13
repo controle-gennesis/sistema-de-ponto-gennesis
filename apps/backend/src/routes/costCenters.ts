@@ -32,4 +32,9 @@ router.delete('/:id', (req, res, next) =>
   costCenterController.deleteCostCenter(req, res, next)
 );
 
+// Importar centros de custo em massa
+router.post('/import/bulk', (req, res, next) => 
+  costCenterController.importBulkCostCenters(req, res, next)
+);
+
 export default router;

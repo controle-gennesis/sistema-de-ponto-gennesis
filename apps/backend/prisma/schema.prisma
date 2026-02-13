@@ -682,6 +682,9 @@ model CostCenter {
   code        String   @unique // Código do centro de custo
   name        String   // Nome do centro de custo
   description String?  // Descrição adicional
+  state       String?  // Estado (DF, GO, etc.)
+  polo        String?  // Polo (BRASÍLIA, GOIÁS, etc.)
+  company     String?  // Empresa (ABRASIL, GÊNNESIS, MÉTRICA, etc.)
   isActive    Boolean  @default(true) // Se está ativo
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

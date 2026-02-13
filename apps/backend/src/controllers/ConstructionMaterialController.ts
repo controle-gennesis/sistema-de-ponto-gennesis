@@ -9,7 +9,7 @@ export class ConstructionMaterialController {
    */
   async getAllMaterials(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { search, isActive } = req.query;
+      const { search, isActive, page = 1, limit = 20 } = req.query;
 
       const where: any = {};
 
@@ -25,10 +25,19 @@ export class ConstructionMaterialController {
         where.isActive = isActive === 'true';
       }
 
-      const materials = await prisma.constructionMaterial.findMany({
-        where,
-        orderBy: { name: 'asc' }
-      });
+      // Limitar o máximo de registros por página
+      const limitNum = Math.min(Number(limit), 100);
+      const skip = (Number(page) - 1) * limitNum;
+
+      const [materials, total] = await Promise.all([
+        prisma.constructionMaterial.findMany({
+          where,
+          skip,
+          take: limitNum,
+          orderBy: { name: 'asc' }
+        }),
+        prisma.constructionMaterial.count({ where })
+      ]);
 
       // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
       const mappedMaterials = materials.map(m => ({
@@ -38,7 +47,13 @@ export class ConstructionMaterialController {
 
       res.json({
         success: true,
-        data: mappedMaterials
+        data: mappedMaterials,
+        pagination: {
+          page: Number(page),
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum)
+        }
       });
     } catch (error) {
       next(error);
