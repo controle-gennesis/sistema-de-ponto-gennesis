@@ -44,6 +44,7 @@ import constructionMaterialRoutes from './routes/constructionMaterials';
 import chatGPTRoutes from './routes/chatgpt';
 import borderRoutes from './routes/border';
 import materialRequestRoutes from './routes/materialRequests';
+import financialAnalysisRoutes from './routes/financialAnalysis';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -226,6 +227,7 @@ app.use('/api/construction-materials', constructionMaterialRoutes);
 app.use('/api/chatgpt', chatGPTRoutes);
 app.use('/api/border', borderRoutes);
 app.use('/api/material-requests', materialRequestRoutes);
+app.use('/api/financial-analysis', financialAnalysisRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

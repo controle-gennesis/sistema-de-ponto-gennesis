@@ -11,6 +11,7 @@ export interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   closeOnOverlayClick?: boolean;
   showCloseButton?: boolean;
+  headerActions?: React.ReactNode;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -21,6 +22,7 @@ export const Modal: React.FC<ModalProps> = ({
   size = 'md',
   closeOnOverlayClick = true,
   showCloseButton = true,
+  headerActions,
 }) => {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -67,20 +69,27 @@ export const Modal: React.FC<ModalProps> = ({
           )}
         >
           {/* Header */}
-          {(title || showCloseButton) && (
+          {(title || showCloseButton || headerActions) && (
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               {title && (
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
               )}
               
-              {showCloseButton && (
-                <button
-                  onClick={onClose}
-                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {headerActions && (
+                  <div className="flex items-center">
+                    {headerActions}
+                  </div>
+                )}
+                {showCloseButton && (
+                  <button
+                    onClick={onClose}
+                    className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

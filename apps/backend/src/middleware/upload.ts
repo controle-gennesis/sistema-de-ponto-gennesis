@@ -56,13 +56,16 @@ export const handleUploadError = (error: any, req: Request, res: any, next: any)
   next(error);
 };
 
-// Configuração do multer para upload de planilhas (Excel)
+// Configuração do multer para upload de planilhas (Excel e CSV)
 const fileFilterImport = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   const allowedMimeTypes = [
     'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/csv',
+    'application/csv',
+    'text/plain'
   ];
-  const allowedExtensions = ['.xlsx', '.xls'];
+  const allowedExtensions = ['.xlsx', '.xls', '.csv'];
 
   const mimetypeOk = !!file.mimetype && allowedMimeTypes.includes(file.mimetype);
   const nameLower = (file.originalname || '').toLowerCase();
@@ -72,7 +75,7 @@ const fileFilterImport = (req: Request, file: Express.Multer.File, cb: multer.Fi
     return cb(null, true);
   }
 
-  cb(new Error('Apenas arquivos Excel (.xlsx ou .xls) são permitidos'));
+  cb(new Error('Apenas arquivos Excel (.xlsx, .xls) ou CSV (.csv) são permitidos'));
 };
 
 export const uploadImport = multer({

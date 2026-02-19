@@ -82,6 +82,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   
   // Verificar se é do departamento Compras
   const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
+  
+  // Verificar se é do departamento Financeiro
+  const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
 
   const handleLogout = () => {
     setShowUserMenu(false);
@@ -252,6 +255,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: DollarSign,
             description: 'Gerar borderô e CNAB400 para pagamentos',
             permission: isAdministrator // Apenas administrador
+          },
+          {
+            name: 'Análise Financeira',
+            href: '/ponto/financeiro/analise',
+            icon: BarChart3,
+            description: 'Importar planilha e gerar relatórios de análise financeira',
+            permission: isAdministrator || isDepartmentFinanceiro // Administrador ou Financeiro
           }
         ]
       },
@@ -439,7 +449,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               /* Quando colapsada: logo acima do botão */
               <>
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
-                  <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
+                  <img src="/loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                 </div>
                 <button
                   onClick={() => setIsCollapsed(!isCollapsed)}
@@ -454,7 +464,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               <>
                 <div className="flex items-center space-x-3 transition-opacity duration-500 ease-in-out">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
-                    <img src="../loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
+                    <img src="/loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
                   <div className="transition-all duration-500 ease-in-out">
                     <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Gennesis</h1>
