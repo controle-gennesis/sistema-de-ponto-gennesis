@@ -274,15 +274,22 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             name: 'Solicitar Materiais',
             href: '/ponto/solicitar-materiais',
             icon: ShoppingCart,
-            description: 'Solicitar materiais para compra',
-            permission: true // Todos podem solicitar materiais
+            description: 'Solicitar materiais para compra (SC)',
+            permission: true
           },
           {
-            name: 'Gerenciar Requisições de Materiais',
+            name: 'Requisições de Materiais',
             href: '/ponto/gerenciar-materiais',
             icon: Package,
-            description: 'Aprovar e gerenciar requisições de materiais',
-            permission: isAdministrator || isDepartmentCompras // Administrador ou departamento Compras
+            description: 'Aprovar SC e criar OC',
+            permission: isAdministrator || isDepartmentCompras
+          },
+          {
+            name: 'Ordens de Compra',
+            href: '/ponto/ordem-de-compra',
+            icon: FileText,
+            description: 'Listar e gerenciar ordens de compra',
+            permission: isAdministrator || isDepartmentCompras
           }
         ]
       },
@@ -304,6 +311,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: Package,
             description: 'Gerenciar materiais de construção civil',
             permission: isAdministrator || isDepartmentPessoal // Apenas Administrador ou Departamento Pessoal
+          },
+          {
+            name: 'Fornecedores',
+            href: '/ponto/fornecedores',
+            icon: Building2,
+            description: 'Cadastro de fornecedores',
+            permission: isAdministrator || isDepartmentCompras
           }
         ]
       },

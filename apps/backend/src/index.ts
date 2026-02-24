@@ -45,6 +45,8 @@ import chatGPTRoutes from './routes/chatgpt';
 import borderRoutes from './routes/border';
 import materialRequestRoutes from './routes/materialRequests';
 import financialAnalysisRoutes from './routes/financialAnalysis';
+import supplierRoutes from './routes/suppliers';
+import purchaseOrderRoutes from './routes/purchaseOrders';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -228,6 +230,8 @@ app.use('/api/chatgpt', chatGPTRoutes);
 app.use('/api/border', borderRoutes);
 app.use('/api/material-requests', materialRequestRoutes);
 app.use('/api/financial-analysis', financialAnalysisRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

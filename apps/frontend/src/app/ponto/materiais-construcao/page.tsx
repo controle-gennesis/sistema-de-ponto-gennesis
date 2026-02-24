@@ -495,7 +495,7 @@ export default function MateriaisConstrucaoPage() {
                       <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Status
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Ações
                       </th>
                     </tr>
@@ -542,7 +542,7 @@ export default function MateriaisConstrucaoPage() {
                           </td>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
                             <span
-                              className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${
                                 material.isActive
                                   ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                                   : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
@@ -551,8 +551,8 @@ export default function MateriaisConstrucaoPage() {
                               {material.isActive ? 'Ativo' : 'Inativo'}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right">
-                            <div className="flex items-center justify-end gap-2">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                            <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() => handleEdit(material)}
                                 className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"

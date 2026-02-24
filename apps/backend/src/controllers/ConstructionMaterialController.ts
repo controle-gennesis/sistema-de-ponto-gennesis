@@ -129,6 +129,21 @@ export class ConstructionMaterialController {
         data: materialData
       });
 
+      // Criar correspondente em EngineeringMaterial para aparecer em Solicitar Materiais
+      try {
+        await prisma.engineeringMaterial.create({
+          data: {
+            sinapiCode: `CM-${material.id}`,
+            name: material.name,
+            description: material.description || material.name,
+            unit: material.unit,
+            isActive: material.isActive
+          }
+        });
+      } catch (engErr) {
+        console.warn('Aviso: material criado mas falha ao sincronizar com EngineeringMaterial:', engErr);
+      }
+
       // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
       const mappedMaterial = {
         ...material,

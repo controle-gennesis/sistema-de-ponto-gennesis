@@ -13,40 +13,64 @@ const materialRequestService = new MaterialRequestService();
 router.use(authenticate);
 
 // Endpoint auxiliar para listar materiais (deve vir antes de /:id)
+// Prioriza Materiais de Construção - garante que cada um tenha correspondente em EngineeringMaterial
 router.get('/materials', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const materials = await prisma.engineeringMaterial.findMany({
-      where: {
-        isActive: true
-      },
-      orderBy: {
-        name: 'asc'
-      },
-      select: {
-        id: true,
-        sinapiCode: true,
-        name: true,
-        description: true,
-        unit: true,
-        medianPrice: true,
-        state: true,
-        referenceMonth: true,
-        referenceYear: true
-      }
+    const constructionMaterials = await prisma.constructionMaterial.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' }
     });
 
-    // Mapear para formato esperado pelo frontend
-    const mappedMaterials = materials.map(m => ({
-      id: m.id,
-      code: m.sinapiCode,
-      name: m.name || m.description,
-      description: m.description,
-      unit: m.unit,
-      medianPrice: m.medianPrice,
-      state: m.state,
-      referenceMonth: m.referenceMonth,
-      referenceYear: m.referenceYear
-    }));
+    const mappedMaterials: { id: string; code: string; sinapiCode?: string; name: string; description: string; unit: string; medianPrice: number | null }[] = [];
+
+    for (const cm of constructionMaterials) {
+      const sinapiCode = `CM-${cm.id}`;
+      let eng = await prisma.engineeringMaterial.findUnique({
+        where: { sinapiCode }
+      });
+      if (!eng) {
+        eng = await prisma.engineeringMaterial.create({
+          data: {
+            sinapiCode,
+            name: cm.name,
+            description: cm.description || cm.name,
+            unit: cm.unit,
+            isActive: cm.isActive
+          }
+        });
+      }
+      mappedMaterials.push({
+        id: eng.id,
+        code: cm.name,
+        sinapiCode: eng.sinapiCode,
+        name: cm.description || cm.name || eng.description || eng.name || '',
+        description: cm.description || eng.description || '',
+        unit: eng.unit,
+        medianPrice: eng.medianPrice ? Number(eng.medianPrice) : null
+      });
+    }
+
+    // Incluir também EngineeringMaterials que não vêm de ConstructionMaterial (ex: importados SINAPI)
+    const engMaterials = await prisma.engineeringMaterial.findMany({
+      where: {
+        isActive: true,
+        sinapiCode: { not: { startsWith: 'CM-' } }
+      },
+      orderBy: { name: 'asc' }
+    });
+    for (const m of engMaterials) {
+      if (!mappedMaterials.some((x) => x.id === m.id)) {
+        mappedMaterials.push({
+          id: m.id,
+          code: m.sinapiCode,
+          name: m.name || m.description,
+          description: m.description,
+          unit: m.unit,
+          medianPrice: m.medianPrice ? Number(m.medianPrice) : null
+        });
+      }
+    }
+    mappedMaterials.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     res.json({
       success: true,
@@ -140,6 +164,24 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
       success: true,
       data: request
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Atualizar status da requisição
+router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const { id } = req.params;
+    const { status, rejectionReason } = req.body;
+    const request = await materialRequestService.updateMaterialRequestStatus(id, {
+      status,
+      approvedBy: status === 'APPROVED' ? req.user.id : undefined,
+      rejectedBy: status === 'REJECTED' ? req.user.id : undefined,
+      rejectionReason: status === 'REJECTED' ? rejectionReason : undefined
+    }, req.user.id);
+    res.json({ success: true, data: request, message: 'Status atualizado' });
   } catch (error) {
     next(error);
   }

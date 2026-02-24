@@ -115,13 +115,18 @@ export class MaterialRequestService {
 
     const materialMap = new Map(materials.map(m => [m.id, m]));
 
+    // projectId só pode ser usado se for ID válido de projeto (CUID) - senão viola FK
+    const projectId = data.projectId && data.projectId.length === 25 && data.projectId.startsWith('c')
+      ? data.projectId
+      : undefined;
+
     // Criar requisição com itens
     const request = await prisma.materialRequest.create({
       data: {
         requestNumber,
         requestedBy: data.requestedBy,
         costCenterId: data.costCenterId,
-        projectId: data.projectId,
+        projectId,
         description: data.description,
         priority: data.priority || 'MEDIUM',
         status: 'PENDING',

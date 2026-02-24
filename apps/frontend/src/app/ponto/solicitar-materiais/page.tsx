@@ -121,6 +121,14 @@ export default function SolicitarMateriaisPage() {
   const handleItemChange = (index: number, field: string, value: any) => {
     const newItems = [...formData.items];
     newItems[index] = { ...newItems[index], [field]: value };
+    if (field === 'materialId') {
+      if (value) {
+        const material = (materialsData?.data || []).find((m: any) => m.id === value);
+        newItems[index].unit = material?.unit || '';
+      } else {
+        newItems[index].unit = '';
+      }
+    }
     setFormData({ ...formData, items: newItems });
   };
 
@@ -360,7 +368,7 @@ export default function SolicitarMateriaisPage() {
                                 <option value="">Selecione um material</option>
                                 {(materialsData?.data || []).map((material: any) => (
                                   <option key={material.id} value={material.id}>
-                                    {material.name} - {material.code}
+                                    {material.description || material.name}
                                   </option>
                                 ))}
                               </select>
@@ -385,9 +393,9 @@ export default function SolicitarMateriaisPage() {
                               <input
                                 type="text"
                                 value={item.unit}
-                                onChange={(e) => handleItemChange(index, 'unit', e.target.value)}
+                                readOnly
                                 placeholder="Ex: kg, m, un"
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm cursor-not-allowed"
                               />
                             </div>
                             <div>

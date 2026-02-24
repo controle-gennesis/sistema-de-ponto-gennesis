@@ -11,16 +11,19 @@ import {
   Eye,
   Search,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  FileText
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import toast from 'react-hot-toast';
 
 interface MaterialRequest {
   id: string;
+  requestNumber?: string;
   description: string;
   status: 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
@@ -43,10 +46,12 @@ interface MaterialRequest {
     quantity: number;
     unit: string;
     observation: string;
+    unitPrice?: number;
     material: {
       id: string;
       name: string;
       code: string;
+      medianPrice?: number;
     };
   }>;
   approvedBy?: {
@@ -109,6 +114,9 @@ export default function GerenciarMateriaisPage() {
   const [selectedRequest, setSelectedRequest] = useState<MaterialRequest | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
+  const [showCreateOCModal, setShowCreateOCModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [ocSupplierId, setOcSupplierId] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
   const [searchTerm, setSearchTerm] = useState('');
@@ -149,6 +157,47 @@ export default function GerenciarMateriaisPage() {
       queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
       setShowApprovalModal(false);
       setSelectedRequest(null);
+    }
+  });
+
+  // Buscar fornecedores para criar OC
+  const { data: suppliersData } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: async () => {
+      const res = await api.get('/suppliers', { params: { limit: 200 } });
+      return res.data;
+    },
+    enabled: showCreateOCModal
+  });
+
+  // Criar Ordem de Compra
+  const createOCMutation = useMutation({
+    mutationFn: async ({ request, supplierId }: { request: MaterialRequest; supplierId: string }) => {
+      const items = request.items.map((item) => ({
+        materialRequestItemId: item.id,
+        materialId: item.material.id,
+        quantity: item.quantity,
+        unit: item.unit,
+        unitPrice: Number(item.material.medianPrice) || Number(item.unitPrice) || 0,
+        notes: item.observation
+      }));
+      const res = await api.post('/purchase-orders', {
+        materialRequestId: request.id,
+        supplierId,
+        items
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      setShowCreateOCModal(false);
+      setSelectedRequest(null);
+      setOcSupplierId('');
+      toast.success('Ordem de compra criada com sucesso!');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Erro ao criar OC');
     }
   });
 
@@ -376,6 +425,19 @@ export default function GerenciarMateriaisPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2 ml-4">
+                            {request.status === 'APPROVED' && (
+                              <button
+                                onClick={() => {
+                                  setSelectedRequest(request);
+                                  setShowCreateOCModal(true);
+                                  setOcSupplierId('');
+                                }}
+                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                title="Criar Ordem de Compra"
+                              >
+                                <FileText className="w-5 h-5" />
+                              </button>
+                            )}
                             {(request.status === 'PENDING' || request.status === 'IN_REVIEW') && (
                               <>
                                 <button
@@ -401,7 +463,10 @@ export default function GerenciarMateriaisPage() {
                               </>
                             )}
                             <button
-                              onClick={() => setSelectedRequest(request)}
+                              onClick={() => {
+                                setSelectedRequest(request);
+                                setShowDetailsModal(true);
+                              }}
                               className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                               title="Ver detalhes"
                             >
@@ -417,6 +482,79 @@ export default function GerenciarMateriaisPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Modal Detalhes */}
+        {showDetailsModal && selectedRequest && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => { setShowDetailsModal(false); setSelectedRequest(null); }} />
+            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                Detalhes da Requisição
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Número</p>
+                  <p className="font-medium text-gray-900 dark:text-gray-100">{selectedRequest.requestNumber || `#${selectedRequest.id.slice(0, 8)}`}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Status</p>
+                  <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${getStatusInfo(selectedRequest.status).color}`}>
+                    {getStatusInfo(selectedRequest.status).label}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Solicitante</p>
+                  <p className="text-gray-900 dark:text-gray-100">{selectedRequest.requestedBy?.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Centro de Custo</p>
+                  <p className="text-gray-900 dark:text-gray-100">{selectedRequest.costCenter?.name}</p>
+                </div>
+                {selectedRequest.project && (
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Projeto</p>
+                    <p className="text-gray-900 dark:text-gray-100">{selectedRequest.project.name}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Descrição</p>
+                  <p className="text-gray-900 dark:text-gray-100">{selectedRequest.description || 'Sem descrição'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Itens</p>
+                  <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 dark:bg-gray-700/50">
+                        <tr>
+                          <th className="text-left p-2">Material</th>
+                          <th className="text-right p-2">Qtd</th>
+                          <th className="text-right p-2">Unidade</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedRequest.items?.map((item: any) => (
+                          <tr key={item.id} className="border-t border-gray-200 dark:border-gray-600">
+                            <td className="p-2 text-gray-900 dark:text-gray-100">{item.material?.description || item.material?.name || '-'}</td>
+                            <td className="p-2 text-right">{item.quantity}</td>
+                            <td className="p-2 text-right">{item.unit || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={() => { setShowDetailsModal(false); setSelectedRequest(null); }}
+                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal de Aprovação */}
         {showApprovalModal && selectedRequest && (
@@ -442,6 +580,66 @@ export default function GerenciarMateriaisPage() {
                   className="px-4 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 disabled:opacity-50"
                 >
                   {approveMutation.isPending ? 'Aprovando...' : 'Aprovar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Criar OC */}
+        {showCreateOCModal && selectedRequest && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowCreateOCModal(false)} />
+            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                Criar Ordem de Compra (OC)
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                SC: {selectedRequest.requestNumber || selectedRequest.id.slice(0, 8)}
+              </p>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Fornecedor *
+                </label>
+                <select
+                  value={ocSupplierId}
+                  onChange={(e) => setOcSupplierId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Selecione o fornecedor</option>
+                  {(suppliersData?.data || []).filter((s: any) => s.isActive).map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.code} - {s.name}</option>
+                  ))}
+                </select>
+                {(suppliersData?.data || []).length === 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    Cadastre fornecedores em Suprimentos → Fornecedores
+                  </p>
+                )}
+              </div>
+              <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                <p className="font-medium mb-1">Itens da SC:</p>
+                <ul className="list-disc list-inside space-y-0.5">
+                  {selectedRequest.items.map((item) => (
+                    <li key={item.id}>
+                      {item.material.name || item.material.code} - {item.quantity} {item.unit}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowCreateOCModal(false)}
+                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => createOCMutation.mutate({ request: selectedRequest, supplierId: ocSupplierId })}
+                  disabled={!ocSupplierId || createOCMutation.isPending}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {createOCMutation.isPending ? 'Criando...' : 'Criar OC'}
                 </button>
               </div>
             </div>

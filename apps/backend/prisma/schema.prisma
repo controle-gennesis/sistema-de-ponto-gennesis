@@ -45,6 +45,8 @@ model User {
   materialRequestsRejected   MaterialRequest[]      @relation("MaterialRequestRejecter")
   chatGPTConversations      ChatGPTConversation[]
   passwordResetTokens PasswordResetToken[]
+  purchaseOrdersCreated     PurchaseOrder[]        @relation("PurchaseOrderCreator")
+  purchaseOrdersApproved    PurchaseOrder[]        @relation("PurchaseOrderApprover")
 
   @@map("users")
 }
@@ -759,6 +761,7 @@ model MaterialRequest {
   costCenter   CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   items        MaterialRequestItem[]
+  purchaseOrders PurchaseOrder[]
 
   @@index([requestNumber])
   @@index([requestedBy])
@@ -804,6 +807,7 @@ model MaterialRequestItem {
   // Relacionamentos
   materialRequest   MaterialRequest @relation(fields: [materialRequestId], references: [id], onDelete: Cascade)
   material          EngineeringMaterial @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  purchaseOrderItems PurchaseOrderItem[]
 
   @@index([materialRequestId])
   @@index([materialId])
@@ -817,6 +821,97 @@ enum MaterialRequestItemStatus {
   PURCHASED   // Comprado
   DELIVERED   // Entregue
   CANCELLED   // Cancelado
+}
+
+// Modelo de Fornecedor (estilo TOTVS RM)
+model Supplier {
+  id          String   @id @default(cuid())
+  code        String   @unique // Código do fornecedor
+  name        String   // Razão social / Nome
+  cnpj        String?  @unique // CNPJ
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  state       String?  // UF
+  zipCode     String?
+  contactName String?  // Nome do contato
+  notes       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("suppliers")
+}
+
+// Modelo de Ordem de Compra (OC - estilo TOTVS RM)
+model PurchaseOrder {
+  id                String   @id @default(cuid())
+  orderNumber       String   @unique // Número da OC (ex: OC-2025-001)
+  materialRequestId String?  // SC que originou (opcional)
+  supplierId        String   // Fornecedor
+  status            PurchaseOrderStatus @default(DRAFT)
+  orderDate         DateTime @default(now())
+  expectedDelivery  DateTime? // Data prevista de entrega
+  deliveryAddress   String?  // Endereço de entrega
+  notes             String?
+  createdBy         String   // Usuário que criou
+  approvedBy        String?  // Usuário que aprovou
+  approvedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  materialRequest   MaterialRequest? @relation(fields: [materialRequestId], references: [id], onDelete: SetNull)
+  supplier          Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  creator           User @relation("PurchaseOrderCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  approver          User? @relation("PurchaseOrderApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  items             PurchaseOrderItem[]
+
+  @@index([orderNumber])
+  @@index([materialRequestId])
+  @@index([supplierId])
+  @@index([status])
+  @@index([orderDate])
+  @@map("purchase_orders")
+}
+
+enum PurchaseOrderStatus {
+  DRAFT       // Rascunho
+  PENDING     // Pendente de aprovação
+  APPROVED    // Aprovada
+  SENT        // Enviada ao fornecedor
+  PARTIALLY_RECEIVED  // Parcialmente recebida
+  RECEIVED    // Totalmente recebida
+  CANCELLED   // Cancelada
+}
+
+// Modelo de Item da Ordem de Compra
+model PurchaseOrderItem {
+  id                    String   @id @default(cuid())
+  purchaseOrderId       String
+  materialRequestItemId String?  // Item da SC que originou (opcional)
+  materialId            String
+  quantity              Decimal  @db.Decimal(10, 2)
+  unit                  String
+  unitPrice             Decimal  @db.Decimal(12, 2)
+  totalPrice            Decimal  @db.Decimal(12, 2)
+  notes                 String?
+  receivedQuantity      Decimal? @db.Decimal(10, 2) @default(0) // Quantidade já recebida
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  purchaseOrder         PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  materialRequestItem   MaterialRequestItem? @relation(fields: [materialRequestItemId], references: [id], onDelete: SetNull)
+  material              EngineeringMaterial @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseOrderId])
+  @@index([materialRequestItemId])
+  @@index([materialId])
+  @@map("purchase_order_items")
 }
 
 // Modelo de Categoria de Material
@@ -857,6 +952,7 @@ model EngineeringMaterial {
   costCenter        CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
   priceHistory      PriceHistory[]
   requestItems      MaterialRequestItem[]
+  purchaseOrderItems PurchaseOrderItem[]
 
   @@index([sinapiCode])
   @@index([state])
