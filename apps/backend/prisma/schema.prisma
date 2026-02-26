@@ -930,6 +930,20 @@ model MaterialCategory {
   @@map("material_categories")
 }
 
+// Modelo de Natureza Orçamentária
+model BudgetNature {
+  id        String   @id @default(cuid())
+  code      String?  @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@map("budget_natures")
+}
+
 // Modelo de Material de Engenharia (SINAPI)
 model EngineeringMaterial {
   id                String   @id @default(cuid())

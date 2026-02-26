@@ -123,6 +123,12 @@ function sortArray<T>(
 }
 
 export default function AnaliseFinanceiroPage() {
+  const pageTitle = 'Análise Financeira';
+  const pageSubtitle = 'Importe uma planilha financeira e gere relatórios detalhados de análise';
+  const uploadTitle = 'Análise Financeira';
+  const uploadSubtitle = 'Importe sua planilha para gerar relatórios detalhados';
+  const reportTitle = 'Relatório de Análise Financeira';
+
   const { isDepartmentFinanceiro, userPosition } = usePermissions();
   const isAdministrator = userPosition === 'Administrador';
   const canAccess = isAdministrator || isDepartmentFinanceiro;

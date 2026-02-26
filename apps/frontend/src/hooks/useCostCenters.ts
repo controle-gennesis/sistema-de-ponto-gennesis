@@ -1,45 +1,46 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { normalizeCostCentersResponse } from '@/lib/costCenters';
 
 interface CostCenter {
-  id: string;
+  id?: string;
   code: string;
-  name: string;
+  name?: string;
   description?: string;
-  isActive: boolean;
+  polo?: string;
+  isActive?: boolean;
 }
 
 /**
  * Hook para buscar centros de custo da API
  * Retorna os centros de custo com apenas o NOME (sem código)
+ * Normaliza a resposta para sempre retornar arrays (filtros, listas, etc.)
  */
 export function useCostCenters() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['cost-centers'],
     queryFn: async () => {
       const res = await api.get('/cost-centers', {
-        params: { isActive: 'true', limit: 100 }
+        params: { isActive: 'true', limit: 2000 }
       });
-      return res.data?.data || [];
+      return normalizeCostCentersResponse(res.data);
     },
     staleTime: 5 * 60 * 1000, // Cache por 5 minutos
   });
 
-  const costCenters: CostCenter[] = data || [];
-  
-  // Formatar com apenas o NOME
+  const costCenters = normalizeCostCentersResponse(data) as unknown as CostCenter[];
+
   const formattedCostCenters = costCenters.map(cc => ({
     ...cc,
-    label: cc.name, // Apenas o nome
-    value: cc.name // Usar o nome como value também
+    label: cc.name || String(cc.code || ''),
+    value: cc.name || String(cc.code || '')
   }));
 
   return {
     costCenters: formattedCostCenters,
     isLoading,
     error,
-    // Retornar também apenas os labels (nomes) para compatibilidade com código antigo
-    costCentersList: formattedCostCenters.map(cc => cc.label)
+    costCentersList: formattedCostCenters.map(cc => cc.label || cc.name || '')
   };
 }
 

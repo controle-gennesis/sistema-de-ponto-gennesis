@@ -25,7 +25,8 @@ export const uploadPhoto = multer({
   fileFilter,
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880'), // 5MB
-    files: 1 // Apenas 1 arquivo por vez
+    files: 1, // Apenas 1 arquivo por vez
+    fieldSize: parseInt(process.env.MAX_FIELD_SIZE || String(5 * 1024 * 1024)) // tamanho máximo para campos (5MB por padrão)
   }
 });
 
@@ -83,6 +84,7 @@ export const uploadImport = multer({
   fileFilter: fileFilterImport,
   limits: {
     fileSize: parseInt(process.env.MAX_IMPORT_FILE_SIZE || '10485760'), // 10MB
-    files: 1
+    files: 1,
+    fieldSize: parseInt(process.env.MAX_FIELD_SIZE || String(20 * 1024 * 1024)) // permitir campos maiores (20MB por padrão) para JSON 'matrix'
   }
 });

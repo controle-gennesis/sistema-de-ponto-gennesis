@@ -75,7 +75,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
     // Se é apenas o código, buscar o nome correspondente (se os dados já carregaram)
     if (costCenters.length > 0) {
       const found = costCenters.find(cc => cc.code === value);
-      if (found) return found.name;
+      if (found) return found.name ?? value;
     }
     // Se não encontrou ou ainda não carregou, retornar o valor original
     return value;

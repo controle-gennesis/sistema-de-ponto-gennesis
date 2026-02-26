@@ -47,6 +47,7 @@ import materialRequestRoutes from './routes/materialRequests';
 import financialAnalysisRoutes from './routes/financialAnalysis';
 import supplierRoutes from './routes/suppliers';
 import purchaseOrderRoutes from './routes/purchaseOrders';
+import budgetNatureRoutes from './routes/budgetNatures';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -232,6 +233,7 @@ app.use('/api/material-requests', materialRequestRoutes);
 app.use('/api/financial-analysis', financialAnalysisRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/budget-natures', budgetNatureRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

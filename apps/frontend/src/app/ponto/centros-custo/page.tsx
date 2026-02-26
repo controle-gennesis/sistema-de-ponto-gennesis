@@ -11,6 +11,7 @@ import { Loading } from '@/components/ui/Loading';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { POLOS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
 
 interface CostCenter {
@@ -41,10 +42,7 @@ export default function CentrosCustoPage() {
   const [formData, setFormData] = useState({
     code: '',
     name: '',
-    description: '',
-    state: '',
     polo: '',
-    company: '',
     isActive: true
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
@@ -138,10 +136,7 @@ export default function CentrosCustoPage() {
     setFormData({
       code: '',
       name: '',
-      description: '',
-      state: '',
       polo: '',
-      company: '',
       isActive: true
     });
     setEditingCostCenter(null);
@@ -152,10 +147,7 @@ export default function CentrosCustoPage() {
     setFormData({
       code: costCenter.code,
       name: costCenter.name,
-      description: costCenter.description || '',
-      state: costCenter.state || '',
       polo: costCenter.polo || '',
-      company: costCenter.company || '',
       isActive: costCenter.isActive
     });
     setShowForm(true);
@@ -173,22 +165,17 @@ export default function CentrosCustoPage() {
       updateMutation.mutate({ 
         id: editingCostCenter.id, 
         data: {
+          code: formData.code.trim() || undefined,
           name: formData.name.trim(),
-          description: formData.description.trim() || undefined,
-          state: formData.state.trim() || undefined,
-          polo: formData.polo.trim() || undefined,
-          company: formData.company.trim() || undefined,
+          polo: formData.polo?.trim() || undefined,
           isActive: formData.isActive
         }
       });
     } else {
       createMutation.mutate({
-        // Código será gerado automaticamente no backend
+        code: formData.code.trim() || undefined,
         name: formData.name.trim(),
-        description: formData.description.trim() || undefined,
-        state: formData.state.trim() || undefined,
-        polo: formData.polo.trim() || undefined,
-        company: formData.company.trim() || undefined,
+        polo: formData.polo?.trim() || undefined,
         isActive: formData.isActive
       });
     }
@@ -203,7 +190,7 @@ export default function CentrosCustoPage() {
     role: 'EMPLOYEE'
   };
 
-  const costCenters = costCentersData?.data || [];
+  const costCenters = normalizeCostCentersResponse(costCentersData) as unknown as CostCenter[];
   const pagination = costCentersData?.pagination || {
     page: 1,
     limit: 20,
@@ -298,7 +285,7 @@ export default function CentrosCustoPage() {
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
                       <input
                         type="text"
-                        placeholder="Buscar por código, nome ou descrição..."
+                        placeholder="Buscar por código ou nome..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -405,10 +392,7 @@ export default function CentrosCustoPage() {
                     <tr>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Código</th>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nome</th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Descrição</th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Estado</th>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Polo</th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Empresa</th>
                       <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
                       <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ações</th>
                     </tr>
@@ -425,7 +409,7 @@ export default function CentrosCustoPage() {
                       </tr>
                     ) : filteredCostCenters.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-6 py-8 text-center">
+                        <td colSpan={4} className="px-6 py-8 text-center">
                           <div className="text-gray-500 dark:text-gray-400">
                             <p>Nenhum centro de custo encontrado.</p>
                             <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
@@ -441,17 +425,8 @@ export default function CentrosCustoPage() {
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                             <span className="text-sm text-gray-900 dark:text-gray-100">{cc.name}</span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">{cc.description || '-'}</span>
-                          </td>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{cc.state || '-'}</span>
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{cc.polo || '-'}</span>
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{cc.company || '-'}</span>
+                            <span className="text-sm text-gray-700 dark:text-gray-400">{cc.polo || '-'}</span>
                           </td>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -635,19 +610,13 @@ function CostCenterFormModal({
   formData: {
     code: string;
     name: string;
-    description: string;
-    state: string;
     polo: string;
-    company: string;
     isActive: boolean;
   };
   setFormData: React.Dispatch<React.SetStateAction<{
     code: string;
     name: string;
-    description: string;
-    state: string;
     polo: string;
-    company: string;
     isActive: boolean;
   }>>;
   onSubmit: (e: React.FormEvent) => void;
@@ -676,23 +645,20 @@ function CostCenterFormModal({
         <div className="p-6">
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {editingCostCenter && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Código
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.code}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed"
-                    disabled
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    O código é gerado automaticamente e não pode ser alterado
-                  </p>
-                </div>
-              )}
-              <div className={editingCostCenter ? '' : 'md:col-span-2'}>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Código *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Ex: CC-001"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Nome *
                 </label>
@@ -705,71 +671,19 @@ function CostCenterFormModal({
                   placeholder="Ex: Secretaria de Estado de Desenvolvimento Social"
                 />
               </div>
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Descrição
+                Polo
               </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                rows={3}
+              <select
+                value={formData.polo}
+                onChange={(e) => setFormData({ ...formData, polo: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Descrição do centro de custo..."
-              />
+              >
+                <option value="">Selecione</option>
+                {POLOS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Estado
-                </label>
-                <select
-                  value={formData.state}
-                  onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="">Selecione...</option>
-                  {ESTADOS_LIST.map((estado) => (
-                    <option key={estado} value={estado}>
-                      {estado}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Polo
-                </label>
-                <select
-                  value={formData.polo}
-                  onChange={(e) => setFormData({ ...formData, polo: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="">Selecione...</option>
-                  {POLOS_LIST.map((polo) => (
-                    <option key={polo} value={polo}>
-                      {polo}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Empresa
-                </label>
-                <select
-                  value={formData.company}
-                  onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="">Selecione...</option>
-                  {COMPANIES_LIST.map((company) => (
-                    <option key={company} value={company}>
-                      {company}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
             <div className="flex items-center">
               <label className="flex items-center space-x-3 cursor-pointer group">
@@ -849,34 +763,51 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
   const [parsedRows, setParsedRows] = useState<Array<{
     linha: number;
     dados: {
+      Código: string;
       Nome: string;
-      Descrição?: string;
-      Estado?: string;
       Polo?: string;
-      Empresa?: string;
-      Status?: string;
+      Ativo?: string;
     };
     erros: string[];
     isValid: boolean;
   }>>([]);
   const [result, setResult] = useState<any>(null);
   const [isDragging, setIsDragging] = useState(false);
+  
+  const handleClose = () => {
+    // limpar estado interno antes de fechar
+    setFile(null);
+    setParsedRows([]);
+    setResult(null);
+    setIsDragging(false);
+    onClose();
+  };
+ 
+  // Garantir que ao fechar a modal (quando isOpen virar false) o estado interno seja limpo
+  React.useEffect(() => {
+    if (!isOpen) {
+      setFile(null);
+      setParsedRows([]);
+      setResult(null);
+      setIsDragging(false);
+      setIsProcessing(false);
+      setIsUploading(false);
+    }
+  }, [isOpen]);
 
   // Função para baixar modelo Excel
   const downloadExcelTemplate = () => {
-    const headers = ['Nome', 'Descrição', 'Estado', 'Polo', 'Empresa', 'Status'];
-    const exampleRow = ['Secretaria de Estado de Desenvolvimento Social', 'Descrição do centro de custo', 'DF', 'BRASÍLIA', 'GÊNNESIS', 'Ativo'];
+    const headers = ['Código', 'Nome', 'Polo', 'Ativo'];
+    const exampleRow = ['CC-001', 'Secretaria de Estado de Desenvolvimento Social', 'POLO-1', 'Ativo'];
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, exampleRow]);
     
     const colWidths = [
+      { wch: 15 }, // Código
       { wch: 50 }, // Nome
-      { wch: 40 }, // Descrição
-      { wch: 10 }, // Estado
-      { wch: 15 }, // Polo
-      { wch: 15 }, // Empresa
-      { wch: 12 }  // Status
+      { wch: 20 }, // Polo
+      { wch: 12 }  // Ativo
     ];
     ws['!cols'] = colWidths;
     
@@ -905,39 +836,115 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
         return;
       }
 
-      // Verificar duplicatas de nome no backend
+      // Construir mapa tolerante de cabeçalhos (normalizado) para aceitar variações
+      const normalize = (s: any) => {
+        if (s === undefined || s === null) return '';
+        return String(s)
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '') // remove diacríticos
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, ''); // remove caracteres não alfanuméricos
+      };
+
+      const headerMap: Record<string, string> = {};
+      const firstRowKeys = Object.keys(rows[0] || {});
+      firstRowKeys.forEach((k) => {
+        headerMap[normalize(k)] = k;
+      });
+      // Heurística para detectar melhor coluna de código e nome
+      const headerNorms = Object.keys(headerMap);
+      const detectKey = (candidates: string[]) => {
+        for (const c of candidates) {
+          const found = headerNorms.find(h => h.includes(c));
+          if (found) return found;
+        }
+        return undefined;
+      };
+
+      const detectedCodeKeyNorm =
+        detectKey(['codigocentro','codigocentro','codigodocentro','codigo','cod','code','id']) ||
+        detectKey(['codigo','cod','code']);
+      const detectedNameKeyNorm =
+        detectKey(['nomecentro','nome_do_centro','nome','name','centro_nome','centro']) ||
+        detectKey(['nome','name']);
+
+      // (no UI debug)
+
+      const pick = (row: any, candidates: string[]) => {
+        // Try direct lookup first
+        for (const c of candidates) {
+          const hk = headerMap[c];
+          if (hk && row[hk] !== undefined && row[hk] !== null) return row[hk];
+        }
+        // If we detected explicit keys for code/name, try them
+        if (detectedCodeKeyNorm && (candidates.includes('codigo') || candidates.includes('cod') || candidates.includes('code'))) {
+          const hk = headerMap[detectedCodeKeyNorm];
+          if (hk && row[hk] !== undefined && row[hk] !== null) return row[hk];
+        }
+        if (detectedNameKeyNorm && (candidates.includes('nome') || candidates.includes('name') || candidates.includes('centro'))) {
+          const hk = headerMap[detectedNameKeyNorm];
+          if (hk && row[hk] !== undefined && row[hk] !== null) return row[hk];
+        }
+        // Fallback: try find a header key that includes candidate or candidate includes header key
+        for (const c of candidates) {
+          for (const hkNorm of Object.keys(headerMap)) {
+            if (hkNorm.includes(c) || c.includes(hkNorm)) {
+              const orig = headerMap[hkNorm];
+              if (orig && row[orig] !== undefined && row[orig] !== null) return row[orig];
+            }
+          }
+        }
+        // Final fallback: return first non-empty cell in row
+        for (const k of Object.keys(row)) {
+          if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') return row[k];
+        }
+        return undefined;
+      };
+
+      const normalizeStatus = (v: any) => {
+        if (v === undefined || v === null) return undefined;
+        const s = String(v).trim().toLowerCase();
+        if (['ativo', 'a', 'sim', 's', 'true', '1', 'yes', 'y'].includes(s)) return 'Ativo';
+        if (['inativo', 'i', 'nao', 'não', 'n', 'false', '0', 'no'].includes(s)) return 'Inativo';
+        return undefined;
+      };
+
       const processedRows = await Promise.all(
         rows.map(async (row, index) => {
           const linha = index + 2;
           const erros: string[] = [];
-          
-          const nome = String(row.Nome || '').trim();
+
+          const rawCodigo = pick(row, ['codigo', 'cod', 'codigo']) || '';
+          const rawNome = pick(row, ['nome', 'name']) || '';
+          const rawPolo = pick(row, ['polo', 'polo']) || '';
+          const rawAtivo = pick(row, ['ativo', 'status']) || pick(row, ['status']) || '';
+
+          const codigo = String(rawCodigo || '').trim();
+          const nome = String(rawNome || '').trim();
+          const status = normalizeStatus(rawAtivo) || '';
+
+          if (!codigo) {
+            erros.push('Código é obrigatório');
+          }
           if (!nome) {
             erros.push('Nome é obrigatório');
           }
-
-          const descricao = row.Descrição ? String(row.Descrição).trim() : '';
-          const estado = row.Estado ? String(row.Estado).trim() : '';
-          const polo = row.Polo ? String(row.Polo).trim() : '';
-          const empresa = row.Empresa ? String(row.Empresa).trim() : '';
-          const status = String(row.Status || 'Ativo').trim();
-
-          // Validar status
-          if (status && !['Ativo', 'Inativo', 'ativo', 'inativo'].includes(status)) {
-            erros.push('Status deve ser "Ativo" ou "Inativo"');
+          if (!status) {
+            erros.push('Ativo deve ser "Ativo" ou "Inativo"');
           }
 
-          // Verificar duplicata de nome
-          if (nome) {
+          // Verificar duplicata por código ou nome
+          if (codigo || nome) {
             try {
               const checkRes = await api.get('/cost-centers', {
-                params: { search: nome, limit: 1 }
+                params: { search: codigo || nome, limit: 10 }
               });
-              const existing = checkRes.data?.data?.find((cc: any) => 
-                cc.name.toLowerCase() === nome.toLowerCase()
+              const existing = normalizeCostCentersResponse(checkRes.data).find((cc: any) =>
+                (codigo && cc.code && cc.code.toLowerCase() === String(codigo).toLowerCase()) ||
+                (nome && cc.name && cc.name.toLowerCase() === nome.toLowerCase())
               );
               if (existing) {
-                erros.push('Já existe um centro de custo com este nome');
+                erros.push('Já existe um centro de custo com este código ou nome');
               }
             } catch (error) {
               // Ignorar erro na verificação
@@ -947,12 +954,10 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
           return {
             linha,
             dados: {
+              Código: codigo,
               Nome: nome,
-              Descrição: descricao,
-              Estado: estado,
-              Polo: polo,
-              Empresa: empresa,
-              Status: status || 'Ativo'
+              Polo: String(rawPolo || '').trim(),
+              Ativo: status || 'Ativo'
             },
             erros,
             isValid: erros.length === 0
@@ -968,6 +973,13 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
     } finally {
       setIsProcessing(false);
     }
+  };
+  const normalizeStatus = (v: any) => {
+    if (v === undefined || v === null) return undefined;
+    const s = String(v).trim().toLowerCase();
+    if (['ativo', 'a', 'sim', 's', 'true', '1', 'yes', 'y'].includes(s)) return 'Ativo';
+    if (['inativo', 'i', 'nao', 'não', 'n', 'false', '0', 'no'].includes(s)) return 'Inativo';
+    return undefined;
   };
 
   // Atualizar linha editada
@@ -985,14 +997,18 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
       // Revalidar
       const row = updated[index];
       const erros: string[] = [];
-      
-      if (!row.dados.Nome.trim()) {
+      if (!row.dados.Código?.trim()) {
+        erros.push('Código é obrigatório');
+      }
+      if (!row.dados.Nome?.trim()) {
         erros.push('Nome é obrigatório');
       }
-
-      const status = row.dados.Status?.trim() || '';
-      if (status && !['Ativo', 'Inativo', 'ativo', 'inativo'].includes(status)) {
-        erros.push('Status deve ser "Ativo" ou "Inativo"');
+      const normalizedStatus = normalizeStatus((row.dados as any).Ativo);
+      if (!normalizedStatus) {
+        erros.push('Ativo deve ser "Ativo" ou "Inativo"');
+      } else {
+        // keep normalized value in the preview
+        updated[index].dados.Ativo = normalizedStatus;
       }
 
       updated[index] = {
@@ -1014,15 +1030,27 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
   const importMutation = useMutation({
     mutationFn: async (rows: typeof parsedRows) => {
       const validRows = rows.filter(r => r.isValid);
-      const res = await api.post('/cost-centers/import/bulk', {
-        costCenters: validRows.map(r => r.dados)
-      });
+      // Backend expects Portuguese keys (Nome, Descrição, Estado, Polo, Empresa, Status)
+      const payload = validRows.map(r => ({
+        Código: (r.dados.Código || '').toString().trim(),
+        Nome: (r.dados.Nome || '').toString().trim(),
+        Descrição: null,
+        Estado: null,
+        Polo: (r.dados.Polo || null),
+        Empresa: null,
+        Status: String(r.dados.Ativo || 'Ativo').toString()
+      }));
+      const res = await api.post('/cost-centers/import/bulk', { costCenters: payload });
       return res.data;
     },
     onSuccess: (data) => {
       setResult(data.data);
       setIsUploading(false);
       if (data.data.erros === 0) {
+        // Limpar arquivo e preview quando import completo com sucesso
+        setFile(null);
+        setParsedRows([]);
+        setResult(data.data);
         toast.success(`✅ ${data.data.sucessos} centro(s) de custo importado(s) com sucesso!`);
         onSuccess();
       } else {
@@ -1062,12 +1090,12 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="absolute inset-0" onClick={onClose} />
+      <div className="absolute inset-0" onClick={handleClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Importar Centros de Custo</h3>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
             aria-label="Fechar"
           >
@@ -1195,6 +1223,8 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
             </div>
           </div>
 
+          {/* hidden: debug mapping removed from UI */}
+
           {/* Botão Processar */}
           {file && parsedRows.length === 0 && (
             <button
@@ -1235,12 +1265,10 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
                     <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Linha</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Código *</th>
                         <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Nome *</th>
-                        <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Descrição</th>
-                        <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Estado</th>
                         <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Polo</th>
-                        <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Empresa</th>
-                        <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Status</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Ativo</th>
                         <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Ações</th>
                       </tr>
                     </thead>
@@ -1254,6 +1282,14 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
                           <td className="px-4 py-2">
                             <input
                               type="text"
+                              value={row.dados.Código || ''}
+                              onChange={(e) => updateRow(index, 'Código', e.target.value)}
+                              className={`w-full px-2 py-1 border rounded ${row.isValid ? 'border-gray-300 dark:border-gray-600' : 'border-red-300 dark:border-red-600'} bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100`}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="text"
                               value={row.dados.Nome}
                               onChange={(e) => updateRow(index, 'Nome', e.target.value)}
                               className={`w-full px-2 py-1 border rounded ${row.isValid ? 'border-gray-300 dark:border-gray-600' : 'border-red-300 dark:border-red-600'} bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100`}
@@ -1262,51 +1298,15 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
                           <td className="px-4 py-2">
                             <input
                               type="text"
-                              value={row.dados.Descrição || ''}
-                              onChange={(e) => updateRow(index, 'Descrição', e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                              value={row.dados.Polo || ''}
+                              onChange={(e) => updateRow(index, 'Polo', e.target.value)}
+                              className={`w-full px-2 py-1 border rounded ${row.isValid ? 'border-gray-300 dark:border-gray-600' : 'border-red-300 dark:border-red-600'} bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100`}
                             />
                           </td>
                           <td className="px-4 py-2">
                             <select
-                              value={row.dados.Estado || ''}
-                              onChange={(e) => updateRow(index, 'Estado', e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            >
-                              <option value="">Selecione...</option>
-                              {ESTADOS_LIST.map((estado) => (
-                                <option key={estado} value={estado}>{estado}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-4 py-2">
-                            <select
-                              value={row.dados.Polo || ''}
-                              onChange={(e) => updateRow(index, 'Polo', e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            >
-                              <option value="">Selecione...</option>
-                              {POLOS_LIST.map((polo) => (
-                                <option key={polo} value={polo}>{polo}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-4 py-2">
-                            <select
-                              value={row.dados.Empresa || ''}
-                              onChange={(e) => updateRow(index, 'Empresa', e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            >
-                              <option value="">Selecione...</option>
-                              {COMPANIES_LIST.map((company) => (
-                                <option key={company} value={company}>{company}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-4 py-2">
-                            <select
-                              value={row.dados.Status || 'Ativo'}
-                              onChange={(e) => updateRow(index, 'Status', e.target.value)}
+                              value={row.dados.Ativo || 'Ativo'}
+                              onChange={(e) => updateRow(index, 'Ativo', e.target.value)}
                               className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                             >
                               <option value="Ativo">Ativo</option>
@@ -1388,10 +1388,10 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
                   <div className="mt-4 max-h-60 overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-gray-50 dark:bg-gray-800">
-                        <tr>
+                    <tr>
                           <th className="px-2 py-1 text-left">Linha</th>
+                          <th className="px-2 py-1 text-left">Código</th>
                           <th className="px-2 py-1 text-left">Nome</th>
-                          <th className="px-2 py-1 text-left">Status</th>
                           <th className="px-2 py-1 text-left">Erro</th>
                         </tr>
                       </thead>

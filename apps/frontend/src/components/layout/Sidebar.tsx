@@ -263,6 +263,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Importar planilha e gerar relatórios de análise financeira',
             permission: isAdministrator || isDepartmentFinanceiro // Administrador ou Financeiro
           }
+          ,
+          {
+            name: 'Análise de Extrato',
+            href: '/ponto/financeiro/analise-extrato',
+            icon: BarChart3,
+            description: 'Importar e validar extratos bancários',
+            permission: isAdministrator || isDepartmentFinanceiro // Administrador ou Financeiro
+          }
         ]
       },
       {
@@ -319,6 +327,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Cadastro de fornecedores',
             permission: isAdministrator || isDepartmentCompras
           }
+              ,
+              {
+                name: 'Natureza Orçamentária',
+                href: '/ponto/natureza-orcamentaria',
+                icon: BookPlus,
+                description: 'Cadastrar naturezas orçamentárias',
+                permission: isAdministrator || isDepartmentFinanceiro
+              }
         ]
       },
       {

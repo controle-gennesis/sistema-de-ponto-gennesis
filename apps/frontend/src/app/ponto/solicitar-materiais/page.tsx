@@ -9,6 +9,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { useCostCenters } from '@/hooks/useCostCenters';
 
 export default function SolicitarMateriaisPage() {
   const router = useRouter();
@@ -37,16 +38,7 @@ export default function SolicitarMateriaisPage() {
     }
   });
 
-  // Buscar centros de custo (apenas ativos)
-  const { data: costCentersData, isLoading: loadingCostCenters } = useQuery({
-    queryKey: ['cost-centers'],
-    queryFn: async () => {
-      const res = await api.get('/cost-centers', {
-        params: { isActive: 'true', limit: 100 }
-      });
-      return res.data;
-    }
-  });
+  const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
 
 
   // Buscar materiais
@@ -269,14 +261,14 @@ export default function SolicitarMateriaisPage() {
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
                         <option value="">Selecione um centro de custo</option>
-                        {(costCentersData?.data || []).map((cc: any) => (
+                        {costCenters.map((cc: any) => (
                           <option key={cc.id} value={cc.id}>
                             {cc.code} - {cc.name} {cc.description ? `(${cc.description})` : ''}
                           </option>
                         ))}
                       </select>
                     )}
-                    {!loadingCostCenters && (!costCentersData?.data || costCentersData.data.length === 0) && (
+                    {!loadingCostCenters && costCenters.length === 0 && (
                       <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-400">
                         Nenhum centro de custo disponível. Execute o seed do banco de dados.
                       </p>

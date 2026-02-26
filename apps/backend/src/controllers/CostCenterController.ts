@@ -83,8 +83,8 @@ export class CostCenterController {
         where.isActive = isActive === 'true';
       }
 
-      // Limitar o máximo de registros por página
-      const limitNum = Math.min(Number(limit), 100);
+      // Limitar o máximo de registros por página (até 2000 para listagens completas, ex.: análise de extrato)
+      const limitNum = Math.min(Number(limit) || 20, 2000);
       const skip = (Number(page) - 1) * limitNum;
 
       const [costCenters, total] = await Promise.all([
@@ -141,18 +141,27 @@ export class CostCenterController {
    */
   async createCostCenter(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { name, description, state, polo, company, isActive } = req.body;
+      const { code, name, description, state, polo, company, isActive } = req.body;
 
       if (!name) {
         throw createError('Nome é obrigatório', 400);
       }
 
-      // Gerar código automaticamente
-      const finalCode = await generateCostCenterCode();
+      // Usar código fornecido se existir e for único; caso contrário gerar um código
+      let finalCode: string | null = code && String(code).trim() !== '' ? String(code).trim() : null;
+
+      if (finalCode) {
+        const exists = await prisma.costCenter.findUnique({ where: { code: finalCode } });
+        if (exists) {
+          throw createError('Já existe um centro de custo com este código', 409);
+        }
+      } else {
+        finalCode = await generateCostCenterCode();
+      }
 
       const costCenter = await prisma.costCenter.create({
         data: {
-          code: finalCode,
+          code: finalCode!,
           name,
           description: description || null,
           state: state || null,
@@ -393,13 +402,29 @@ export class CostCenterController {
             continue;
           }
 
-          // Gerar código automaticamente
-          const code = await generateCostCenterCode();
+          // Usar código fornecido se houver, senão gerar
+          let finalCode = ccData.Código || ccData.Codigo || ccData.code || ccData.Code || null;
+          if (finalCode && typeof finalCode !== 'string') finalCode = String(finalCode);
+          if (finalCode) {
+            const existsCode = await prisma.costCenter.findUnique({ where: { code: String(finalCode) } });
+            if (existsCode) {
+              results.erros++;
+              results.detalhes.push({
+                linha,
+                nome: name,
+                sucesso: false,
+                erro: 'Já existe um centro de custo com este código'
+              });
+              continue;
+            }
+          } else {
+            finalCode = await generateCostCenterCode();
+          }
 
           // Criar centro de custo
           await prisma.costCenter.create({
             data: {
-              code,
+              code: String(finalCode),
               name,
               description,
               state,
