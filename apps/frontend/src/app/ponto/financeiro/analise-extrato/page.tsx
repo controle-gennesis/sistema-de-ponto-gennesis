@@ -210,14 +210,76 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
      }
    };
  
-  const parseExcelFile = async (file: File) => {
+  const parseExcelFile = async (file: File): Promise<any[]> => {
     const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
-    const first = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[first];
-    // Parse as array of objects using the first row as headers (more robust for columns)
-    const data = XLSX.utils.sheet_to_json<any>(sheet, { defval: '' });
-    return data;
+    const ext = (file.name || '').toLowerCase();
+    const isCsv = ext.endsWith('.csv');
+    const workbook = XLSX.read(arrayBuffer, {
+      type: 'array',
+      cellDates: true,
+      cellNF: false,
+      raw: false,
+      codepage: isCsv ? 65001 : undefined,
+    });
+    const norm = (s: string) => String(s ?? '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, '');
+    const looksLikeHeader = (cells: any[]): boolean => {
+      const str = cells.map(c => norm(String(c ?? ''))).join(' ');
+      return (
+        /ccusto|centro|c\.custo/.test(str) ||
+        /valor|valortotal|vlr/.test(str) ||
+        /data|datacriacao|dataemissao|dt/.test(str)
+      );
+    };
+
+    const parseSheet = (sheet: XLSX.WorkSheet): any[] => {
+      const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' }) as any[][];
+      if (!rawRows || rawRows.length < 2) return [];
+
+      let headerRowIdx = -1;
+      for (let i = 0; i < Math.min(15, rawRows.length); i++) {
+        const row = rawRows[i];
+        if (Array.isArray(row) && row.some((c: any) => c != null && String(c).trim() !== '')) {
+          if (looksLikeHeader(row)) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+      }
+      if (headerRowIdx < 0) headerRowIdx = 0;
+
+      const headerRow = (rawRows[headerRowIdx] || []).map((c: any) => String(c ?? '').trim());
+      const dataRows = rawRows.slice(headerRowIdx + 1).filter((row: any) =>
+        Array.isArray(row) && row.some((c: any) => c != null && String(c).trim() !== '')
+      );
+
+      return dataRows.map((row: any[]) => {
+        const obj: Record<string, any> = {};
+        headerRow.forEach((h, j) => {
+          const key = h || `Col${j}`;
+          obj[key] = row[j] ?? '';
+        });
+        return obj;
+      });
+    };
+
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      const data = parseSheet(sheet);
+      if (data.length > 0) {
+        const firstKeys = Object.keys(data[0] || {});
+        const keysStr = firstKeys.map(k => norm(k)).join(' ');
+        if (/valor|centro|data|vlr|ccusto|documento|historico|descri/.test(keysStr)) return data;
+      }
+    }
+    if (workbook.SheetNames.length > 0) {
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      return parseSheet(firstSheet);
+    }
+    return [];
   };
 
   const handleUpload = async () => {
@@ -230,7 +292,7 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
     try {
       const data = await parseExcelFile(selectedFile);
       if (!Array.isArray(data) || data.length === 0) {
-        setError('Planilha vazia ou formato inválido.');
+        setError('Planilha vazia ou formato inválido. Verifique se o arquivo possui uma linha de cabeçalho com colunas como "Centro de Custo", "Valor" ou "Valor Total", "Data", etc.');
         setIsProcessing(false);
         return;
       }
@@ -238,40 +300,78 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
       const headers = Object.keys(data[0] || {}).map(h => String(h || '').trim());
       setFileHeaders(headers);
 
-      // heurística para encontrar chaves (nomes de colunas)
-      const norm = (s: string) => String(s || '').toLowerCase().replace(/\s+/g, '');
+      // heurística para encontrar chaves (nomes de colunas) - busca case-insensitive e com variações
+      const norm = (s: string) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
       const findKey = (regex: RegExp) => headers.find(h => regex.test(norm(h)));
       const keyMap = {
-        ccusto: findKey(/ccusto|centro|centrodecusto/),
-        valortotal: findKey(/valor|valortotal|value/),
-        datacriacao: findKey(/datadecriacao|datadecriação|datacriacao|dataemissao|data/),
-        numerodocumento: findKey(/numerodocumento|documento|n[ºo]documento/),
+        ccusto: findKey(/ccusto|c\.custo|centrodecusto|centrodeuso/),
+        valortotal: findKey(/valortotal|valortot|valor|value|vlr/),
+        datacriacao: findKey(/datadecriacao|datadecriacao|datacriacao|dataemissao|data|dt|emissao/),
+        numerodocumento: findKey(/numerodocumento|n[ºo]\.?\s*doc|documento|numdoc|nrdoc/),
         descricao: findKey(/descricao|historico|descri/),
       };
 
+      // Fallback: se valortotal não encontrado, buscar coluna que pareça valor
+      const findValueColumn = (): string | undefined => {
+        if (keyMap.valortotal) return keyMap.valortotal;
+        for (const h of headers) {
+          const n = norm(h);
+          if (!/centro|ccusto|codigo|documento|data|dia|numero|n[ºo]/.test(n) &&
+              /valor|vlr|value|total|saldo|debito|credito|entrada|saida/.test(n)) return h;
+        }
+        for (const h of headers) {
+          const n = norm(h);
+          if (/valor|vlr|total|saldo/.test(n)) return h;
+        }
+        return undefined;
+      };
+      const kVal = findValueColumn() ?? keyMap.valortotal;
+
       const rawRecords = (data as any[]).map(r => {
         const obj: any = { ...r };
-        // normalized helpful fields with safe key checks
         const kCC = keyMap.ccusto as string | undefined;
-        const kVal = keyMap.valortotal as string | undefined;
         const kDate = keyMap.datacriacao as string | undefined;
         const kNum = keyMap.numerodocumento as string | undefined;
         const kDesc = keyMap.descricao as string | undefined;
 
-        obj.ccusto = String((kCC && r[kCC]) ?? r['Centro de Custo'] ?? r['Código'] ?? r['Centro'] ?? '').trim();
-        obj.valortotal = (kVal && r[kVal]) ?? r['Valor'] ?? r['VALOR'] ?? '';
-        obj.datacriacao = (kDate && r[kDate]) ?? r['Data'] ?? r['DATA'] ?? '';
-        obj.numerodocumento = (kNum && r[kNum]) ?? r['Número Documento'] ?? r['NUMERO DOCUMENTO'] ?? '';
-        obj.descricao = (kDesc && r[kDesc]) ?? r['Descrição'] ?? r['Histórico'] ?? r['HISTORICO'] ?? '';
+        obj.ccusto = String((kCC && r[kCC]) ?? r['Centro de Custo'] ?? r['CENTRO DE CUSTO'] ?? r['C.CUSTO'] ?? r['Código'] ?? r['Centro'] ?? r['CC'] ?? r['CUSTO'] ?? '').trim();
+        obj.valortotal = (kVal && r[kVal]) ?? r['Valor'] ?? r['VALOR'] ?? r['Valor Total'] ?? r['Vlr Total'] ?? r['Valor Total'] ?? r['Vlr'] ?? '';
+        obj.datacriacao = (kDate && r[kDate]) ?? r['Data'] ?? r['DATA'] ?? r['Data Criação'] ?? r['Data Emissão'] ?? r['Data Emissao'] ?? '';
+        obj.numerodocumento = (kNum && r[kNum]) ?? r['Número Documento'] ?? r['NUMERO DOCUMENTO'] ?? r['Nº Documento'] ?? r['Documento'] ?? '';
+        obj.descricao = (kDesc && r[kDesc]) ?? r['Descrição'] ?? r['Histórico'] ?? r['HISTORICO'] ?? r['Descricao'] ?? r['Historico'] ?? '';
         return obj;
       });
+
+      // Helper para parse de valor monetário (suporta formato BR: 1.234,56 e EN: 1,234.56)
+      const parseMonetaryValue = (raw: unknown): number => {
+        const s = String(raw ?? '').replace(/[\u00A0\u200B-\u200D\uFEFF]/g, '');
+        const cleaned = s.replace(/[^\d-.,]/g, '');
+        if (!cleaned) return 0;
+        // Formato BR: vírgula = decimal, ponto = milhar (ex: 1.234,56)
+        const hasComma = cleaned.includes(',');
+        const hasDot = cleaned.includes('.');
+        let numStr: string;
+        if (hasComma && hasDot) {
+          const lastComma = cleaned.lastIndexOf(',');
+          const lastDot = cleaned.lastIndexOf('.');
+          numStr = lastComma > lastDot
+            ? cleaned.replace(/\./g, '').replace(',', '.')  // 1.234,56
+            : cleaned.replace(/,/g, '');                     // 1,234.56
+        } else if (hasComma) {
+          numStr = cleaned.replace(',', '.');
+        } else {
+          numStr = cleaned;
+        }
+        const n = Number(numStr);
+        return isNaN(n) ? 0 : n;
+      };
 
       // construir summary simples
       let totalEntries = 0;
       let totalExits = 0;
       const parsedRecords = rawRecords.map(rr => {
         const rawValField = rr.valortotal ?? '';
-        const n = Number(String(rawValField).replace(/[^\d-.,-]/g, '').replace(',', '.'));
+        const n = parseMonetaryValue(rawValField);
         const v = isNaN(n) ? 0 : n;
         if (v > 0) totalEntries += v;
         if (v < 0) totalExits += Math.abs(v);
