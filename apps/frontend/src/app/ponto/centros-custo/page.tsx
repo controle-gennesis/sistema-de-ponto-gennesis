@@ -862,7 +862,7 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
       };
 
       const detectedCodeKeyNorm =
-        detectKey(['codigocentro','codigocentro','codigodocentro','codigo','cod','code','id']) ||
+        detectKey(['codigocentro','codigodocentro','codigo','cod','code','id','código']) ||
         detectKey(['codigo','cod','code']);
       const detectedNameKeyNorm =
         detectKey(['nomecentro','nome_do_centro','nome','name','centro_nome','centro']) ||
@@ -871,32 +871,31 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
       // (no UI debug)
 
       const pick = (row: any, candidates: string[]) => {
-        // Try direct lookup first
+        // 1) Tentar chaves exatas do Excel (ex.: Código, Nome)
+        for (const c of candidates) {
+          if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') return row[c];
+        }
+        // 2) Tentar via headerMap (chave normalizada)
         for (const c of candidates) {
           const hk = headerMap[c];
           if (hk && row[hk] !== undefined && row[hk] !== null) return row[hk];
         }
-        // If we detected explicit keys for code/name, try them
-        if (detectedCodeKeyNorm && (candidates.includes('codigo') || candidates.includes('cod') || candidates.includes('code'))) {
+        if (detectedCodeKeyNorm && (candidates.includes('codigo') || candidates.includes('cod') || candidates.includes('code') || candidates.includes('Código') || candidates.includes('Codigo'))) {
           const hk = headerMap[detectedCodeKeyNorm];
           if (hk && row[hk] !== undefined && row[hk] !== null) return row[hk];
         }
-        if (detectedNameKeyNorm && (candidates.includes('nome') || candidates.includes('name') || candidates.includes('centro'))) {
+        if (detectedNameKeyNorm && (candidates.includes('nome') || candidates.includes('name') || candidates.includes('Nome') || candidates.includes('centro'))) {
           const hk = headerMap[detectedNameKeyNorm];
           if (hk && row[hk] !== undefined && row[hk] !== null) return row[hk];
         }
-        // Fallback: try find a header key that includes candidate or candidate includes header key
+        // 3) Header que contenha o candidato
         for (const c of candidates) {
           for (const hkNorm of Object.keys(headerMap)) {
-            if (hkNorm.includes(c) || c.includes(hkNorm)) {
+            if (hkNorm.includes(c) || (c.length >= 2 && hkNorm.includes(c))) {
               const orig = headerMap[hkNorm];
               if (orig && row[orig] !== undefined && row[orig] !== null) return row[orig];
             }
           }
-        }
-        // Final fallback: return first non-empty cell in row
-        for (const k of Object.keys(row)) {
-          if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') return row[k];
         }
         return undefined;
       };
@@ -914,8 +913,8 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
           const linha = index + 2;
           const erros: string[] = [];
 
-          const rawCodigo = pick(row, ['codigo', 'cod', 'codigo']) || '';
-          const rawNome = pick(row, ['nome', 'name']) || '';
+          const rawCodigo = pick(row, ['Código', 'Codigo', 'codigo', 'cod', 'code', 'id']) ?? '';
+          const rawNome = pick(row, ['Nome', 'nome', 'name', 'centro']) ?? '';
           const rawPolo = pick(row, ['polo', 'polo']) || '';
           const rawAtivo = pick(row, ['ativo', 'status']) || pick(row, ['status']) || '';
 
@@ -933,18 +932,17 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
             erros.push('Ativo deve ser "Ativo" ou "Inativo"');
           }
 
-          // Verificar duplicata por código ou nome
-          if (codigo || nome) {
+          // Verificar duplicata apenas por código (nome pode repetir)
+          if (codigo) {
             try {
               const checkRes = await api.get('/cost-centers', {
-                params: { search: codigo || nome, limit: 10 }
+                params: { search: codigo, limit: 10 }
               });
               const existing = normalizeCostCentersResponse(checkRes.data).find((cc: any) =>
-                (codigo && cc.code && cc.code.toLowerCase() === String(codigo).toLowerCase()) ||
-                (nome && cc.name && cc.name.toLowerCase() === nome.toLowerCase())
+                cc.code && String(cc.code).trim().toLowerCase() === String(codigo).trim().toLowerCase()
               );
               if (existing) {
-                erros.push('Já existe um centro de custo com este código ou nome');
+                erros.push('Já existe um centro de custo com este código');
               }
             } catch (error) {
               // Ignorar erro na verificação
@@ -1392,16 +1390,26 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
                           <th className="px-2 py-1 text-left">Linha</th>
                           <th className="px-2 py-1 text-left">Código</th>
                           <th className="px-2 py-1 text-left">Nome</th>
-                          <th className="px-2 py-1 text-left">Erro</th>
+                          <th className="px-2 py-1 text-left">Status</th>
+                          <th className="px-2 py-1 text-left">Erro / Aviso</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                         {result.detalhes.map((d: any, idx: number) => (
                           <tr key={idx} className={d.sucesso ? 'bg-green-50 dark:bg-green-900/10' : 'bg-red-50 dark:bg-red-900/10'}>
                             <td className="px-2 py-1">{d.linha}</td>
-                            <td className="px-2 py-1">{d.nome}</td>
+                            <td className="px-2 py-1 font-mono text-gray-900 dark:text-gray-100">{d.codigo ?? '-'}</td>
+                            <td className="px-2 py-1 text-gray-900 dark:text-gray-100">{d.nome ?? '-'}</td>
                             <td className="px-2 py-1">{d.sucesso ? '✅' : '❌'}</td>
-                            <td className="px-2 py-1 text-red-600 dark:text-red-400">{d.erro || '-'}</td>
+                            <td className="px-2 py-1">
+                              {d.erro ? (
+                                <span className="text-red-600 dark:text-red-400">{d.erro}</span>
+                              ) : d.aviso ? (
+                                <span className="text-amber-600 dark:text-amber-400">{d.aviso}</span>
+                              ) : (
+                                '-'
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

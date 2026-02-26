@@ -354,8 +354,11 @@ export class CostCenterController {
       const results = {
         sucessos: 0,
         erros: 0,
-        detalhes: [] as Array<{ linha: number; nome: string; sucesso: boolean; erro?: string }>
+        detalhes: [] as Array<{ linha: number; codigo: string; nome: string; sucesso: boolean; erro?: string; aviso?: string }>
       };
+
+      // Códigos já usados nesta importação (duplicata na planilha → gerar novo código para todos darem certo)
+      const codigosUsadosNestaImportacao = new Set<string>();
 
       for (let i = 0; i < costCenters.length; i++) {
         const ccData = costCenters[i];
@@ -367,6 +370,7 @@ export class CostCenterController {
             results.erros++;
             results.detalhes.push({
               linha,
+              codigo: (ccData.Código || ccData.Codigo || ccData.code || ccData.Code || '').toString().trim() || '-',
               nome: ccData.Nome || '(sem nome)',
               sucesso: false,
               erro: 'Nome é obrigatório'
@@ -381,42 +385,21 @@ export class CostCenterController {
           const company = ccData.Empresa ? ccData.Empresa.trim() : null;
           const isActive = ccData.Status?.toLowerCase() === 'ativo' || ccData.Status === 'Ativo' || ccData.Status === true || ccData.Status === 'true' || ccData.Status === 1;
 
-          // Verificar se já existe um centro de custo com o mesmo nome
-          const existing = await prisma.costCenter.findFirst({
-            where: {
-              name: {
-                equals: name,
-                mode: 'insensitive'
-              }
-            }
-          });
+          // Apenas código precisa ser único; nome pode repetir
+          // Código da planilha; se vazio ou duplicado (no banco ou na planilha), gerar um novo para a linha dar certo
+          let finalCode: string | null = ccData.Código || ccData.Codigo || ccData.code || ccData.Code || null;
+          if (finalCode != null && typeof finalCode !== 'string') finalCode = String(finalCode).trim() || null;
+          if (finalCode != null && finalCode !== '') finalCode = String(finalCode).trim(); else finalCode = null;
 
-          if (existing) {
-            results.erros++;
-            results.detalhes.push({
-              linha,
-              nome: name,
-              sucesso: false,
-              erro: 'Já existe um centro de custo com este nome'
-            });
-            continue;
-          }
-
-          // Usar código fornecido se houver, senão gerar
-          let finalCode = ccData.Código || ccData.Codigo || ccData.code || ccData.Code || null;
-          if (finalCode && typeof finalCode !== 'string') finalCode = String(finalCode);
+          let aviso: string | undefined;
           if (finalCode) {
-            const existsCode = await prisma.costCenter.findUnique({ where: { code: String(finalCode) } });
-            if (existsCode) {
-              results.erros++;
-              results.detalhes.push({
-                linha,
-                nome: name,
-                sucesso: false,
-                erro: 'Já existe um centro de custo com este código'
-              });
-              continue;
+            const codigoJaNoBanco = await prisma.costCenter.findUnique({ where: { code: finalCode } });
+            const codigoJaUsadoNestaPlanilha = codigosUsadosNestaImportacao.has(finalCode);
+            if (codigoJaNoBanco || codigoJaUsadoNestaPlanilha) {
+              aviso = 'Código duplicado; usado código gerado.';
+              finalCode = await generateCostCenterCode();
             }
+            codigosUsadosNestaImportacao.add(finalCode);
           } else {
             finalCode = await generateCostCenterCode();
           }
@@ -424,7 +407,7 @@ export class CostCenterController {
           // Criar centro de custo
           await prisma.costCenter.create({
             data: {
-              code: String(finalCode),
+              code: finalCode,
               name,
               description,
               state,
@@ -437,13 +420,16 @@ export class CostCenterController {
           results.sucessos++;
           results.detalhes.push({
             linha,
+            codigo: finalCode,
             nome: name,
-            sucesso: true
+            sucesso: true,
+            ...(aviso && { aviso })
           });
         } catch (error: any) {
           results.erros++;
           results.detalhes.push({
             linha,
+            codigo: (ccData.Código || ccData.Codigo || ccData.code || ccData.Code || '').toString().trim() || '-',
             nome: ccData.Nome || '(sem nome)',
             sucesso: false,
             erro: error.message || 'Erro ao criar centro de custo'
