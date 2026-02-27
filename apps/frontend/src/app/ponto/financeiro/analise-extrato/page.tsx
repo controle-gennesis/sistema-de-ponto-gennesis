@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
  import { Upload, FileText, Loader2, Download, BarChart3, TrendingUp, DollarSign, Building2, Layers, Filter, RotateCcw, AlertCircle, CheckCircle2, Eye, ChevronUp, ChevronDown, ArrowUpDown, ArrowLeft } from 'lucide-react';
- import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
+ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie, LabelList } from 'recharts';
  import { Card, CardContent, CardHeader } from '@/components/ui/Card';
  import { Modal } from '@/components/ui/Modal';
  import { MainLayout } from '@/components/layout/MainLayout';
@@ -1995,6 +1995,147 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
                     </div>
                   </CardHeader>
                   <CardContent>
+                    {/* Gráficos por Centro de Custo */}
+                    {sortedCostCenterSummary.length > 0 && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Entrada por Centro de Custo</h4>
+                          <ResponsiveContainer width="100%" height={360}>
+                            <BarChart
+                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.entrada }))}
+                              layout="vertical"
+                              margin={{ top: 20, right: 80, left: 10, bottom: 20 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
+                              <XAxis type="number" tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 11 }} />
+                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
+                              <Tooltip formatter={(v: number) => [formatCurrency(v), 'Entrada']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
+                              <Bar dataKey="valor" fill="#16a34a" radius={[0, 4, 4, 0]} name="Entrada">
+                                <LabelList
+                                  dataKey="valor"
+                                  content={(props: any) => {
+                                    const { x, y, width, height, value } = props;
+                                    if (value == null) return null;
+                                    const formatted = formatCurrency(value);
+                                    const w = Math.abs(width ?? 0);
+                                    const inside = w > 180;
+                                    const padding = 8;
+                                    const barRight = (x ?? 0) + (width ?? 0);
+                                    const textX = inside ? barRight - padding : barRight + padding;
+                                    const textAnchor = inside ? 'end' : 'start';
+                                    const fill = inside ? '#fff' : '#e5e7eb';
+                                    return (
+                                      <text x={textX} y={(y || 0) + (height || 0) / 2} textAnchor={textAnchor} dominantBaseline="middle" fill={fill} fontSize={11} fontWeight={inside ? 500 : 400}>
+                                        {formatted}
+                                      </text>
+                                    );
+                                  }}
+                                />
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Saída por Centro de Custo</h4>
+                          <ResponsiveContainer width="100%" height={360}>
+                            <BarChart
+                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.saida }))}
+                              layout="vertical"
+                              margin={{ top: 20, right: 80, left: 10, bottom: 20 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
+                              <XAxis type="number" tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 11 }} />
+                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
+                              <Tooltip formatter={(v: number) => [formatCurrency(v), 'Saída']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
+                              <Bar dataKey="valor" fill="#dc2626" radius={[0, 4, 4, 0]} name="Saída">
+                                <LabelList
+                                  dataKey="valor"
+                                  content={(props: any) => {
+                                    const { x, y, width, height, value } = props;
+                                    if (value == null) return null;
+                                    const formatted = formatCurrency(value);
+                                    const w = Math.abs(width ?? 0);
+                                    const inside = w > 180;
+                                    const padding = 8;
+                                    const barRight = (x ?? 0) + (width ?? 0);
+                                    const textX = inside ? barRight - padding : barRight + padding;
+                                    const textAnchor = inside ? 'end' : 'start';
+                                    const fill = inside ? '#fff' : '#e5e7eb';
+                                    return (
+                                      <text x={textX} y={(y || 0) + (height || 0) / 2} textAnchor={textAnchor} dominantBaseline="middle" fill={fill} fontSize={11} fontWeight={inside ? 500 : 400}>
+                                        {formatted}
+                                      </text>
+                                    );
+                                  }}
+                                />
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Saldo por Centro de Custo</h4>
+                          <ResponsiveContainer width="100%" height={360}>
+                            <BarChart
+                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.valorFinal }))}
+                              layout="vertical"
+                              margin={{ top: 20, right: 80, left: 10, bottom: 20 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
+                              <XAxis type="number" tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 11 }} />
+                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
+                              <Tooltip formatter={(v: number) => [formatCurrency(v), 'Saldo']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
+                              <Bar dataKey="valor" fill="#d97706" radius={[0, 4, 4, 0]} name="Saldo">
+                                <LabelList
+                                  dataKey="valor"
+                                  content={(props: any) => {
+                                    const { x, y, width, height, value } = props;
+                                    if (value == null) return null;
+                                    const formatted = formatCurrency(value);
+                                    const xVal = x ?? 0;
+                                    const wVal = width ?? 0;
+                                    const barLeft = Math.min(xVal, xVal + wVal);
+                                    const barRight = Math.max(xVal, xVal + wVal);
+                                    const w = Math.abs(wVal);
+                                    const inside = w > 180;
+                                    const padding = 8;
+                                    const isNegative = Number(value) < 0;
+                                    const textX = isNegative
+                                      ? (inside ? barLeft + padding : barLeft - padding)
+                                      : (inside ? barRight - padding : barRight + padding);
+                                    const textAnchor = isNegative ? (inside ? 'start' : 'end') : (inside ? 'end' : 'start');
+                                    const fill = inside ? '#fff' : '#e5e7eb';
+                                    return (
+                                      <text x={textX} y={(y || 0) + (height || 0) / 2} textAnchor={textAnchor} dominantBaseline="middle" fill={fill} fontSize={11} fontWeight={inside ? 500 : 400}>
+                                        {formatted}
+                                      </text>
+                                    );
+                                  }}
+                                />
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Registros por Centro de Custo</h4>
+                          <ResponsiveContainer width="100%" height={360}>
+                            <BarChart
+                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.registros ?? 0 }))}
+                              layout="vertical"
+                              margin={{ top: 20, right: 60, left: 10, bottom: 20 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
+                              <XAxis type="number" tick={{ fill: '#9ca3af', fontSize: 11 }} />
+                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
+                              <Tooltip formatter={(v: number) => [`${Number(v).toLocaleString('pt-BR')}`, 'Registros']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
+                              <Bar dataKey="valor" fill="#6366f1" radius={[0, 4, 4, 0]} name="Registros">
+                                <LabelList dataKey="valor" position="right" formatter={(v: number) => v.toLocaleString('pt-BR')} style={{ fill: '#e5e7eb', fontSize: 11 }} />
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="overflow-x-auto">
                       <div className="max-h-[60vh] overflow-y-auto">
                         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
