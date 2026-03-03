@@ -14,7 +14,6 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import { normalizeCostCentersResponse } from '@/lib/costCenters';
  import * as XLSX from 'xlsx';
  import jsPDF from 'jspdf';
- import html2canvas from 'html2canvas';
  
  interface FinancialAnalysisReport {
    summary: {
@@ -455,12 +454,21 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
     }
   };
  
-   const formatCurrency = (value: number) => {
-     return new Intl.NumberFormat('pt-BR', {
-       style: 'currency',
-       currency: 'BRL',
-     }).format(value);
-   };
+ const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    }).format(value);
+  };
+
+  const formatCurrencyShort = (value: number) => {
+    if (!value && value !== 0) return '';
+    const abs = Math.abs(value);
+    const sign = value < 0 ? '-' : '';
+    if (abs >= 1_000_000) return `${sign}R$ ${(abs / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: abs >= 10e6 ? 0 : 1 })}M`;
+    if (abs >= 1_000) return `${sign}R$ ${(abs / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}k`;
+    return formatCurrency(value);
+  };
  
   const formatDate = (dateString: any) => {
     if (!dateString) return '-';
@@ -1198,132 +1206,241 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
     }
   };
 
+const loadLogoBase64 = (): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { resolve(null); return; }
+          ctx.drawImage(img, 0, 0);
+          const dataUrl = canvas.toDataURL('image/png');
+          resolve(dataUrl);
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = '/logobranca.png';
+    });
+  };
+
    const handleExportPDF = async () => {
-     if (!displayReport) return;
- 
-     try {
-       // Mostrar loading
-       const loadingToast = document.createElement('div');
-       loadingToast.className = 'fixed top-4 right-4 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
-       loadingToast.textContent = 'Gerando PDF com gráficos e tabelas...';
-       document.body.appendChild(loadingToast);
- 
-       const pdf = new jsPDF('p', 'mm', 'a4');
-       const pageWidth = pdf.internal.pageSize.getWidth();
-       const pageHeight = pdf.internal.pageSize.getHeight();
-       const margin = 15;
-       let yPosition = margin;
- 
-       // Função para adicionar nova página se necessário
-       const checkPageBreak = (requiredHeight: number) => {
-         if (yPosition + requiredHeight > pageHeight - margin) {
-           pdf.addPage();
-           yPosition = margin;
-         }
-       };
- 
-       // Função para capturar elemento e adicionar ao PDF
-       const captureAndAdd = async (element: HTMLElement | null, spacing: number = 15, elementName: string = 'elemento'): Promise<boolean> => {
-         if (!element) {
-           console.warn(`${elementName} não encontrado`);
-           return false;
-         }
- 
-         try {
-           console.log(`Capturando ${elementName}...`);
-           
-           // Rolar até o elemento
-           element.scrollIntoView({ behavior: 'instant', block: 'center' });
-           await new Promise(resolve => setTimeout(resolve, 1500));
- 
-           // Verificar se o elemento está visível
-           const rect = element.getBoundingClientRect();
-           if (rect.width === 0 || rect.height === 0) {
-             console.warn(`${elementName} não está visível (width: ${rect.width}, height: ${rect.height})`);
-             return false;
-           }
- 
-           // Capturar elemento
-           const canvas = await html2canvas(element, {
-             backgroundColor: '#ffffff',
-             scale: 2,
-             logging: false,
-             useCORS: true,
-             allowTaint: true,
-             width: element.scrollWidth || element.offsetWidth,
-             height: element.scrollHeight || element.offsetHeight
-           });
- 
-           if (!canvas || canvas.width === 0 || canvas.height === 0) {
-             console.warn(`${elementName}: Canvas vazio ou inválido`); 
-             return false;
-           }
- 
-           console.log(`${elementName} capturado: ${canvas.width}x${canvas.height}px`);
- 
-           // Calcular dimensões
-           const imgWidth = pageWidth - 2 * margin;
-           const imgHeight = (canvas.height * imgWidth) / canvas.width;
- 
-           // Verificar se precisa de nova página
-           checkPageBreak(imgHeight + spacing);
- 
-           // Adicionar imagem
-           pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, yPosition, imgWidth, imgHeight);
-           yPosition += imgHeight + spacing;
- 
-           console.log(`${elementName} adicionado ao PDF com sucesso`);
-           return true;
-         } catch (error) {
-           console.error(`Erro ao capturar ${elementName}:`, error);
-           return false;
-         }
-       };
- 
-       // Cabeçalho
-       pdf.setFontSize(20);
-       pdf.setFont('helvetica', 'bold');
-       pdf.text('Relatório de Análise de Extrato', pageWidth / 2, yPosition, { align: 'center' });
-       yPosition += 10;
- 
+    if (!displayReport) return;
+
+    try {
+      const logoBase64 = await loadLogoBase64();
+
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 18;
+      const contentWidth = pageWidth - 2 * margin;
+      let y = margin;
+
+      const checkPageBreak = (h: number) => {
+        if (y + h > pageHeight - margin - 15) { pdf.addPage(); y = margin; }
+      };
+
+      const now = new Date();
+
+      // Cabeçalho com faixa de destaque
+      pdf.setFillColor(185, 28, 28); // vermelho escuro
+      pdf.rect(0, 0, pageWidth, 32, 'F');
+      if (logoBase64) {
+        const logoW = 20;
+        const logoH = 20;
+        pdf.addImage(logoBase64, 'PNG', margin, 6, logoW, logoH);
+      }
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(22);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Relatório de Análise de Extrato', pageWidth / 2, 18, { align: 'center' });
        pdf.setFontSize(10);
        pdf.setFont('helvetica', 'normal');
-       const now = new Date();
-       pdf.text(`Gerado em: ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`, pageWidth / 2, yPosition, { align: 'center' });
-       yPosition += 20;
- 
-       // Resumo (texto)
-       pdf.setFontSize(16);
-       pdf.setFont('helvetica', 'bold');
-       pdf.text('Resumo', margin, yPosition);
-       yPosition += 10;
- 
-       pdf.setFontSize(11);
-       pdf.setFont('helvetica', 'normal');
-       pdf.text(`Total de Registros: ${displayReport.summary.totalRecords.toLocaleString('pt-BR')}`, margin, yPosition);
-       yPosition += 7;
-       pdf.setTextColor(0, 150, 0);
-       pdf.text(`Total de Entradas: ${formatCurrency(displayReport.summary.totalEntries)}`, margin, yPosition);
-       yPosition += 7;
-       pdf.setTextColor(200, 0, 0);
-       pdf.text(`Total de Saídas: ${formatCurrency(displayReport.summary.totalExits)}`, margin, yPosition);
-       yPosition += 7;
+       pdf.text(`Gerado em ${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, pageWidth / 2, 26, { align: 'center' });
        pdf.setTextColor(0, 0, 0);
-       pdf.text(`Período: ${formatDate(displayReport.summary.periodRange.start)} a ${formatDate(displayReport.summary.periodRange.end)}`, margin, yPosition);
-       yPosition += 15;
- 
-       // ... restante do PDF e relatórios idênticos ao original ...
- 
-       // Remover loading
-       if (loadingToast && loadingToast.parentNode) {
-         document.body.removeChild(loadingToast);
+       y = 42;
+
+       // Filtros aplicados (quando houver filtros ativos)
+       const entradaAll = (naturezaEntradasList || []).length > 0 && selectedNatureEntrada.length >= (naturezaEntradasList || []).length;
+       const saidaAll = (naturezaSaidasList || []).length > 0 && selectedNatureSaida.length >= (naturezaSaidasList || []).length;
+       const polosAll = polosList.length > 0 && selectedPolos.length >= polosList.length;
+       const hasFilters = !entradaAll || !saidaAll || !polosAll;
+       if (hasFilters) {
+         const filtrosComLista = !polosAll && selectedPolos.length > 0 && selectedPolos.length <= 8;
+         const filtrosComListaLonga = !polosAll && selectedPolos.length > 8;
+         const filtrosAltura = (filtrosComLista || filtrosComListaLonga) ? 30 : 24;
+         checkPageBreak(filtrosAltura + 4);
+         pdf.setFillColor(254, 252, 232);
+         pdf.setDrawColor(253, 224, 71);
+         pdf.rect(margin, y, contentWidth, filtrosAltura, 'FD');
+         pdf.setFontSize(10);
+         pdf.setFont('helvetica', 'bold');
+         pdf.setTextColor(113, 63, 18);
+         pdf.text('Filtros aplicados', margin + 6, y + 8);
+         pdf.setFont('helvetica', 'normal');
+         pdf.setFontSize(9);
+         pdf.setTextColor(0, 0, 0);
+         const entLabel = entradaAll ? 'Entrada: Todas' : `Entrada: ${selectedNatureEntrada.length} natureza(s)`;
+         const saiLabel = saidaAll ? 'Saída: Todas' : `Saída: ${selectedNatureSaida.length} natureza(s)`;
+         const polLabel = polosAll ? 'Polos: Todos' : `Polos: ${selectedPolos.length} polo(s)`;
+         pdf.text(`Naturezas de ${entLabel}  |  Naturezas de ${saiLabel}  |  ${polLabel}`, margin + 6, y + 16);
+         if (!polosAll && selectedPolos.length > 0 && selectedPolos.length <= 8) {
+           pdf.setFontSize(8);
+           pdf.text(selectedPolos.join(', '), margin + 6, y + 22);
+         } else if (filtrosComListaLonga) {
+           pdf.setFontSize(8);
+           pdf.text(selectedPolos.slice(0, 8).join(', ') + '...', margin + 6, y + 22);
+         }
+         pdf.setTextColor(0, 0, 0);
+         y += filtrosAltura + 6;
        }
- 
-       // Salvar PDF
-       const fileName = `analise-extrato-${now.toISOString().split('T')[0]}.pdf`;
-       pdf.save(fileName);
-       
-       console.log('PDF gerado com sucesso!');
+
+       // Cards de resumo com cores por tipo
+       const cardW = (contentWidth - 12) / 4;
+       const cardGap = 4;
+       const cardData = [
+         { label: 'Registros', value: (costCenterTotals.registros ?? 0).toLocaleString('pt-BR'), fill: [241, 245, 249], border: [203, 213, 225] },
+         { label: 'Total Entradas', value: formatCurrency(costCenterTotals.entrada), fill: [240, 253, 244], border: [187, 247, 208] },
+         { label: 'Total Saídas', value: formatCurrency(costCenterTotals.saida), fill: [254, 242, 242], border: [252, 165, 165] },
+         { label: 'Saldo', value: formatCurrency(costCenterTotals.valorFinal ?? 0), fill: [255, 251, 235], border: [253, 186, 116] }
+       ];
+       for (let i = 0; i < 4; i++) {
+         const c = cardData[i];
+         const x = margin + i * (cardW + cardGap);
+         const pad = 6;
+         pdf.setFillColor(c.fill[0], c.fill[1], c.fill[2]);
+         pdf.setDrawColor(c.border[0], c.border[1], c.border[2]);
+         pdf.rect(x, y, cardW, 22, 'FD');
+         pdf.setFont('helvetica', 'normal');
+         pdf.setFontSize(9);
+         pdf.setTextColor(107, 114, 128);
+         const labelLines = pdf.splitTextToSize(c.label, cardW - 2 * pad);
+         pdf.text(labelLines[0] || c.label, x + pad, y + 9);
+         pdf.setFont('helvetica', 'bold');
+         pdf.setFontSize(10);
+         pdf.setTextColor(0, 0, 0);
+         const valueLines = pdf.splitTextToSize(c.value, cardW - 2 * pad);
+         pdf.text(valueLines[0] || c.value, x + pad, y + 18);
+       }
+       y += 28;
+
+       // Gráficos: Entrada, Saída e Saldo (3 seções separadas, cada uma com escala própria)
+       const chartData = sortedCostCenterSummary.slice(0, 15);
+       if (chartData.length > 0) {
+         const maxEntrada = Math.max(...chartData.map(r => r.entrada || 0), 1);
+         const maxSaida = Math.max(...chartData.map(r => r.saida || 0), 1);
+         const maxSaldo = Math.max(...chartData.map(r => Math.abs(r.valorFinal ?? 0)), 1);
+         const barLabelW = 65;
+         const barMaxW = contentWidth - barLabelW - 75;
+         const barH = 8;
+         const rowH = 12;
+
+         const drawSection = (title: string, getVal: (r: typeof chartData[0]) => number, max: number, rgb: [number, number, number] | ((v: number) => [number, number, number]), fmt: (v: number) => string) => {
+           checkPageBreak(chartData.length * rowH + 28);
+           pdf.setFillColor(248, 250, 252);
+           pdf.rect(margin, y, contentWidth, chartData.length * rowH + 20, 'F');
+           pdf.setDrawColor(226, 232, 240);
+           pdf.rect(margin, y, contentWidth, chartData.length * rowH + 20, 'S');
+           pdf.setFontSize(11);
+           pdf.setFont('helvetica', 'bold');
+           pdf.text(title, margin + 8, y + 10);
+           y += 16;
+           pdf.setFont('helvetica', 'normal');
+           pdf.setFontSize(9);
+           chartData.forEach((r) => {
+             checkPageBreak(rowH);
+             const label = (r.centro ?? 'Sem Centro').substring(0, 30);
+             const val = getVal(r);
+             pdf.text(label, margin + 8, y + 5);
+             const w = max > 0 ? (Math.abs(val) / max) * barMaxW : 0;
+             if (w > 0) {
+               const c = typeof rgb === 'function' ? rgb(val) : rgb;
+               pdf.setFillColor(c[0], c[1], c[2]);
+               pdf.rect(margin + barLabelW, y - 1, w, barH, 'F');
+             }
+             pdf.text(fmt(val), margin + barLabelW + barMaxW + 8, y + 5);
+             y += rowH;
+           });
+           y += 14;
+         };
+
+         drawSection('Entrada por Centro de Custo', r => r.entrada || 0, maxEntrada, [22, 163, 74], formatCurrency);
+         drawSection('Saída por Centro de Custo', r => r.saida || 0, maxSaida, [220, 38, 38], formatCurrency);
+         drawSection('Saldo por Centro de Custo', r => r.valorFinal ?? 0, maxSaldo, (v) => (v >= 0 ? [217, 119, 6] : [185, 28, 28]), formatCurrency);
+       }
+
+       // Tabela
+       checkPageBreak(35);
+       pdf.setFontSize(12);
+       pdf.setFont('helvetica', 'bold');
+       pdf.text('Tabela por Centro de Custo', margin, y);
+       y += 10;
+
+       const totalW = contentWidth;
+       const colW = [totalW * 0.26, totalW * 0.14, totalW * 0.15, totalW * 0.15, totalW * 0.15, totalW * 0.15];
+       const headers = ['Centro de Custo', 'Polo', 'Entrada', 'Saída', 'Saldo', 'Registros'];
+       const startX = margin;
+       const rowH = 8;
+       const cellPad = 4;
+       const colRight = (i: number) => startX + colW.slice(0, i + 1).reduce((a, b) => a + b, 0) - cellPad;
+
+       // Cabeçalho da tabela
+       pdf.setFillColor(55, 65, 81);
+       pdf.rect(startX, y, totalW, rowH, 'F');
+       pdf.setTextColor(255, 255, 255);
+       pdf.setFontSize(9);
+       pdf.setFont('helvetica', 'bold');
+       pdf.text(headers[0], startX + cellPad, y + 5.5);
+       pdf.text(headers[1], startX + colW[0] + cellPad, y + 5.5);
+       pdf.text(headers[2], colRight(2), y + 5.5, { align: 'right' });
+       pdf.text(headers[3], colRight(3), y + 5.5, { align: 'right' });
+       pdf.text(headers[4], colRight(4), y + 5.5, { align: 'right' });
+       pdf.text(headers[5], colRight(5), y + 5.5, { align: 'right' });
+       pdf.setTextColor(0, 0, 0);
+       y += rowH;
+
+       sortedCostCenterSummary.forEach((row, idx) => {
+         checkPageBreak(rowH + 2);
+         if (idx % 2 === 1) {
+           pdf.setFillColor(249, 250, 251);
+           pdf.rect(startX, y, totalW, rowH, 'F');
+         }
+         pdf.setDrawColor(229, 231, 235);
+         pdf.line(startX, y, startX + totalW, y);
+         pdf.setFont('helvetica', 'normal');
+         pdf.setFontSize(8);
+         const cen = (row.centro ?? '-').substring(0, 24);
+         const pol = (row.polo ?? '-').substring(0, 12);
+         pdf.text(cen, startX + cellPad, y + 5.5);
+         pdf.text(pol, startX + colW[0] + cellPad, y + 5.5);
+         pdf.text(formatCurrency(row.entrada || 0), colRight(2), y + 5.5, { align: 'right' });
+         pdf.text(formatCurrency(row.saida || 0), colRight(3), y + 5.5, { align: 'right' });
+         pdf.text(formatCurrency(row.valorFinal ?? 0), colRight(4), y + 5.5, { align: 'right' });
+         pdf.text(String(row.registros ?? 0), colRight(5), y + 5.5, { align: 'right' });
+         y += rowH;
+       });
+
+       checkPageBreak(rowH + 4);
+       pdf.setFillColor(243, 244, 246);
+       pdf.rect(startX, y, totalW, rowH, 'F');
+       pdf.setDrawColor(156, 163, 175);
+       pdf.line(startX, y, startX + totalW, y);
+       pdf.line(startX, y + rowH, startX + totalW, y + rowH);
+       pdf.setFont('helvetica', 'bold');
+       pdf.setFontSize(9);
+       pdf.text('Total', startX + cellPad, y + 5.5);
+       pdf.text(formatCurrency(costCenterTotals.entrada), colRight(2), y + 5.5, { align: 'right' });
+       pdf.text(formatCurrency(costCenterTotals.saida), colRight(3), y + 5.5, { align: 'right' });
+       pdf.text(formatCurrency(costCenterTotals.valorFinal ?? 0), colRight(4), y + 5.5, { align: 'right' });
+       pdf.text(String(costCenterTotals.registros ?? 0), colRight(5), y + 5.5, { align: 'right' });
+
+       pdf.save(`analise-extrato-${now.toISOString().split('T')[0]}.pdf`);
      } catch (error) {
        console.error('Erro ao exportar PDF:', error);
        const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1460,6 +1577,15 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
  
                   {/* Action Buttons */}
                   <div className="flex justify-end gap-3">
+                    {displayReport && (
+                      <button
+                        onClick={handleExportPDF}
+                        className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-all shadow-sm hover:shadow-md"
+                      >
+                        <Download className="w-5 h-5" />
+                        <span>Exportar PDF</span>
+                      </button>
+                    )}
                     <button
                       onClick={handleUpload}
                       disabled={!selectedFile || uploadMutation.isPending}
@@ -1996,145 +2122,94 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
                   </CardHeader>
                   <CardContent>
                     {/* Gráficos por Centro de Custo */}
-                    {sortedCostCenterSummary.length > 0 && (
+                    {sortedCostCenterSummary.length > 0 && (() => {
+                        const chartData = sortedCostCenterSummary.slice(0, 15).map(r => ({
+                          name: r.centro ?? 'Sem Centro',
+                          Entrada: r.entrada || 0,
+                          Saída: r.saida || 0,
+                          Saldo: r.valorFinal ?? 0
+                        }));
+                        const maxEntrada = Math.max(...chartData.map(d => d.Entrada), 1);
+                        const maxSaida = Math.max(...chartData.map(d => d.Saída), 1);
+                        const maxSaldo = Math.max(...chartData.map(d => Math.abs(d.Saldo)), 1);
+                        const renderBarLabel = (dataKey: 'Entrada' | 'Saída' | 'Saldo', seriesMax: number) => (props: Record<string, unknown>) => {
+                          const x = Number(props.x ?? 0);
+                          const y = Number(props.y ?? 0);
+                          const width = Number(props.width ?? 0);
+                          const height = Number(props.height ?? 0);
+                          const value = props.value as number | undefined;
+                          const payload = props.payload as { Entrada?: number; Saída?: number; Saldo?: number } | undefined;
+                          if (value == null || value === 0) return null;
+                          const text = formatCurrency(value);
+                          const rowMax = payload ? Math.max(
+                            Math.abs(payload.Entrada ?? 0),
+                            Math.abs(payload.Saída ?? 0),
+                            Math.abs(payload.Saldo ?? 0)
+                          ) : 0;
+                          const ratio = rowMax ? Math.abs(Number(value)) / rowMax : 0;
+                          const isLongInRow = ratio >= 0.85;
+                          const isLongGlobally = seriesMax > 0 && Math.abs(Number(value)) >= 0.9 * seriesMax;
+                          const isLongBar = (width > 0 && (isLongInRow || isLongGlobally));
+                          const style: React.CSSProperties = { fill: isLongBar ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: isLongBar ? 500 : undefined };
+                          const numVal = Number(value);
+                          let textX: number;
+                          let textAnchor: 'start' | 'middle' | 'end';
+                          if (numVal >= 0) {
+                            if (isLongBar) {
+                              textX = x + width - 8;
+                              textAnchor = 'end';
+                            } else {
+                              textX = x + width + 6;
+                              textAnchor = 'start';
+                            }
+                          } else {
+                            const barLeft = width >= 0 ? x : x + width;
+                            const labelEstWidth = Math.max(70, text.length * 7);
+                            const wouldOverflow = (barLeft - 6 - labelEstWidth) < 280;
+                            if (wouldOverflow || isLongBar) {
+                              textX = barLeft + 8;
+                              textAnchor = 'start';
+                            } else {
+                              textX = barLeft - 6;
+                              textAnchor = 'end';
+                            }
+                          }
+                          return (
+                            <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={style}>
+                              {text}
+                            </text>
+                          );
+                        };
+                        return (
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Entrada por Centro de Custo</h4>
-                          <ResponsiveContainer width="100%" height={360}>
+                        <div className="space-y-2 lg:col-span-2">
+                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Entrada, Saída e Saldo por Centro de Custo</h4>
+                          <ResponsiveContainer width="100%" height={880}>
                             <BarChart
-                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.entrada }))}
+                              data={chartData}
                               layout="vertical"
-                              margin={{ top: 20, right: 80, left: 10, bottom: 20 }}
+                              margin={{ top: 24, right: 180, left: 12, bottom: 24 }}
                             >
                               <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
-                              <XAxis type="number" tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 11 }} />
-                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
-                              <Tooltip formatter={(v: number) => [formatCurrency(v), 'Entrada']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
-                              <Bar dataKey="valor" fill="#16a34a" radius={[0, 4, 4, 0]} name="Entrada">
-                                <LabelList
-                                  dataKey="valor"
-                                  content={(props: any) => {
-                                    const { x, y, width, height, value } = props;
-                                    if (value == null) return null;
-                                    const formatted = formatCurrency(value);
-                                    const w = Math.abs(width ?? 0);
-                                    const inside = w > 180;
-                                    const padding = 8;
-                                    const barRight = (x ?? 0) + (width ?? 0);
-                                    const textX = inside ? barRight - padding : barRight + padding;
-                                    const textAnchor = inside ? 'end' : 'start';
-                                    const fill = inside ? '#fff' : '#e5e7eb';
-                                    return (
-                                      <text x={textX} y={(y || 0) + (height || 0) / 2} textAnchor={textAnchor} dominantBaseline="middle" fill={fill} fontSize={11} fontWeight={inside ? 500 : 400}>
-                                        {formatted}
-                                      </text>
-                                    );
-                                  }}
-                                />
+                              <XAxis type="number" tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 12 }} />
+                              <YAxis type="category" dataKey="name" width={260} tick={{ fill: '#e5e7eb', fontSize: 12 }} tickLine={false} interval={0} />
+                              <Tooltip formatter={(v: number, name: string) => [formatCurrency(v), name]} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
+                              <Legend />
+                              <Bar dataKey="Entrada" fill="#16a34a" radius={[0, 6, 6, 0]} name="Entrada" barSize={64}>
+                                <LabelList dataKey="Entrada" content={renderBarLabel('Entrada', maxEntrada) as any} />
                               </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Saída por Centro de Custo</h4>
-                          <ResponsiveContainer width="100%" height={360}>
-                            <BarChart
-                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.saida }))}
-                              layout="vertical"
-                              margin={{ top: 20, right: 80, left: 10, bottom: 20 }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
-                              <XAxis type="number" tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 11 }} />
-                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
-                              <Tooltip formatter={(v: number) => [formatCurrency(v), 'Saída']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
-                              <Bar dataKey="valor" fill="#dc2626" radius={[0, 4, 4, 0]} name="Saída">
-                                <LabelList
-                                  dataKey="valor"
-                                  content={(props: any) => {
-                                    const { x, y, width, height, value } = props;
-                                    if (value == null) return null;
-                                    const formatted = formatCurrency(value);
-                                    const w = Math.abs(width ?? 0);
-                                    const inside = w > 180;
-                                    const padding = 8;
-                                    const barRight = (x ?? 0) + (width ?? 0);
-                                    const textX = inside ? barRight - padding : barRight + padding;
-                                    const textAnchor = inside ? 'end' : 'start';
-                                    const fill = inside ? '#fff' : '#e5e7eb';
-                                    return (
-                                      <text x={textX} y={(y || 0) + (height || 0) / 2} textAnchor={textAnchor} dominantBaseline="middle" fill={fill} fontSize={11} fontWeight={inside ? 500 : 400}>
-                                        {formatted}
-                                      </text>
-                                    );
-                                  }}
-                                />
+                              <Bar dataKey="Saída" fill="#dc2626" radius={[0, 6, 6, 0]} name="Saída" barSize={64}>
+                                <LabelList dataKey="Saída" content={renderBarLabel('Saída', maxSaida) as any} />
                               </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Saldo por Centro de Custo</h4>
-                          <ResponsiveContainer width="100%" height={360}>
-                            <BarChart
-                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.valorFinal }))}
-                              layout="vertical"
-                              margin={{ top: 20, right: 80, left: 10, bottom: 20 }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
-                              <XAxis type="number" tickFormatter={(v) => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 11 }} />
-                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
-                              <Tooltip formatter={(v: number) => [formatCurrency(v), 'Saldo']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
-                              <Bar dataKey="valor" fill="#d97706" radius={[0, 4, 4, 0]} name="Saldo">
-                                <LabelList
-                                  dataKey="valor"
-                                  content={(props: any) => {
-                                    const { x, y, width, height, value } = props;
-                                    if (value == null) return null;
-                                    const formatted = formatCurrency(value);
-                                    const xVal = x ?? 0;
-                                    const wVal = width ?? 0;
-                                    const barLeft = Math.min(xVal, xVal + wVal);
-                                    const barRight = Math.max(xVal, xVal + wVal);
-                                    const w = Math.abs(wVal);
-                                    const inside = w > 180;
-                                    const padding = 8;
-                                    const isNegative = Number(value) < 0;
-                                    const textX = isNegative
-                                      ? (inside ? barLeft + padding : barLeft - padding)
-                                      : (inside ? barRight - padding : barRight + padding);
-                                    const textAnchor = isNegative ? (inside ? 'start' : 'end') : (inside ? 'end' : 'start');
-                                    const fill = inside ? '#fff' : '#e5e7eb';
-                                    return (
-                                      <text x={textX} y={(y || 0) + (height || 0) / 2} textAnchor={textAnchor} dominantBaseline="middle" fill={fill} fontSize={11} fontWeight={inside ? 500 : 400}>
-                                        {formatted}
-                                      </text>
-                                    );
-                                  }}
-                                />
-                              </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Registros por Centro de Custo</h4>
-                          <ResponsiveContainer width="100%" height={360}>
-                            <BarChart
-                              data={sortedCostCenterSummary.slice(0, 12).map(r => ({ name: r.centro ?? 'Sem Centro', valor: r.registros ?? 0 }))}
-                              layout="vertical"
-                              margin={{ top: 20, right: 60, left: 10, bottom: 20 }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
-                              <XAxis type="number" tick={{ fill: '#9ca3af', fontSize: 11 }} />
-                              <YAxis type="category" dataKey="name" width={240} tick={{ fill: '#e5e7eb', fontSize: 11 }} tickLine={false} interval={0} />
-                              <Tooltip formatter={(v: number) => [`${Number(v).toLocaleString('pt-BR')}`, 'Registros']} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
-                              <Bar dataKey="valor" fill="#6366f1" radius={[0, 4, 4, 0]} name="Registros">
-                                <LabelList dataKey="valor" position="right" formatter={(v: number) => v.toLocaleString('pt-BR')} style={{ fill: '#e5e7eb', fontSize: 11 }} />
+                              <Bar dataKey="Saldo" fill="#d97706" radius={[0, 6, 6, 0]} name="Saldo" barSize={64}>
+                                <LabelList dataKey="Saldo" content={renderBarLabel('Saldo', maxSaldo) as any} />
                               </Bar>
                             </BarChart>
                           </ResponsiveContainer>
                         </div>
                       </div>
-                    )}
+                        );
+                      })()}
 
                     <div className="overflow-x-auto">
                       <div className="max-h-[60vh] overflow-y-auto">
@@ -2167,7 +2242,7 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
                                 <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{row.polo ?? 'Sem Polo'}</td>
                                 <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400 text-right">{formatCurrency(row.entrada)}</td>
                                 <td className="px-4 py-3 text-sm text-red-600 dark:text-red-400 text-right">{formatCurrency(row.saida)}</td>
-                                <td className="px-4 py-3 text-sm text-right font-medium">
+                                <td className="px-4 py-3 text-sm text-amber-600 dark:text-amber-400 text-right font-medium">
                                   {formatCurrency(row.valorFinal)}
                                 </td>
                                 <td className="px-4 py-3 text-sm text-right">{(row.registros ?? 0).toLocaleString('pt-BR')}</td>
@@ -2181,7 +2256,7 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
                             <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400"></td>
                             <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400 text-right">{formatCurrency(costCenterTotals.entrada)}</td>
                             <td className="px-4 py-3 text-sm text-red-600 dark:text-red-400 text-right">{formatCurrency(costCenterTotals.saida)}</td>
-                            <td className="px-4 py-3 text-sm text-right">
+                            <td className="px-4 py-3 text-sm text-amber-600 dark:text-amber-400 text-right">
                               {formatCurrency(costCenterTotals.valorFinal)}
                             </td>
                             <td className="px-4 py-3 text-sm text-right">{(costCenterTotals.registros ?? 0).toLocaleString('pt-BR')}</td>
