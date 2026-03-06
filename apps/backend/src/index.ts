@@ -11,6 +11,7 @@ console.log(`   🗄️  Database: ${process.env.DATABASE_URL ? '✅ Configurada
 console.log(`   🔐 JWT Secret: ${process.env.JWT_SECRET ? '✅ Configurada' : '❌ Não configurada'}`);
 console.log(`   ☁️  AWS S3: ${process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? '✅ Configurado' : '❌ Não configurado'}`);
 console.log(`   📦 Bucket: ${process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos'}`);
+console.log(`   📊 Fluig API: ${process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN ? '✅ Configurado' : '❌ Não configurado'}`);
 console.log('');
 
 import express from 'express';
@@ -48,6 +49,8 @@ import financialAnalysisRoutes from './routes/financialAnalysis';
 import supplierRoutes from './routes/suppliers';
 import purchaseOrderRoutes from './routes/purchaseOrders';
 import budgetNatureRoutes from './routes/budgetNatures';
+import orcamentoRoutes from './routes/orcamento';
+import fluigRoutes from './routes/fluig';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -234,6 +237,8 @@ app.use('/api/financial-analysis', financialAnalysisRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/budget-natures', budgetNatureRoutes);
+app.use('/api/orcamento', orcamentoRoutes);
+app.use('/api/fluig', fluigRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

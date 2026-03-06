@@ -16,6 +16,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "ts-node prisma/seed.ts",
+    "fluig:get-tokens": "ts-node scripts/get-fluig-tokens.ts",
     "test": "jest",
     "test:watch": "jest --watch"
   },
@@ -44,6 +45,7 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.10.1",
+    "oauth-1.0a": "^2.2.6",
     "pdfkit": "^0.17.2",
     "resend": "^3.2.0",
     "uuid": "^9.0.1",

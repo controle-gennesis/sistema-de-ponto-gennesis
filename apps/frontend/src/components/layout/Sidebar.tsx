@@ -40,7 +40,8 @@ import {
   ShoppingCart,
   Building2,
   Bot,
-  Cake
+  Cake,
+  Calculator
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTheme } from '@/context/ThemeContext';
@@ -150,6 +151,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: Bot,
             description: 'Tire suas dúvidas com o ChatGPT',
             permission: true // Todos os usuários podem usar
+          },
+          {
+            name: 'Solicitações Fluig',
+            href: '/ponto/bi',
+            icon: BarChart3,
+            description: 'Dashboard com dados dos datasets do Fluig',
+            permission: true
           }
         ]
       },
@@ -270,6 +278,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BarChart3,
             description: 'Importar e validar extratos bancários',
             permission: isAdministrator || isDepartmentFinanceiro // Administrador ou Financeiro
+          }
+        ]
+      },
+      {
+        id: 'engenharia',
+        name: 'Engenharia',
+        icon: Calculator,
+        items: [
+          {
+            name: 'Orçamento',
+            href: '/ponto/orcamento',
+            icon: Calculator,
+            description: 'Criar orçamentos com composições e serviços padrão',
+            permission: true
           }
         ]
       },
@@ -566,7 +588,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const hasActiveItem = category.items.some(item => isActive(item.href));
             const isExpanded = isMenuExpanded(category.id);
             const visibleItems = category.items.filter(item => item.permission);
-            const isSingleItem = visibleItems.length === 1;
+            const forceAsGroup = category.id === 'engenharia';
+            const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
             // Verificar se é o primeiro grupo (categoria com mais de um item visível)
