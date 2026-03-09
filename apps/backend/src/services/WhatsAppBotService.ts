@@ -30,6 +30,13 @@ const ATESTADO_LABELS: Record<string, string> = {
   '6': 'Outros'
 };
 
+/** Delay aleatório 5s a 7s para parecer mais natural (evitar bloqueio) */
+const delayNatural = () =>
+  new Promise((r) => setTimeout(r, 5000 + Math.random() * 2000));
+
+/** Escolhe uma opção aleatória de um array */
+const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
 export class WhatsAppBotService {
   async processMessage(phone: string, text: string, hasMedia = false): Promise<void> {
     let conversation = await prisma.whatsAppConversation.findUnique({
@@ -67,13 +74,17 @@ export class WhatsAppBotService {
       case 'MENU': {
         if (content === '1' || content.includes('atestado')) {
           newStatus = 'ASK_NAME';
-          reply =
-            '📋 *Envio de Atestado*\n\nPara começar, qual é o seu *nome completo*?';
+          reply = pick([
+            '📋 *Envio de Atestado*\n\nPara começar, qual é o seu *nome completo*?',
+            '📋 *Atestado*\n\nCerto! Me informe seu *nome completo* por favor.'
+          ]);
           newPayload.flow = 'ATESTADO';
         } else if (content === '2' || content.includes('dúvida') || content.includes('duvida')) {
           newStatus = 'DUVIDAS';
-          reply =
-            '💬 Em breve teremos atendimento para dúvidas. Por enquanto, escolha a opção 1 para enviar atestado ou volte ao menu digitando *voltar*.';
+          reply = pick([
+            '💬 Em breve teremos atendimento para dúvidas. Por enquanto, use a opção 1 para atestado ou digite *voltar* para o menu.',
+            '💬 O atendimento para dúvidas estará disponível em breve. Digite *voltar* para outras opções.'
+          ]);
         } else {
           reply = this.getMenuMessage();
         }
@@ -88,8 +99,11 @@ export class WhatsAppBotService {
         } else if (content) {
           newPayload.name = text.trim();
           newStatus = 'ASK_REGISTRATION';
-          reply =
-            `Obrigado, ${newPayload.name}! Qual é a sua *matrícula* ou *CPF*? (para identificarmos no sistema)\n\nSe não souber, digite *pular* para continuar.`;
+          const nome = String(newPayload.name);
+          reply = pick([
+            `Obrigado, ${nome}! Qual é a sua *matrícula* ou *CPF*? (para identificarmos no sistema)\n\nSe não souber, digite *pular* para continuar.`,
+            `Perfeito, ${nome}! Agora preciso da sua *matrícula* ou *CPF*.\n\nSe não souber, digite *pular*.`
+          ]);
         } else {
           reply = 'Por favor, informe seu *nome completo*.';
         }
@@ -174,8 +188,10 @@ export class WhatsAppBotService {
           });
 
           newStatus = 'MENU';
-          reply =
-            '✅ *Atestado recebido!*\n\nSua solicitação foi registrada e será analisada pelo departamento pessoal. Você pode acompanhar pelo sistema.\n\nDigite *menu* para novas opções.';
+          reply = pick([
+            '✅ *Atestado recebido!*\n\nSua solicitação foi registrada e será analisada pelo departamento pessoal. Você pode acompanhar pelo sistema.\n\nDigite *menu* para novas opções.',
+            '✅ *Pronto!*\n\nRecebemos seu atestado. O departamento pessoal vai analisar e em breve você terá o retorno.\n\nDigite *menu* para outras opções.'
+          ]);
           Object.keys(newPayload).forEach((k) => delete newPayload[k]);
         } else if (content) {
           reply =
@@ -221,17 +237,21 @@ export class WhatsAppBotService {
       }
     });
 
+    await delayNatural();
     await evolutionApi.sendText(phone, reply);
   }
 
   private getMenuMessage(): string {
-    return (
-      '👋 *Olá! Sou o assistente da Gennesis Engenharia.*\n\n' +
-      'Como posso ajudar?\n\n' +
-      '1️⃣ - Enviar atestado médico\n' +
-      '2️⃣ - Tirar dúvidas\n\n' +
-      'Digite o número da opção desejada.'
-    );
+    const intros = [
+      '👋 *Olá! Sou o assistente da Gennesis Engenharia.*\n\nComo posso ajudar?',
+      '👋 *Oi! Aqui é o assistente da Gennesis.*\n\nO que você precisa?',
+      '👋 *Olá! Em que posso ajudar?*\n\nSou o assistente da Gennesis Engenharia.'
+    ];
+    const options = [
+      '\n\n1️⃣ - Enviar atestado médico\n2️⃣ - Tirar dúvidas\n\nDigite o número da opção.',
+      '\n\n*Opções:*\n1 - Enviar atestado\n2 - Tirar dúvidas\n\nResponda com 1 ou 2.'
+    ];
+    return pick(intros) + pick(options);
   }
 }
 
