@@ -13,26 +13,38 @@ export class WhatsAppController {
       res.status(200).send('OK');
 
       const body = req.body || {};
-      const event = (body.event || body.type || '').toLowerCase();
+      const event = String(body.event || body.type || '').toLowerCase();
 
       if (!event.includes('message') && !event.includes('upsert')) {
         return;
       }
 
-      const data = body.data || body;
-      const key = data.key || {};
+      // Evolution pode enviar data como objeto ou como array de mensagens
+      let data = body.data ?? body;
+      if (Array.isArray(data) && data.length > 0) {
+        data = data[0];
+      }
+
+      const key = data?.key || {};
       const fromMe = !!key.fromMe;
-      if (fromMe) return; // ignorar mensagens enviadas por nós
+      if (fromMe) return;
 
-      const remoteJid = key.remoteJid || data.remoteJid || '';
-      const phone = String(remoteJid).replace(/@s\.whatsapp\.net$/, '').replace(/@c\.us$/, '') || '';
-
-      if (!phone) return;
+      const remoteJid =
+        key.remoteJid || data?.remoteJid || key?.participant || data?.participant || '';
+      const phone = String(remoteJid)
+        .replace(/@s\.whatsapp\.net$/i, '')
+        .replace(/@c\.us$/i, '')
+        .replace(/@g\.us$/i, '')
+        .trim();
+      if (!phone) {
+        console.warn('[WhatsApp Webhook] Sem phone no payload:', JSON.stringify(body).slice(0, 300));
+        return;
+      }
 
       let text = '';
       let hasMedia = false;
 
-      const msg = data.message || body.message || {};
+      const msg = data?.message || body.message || {};
       if (typeof msg.conversation === 'string') {
         text = msg.conversation;
       } else if (msg.extendedTextMessage?.text) {
@@ -43,11 +55,21 @@ export class WhatsAppController {
       } else if (msg.documentMessage) {
         hasMedia = true;
         text = msg.documentMessage.caption || '';
+      } else if (msg.buttonsResponseMessage?.selectedButtonId) {
+        text = msg.buttonsResponseMessage.selectedButtonId;
+      } else if (msg.listResponseMessage?.singleSelectReply?.id) {
+        text = msg.listResponseMessage.singleSelectReply.id;
+      } else if (typeof msg.text === 'object' && msg.text?.body) {
+        text = msg.text.body;
+      } else if (typeof msg.text === 'string') {
+        text = msg.text;
       }
 
-      if (!text && !hasMedia) return;
+      if (!text && !hasMedia) {
+        console.warn('[WhatsApp Webhook] Sem texto nem mídia, ignorando. phone=', phone);
+        return;
+      }
 
-      // Processar em background (não bloquear resposta do webhook)
       whatsAppBot.processMessage(phone, text || ' ', hasMedia).catch((err) => {
         console.error('[WhatsApp Webhook] Erro ao processar:', err);
       });
