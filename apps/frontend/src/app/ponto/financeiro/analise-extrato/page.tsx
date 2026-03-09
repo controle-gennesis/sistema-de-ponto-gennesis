@@ -162,6 +162,8 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
    // Estados para ordenação
   const [sortCostCenter, setSortCostCenter] = useState<{ column: 'costCenter' | 'entries' | 'exits' | 'valorFinal' | 'records' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'desc' });
    const [sortNature, setSortNature] = useState<{ column: 'nature' | 'entries' | 'exits' | 'records' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'desc' });
+   const [sortNatureReport, setSortNatureReport] = useState<{ column: 'nature' | 'entries' | 'exits' | 'valorFinal' | 'records' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'desc' });
+   const [sortContaBancaria, setSortContaBancaria] = useState<{ column: 'conta' | 'entries' | 'exits' | 'valorFinal' | 'records' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'desc' });
    const [sortSuppliers, setSortSuppliers] = useState<{ column: 'supplier' | 'entries' | 'exits' | 'difference' | 'records' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'desc' });
    const [sortDocumentType, setSortDocumentType] = useState<{ column: 'documentType' | 'entries' | 'exits' | 'records' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'desc' });
    
@@ -686,11 +688,16 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
   const [selectedPolos, setSelectedPolos] = useState<string[]>([]);
   const [selectedPolosSearch, setSelectedPolosSearch] = useState('');
   const [showPoloDropdown, setShowPoloDropdown] = useState(false);
+  const [selectedOperacoes, setSelectedOperacoes] = useState<string[]>([]);
+  const [selectedOperacoesSearch, setSelectedOperacoesSearch] = useState('');
+  const [showOperacaoDropdown, setShowOperacaoDropdown] = useState(false);
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
   const entradaRef = useRef<HTMLDivElement | null>(null);
   const saidaRef = useRef<HTMLDivElement | null>(null);
   const poloRef = useRef<HTMLDivElement | null>(null);
+  const operacaoRef = useRef<HTMLDivElement | null>(null);
   const hasInitializedPolosRef = useRef(false);
+  const hasInitializedOperacoesRef = useRef(false);
   const prevDisplayReportRef = useRef<typeof displayReport>(null);
 
   // fechar dropdowns ao clicar fora
@@ -699,6 +706,7 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
       if (entradaRef.current && !entradaRef.current.contains(e.target as Node)) setShowEntradaDropdown(false);
       if (saidaRef.current && !saidaRef.current.contains(e.target as Node)) setShowSaidaDropdown(false);
       if (poloRef.current && !poloRef.current.contains(e.target as Node)) setShowPoloDropdown(false);
+      if (operacaoRef.current && !operacaoRef.current.contains(e.target as Node)) setShowOperacaoDropdown(false);
     };
     document.addEventListener('click', handler);
     return () => document.removeEventListener('click', handler);
@@ -732,21 +740,37 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
   }, [displayReport, naturezaEntradasList, naturezaSaidasList]);
 
   const getNatureCodeForRecord = (record: any) => {
-    // try explicit codNatureza fields first
-    const tryKeys = ['codNatureza', 'cod_natureza', 'COD_NATUREZA', 'CodNatureza', 'cod natureza', 'cod'];
-    for (const k of tryKeys) {
-      if (record[k]) return String(record[k]).trim();
-    }
-    // else try natureza field (could be code or name)
-    const raw = String(record.natureza || record.NATUREZA || record['Natureza'] || '').trim();
+    const raw = getNatureRawForRecord(record);
     if (!raw) return '';
     const { map: nmap, normalize: nnormalize } = natureLookup || {};
     if (nmap) {
       const found = nmap.get(raw) || nmap.get(nnormalize ? nnormalize(raw) : raw) || nmap.get(raw.replace(/[^0-9]/g, ''));
       if (found) return found.code;
     }
-    // fallback: if raw looks like code (starts with digit), return raw
     if (/^\d/.test(raw)) return raw;
+    return '';
+  };
+
+  // Mesma coluna que o filtro usa - extrai valor bruto da natureza (para relatório/gráfico)
+  const getNatureRawForRecord = (record: any): string => {
+    if (!record) return '';
+    const tryKeys = [
+      'codNatureza', 'cod_natureza', 'COD_NATUREZA', 'CodNatureza', 'cod natureza', 'cod',
+      'natureza', 'NATUREZA', 'Natureza',
+      'Natureza Orçamentária Financeira', 'Natureza Orcamentaria Financeira', 'NATUREZA ORCAMENTARIA FINANCEIRA',
+      'Código Natureza', 'Codigo Natureza', 'Código Natureza Orçamentária'
+    ];
+    for (const k of tryKeys) {
+      const v = record[k];
+      if (v != null && String(v).trim() !== '') return String(v).trim();
+    }
+    for (const k of Object.keys(record)) {
+      const n = k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
+      if ((n.includes('natureza') && n.includes('orcamentaria')) || (n.includes('cod') && n.includes('natureza'))) {
+        const v = record[k];
+        if (v != null && String(v).trim() !== '') return String(v).trim();
+      }
+    }
     return '';
   };
 
@@ -927,16 +951,43 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
     return Array.from(set).sort();
   }, [displayReport, costCentersList]);
 
+  const getOperacaoForRecord = (record: any) => {
+    // Prioridade: campos mapeados, depois colunas originais da planilha
+    const keys = ['tipooperacao', 'tipo_operacao', 'TIPOOPERACAO', 'Tipo Operação', 'tipo operacao', 'Operação', 'Operacao', 'operacao', 'OPERAÇÃO', 'operação'];
+    for (const k of keys) {
+      const v = record[k];
+      if (v != null && String(v).trim() !== '') return String(v).trim();
+    }
+    // Fallback: procurar qualquer chave cujo nome normalizado contenha "operacao"
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s/g, '');
+    for (const k of Object.keys(record || {})) {
+      if (norm(k).includes('operacao') || (norm(k).includes('oper') && norm(k).length >= 6)) {
+        const v = record[k];
+        if (v != null && String(v).trim() !== '') return String(v).trim();
+      }
+    }
+    return 'Não informado';
+  };
+
+  const operacoesList = useMemo(() => {
+    if (!displayReport?.rawRecords?.length) return [];
+    const set = new Set<string>();
+    (displayReport.rawRecords as any[]).forEach(r => set.add(getOperacaoForRecord(r)));
+    return Array.from(set).sort();
+  }, [displayReport]);
+
   // Inicializar polos só uma vez por planilha; não sobrescrever quando o usuário altera a seleção
   useEffect(() => {
     if (!displayReport) {
       hasInitializedPolosRef.current = false;
+      hasInitializedOperacoesRef.current = false;
       prevDisplayReportRef.current = null;
       return;
     }
     if (prevDisplayReportRef.current !== displayReport) {
       prevDisplayReportRef.current = displayReport;
       hasInitializedPolosRef.current = false;
+      hasInitializedOperacoesRef.current = false;
     }
     if (!polosList.length) return;
     if (!hasInitializedPolosRef.current) {
@@ -952,11 +1003,29 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
     return selectedPolos.includes(polo);
   };
 
+  useEffect(() => {
+    if (!displayReport || !operacoesList.length) {
+      hasInitializedOperacoesRef.current = false;
+      return;
+    }
+    if (!hasInitializedOperacoesRef.current) {
+      hasInitializedOperacoesRef.current = true;
+      setSelectedOperacoes([...operacoesList]);
+    }
+  }, [displayReport, operacoesList]);
+
+  const filterRecordsByOperacao = (rec: any) => {
+    const op = getOperacaoForRecord(rec);
+    if (selectedOperacoes.length === 0) return false;
+    if (selectedOperacoes.length === operacoesList.length) return true;
+    return selectedOperacoes.includes(op);
+  };
+
   // Relatório sintetizado por Centro de Custo (Entrada / Saída / Valor Final) a partir dos registros brutos
   const costCenterSummary = useMemo(() => {
     if (!displayReport) return [];
     const allRecords = displayReport.rawRecords || [];
-    const records = allRecords.filter(r => filterRecordsByNature(r) && filterRecordsByPolo(r));
+    const records = allRecords.filter(r => filterRecordsByNature(r) && filterRecordsByPolo(r) && filterRecordsByOperacao(r));
     const map = new Map<string, { centro: string; entrada: number; saida: number; count: number }>();
 
     records.forEach(r => {
@@ -1064,7 +1133,83 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
 
     arr.sort((a, b) => b.valorFinal - a.valorFinal);
     return arr;
-  }, [displayReport, selectedNatureEntrada, selectedNatureSaida, naturezaEntradasList, naturezaSaidasList, selectedPolos, polosList, costCentersList]);
+  }, [displayReport, selectedNatureEntrada, selectedNatureSaida, naturezaEntradasList, naturezaSaidasList, selectedPolos, polosList, selectedOperacoes, operacoesList, costCentersList]);
+
+  // Helper: extrai valor de coluna por padrão no nome (busca flexível nas chaves do registro)
+  const getValueByColumnPattern = (r: Record<string, unknown>, patterns: string[]): string => {
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+    for (const p of patterns) {
+      const normP = norm(p);
+      for (const k of Object.keys(r || {})) {
+        const normK = norm(k);
+        if (normK.includes(normP) || normP.includes(normK)) {
+          const v = (r as any)[k];
+          if (v != null && String(v).trim() !== '') return String(v).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  // Relatório sintetizado por Natureza - USA A MESMA COLUNA DO FILTRO (getNatureRawForRecord / getNatureCodeForRecord)
+  const natureSummary = useMemo(() => {
+    if (!displayReport?.rawRecords?.length) return [];
+    const records = (displayReport.rawRecords as any[]).filter(r => filterRecordsByNature(r) && filterRecordsByPolo(r) && filterRecordsByOperacao(r));
+    const map = new Map<string, { nome: string; entrada: number; saida: number; count: number }>();
+    records.forEach(r => {
+      let entrada = Number(r.entrada) || 0;
+      let saida = Number(r.saida) || 0;
+      if (entrada === 0 && saida === 0) {
+        const v = Number(String(r.valortotal ?? 0).replace(/[^\d-.,]/g, '').replace(',', '.')) || 0;
+        if (v > 0) entrada = v; else saida = Math.abs(v);
+      }
+      const code = getNatureCodeForRecord(r) || '__VAZIAS__';
+      const raw = getNatureRawForRecord(r) || 'Não informado';
+      const { map: nmap } = natureLookup || {};
+      const nome = (nmap && code && code !== VAZIAS_CODE ? (nmap.get(code)?.name || nmap.get(raw)?.name) : null) || (raw !== 'Não informado' ? raw : '');
+      const key = code || raw || 'Não informado';
+      const cur = map.get(key) ?? { nome: '', entrada: 0, saida: 0, count: 0 };
+      if (nome && !cur.nome) cur.nome = nome;
+      cur.entrada += entrada;
+      cur.saida += saida;
+      cur.count += 1;
+      map.set(key, cur);
+    });
+    return Array.from(map.entries())
+      .map(([key, x]) => ({
+        nature: x.nome || (key === VAZIAS_CODE ? 'Vazias' : key) || 'Não informado',
+        natureKey: key,
+        entrada: x.entrada,
+        saida: x.saida,
+        valorFinal: x.entrada - x.saida,
+        registros: x.count
+      }))
+      .sort((a, b) => Math.abs(b.valorFinal) - Math.abs(a.valorFinal));
+  }, [displayReport, selectedNatureEntrada, selectedNatureSaida, naturezaEntradasList, naturezaSaidasList, selectedPolos, polosList, selectedOperacoes, operacoesList, natureLookup]);
+
+  // Relatório sintetizado por Conta/Caixa (conta bancária) - usa coluna Conta/Caixa
+  const contaBancariaSummary = useMemo(() => {
+    if (!displayReport?.rawRecords?.length) return [];
+    const records = (displayReport.rawRecords as any[]).filter(r => filterRecordsByNature(r) && filterRecordsByPolo(r) && filterRecordsByOperacao(r));
+    const map = new Map<string, { conta: string; entrada: number; saida: number; count: number }>();
+    records.forEach(r => {
+      let entrada = Number(r.entrada) || 0;
+      let saida = Number(r.saida) || 0;
+      if (entrada === 0 && saida === 0) {
+        const v = Number(String(r.valortotal ?? 0).replace(/[^\d-.,]/g, '').replace(',', '.')) || 0;
+        if (v > 0) entrada = v; else saida = Math.abs(v);
+      }
+      const conta = (r.codcxa || r.coligada || (r as any)['Conta/Caixa'] || getValueByColumnPattern(r, ['contacaixa', 'conta/caixa', 'conta caixa', 'codcxa', 'coligada']) || 'Não informado').trim() || 'Não informado';
+      const cur = map.get(conta) ?? { conta, entrada: 0, saida: 0, count: 0 };
+      cur.entrada += entrada;
+      cur.saida += saida;
+      cur.count += 1;
+      map.set(conta, cur);
+    });
+    return Array.from(map.entries())
+      .map(([, x]) => ({ conta: x.conta, entrada: x.entrada, saida: x.saida, valorFinal: x.entrada - x.saida, registros: x.count }))
+      .sort((a, b) => Math.abs(b.valorFinal) - Math.abs(a.valorFinal));
+  }, [displayReport, selectedNatureEntrada, selectedNatureSaida, naturezaEntradasList, naturezaSaidasList, selectedPolos, polosList, selectedOperacoes, operacoesList]);
  
   // Totais agregados do relatório por Centro de Custo
   const costCenterTotals = useMemo(() => {
@@ -1082,6 +1227,72 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
       { entrada: 0, saida: 0, valorFinal: 0, registros: 0 }
     );
   }, [costCenterSummary]);
+
+  // Totais por Natureza
+  const natureTotals = useMemo(() => {
+    if (!natureSummary || natureSummary.length === 0) return { entrada: 0, saida: 0, valorFinal: 0, registros: 0 };
+    return natureSummary.reduce((acc, cur) => {
+      acc.entrada += cur.entrada;
+      acc.saida += cur.saida;
+      acc.valorFinal += cur.valorFinal;
+      acc.registros += cur.registros || 0;
+      return acc;
+    }, { entrada: 0, saida: 0, valorFinal: 0, registros: 0 });
+  }, [natureSummary]);
+
+  // Totais por Conta Bancária
+  const contaBancariaTotals = useMemo(() => {
+    if (!contaBancariaSummary || contaBancariaSummary.length === 0) return { entrada: 0, saida: 0, valorFinal: 0, registros: 0 };
+    return contaBancariaSummary.reduce((acc, cur) => {
+      acc.entrada += cur.entrada;
+      acc.saida += cur.saida;
+      acc.valorFinal += cur.valorFinal;
+      acc.registros += cur.registros || 0;
+      return acc;
+    }, { entrada: 0, saida: 0, valorFinal: 0, registros: 0 });
+  }, [contaBancariaSummary]);
+
+  const sortedNatureSummary = useMemo(() => {
+    if (!natureSummary || natureSummary.length === 0) return [];
+    return sortArray(natureSummary, sortNatureReport, (item: any, column: string) => {
+      switch (column) {
+        case 'nature': return (item.nature || '').toLowerCase();
+        case 'entries': return item.entrada;
+        case 'exits': return item.saida;
+        case 'valorFinal': return item.valorFinal;
+        case 'records': return item.registros ?? 0;
+        default: return '';
+      }
+    });
+  }, [natureSummary, sortNatureReport]);
+
+  const sortedContaBancariaSummary = useMemo(() => {
+    if (!contaBancariaSummary || contaBancariaSummary.length === 0) return [];
+    return sortArray(contaBancariaSummary, sortContaBancaria, (item: any, column: string) => {
+      switch (column) {
+        case 'conta': return (item.conta || '').toLowerCase();
+        case 'entries': return item.entrada;
+        case 'exits': return item.saida;
+        case 'valorFinal': return item.valorFinal;
+        case 'records': return item.registros ?? 0;
+        default: return '';
+      }
+    });
+  }, [contaBancariaSummary, sortContaBancaria]);
+
+  const handleSortNatureReport = (column: string) => {
+    setSortNatureReport(prev => {
+      if (prev.column === column) return { column: prev.column, direction: prev.direction === 'desc' ? 'asc' : 'desc' };
+      return { column: column as any, direction: 'desc' };
+    });
+  };
+
+  const handleSortContaBancariaReport = (column: string) => {
+    setSortContaBancaria(prev => {
+      if (prev.column === column) return { column: prev.column, direction: prev.direction === 'desc' ? 'asc' : 'desc' };
+      return { column: column as any, direction: 'desc' };
+    });
+  };
 
   // Ordenação aplicada ao resumo por centro de custo
   const handleSortCostCenter = (column: string) => {
@@ -1109,21 +1320,28 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
   }, [costCenterSummary, sortCostCenter]);
 
    // Função para lidar com clique em uma linha e mostrar registros detalhados
-   const handleRowClick = (filterType: 'costCenter' | 'nature' | 'supplier' | 'documentType', filterValue: string, title: string) => {
+   const handleRowClick = (filterType: 'costCenter' | 'nature' | 'supplier' | 'documentType' | 'contaBancaria', filterValue: string, title: string) => {
      if (!displayReport?.rawRecords) return;
      
-     const filtered = displayReport.rawRecords.filter(record => {
-       if (!filterRecordsByNature(record) || !filterRecordsByPolo(record)) return false;
+     const filtered = displayReport.rawRecords.filter((record: any) => {
+       if (!filterRecordsByNature(record) || !filterRecordsByPolo(record) || !filterRecordsByOperacao(record)) return false;
        switch (filterType) {
          case 'costCenter':
           {
             const raw = String(record.ccusto || '').replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '').trim();
             const canonical = costCenterLookup && costCenterLookup.normalize ? costCenterLookup.normalize(raw) : normalizeStandalone(raw);
-            // filterValue may be the canonical key (row.key) or the original code/name
             return raw === filterValue || canonical === filterValue;
           }
-         case 'nature':
-           return (record.natureza || 'Não informado') === filterValue;
+         case 'nature': {
+           const recCode = getNatureCodeForRecord(record) || VAZIAS_CODE;
+           const recRaw = getNatureRawForRecord(record) || '';
+           if (filterValue === VAZIAS_CODE) return recCode === VAZIAS_CODE || !recRaw;
+           return recCode === filterValue || recRaw === filterValue;
+         }
+         case 'contaBancaria': {
+           const recConta = record.codcxa || record.coligada || record['Conta/Caixa'] || getValueByColumnPattern(record, ['contacaixa', 'conta/caixa', 'conta caixa']) || 'Não informado';
+           return String(recConta).trim() === filterValue;
+         }
          case 'supplier':
            return (record.fornecedor || 'Não informado') === filterValue;
          case 'documentType':
@@ -1245,6 +1463,10 @@ const loadLogoBase64 = (): Promise<string | null> => {
       const checkPageBreak = (h: number) => {
         if (y + h > pageHeight - margin - 15) { pdf.addPage(); y = margin; }
       };
+      const barLabelW = 65;
+      const barMaxW = contentWidth - barLabelW - 75;
+      const barH = 8;
+      const chartRowH = 12;
 
       const now = new Date();
 
@@ -1270,11 +1492,12 @@ const loadLogoBase64 = (): Promise<string | null> => {
        const entradaAll = (naturezaEntradasList || []).length > 0 && selectedNatureEntrada.length >= (naturezaEntradasList || []).length;
        const saidaAll = (naturezaSaidasList || []).length > 0 && selectedNatureSaida.length >= (naturezaSaidasList || []).length;
        const polosAll = polosList.length > 0 && selectedPolos.length >= polosList.length;
-       const hasFilters = !entradaAll || !saidaAll || !polosAll;
+       const operacoesAll = operacoesList.length > 0 && selectedOperacoes.length >= operacoesList.length;
+       const hasFilters = !entradaAll || !saidaAll || !polosAll || !operacoesAll;
        if (hasFilters) {
-         const filtrosComLista = !polosAll && selectedPolos.length > 0 && selectedPolos.length <= 8;
-         const filtrosComListaLonga = !polosAll && selectedPolos.length > 8;
-         const filtrosAltura = (filtrosComLista || filtrosComListaLonga) ? 30 : 24;
+         const temListaPolos = !polosAll && selectedPolos.length > 0;
+         const temListaOp = !operacoesAll && selectedOperacoes.length > 0;
+         const filtrosAltura = 24 + (temListaPolos ? 8 : 0) + (temListaOp ? 8 : 0);
          checkPageBreak(filtrosAltura + 4);
          pdf.setFillColor(254, 252, 232);
          pdf.setDrawColor(253, 224, 71);
@@ -1289,13 +1512,19 @@ const loadLogoBase64 = (): Promise<string | null> => {
          const entLabel = entradaAll ? 'Entrada: Todas' : `Entrada: ${selectedNatureEntrada.length} natureza(s)`;
          const saiLabel = saidaAll ? 'Saída: Todas' : `Saída: ${selectedNatureSaida.length} natureza(s)`;
          const polLabel = polosAll ? 'Polos: Todos' : `Polos: ${selectedPolos.length} polo(s)`;
-         pdf.text(`Naturezas de ${entLabel}  |  Naturezas de ${saiLabel}  |  ${polLabel}`, margin + 6, y + 16);
-         if (!polosAll && selectedPolos.length > 0 && selectedPolos.length <= 8) {
+         const opLabel = operacoesAll ? 'Operações: Todas' : `Operações: ${selectedOperacoes.length} op.`;
+         pdf.text(`Naturezas de ${entLabel}  |  Naturezas de ${saiLabel}  |  ${polLabel}  |  ${opLabel}`, margin + 6, y + 16);
+         let extraY = 0;
+         if (!polosAll && selectedPolos.length > 0) {
            pdf.setFontSize(8);
-           pdf.text(selectedPolos.join(', '), margin + 6, y + 22);
-         } else if (filtrosComListaLonga) {
+           const polText = selectedPolos.length <= 8 ? selectedPolos.join(', ') : selectedPolos.slice(0, 8).join(', ') + '...';
+           pdf.text('Polos: ' + polText, margin + 6, y + 22);
+           extraY = 6;
+         }
+         if (!operacoesAll && selectedOperacoes.length > 0) {
            pdf.setFontSize(8);
-           pdf.text(selectedPolos.slice(0, 8).join(', ') + '...', margin + 6, y + 22);
+           const opText = selectedOperacoes.length <= 8 ? selectedOperacoes.join(', ') : selectedOperacoes.slice(0, 8).join(', ') + '...';
+           pdf.text('Operações: ' + opText, margin + 6, y + 22 + extraY);
          }
          pdf.setTextColor(0, 0, 0);
          y += filtrosAltura + 6;
@@ -1336,17 +1565,13 @@ const loadLogoBase64 = (): Promise<string | null> => {
          const maxEntrada = Math.max(...chartData.map(r => r.entrada || 0), 1);
          const maxSaida = Math.max(...chartData.map(r => r.saida || 0), 1);
          const maxSaldo = Math.max(...chartData.map(r => Math.abs(r.valorFinal ?? 0)), 1);
-         const barLabelW = 65;
-         const barMaxW = contentWidth - barLabelW - 75;
-         const barH = 8;
-         const rowH = 12;
 
          const drawSection = (title: string, getVal: (r: typeof chartData[0]) => number, max: number, rgb: [number, number, number] | ((v: number) => [number, number, number]), fmt: (v: number) => string) => {
-           checkPageBreak(chartData.length * rowH + 28);
+           checkPageBreak(chartData.length * chartRowH + 28);
            pdf.setFillColor(248, 250, 252);
-           pdf.rect(margin, y, contentWidth, chartData.length * rowH + 20, 'F');
+           pdf.rect(margin, y, contentWidth, chartData.length * chartRowH + 20, 'F');
            pdf.setDrawColor(226, 232, 240);
-           pdf.rect(margin, y, contentWidth, chartData.length * rowH + 20, 'S');
+           pdf.rect(margin, y, contentWidth, chartData.length * chartRowH + 20, 'S');
            pdf.setFontSize(11);
            pdf.setFont('helvetica', 'bold');
            pdf.text(title, margin + 8, y + 10);
@@ -1354,7 +1579,7 @@ const loadLogoBase64 = (): Promise<string | null> => {
            pdf.setFont('helvetica', 'normal');
            pdf.setFontSize(9);
            chartData.forEach((r) => {
-             checkPageBreak(rowH);
+             checkPageBreak(chartRowH);
              const label = (r.centro ?? 'Sem Centro').substring(0, 30);
              const val = getVal(r);
              pdf.text(label, margin + 8, y + 5);
@@ -1365,7 +1590,7 @@ const loadLogoBase64 = (): Promise<string | null> => {
                pdf.rect(margin + barLabelW, y - 1, w, barH, 'F');
              }
              pdf.text(fmt(val), margin + barLabelW + barMaxW + 8, y + 5);
-             y += rowH;
+             y += chartRowH;
            });
            y += 14;
          };
@@ -1439,6 +1664,192 @@ const loadLogoBase64 = (): Promise<string | null> => {
        pdf.text(formatCurrency(costCenterTotals.saida), colRight(3), y + 5.5, { align: 'right' });
        pdf.text(formatCurrency(costCenterTotals.valorFinal ?? 0), colRight(4), y + 5.5, { align: 'right' });
        pdf.text(String(costCenterTotals.registros ?? 0), colRight(5), y + 5.5, { align: 'right' });
+       y += rowH + 12;
+
+       // ----- Relatório por Natureza -----
+       const natureData = sortedNatureSummary.slice(0, 15);
+       if (natureData.length > 0) {
+         checkPageBreak(40);
+         pdf.setFontSize(14);
+         pdf.setFont('helvetica', 'bold');
+         pdf.text('Relatório por Natureza', margin, y);
+         y += 12;
+         const maxEntN = Math.max(...natureData.map(r => r.entrada || 0), 1);
+         const maxSaiN = Math.max(...natureData.map(r => r.saida || 0), 1);
+         const maxSalN = Math.max(...natureData.map(r => Math.abs(r.valorFinal ?? 0)), 1);
+         const drawNatureSection = (title: string, getVal: (r: typeof natureData[0]) => number, max: number, rgb: [number, number, number] | ((v: number) => [number, number, number])) => {
+           checkPageBreak(natureData.length * chartRowH + 28);
+           pdf.setFillColor(248, 250, 252);
+           pdf.rect(margin, y, contentWidth, natureData.length * chartRowH + 20, 'F');
+           pdf.setDrawColor(226, 232, 240);
+           pdf.rect(margin, y, contentWidth, natureData.length * chartRowH + 20, 'S');
+           pdf.setFontSize(10);
+           pdf.setFont('helvetica', 'bold');
+           pdf.text(title, margin + 8, y + 10);
+           y += 16;
+           pdf.setFont('helvetica', 'normal');
+           pdf.setFontSize(9);
+           natureData.forEach((r) => {
+             checkPageBreak(chartRowH);
+             const label = ((r as { nature?: string }).nature ?? '-').substring(0, 36);
+             const val = getVal(r);
+             pdf.text(label, margin + 8, y + 5);
+             const w = max > 0 ? (Math.abs(val) / max) * barMaxW : 0;
+             if (w > 0) {
+               const c = typeof rgb === 'function' ? rgb(val) : rgb;
+               pdf.setFillColor(c[0], c[1], c[2]);
+               pdf.rect(margin + barLabelW, y - 1, w, barH, 'F');
+             }
+             pdf.text(formatCurrency(val), margin + barLabelW + barMaxW + 8, y + 5);
+             y += chartRowH;
+           });
+           y += 14;
+         };
+         drawNatureSection('Entrada por Natureza', r => r.entrada || 0, maxEntN, [22, 163, 74]);
+         drawNatureSection('Saída por Natureza', r => r.saida || 0, maxSaiN, [220, 38, 38]);
+         drawNatureSection('Saldo por Natureza', r => r.valorFinal ?? 0, maxSalN, (v) => (v >= 0 ? [217, 119, 6] : [185, 28, 28]));
+         checkPageBreak(35);
+         pdf.setFontSize(11);
+         pdf.setFont('helvetica', 'bold');
+         pdf.text('Tabela por Natureza', margin, y);
+         y += 10;
+         const colWNat = [totalW * 0.38, totalW * 0.18, totalW * 0.18, totalW * 0.14, totalW * 0.12];
+         const headersNat = ['Natureza', 'Entrada', 'Saída', 'Saldo', 'Registros'];
+         const colRightNat = (i: number) => startX + colWNat.slice(0, i + 1).reduce((a, b) => a + b, 0) - cellPad;
+         pdf.setFillColor(55, 65, 81);
+         pdf.rect(startX, y, totalW, rowH, 'F');
+         pdf.setTextColor(255, 255, 255);
+         pdf.setFontSize(9);
+         pdf.setFont('helvetica', 'bold');
+         pdf.text(headersNat[0], startX + cellPad, y + 5.5);
+         pdf.text(headersNat[1], colRightNat(1), y + 5.5, { align: 'right' });
+         pdf.text(headersNat[2], colRightNat(2), y + 5.5, { align: 'right' });
+         pdf.text(headersNat[3], colRightNat(3), y + 5.5, { align: 'right' });
+         pdf.text(headersNat[4], colRightNat(4), y + 5.5, { align: 'right' });
+         pdf.setTextColor(0, 0, 0);
+         y += rowH;
+         sortedNatureSummary.forEach((row, idx) => {
+           checkPageBreak(rowH + 2);
+           if (idx % 2 === 1) { pdf.setFillColor(249, 250, 251); pdf.rect(startX, y, totalW, rowH, 'F'); }
+           pdf.setDrawColor(229, 231, 235);
+           pdf.line(startX, y, startX + totalW, y);
+           pdf.setFont('helvetica', 'normal');
+           pdf.setFontSize(8);
+           const nat = ((row as { nature?: string }).nature ?? '-').substring(0, 32);
+           pdf.text(nat, startX + cellPad, y + 5.5);
+           pdf.text(formatCurrency(row.entrada || 0), colRightNat(1), y + 5.5, { align: 'right' });
+           pdf.text(formatCurrency(row.saida || 0), colRightNat(2), y + 5.5, { align: 'right' });
+           pdf.text(formatCurrency(row.valorFinal ?? 0), colRightNat(3), y + 5.5, { align: 'right' });
+           pdf.text(String(row.registros ?? 0), colRightNat(4), y + 5.5, { align: 'right' });
+           y += rowH;
+         });
+         checkPageBreak(rowH + 4);
+         pdf.setFillColor(243, 244, 246);
+         pdf.rect(startX, y, totalW, rowH, 'F');
+         pdf.setDrawColor(156, 163, 175);
+         pdf.line(startX, y, startX + totalW, y);
+         pdf.line(startX, y + rowH, startX + totalW, y + rowH);
+         pdf.setFont('helvetica', 'bold');
+         pdf.setFontSize(9);
+         pdf.text('Total', startX + cellPad, y + 5.5);
+         pdf.text(formatCurrency(natureTotals.entrada), colRightNat(1), y + 5.5, { align: 'right' });
+         pdf.text(formatCurrency(natureTotals.saida), colRightNat(2), y + 5.5, { align: 'right' });
+         pdf.text(formatCurrency(natureTotals.valorFinal ?? 0), colRightNat(3), y + 5.5, { align: 'right' });
+         pdf.text(String(natureTotals.registros ?? 0), colRightNat(4), y + 5.5, { align: 'right' });
+         y += rowH + 12;
+       }
+
+       // ----- Relatório por Conta Bancária -----
+       const contaData = sortedContaBancariaSummary.slice(0, 15);
+       if (contaData.length > 0) {
+         checkPageBreak(40);
+         pdf.setFontSize(14);
+         pdf.setFont('helvetica', 'bold');
+         pdf.text('Relatório por Conta Bancária', margin, y);
+         y += 12;
+         const maxEntC = Math.max(...contaData.map(r => r.entrada || 0), 1);
+         const maxSaiC = Math.max(...contaData.map(r => r.saida || 0), 1);
+         const maxSalC = Math.max(...contaData.map(r => Math.abs(r.valorFinal ?? 0)), 1);
+         const drawContaSection = (title: string, getVal: (r: typeof contaData[0]) => number, max: number, rgb: [number, number, number] | ((v: number) => [number, number, number])) => {
+           checkPageBreak(contaData.length * chartRowH + 28);
+           pdf.setFillColor(248, 250, 252);
+           pdf.rect(margin, y, contentWidth, contaData.length * chartRowH + 20, 'F');
+           pdf.setDrawColor(226, 232, 240);
+           pdf.rect(margin, y, contentWidth, contaData.length * chartRowH + 20, 'S');
+           pdf.setFontSize(10);
+           pdf.setFont('helvetica', 'bold');
+           pdf.text(title, margin + 8, y + 10);
+           y += 16;
+           pdf.setFont('helvetica', 'normal');
+           pdf.setFontSize(9);
+           contaData.forEach((r) => {
+             checkPageBreak(chartRowH);
+             const label = ((r as { conta?: string }).conta ?? '-').substring(0, 36);
+             const val = getVal(r);
+             pdf.text(label, margin + 8, y + 5);
+             const w = max > 0 ? (Math.abs(val) / max) * barMaxW : 0;
+             if (w > 0) {
+               const c = typeof rgb === 'function' ? rgb(val) : rgb;
+               pdf.setFillColor(c[0], c[1], c[2]);
+               pdf.rect(margin + barLabelW, y - 1, w, barH, 'F');
+             }
+             pdf.text(formatCurrency(val), margin + barLabelW + barMaxW + 8, y + 5);
+             y += chartRowH;
+           });
+           y += 14;
+         };
+         drawContaSection('Entrada por Conta Bancária', r => r.entrada || 0, maxEntC, [22, 163, 74]);
+         drawContaSection('Saída por Conta Bancária', r => r.saida || 0, maxSaiC, [220, 38, 38]);
+         drawContaSection('Saldo por Conta Bancária', r => r.valorFinal ?? 0, maxSalC, (v) => (v >= 0 ? [217, 119, 6] : [185, 28, 28]));
+         checkPageBreak(35);
+         pdf.setFontSize(11);
+         pdf.setFont('helvetica', 'bold');
+         pdf.text('Tabela por Conta Bancária', margin, y);
+         y += 10;
+         const colWConta = [totalW * 0.38, totalW * 0.18, totalW * 0.18, totalW * 0.14, totalW * 0.12];
+         const headersConta = ['Conta Bancária', 'Entrada', 'Saída', 'Saldo', 'Registros'];
+         const colRightConta = (i: number) => startX + colWConta.slice(0, i + 1).reduce((a, b) => a + b, 0) - cellPad;
+         pdf.setFillColor(55, 65, 81);
+         pdf.rect(startX, y, totalW, rowH, 'F');
+         pdf.setTextColor(255, 255, 255);
+         pdf.setFontSize(9);
+         pdf.setFont('helvetica', 'bold');
+         pdf.text(headersConta[0], startX + cellPad, y + 5.5);
+         pdf.text(headersConta[1], colRightConta(1), y + 5.5, { align: 'right' });
+         pdf.text(headersConta[2], colRightConta(2), y + 5.5, { align: 'right' });
+         pdf.text(headersConta[3], colRightConta(3), y + 5.5, { align: 'right' });
+         pdf.text(headersConta[4], colRightConta(4), y + 5.5, { align: 'right' });
+         pdf.setTextColor(0, 0, 0);
+         y += rowH;
+         sortedContaBancariaSummary.forEach((row, idx) => {
+           checkPageBreak(rowH + 2);
+           if (idx % 2 === 1) { pdf.setFillColor(249, 250, 251); pdf.rect(startX, y, totalW, rowH, 'F'); }
+           pdf.setDrawColor(229, 231, 235);
+           pdf.line(startX, y, startX + totalW, y);
+           pdf.setFont('helvetica', 'normal');
+           pdf.setFontSize(8);
+           const con = ((row as { conta?: string }).conta ?? '-').substring(0, 32);
+           pdf.text(con, startX + cellPad, y + 5.5);
+           pdf.text(formatCurrency(row.entrada || 0), colRightConta(1), y + 5.5, { align: 'right' });
+           pdf.text(formatCurrency(row.saida || 0), colRightConta(2), y + 5.5, { align: 'right' });
+           pdf.text(formatCurrency(row.valorFinal ?? 0), colRightConta(3), y + 5.5, { align: 'right' });
+           pdf.text(String(row.registros ?? 0), colRightConta(4), y + 5.5, { align: 'right' });
+           y += rowH;
+         });
+         checkPageBreak(rowH + 4);
+         pdf.setFillColor(243, 244, 246);
+         pdf.rect(startX, y, totalW, rowH, 'F');
+         pdf.setDrawColor(156, 163, 175);
+         pdf.line(startX, y, startX + totalW, y);
+         pdf.line(startX, y + rowH, startX + totalW, y + rowH);
+         pdf.setFont('helvetica', 'bold');
+         pdf.setFontSize(9);
+         pdf.text('Total', startX + cellPad, y + 5.5);
+         pdf.text(formatCurrency(contaBancariaTotals.entrada), colRightConta(1), y + 5.5, { align: 'right' });
+         pdf.text(formatCurrency(contaBancariaTotals.saida), colRightConta(2), y + 5.5, { align: 'right' });
+         pdf.text(formatCurrency(contaBancariaTotals.valorFinal ?? 0), colRightConta(3), y + 5.5, { align: 'right' });
+         pdf.text(String(contaBancariaTotals.registros ?? 0), colRightConta(4), y + 5.5, { align: 'right' });
+       }
 
        pdf.save(`analise-extrato-${now.toISOString().split('T')[0]}.pdf`);
      } catch (error) {
@@ -1658,9 +2069,11 @@ const loadLogoBase64 = (): Promise<string | null> => {
                          setSelectedNatureEntrada(allEntrada);
                          setSelectedNatureSaida(allSaida);
                          setSelectedPolos([...polosList]);
+                         setSelectedOperacoes([...operacoesList]);
                          setSelectedNatureEntradaSearch('');
                          setSelectedNatureSaidaSearch('');
                          setSelectedPolosSearch('');
+                         setSelectedOperacoesSearch('');
                        }}
                        className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                        title="Limpar todos os filtros"
@@ -1685,14 +2098,14 @@ const loadLogoBase64 = (): Promise<string | null> => {
              {!isFiltersMinimized && (
              <CardContent className="p-4 sm:p-6">
                <div className="space-y-4">
-               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                  {/* Entradas */}
                  <div ref={entradaRef} className="relative">
                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Naturezas de Entrada</label>
                    <div className="relative">
                      <button
                        type="button"
-                       onClick={(e) => { e.stopPropagation(); setShowEntradaDropdown(v => !v); setShowSaidaDropdown(false); setShowPoloDropdown(false); }}
+                       onClick={(e) => { e.stopPropagation(); setShowEntradaDropdown(v => !v); setShowSaidaDropdown(false); setShowPoloDropdown(false); setShowOperacaoDropdown(false); }}
                        className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent relative"
                      >
                        <Layers className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
@@ -1812,7 +2225,7 @@ const loadLogoBase64 = (): Promise<string | null> => {
                    <div className="relative">
                      <button
                        type="button"
-                       onClick={(e) => { e.stopPropagation(); setShowSaidaDropdown(v => !v); setShowEntradaDropdown(false); setShowPoloDropdown(false); }}
+                       onClick={(e) => { e.stopPropagation(); setShowSaidaDropdown(v => !v); setShowEntradaDropdown(false); setShowPoloDropdown(false); setShowOperacaoDropdown(false); }}
                        className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent relative"
                      >
                        <Layers className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
@@ -1932,7 +2345,7 @@ const loadLogoBase64 = (): Promise<string | null> => {
                    <div className="relative">
                      <button
                        type="button"
-                       onClick={(e) => { e.stopPropagation(); setShowPoloDropdown(v => !v); setShowEntradaDropdown(false); setShowSaidaDropdown(false); }}
+                       onClick={(e) => { e.stopPropagation(); setShowPoloDropdown(v => !v); setShowEntradaDropdown(false); setShowSaidaDropdown(false); setShowOperacaoDropdown(false); }}
                        className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent relative"
                      >
                        <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
@@ -2034,6 +2447,115 @@ const loadLogoBase64 = (): Promise<string | null> => {
                      </div>
                    )}
                  </div>
+
+                 {/* Operações - dropdown no mesmo padrão */}
+                 <div ref={operacaoRef} className="relative">
+                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Operações</label>
+                   <div className="relative">
+                     <button
+                       type="button"
+                       onClick={(e) => { e.stopPropagation(); setShowOperacaoDropdown(v => !v); setShowEntradaDropdown(false); setShowSaidaDropdown(false); setShowPoloDropdown(false); }}
+                       className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent relative"
+                     >
+                       <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
+                       <span className="block pr-6 text-sm truncate">
+                         {selectedOperacoes.length === 0 ? 'Nenhuma' : selectedOperacoes.length === operacoesList.length ? 'Todas' : `${selectedOperacoes.length} selecionada(s)`}
+                       </span>
+                       <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
+                         {showOperacaoDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                       </span>
+                     </button>
+                   </div>
+                   {showOperacaoDropdown && (
+                     <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3">
+                       <input
+                         type="text"
+                         placeholder="Pesquisar..."
+                         value={selectedOperacoesSearch}
+                         onChange={(e) => {
+                           const value = e.target.value;
+                           setSelectedOperacoesSearch(value);
+                           const q = value.trim().toLowerCase();
+                           if (q === '') {
+                             setSelectedOperacoes([...operacoesList]);
+                           } else {
+                             setSelectedOperacoes(operacoesList.filter(op => op.toLowerCase().includes(q)));
+                           }
+                         }}
+                         className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                       />
+                       <div className="flex items-center gap-2 mb-2">
+                         <label htmlFor="select-all-operacao" className="flex items-center gap-3 cursor-pointer group">
+                           <div className="relative">
+                             <input
+                               id="select-all-operacao"
+                               type="checkbox"
+                               checked={selectedOperacoes.length > 0 && selectedOperacoes.length === operacoesList.length}
+                               onChange={(e) => {
+                                 if (e.target.checked) {
+                                   setSelectedOperacoes([...operacoesList]);
+                                 } else {
+                                   setSelectedOperacoes([]);
+                                 }
+                               }}
+                               className="sr-only"
+                             />
+                             <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
+                               selectedOperacoes.length > 0 && selectedOperacoes.length === operacoesList.length
+                                 ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
+                                 : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
+                             }`}>
+                               {selectedOperacoes.length > 0 && selectedOperacoes.length === operacoesList.length && (
+                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                 </svg>
+                               )}
+                             </div>
+                           </div>
+                           <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
+                         </label>
+                       </div>
+                       <div className="max-h-48 overflow-y-auto">
+                         {operacoesList
+                           .filter(op => op.toLowerCase().includes(selectedOperacoesSearch.toLowerCase()))
+                           .map(op => {
+                             const checked = selectedOperacoes.includes(op);
+                             return (
+                               <label key={op} className="flex items-center gap-3 py-1.5 cursor-pointer group">
+                                 <div className="relative">
+                                   <input
+                                     type="checkbox"
+                                     checked={checked}
+                                     onChange={(e) => {
+                                       e.stopPropagation();
+                                       if (e.target.checked) {
+                                         setSelectedOperacoes(prev => Array.from(new Set([...prev, op])));
+                                       } else {
+                                         setSelectedOperacoes(prev => prev.filter(x => x !== op));
+                                       }
+                                     }}
+                                     className="sr-only"
+                                   />
+                                   <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
+                                     checked
+                                       ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
+                                       : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
+                                   }`}>
+                                     {checked && (
+                                       <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                       </svg>
+                                     )}
+                                   </div>
+                                 </div>
+                                 <span className="text-sm text-gray-900 dark:text-gray-100">{op}</span>
+                               </label>
+                             );
+                           })}
+                       </div>
+                     </div>
+                   )}
+                 </div>
                </div>
                </div>
              </CardContent>
@@ -2108,6 +2630,226 @@ const loadLogoBase64 = (): Promise<string | null> => {
                 </Card>
               </div>
 
+              {/* Relatório por Natureza Orçamentária Financeira */}
+              <Card>
+                <CardHeader className="border-b-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <BarChart3 className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Relatório por Natureza Orçamentária Financeira</h3>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {sortedNatureSummary.length > 0 && (() => {
+                    const chartData = sortedNatureSummary.slice(0, 15).map(r => ({
+                      name: (r.nature ?? 'Não informado').slice(0, 40),
+                      Entrada: r.entrada || 0,
+                      Saída: r.saida || 0,
+                      Saldo: r.valorFinal ?? 0
+                    }));
+                    const maxE = Math.max(...chartData.map(d => d.Entrada), 1);
+                    const maxS = Math.max(...chartData.map(d => d.Saída), 1);
+                    const maxSal = Math.max(...chartData.map(d => Math.abs(d.Saldo)), 1);
+                    const renderBarLabel = (dataKey: 'Entrada' | 'Saída' | 'Saldo', seriesMax: number) => (props: Record<string, unknown>) => {
+                      const x = Number(props.x ?? 0); const y = Number(props.y ?? 0);
+                      const width = Number(props.width ?? 0); const height = Number(props.height ?? 0);
+                      const value = props.value as number | undefined;
+                      const payload = props.payload as { Entrada?: number; Saída?: number; Saldo?: number } | undefined;
+                      if (value == null || value === 0) return null;
+                      const text = formatCurrency(value);
+                      const rowMax = payload ? Math.max(Math.abs(payload.Entrada ?? 0), Math.abs(payload.Saída ?? 0), Math.abs(payload.Saldo ?? 0)) : 0;
+                      const ratio = rowMax ? Math.abs(Number(value)) / rowMax : 0;
+                      const wouldBeLong = (width > 0 && (ratio >= 0.85 || (seriesMax > 0 && Math.abs(Number(value)) >= 0.9 * seriesMax)));
+                      const isLongBar = wouldBeLong && dataKey !== 'Saldo';
+                      const numVal = Number(value);
+                      let textX: number; let textAnchor: 'start' | 'end';
+                      if (numVal >= 0) {
+                        textX = isLongBar ? x + width - 8 : x + width + 6;
+                        textAnchor = isLongBar ? 'end' : 'start';
+                      } else {
+                        const barLeft = width >= 0 ? x : x + width;
+                        textX = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? barLeft + 8 : barLeft - 6;
+                        textAnchor = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? 'start' : 'end';
+                      }
+                      return <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={{ fill: isLongBar ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: isLongBar ? 500 : undefined }}>{text}</text>;
+                    };
+                    return (
+                      <div className="space-y-2 mb-6">
+                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Entrada, Saída e Saldo por Natureza</h4>
+                        <ResponsiveContainer width="100%" height={Math.min(880, chartData.length * 56 + 80)}>
+                          <BarChart data={chartData} layout="vertical" margin={{ top: 24, right: 180, left: 12, bottom: 24 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
+                            <XAxis type="number" tickFormatter={v => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 12 }} />
+                            <YAxis type="category" dataKey="name" width={260} tick={{ fill: '#e5e7eb', fontSize: 12 }} tickLine={false} interval={0} />
+                            <Tooltip formatter={(v: number, n: string) => [formatCurrency(v), n]} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
+                            <Legend />
+                            <Bar dataKey="Entrada" fill="#16a34a" radius={[0, 6, 6, 0]} name="Entrada" barSize={64}><LabelList dataKey="Entrada" content={renderBarLabel('Entrada', maxE) as any} /></Bar>
+                            <Bar dataKey="Saída" fill="#dc2626" radius={[0, 6, 6, 0]} name="Saída" barSize={64}><LabelList dataKey="Saída" content={renderBarLabel('Saída', maxS) as any} /></Bar>
+                            <Bar dataKey="Saldo" fill="#d97706" radius={[0, 6, 6, 0]} name="Saldo" barSize={64}><LabelList dataKey="Saldo" content={renderBarLabel('Saldo', maxSal) as any} /></Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    );
+                  })()}
+                  <div className="overflow-x-auto">
+                    <div className="max-h-[60vh] overflow-y-auto">
+                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 shadow-[0_1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]">
+                          <tr>
+                            {renderSortableHeaderLeft('Natureza', 'nature', sortNatureReport as any, handleSortNatureReport)}
+                            {renderSortableHeader('Entrada', 'entries', sortNatureReport as any, handleSortNatureReport)}
+                            {renderSortableHeader('Saída', 'exits', sortNatureReport as any, handleSortNatureReport)}
+                            {renderSortableHeader('Saldo', 'valorFinal', sortNatureReport as any, handleSortNatureReport)}
+                            {renderSortableHeader('Registros', 'records', sortNatureReport as any, handleSortNatureReport)}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                          {sortedNatureSummary.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Nenhum registro a exibir</td>
+                            </tr>
+                          ) : (
+                            sortedNatureSummary.map((row, idx) => (
+                              <tr
+                                key={idx}
+                                className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                                onClick={() => handleRowClick('nature', (row as { natureKey?: string }).natureKey ?? row.nature ?? 'Não informado', `Registros - Natureza: ${row.nature}`)}
+                              >
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{row.nature}</td>
+                                <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400 text-right">{formatCurrency(row.entrada)}</td>
+                                <td className="px-4 py-3 text-sm text-red-600 dark:text-red-400 text-right">{formatCurrency(row.saida)}</td>
+                                <td className="px-4 py-3 text-sm text-amber-600 dark:text-amber-400 text-right font-medium">{formatCurrency(row.valorFinal)}</td>
+                                <td className="px-4 py-3 text-sm text-right">{(row.registros ?? 0).toLocaleString('pt-BR')}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        <tfoot className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 z-10">
+                          <tr className="font-semibold">
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">Total</td>
+                            <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400 text-right">{formatCurrency(natureTotals.entrada)}</td>
+                            <td className="px-4 py-3 text-sm text-red-600 dark:text-red-400 text-right">{formatCurrency(natureTotals.saida)}</td>
+                            <td className="px-4 py-3 text-sm text-amber-600 dark:text-amber-400 text-right">{formatCurrency(natureTotals.valorFinal)}</td>
+                            <td className="px-4 py-3 text-sm text-right">{(natureTotals.registros ?? 0).toLocaleString('pt-BR')}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Relatório por Conta Bancária */}
+              <Card>
+                <CardHeader className="border-b-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <BarChart3 className="w-5 h-5 text-gray-900 dark:text-gray-100" />
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Relatório por Conta Bancária</h3>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {sortedContaBancariaSummary.length > 0 && (() => {
+                    const chartData = sortedContaBancariaSummary.slice(0, 15).map(r => ({
+                      name: (r.conta ?? 'Não informado').slice(0, 40),
+                      Entrada: r.entrada || 0,
+                      Saída: r.saida || 0,
+                      Saldo: r.valorFinal ?? 0
+                    }));
+                    const maxE = Math.max(...chartData.map(d => d.Entrada), 1);
+                    const maxS = Math.max(...chartData.map(d => d.Saída), 1);
+                    const maxSal = Math.max(...chartData.map(d => Math.abs(d.Saldo)), 1);
+                    const renderBarLabel = (dataKey: 'Entrada' | 'Saída' | 'Saldo', seriesMax: number) => (props: Record<string, unknown>) => {
+                      const x = Number(props.x ?? 0); const y = Number(props.y ?? 0);
+                      const width = Number(props.width ?? 0); const height = Number(props.height ?? 0);
+                      const value = props.value as number | undefined;
+                      const payload = props.payload as { Entrada?: number; Saída?: number; Saldo?: number } | undefined;
+                      if (value == null || value === 0) return null;
+                      const text = formatCurrency(value);
+                      const rowMax = payload ? Math.max(Math.abs(payload.Entrada ?? 0), Math.abs(payload.Saída ?? 0), Math.abs(payload.Saldo ?? 0)) : 0;
+                      const ratio = rowMax ? Math.abs(Number(value)) / rowMax : 0;
+                      const wouldBeLong = (width > 0 && (ratio >= 0.85 || (seriesMax > 0 && Math.abs(Number(value)) >= 0.9 * seriesMax)));
+                      const isLongBar = wouldBeLong && dataKey !== 'Saldo';
+                      const numVal = Number(value);
+                      let textX: number; let textAnchor: 'start' | 'end';
+                      if (numVal >= 0) {
+                        textX = isLongBar ? x + width - 8 : x + width + 6;
+                        textAnchor = isLongBar ? 'end' : 'start';
+                      } else {
+                        const barLeft = width >= 0 ? x : x + width;
+                        textX = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? barLeft + 8 : barLeft - 6;
+                        textAnchor = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? 'start' : 'end';
+                      }
+                      return <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={{ fill: isLongBar ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: isLongBar ? 500 : undefined }}>{text}</text>;
+                    };
+                    return (
+                      <div className="space-y-2 mb-6">
+                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Entrada, Saída e Saldo por Conta Bancária</h4>
+                        <ResponsiveContainer width="100%" height={Math.min(880, chartData.length * 56 + 80)}>
+                          <BarChart data={chartData} layout="vertical" margin={{ top: 24, right: 180, left: 12, bottom: 24 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(156,163,175,0.3)" />
+                            <XAxis type="number" tickFormatter={v => `R$ ${(v / 1000).toFixed(0)}k`} tick={{ fill: '#9ca3af', fontSize: 12 }} />
+                            <YAxis type="category" dataKey="name" width={260} tick={{ fill: '#e5e7eb', fontSize: 12 }} tickLine={false} interval={0} />
+                            <Tooltip formatter={(v: number, n: string) => [formatCurrency(v), n]} contentStyle={{ borderRadius: 8, background: '#1f2937', color: '#fff', border: 'none' }} />
+                            <Legend />
+                            <Bar dataKey="Entrada" fill="#16a34a" radius={[0, 6, 6, 0]} name="Entrada" barSize={64}><LabelList dataKey="Entrada" content={renderBarLabel('Entrada', maxE) as any} /></Bar>
+                            <Bar dataKey="Saída" fill="#dc2626" radius={[0, 6, 6, 0]} name="Saída" barSize={64}><LabelList dataKey="Saída" content={renderBarLabel('Saída', maxS) as any} /></Bar>
+                            <Bar dataKey="Saldo" fill="#d97706" radius={[0, 6, 6, 0]} name="Saldo" barSize={64}><LabelList dataKey="Saldo" content={renderBarLabel('Saldo', maxSal) as any} /></Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    );
+                  })()}
+                  <div className="overflow-x-auto">
+                    <div className="max-h-[60vh] overflow-y-auto">
+                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 shadow-[0_1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]">
+                          <tr>
+                            {renderSortableHeaderLeft('Conta Bancária', 'conta', sortContaBancaria as any, handleSortContaBancariaReport)}
+                            {renderSortableHeader('Entrada', 'entries', sortContaBancaria as any, handleSortContaBancariaReport)}
+                            {renderSortableHeader('Saída', 'exits', sortContaBancaria as any, handleSortContaBancariaReport)}
+                            {renderSortableHeader('Saldo', 'valorFinal', sortContaBancaria as any, handleSortContaBancariaReport)}
+                            {renderSortableHeader('Registros', 'records', sortContaBancaria as any, handleSortContaBancariaReport)}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                          {sortedContaBancariaSummary.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Nenhum registro a exibir</td>
+                            </tr>
+                          ) : (
+                            sortedContaBancariaSummary.map((row, idx) => (
+                              <tr
+                                key={idx}
+                                className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                                onClick={() => handleRowClick('contaBancaria', row.conta || 'Não informado', `Registros - Conta Bancária: ${row.conta}`)}
+                              >
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{row.conta}</td>
+                                <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400 text-right">{formatCurrency(row.entrada)}</td>
+                                <td className="px-4 py-3 text-sm text-red-600 dark:text-red-400 text-right">{formatCurrency(row.saida)}</td>
+                                <td className="px-4 py-3 text-sm text-amber-600 dark:text-amber-400 text-right font-medium">{formatCurrency(row.valorFinal)}</td>
+                                <td className="px-4 py-3 text-sm text-right">{(row.registros ?? 0).toLocaleString('pt-BR')}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        <tfoot className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 z-10">
+                          <tr className="font-semibold">
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">Total</td>
+                            <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400 text-right">{formatCurrency(contaBancariaTotals.entrada)}</td>
+                            <td className="px-4 py-3 text-sm text-red-600 dark:text-red-400 text-right">{formatCurrency(contaBancariaTotals.saida)}</td>
+                            <td className="px-4 py-3 text-sm text-amber-600 dark:text-amber-400 text-right">{formatCurrency(contaBancariaTotals.valorFinal)}</td>
+                            <td className="px-4 py-3 text-sm text-right">{(contaBancariaTotals.registros ?? 0).toLocaleString('pt-BR')}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
              {/* Relatório personalizado por Centro de Custo */}
               <Card>
                   <CardHeader className="border-b-0">
@@ -2149,7 +2891,8 @@ const loadLogoBase64 = (): Promise<string | null> => {
                           const ratio = rowMax ? Math.abs(Number(value)) / rowMax : 0;
                           const isLongInRow = ratio >= 0.85;
                           const isLongGlobally = seriesMax > 0 && Math.abs(Number(value)) >= 0.9 * seriesMax;
-                          const isLongBar = (width > 0 && (isLongInRow || isLongGlobally));
+                          const wouldBeLong = (width > 0 && (isLongInRow || isLongGlobally));
+                          const isLongBar = wouldBeLong && dataKey !== 'Saldo';
                           const style: React.CSSProperties = { fill: isLongBar ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: isLongBar ? 500 : undefined };
                           const numVal = Number(value);
                           let textX: number;

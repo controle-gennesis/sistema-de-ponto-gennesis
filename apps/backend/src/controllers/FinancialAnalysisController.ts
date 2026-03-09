@@ -235,8 +235,11 @@ export const uploadFinancialAnalysis = async (req: Request, res: Response) => {
     }
 
     // Log das colunas encontradas (primeira linha)
-    if (rows.length > 0) {
-      console.log('Colunas encontradas na planilha:', Object.keys(rows[0]));
+    const colNames = rows.length > 0 ? Object.keys(rows[0]) : [];
+    console.log('Colunas encontradas na planilha:', colNames);
+    if (colNames.length > 0) {
+      const colNorm = colNames.map(c => `${c}->${normalizeColumnName(c)}`);
+      console.log('Colunas normalizadas (para debug Operação):', colNorm.filter(s => s.includes('oper')));
     }
 
     // Normalizar dados
@@ -279,23 +282,57 @@ export const uploadFinancialAnalysis = async (req: Request, res: Response) => {
       record.dataemissao = getValue(['DATAEMISSAO', 'dataemissao', 'DataEmissao', 'DATA EMISSÃO', 'data emissão', 'Data Emissão', 'DATA_EMISSAO', 'data_emissao']) || null;
       record.historico = getValue(['HISTORICO', 'historico', 'Historico', 'HISTÓRICO', 'Histórico', 'histórico']) || null;
       record.ccusto = getValue(['CCUSTO', 'ccusto', 'CCusto', 'CUSTO', 'custo', 'C CUSTO', 'c custo', 'CENTRO DE CUSTO', 'centro de custo', 'Centro de Custo']) || null;
-      record.natureza = getValue(['NATUREZA', 'natureza', 'Natureza']) || null;
+      // SOMENTE coluna "Natureza Orçamentária Financeira" - não usar "Natureza" genérico (evita pegar Descrição/Histórico)
+      record.natureza = getValue([
+        'NATUREZA ORCAMENTARIA FINANCEIRA', 'Natureza Orçamentária Financeira', 'natureza orçamentária financeira',
+        'NATUREZA ORCAMENTARIA', 'Natureza Orçamentária', 'natureza orçamentária'
+      ]) || null;
       record.fornecedor = getValue(['FORNECEDOR', 'fornecedor', 'Fornecedor']) || null;
       record.cpfCnpj = getValue(['CPF/CNPJ', 'cpf/cnpj', 'CPFCNPJ', 'cpfcnpj', 'CpfCnpj', 'CPF CNPJ', 'cpf cnpj', 'CPF_CNPJ', 'cpf_cnpj']) || null;
       record.saida = getValue(['SAIDA', 'saida', 'Saida', 'SAÍDA', 'saída', 'Saída', 'SAÍDAS', 'saídas', 'Saídas']) || null;
       record.entrada = getValue(['ENTRADA', 'entrada', 'Entrada', 'ENTRADAS', 'entradas', 'Entradas']) || null;
-      record.tipooperacao = getValue(['TIPOOPERACAO', 'tipooperacao', 'TipoOperacao', 'TIPO OPERAÇÃO', 'tipo operação', 'Tipo Operação', 'TIPO_OPERACAO', 'tipo_operacao', 'TIPO', 'tipo', 'Tipo']) || null;
+      // Operação: NÃO usar 'Tipo' isolado pois conflita com "Tipo Documento"
+      record.tipooperacao = getValue([
+        'OPERACAO', 'operacao', 'Operacao', 'OPERAÇÃO', 'Operação', 'operação',
+        'TIPO OPERACAO', 'tipo operacao', 'Tipo Operacao', 'TIPO OPERAÇÃO', 'tipo operação', 'Tipo Operação',
+        'TIPOOPERACAO', 'tipooperacao', 'TipoOperacao', 'TIPO_OPERACAO', 'tipo_operacao',
+        'TIPO DE OPERAÇÃO', 'tipo de operação', 'Tipo de Operação', 'TIPO DE OPERACAO', 'Tipo de Operacao',
+        'OPERACOES', 'operacoes', 'Operacoes', 'OPERAÇÕES', 'Operações', 'operações'
+      ]) || null;
+
+      // Fallback: buscar coluna cujo nome normalizado contenha "operacao"
+      if (!record.tipooperacao && rowKeys.length > 0) {
+        const operKey = rowKeys.find(k => {
+          const n = normalizeColumnName(k);
+          return n.includes('operacao') || (n.includes('oper') && n.length >= 6);
+        });
+        if (operKey != null) {
+          const v = row[operKey];
+          if (v != null && String(v).trim() !== '') record.tipooperacao = v;
+        }
+      }
+
       record.valortotal = getValue(['VALORTOTAL', 'valortotal', 'ValorTotal', 'VALOR TOTAL', 'valor total', 'Valor Total', 'VALOR_TOTAL', 'valor_total', 'VALOR', 'valor', 'Valor']) || null;
       record.codCcusto = getValue(['COD_CCUSTO', 'cod_ccusto', 'CodCcusto', 'COD CCUSTO', 'cod ccusto', 'Cod Ccusto']) || null;
       record.codFornecedor = getValue(['COD_FORNECEDOR', 'cod_fornecedor', 'CodFornecedor', 'COD FORNECEDOR', 'cod fornecedor', 'Cod Fornecedor']) || null;
       record.codNatureza = getValue(['COD_NATUREZA', 'cod_natureza', 'CodNatureza', 'COD NATUREZA', 'cod natureza', 'Cod Natureza']) || null;
       record.tipodocumento = getValue(['TIPODOCUMENTO', 'tipodocumento', 'TipoDocumento', 'TIPO DOCUMENTO', 'tipo documento', 'Tipo Documento', 'TIPO_DOCUMENTO', 'tipo_documento']) || null;
 
+      // Preservar TODAS as colunas originais da planilha (igual Natureza) - garante que Operação seja sempre encontrada
+      Object.entries(row).forEach(([k, v]) => {
+        if (v != null && v !== '') {
+          const s = String(v).trim();
+          if (s !== '') (record as any)[k] = v;
+        }
+      });
+
       return record;
     });
 
     // Log para debug - mostrar primeiros registros
     console.log('Primeiros 3 registros processados:', JSON.stringify(records.slice(0, 3), null, 2));
+    const opVals = [...new Set(records.map(r => r.tipooperacao || '').filter(Boolean))];
+    console.log('Valores únicos de tipooperacao encontrados:', opVals.length > 0 ? opVals : '(nenhum)');
 
     // Obter filtros de data opcionais do body (enviados via FormData)
     const startDateStr = req.body.startDate;
@@ -357,6 +394,7 @@ function analyzeFinancialData(records: FinancialRecord[]) {
   const byCompany: Map<string, { entries: number; exits: number; count: number; net: number }> = new Map();
   const byCostCenter: Map<string, { entries: number; exits: number; count: number; net: number }> = new Map();
   const byNature: Map<string, { entries: number; exits: number; count: number; net: number }> = new Map();
+  const byOperacao: Map<string, { entries: number; exits: number; count: number; net: number }> = new Map();
   const bySupplier: Map<string, { entries: number; exits: number; count: number; cpfCnpj: string; net: number }> = new Map();
   const byDocumentType: Map<string, { entries: number; exits: number; count: number; net: number }> = new Map();
 
@@ -429,6 +467,17 @@ function analyzeFinancialData(records: FinancialRecord[]) {
     natureData.net += netValue;
     natureData.count += 1;
 
+    // Agrupar por operação
+    const operacao = record.tipooperacao || (record as any)['Operação'] || (record as any)['Operacao'] || (record as any)['operação'] || 'Não informado';
+    if (!byOperacao.has(operacao)) {
+      byOperacao.set(operacao, { entries: 0, exits: 0, count: 0, net: 0 });
+    }
+    const operacaoData = byOperacao.get(operacao)!;
+    operacaoData.entries += entryValue;
+    operacaoData.exits += exitValue;
+    operacaoData.net += netValue;
+    operacaoData.count += 1;
+
     // Agrupar por fornecedor
     const supplier = record.fornecedor || 'Não informado';
     const cpfCnpj = record.cpfCnpj || '';
@@ -480,6 +529,16 @@ function analyzeFinancialData(records: FinancialRecord[]) {
       totalEntries: data.entries,
       totalExits: data.exits,
       netValue: data.net, // Usar valor líquido da coluna VALORTOTAL
+      recordCount: data.count
+    }))
+    .sort((a, b) => Math.abs(b.netValue) - Math.abs(a.netValue));
+
+  const byOperacaoArray = Array.from(byOperacao.entries())
+    .map(([operacao, data]) => ({
+      operacao,
+      totalEntries: data.entries,
+      totalExits: data.exits,
+      netValue: data.net,
       recordCount: data.count
     }))
     .sort((a, b) => Math.abs(b.netValue) - Math.abs(a.netValue));
@@ -537,26 +596,53 @@ function analyzeFinancialData(records: FinancialRecord[]) {
   console.log('Registros com saída > 0:', recordsWithExits);
   console.log('==========================');
 
-  // Preparar registros brutos para retorno (apenas campos essenciais)
-  const rawRecords = records.map(record => ({
-    coligada: record.coligada || '',
-    numerodocumento: record.numerodocumento || '',
-    segundonumero: record.segundonumero || '',
-    descricao: record.descricao || '',
-    datacriacao: record.datacriacao ? (record.datacriacao as Date).toISOString() : '',
-    datacompensacao: record.datacompensacao ? (record.datacompensacao as Date).toISOString() : '',
-    dataemissao: record.dataemissao ? (record.dataemissao as Date).toISOString() : '',
-    historico: record.historico || '',
-    ccusto: record.ccusto || '',
-    natureza: record.natureza || '',
-    fornecedor: record.fornecedor || '',
-    cpfCnpj: record.cpfCnpj || '',
-    saida: record.saida || 0,
-    entrada: record.entrada || 0,
-    tipooperacao: record.tipooperacao || '',
-    valortotal: record.valortotal || 0,
-    tipodocumento: record.tipodocumento || ''
-  }));
+  // Helper: encontra valor em coluna por nome normalizado (busca flexível)
+  const findValueByColumnPattern = (r: Record<string, any>, patterns: string[]): string => {
+    for (const p of patterns) {
+      const normP = p.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+      for (const k of Object.keys(r)) {
+        const normK = k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+        if (normK.includes(normP) || normP.includes(normK)) {
+          const v = r[k];
+          if (v != null && String(v).trim() !== '') return String(v).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  // Preparar registros brutos para retorno (campos mapeados + colunas originais da planilha)
+  const rawRecords = records.map(record => {
+    const r = record as any;
+    const tipoOperacao = r.tipooperacao || r['Operação'] || r['Operacao'] || findValueByColumnPattern(r, ['operacao', 'operação']) || '';
+    // SOMENTE coluna "Natureza Orçamentária Financeira" - padrão restrito para não pegar Descrição/Histórico
+    const natureza = (r.natureza ?? '').toString().trim() || findValueByColumnPattern(r, ['naturezaorcamentariafinanceira', 'natureza orcamentaria financeira']) || '';
+    const naturezaNome = ((r as any).naturezaNome ?? '').toString().trim() || findValueByColumnPattern(r, ['descricaonatureza', 'nomenatureza', 'descricao natureza']) || '';
+    const codcxa = ((r.codcxa ?? '').toString().trim() || (r.coligada ?? '').toString().trim() || findValueByColumnPattern(r, ['contacaixa', 'conta/caixa', 'conta caixa', 'codcxa', 'coligada'])) || '';
+    const base: Record<string, any> = {
+      coligada: r.coligada ?? '',
+      codcxa: codcxa || (r.codcxa ?? ''),
+      numerodocumento: r.numerodocumento ?? '',
+      segundonumero: r.segundonumero ?? '',
+      descricao: r.descricao ?? '',
+      datacriacao: r.datacriacao ? (r.datacriacao instanceof Date ? r.datacriacao.toISOString() : String(r.datacriacao)) : '',
+      datacompensacao: r.datacompensacao ? (r.datacompensacao instanceof Date ? r.datacompensacao.toISOString() : String(r.datacompensacao)) : '',
+      dataemissao: r.dataemissao ? (r.dataemissao instanceof Date ? r.dataemissao.toISOString() : String(r.dataemissao)) : '',
+      historico: r.historico ?? '',
+      ccusto: r.ccusto ?? '',
+      natureza,
+      naturezaNome,
+      fornecedor: r.fornecedor ?? '',
+      cpfCnpj: r.cpfCnpj ?? '',
+      saida: r.saida ?? 0,
+      entrada: r.entrada ?? 0,
+      tipooperacao: tipoOperacao,
+      valortotal: r.valortotal ?? 0,
+      tipodocumento: r.tipodocumento ?? ''
+    };
+    Object.keys(r).forEach(k => { if (!(k in base)) base[k] = r[k]; });
+    return base;
+  });
 
   return {
     summary: {
@@ -572,6 +658,7 @@ function analyzeFinancialData(records: FinancialRecord[]) {
     byCompany: byCompanyArray,
     byCostCenter: byCostCenterArray,
     byNature: byNatureArray,
+    byOperacao: byOperacaoArray,
     bySupplier: bySupplierArray,
     topSuppliers,
     byDocumentType: byDocumentTypeArray,
