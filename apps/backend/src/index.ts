@@ -51,6 +51,7 @@ import purchaseOrderRoutes from './routes/purchaseOrders';
 import budgetNatureRoutes from './routes/budgetNatures';
 import orcamentoRoutes from './routes/orcamento';
 import fluigRoutes from './routes/fluig';
+import whatsappRoutes from './routes/whatsapp';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -239,6 +240,7 @@ app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/budget-natures', budgetNatureRoutes);
 app.use('/api/orcamento', orcamentoRoutes);
 app.use('/api/fluig', fluigRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

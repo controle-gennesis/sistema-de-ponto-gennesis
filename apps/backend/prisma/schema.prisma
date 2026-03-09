@@ -1083,3 +1083,60 @@ model PasswordResetToken {
   @@index([userId])
   @@map("password_reset_tokens")
 }
+
+// Conversas do chatbot WhatsApp (Evolution API)
+model WhatsAppConversation {
+  id           String    @id @default(cuid())
+  phone        String    @unique
+  flowStatus   String    @default("MENU")
+  currentStep  String?
+  payload      Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  messages     WhatsAppMessage[]
+  submissions  WhatsAppSubmission[]
+
+  @@index([phone])
+  @@index([updatedAt])
+  @@map("whatsapp_conversations")
+}
+
+model WhatsAppMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // 'user' | 'assistant'
+  content        String
+  mediaUrl       String?
+  mediaKey       String?
+  fileName       String?
+  mimeType       String?
+  createdAt      DateTime @default(now())
+
+  conversation   WhatsAppConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("whatsapp_messages")
+}
+
+model WhatsAppSubmission {
+  id                   String   @id @default(cuid())
+  conversationId       String
+  type                 String   // ex: 'MEDICAL_CERTIFICATE'
+  payload              Json
+  fileUrl              String?
+  fileKey              String?
+  fileName              String?
+  status               String   @default("PENDING") // PENDING, PROCESSED, REJECTED
+  medicalCertificateId String?
+  createdAt            DateTime @default(now())
+
+  conversation         WhatsAppConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("whatsapp_submissions")
+}

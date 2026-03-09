@@ -158,6 +158,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BarChart3,
             description: 'Dashboard com dados dos datasets do Fluig',
             permission: true
+          },
+          {
+            name: 'Conversas WhatsApp',
+            href: '/ponto/conversas-whatsapp',
+            icon: MessageSquare,
+            description: 'Conversas do chatbot WhatsApp para o pessoal ver',
+            permission: isAdministrator || isDepartmentPessoal
           }
         ]
       },
