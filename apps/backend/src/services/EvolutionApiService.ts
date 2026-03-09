@@ -51,8 +51,11 @@ export class EvolutionApiService {
 
       return response.status >= 200 && response.status < 300;
     } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : String(err);
-      console.error('[EvolutionApi] Erro ao enviar:', msg);
+      const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+      const msg = ax?.message || String(err);
+      const status = ax?.response?.status;
+      const data = ax?.response?.data;
+      console.error('[EvolutionApi] Erro ao enviar:', msg, status ? `status=${status}` : '', data ? JSON.stringify(data).slice(0, 200) : '');
       return false;
     }
   }

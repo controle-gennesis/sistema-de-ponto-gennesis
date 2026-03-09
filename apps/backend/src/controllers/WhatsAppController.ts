@@ -70,6 +70,7 @@ export class WhatsAppController {
         return;
       }
 
+      console.log('[WhatsApp Webhook] Processando mensagem phone=', phone, 'text=', (text || '').slice(0, 50));
       whatsAppBot.processMessage(phone, text || ' ', hasMedia).catch((err) => {
         console.error('[WhatsApp Webhook] Erro ao processar:', err);
       });
