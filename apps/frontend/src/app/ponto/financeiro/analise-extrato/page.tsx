@@ -2651,28 +2651,25 @@ const loadLogoBase64 = (): Promise<string | null> => {
                     const maxE = Math.max(...chartData.map(d => d.Entrada), 1);
                     const maxS = Math.max(...chartData.map(d => d.Saída), 1);
                     const maxSal = Math.max(...chartData.map(d => Math.abs(d.Saldo)), 1);
-                    const renderBarLabel = (dataKey: 'Entrada' | 'Saída' | 'Saldo', seriesMax: number) => (props: Record<string, unknown>) => {
+                    const renderBarLabel = (_dataKey: 'Entrada' | 'Saída' | 'Saldo', _seriesMax: number) => (props: Record<string, unknown>) => {
                       const x = Number(props.x ?? 0); const y = Number(props.y ?? 0);
-                      const width = Number(props.width ?? 0); const height = Number(props.height ?? 0);
+                      const width = Math.abs(Number(props.width ?? 0)); const height = Number(props.height ?? 0);
                       const value = props.value as number | undefined;
-                      const payload = props.payload as { Entrada?: number; Saída?: number; Saldo?: number } | undefined;
                       if (value == null || value === 0) return null;
                       const text = formatCurrency(value);
-                      const rowMax = payload ? Math.max(Math.abs(payload.Entrada ?? 0), Math.abs(payload.Saída ?? 0), Math.abs(payload.Saldo ?? 0)) : 0;
-                      const ratio = rowMax ? Math.abs(Number(value)) / rowMax : 0;
-                      const wouldBeLong = (width > 0 && (ratio >= 0.85 || (seriesMax > 0 && Math.abs(Number(value)) >= 0.9 * seriesMax)));
-                      const isLongBar = wouldBeLong && dataKey !== 'Saldo';
+                      const textW = text.length * 6;
+                      const putInside = width >= textW + 16;
                       const numVal = Number(value);
                       let textX: number; let textAnchor: 'start' | 'end';
                       if (numVal >= 0) {
-                        textX = isLongBar ? x + width - 8 : x + width + 6;
-                        textAnchor = isLongBar ? 'end' : 'start';
+                        textX = putInside ? x + width - 8 : x + width + 6;
+                        textAnchor = putInside ? 'end' : 'start';
                       } else {
-                        const barLeft = width >= 0 ? x : x + width;
-                        textX = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? barLeft + 8 : barLeft - 6;
-                        textAnchor = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? 'start' : 'end';
+                        const barLeft = Number(props.width ?? 0) >= 0 ? x : x + Number(props.width ?? 0);
+                        textX = putInside ? barLeft + 8 : barLeft - 6;
+                        textAnchor = putInside ? 'start' : 'end';
                       }
-                      return <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={{ fill: isLongBar ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: isLongBar ? 500 : undefined }}>{text}</text>;
+                      return <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={{ fill: putInside ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: putInside ? 500 : undefined }}>{text}</text>;
                     };
                     return (
                       <div className="space-y-2 mb-6">
@@ -2761,28 +2758,25 @@ const loadLogoBase64 = (): Promise<string | null> => {
                     const maxE = Math.max(...chartData.map(d => d.Entrada), 1);
                     const maxS = Math.max(...chartData.map(d => d.Saída), 1);
                     const maxSal = Math.max(...chartData.map(d => Math.abs(d.Saldo)), 1);
-                    const renderBarLabel = (dataKey: 'Entrada' | 'Saída' | 'Saldo', seriesMax: number) => (props: Record<string, unknown>) => {
+                    const renderBarLabel = (_dataKey: 'Entrada' | 'Saída' | 'Saldo', _seriesMax: number) => (props: Record<string, unknown>) => {
                       const x = Number(props.x ?? 0); const y = Number(props.y ?? 0);
-                      const width = Number(props.width ?? 0); const height = Number(props.height ?? 0);
+                      const width = Math.abs(Number(props.width ?? 0)); const height = Number(props.height ?? 0);
                       const value = props.value as number | undefined;
-                      const payload = props.payload as { Entrada?: number; Saída?: number; Saldo?: number } | undefined;
                       if (value == null || value === 0) return null;
                       const text = formatCurrency(value);
-                      const rowMax = payload ? Math.max(Math.abs(payload.Entrada ?? 0), Math.abs(payload.Saída ?? 0), Math.abs(payload.Saldo ?? 0)) : 0;
-                      const ratio = rowMax ? Math.abs(Number(value)) / rowMax : 0;
-                      const wouldBeLong = (width > 0 && (ratio >= 0.85 || (seriesMax > 0 && Math.abs(Number(value)) >= 0.9 * seriesMax)));
-                      const isLongBar = wouldBeLong && dataKey !== 'Saldo';
+                      const textW = text.length * 6;
+                      const putInside = width >= textW + 16;
                       const numVal = Number(value);
                       let textX: number; let textAnchor: 'start' | 'end';
                       if (numVal >= 0) {
-                        textX = isLongBar ? x + width - 8 : x + width + 6;
-                        textAnchor = isLongBar ? 'end' : 'start';
+                        textX = putInside ? x + width - 8 : x + width + 6;
+                        textAnchor = putInside ? 'end' : 'start';
                       } else {
-                        const barLeft = width >= 0 ? x : x + width;
-                        textX = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? barLeft + 8 : barLeft - 6;
-                        textAnchor = (barLeft - 6 - Math.max(70, text.length * 7) < 280) ? 'start' : 'end';
+                        const barLeft = Number(props.width ?? 0) >= 0 ? x : x + Number(props.width ?? 0);
+                        textX = putInside ? barLeft + 8 : barLeft - 6;
+                        textAnchor = putInside ? 'start' : 'end';
                       }
-                      return <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={{ fill: isLongBar ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: isLongBar ? 500 : undefined }}>{text}</text>;
+                      return <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={{ fill: putInside ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: putInside ? 500 : undefined }}>{text}</text>;
                     };
                     return (
                       <div className="space-y-2 mb-6">
@@ -2874,48 +2868,27 @@ const loadLogoBase64 = (): Promise<string | null> => {
                         const maxEntrada = Math.max(...chartData.map(d => d.Entrada), 1);
                         const maxSaida = Math.max(...chartData.map(d => d.Saída), 1);
                         const maxSaldo = Math.max(...chartData.map(d => Math.abs(d.Saldo)), 1);
-                        const renderBarLabel = (dataKey: 'Entrada' | 'Saída' | 'Saldo', seriesMax: number) => (props: Record<string, unknown>) => {
+                        const renderBarLabel = (_dataKey: 'Entrada' | 'Saída' | 'Saldo', _seriesMax: number) => (props: Record<string, unknown>) => {
                           const x = Number(props.x ?? 0);
                           const y = Number(props.y ?? 0);
-                          const width = Number(props.width ?? 0);
+                          const width = Math.abs(Number(props.width ?? 0));
                           const height = Number(props.height ?? 0);
                           const value = props.value as number | undefined;
-                          const payload = props.payload as { Entrada?: number; Saída?: number; Saldo?: number } | undefined;
                           if (value == null || value === 0) return null;
                           const text = formatCurrency(value);
-                          const rowMax = payload ? Math.max(
-                            Math.abs(payload.Entrada ?? 0),
-                            Math.abs(payload.Saída ?? 0),
-                            Math.abs(payload.Saldo ?? 0)
-                          ) : 0;
-                          const ratio = rowMax ? Math.abs(Number(value)) / rowMax : 0;
-                          const isLongInRow = ratio >= 0.85;
-                          const isLongGlobally = seriesMax > 0 && Math.abs(Number(value)) >= 0.9 * seriesMax;
-                          const wouldBeLong = (width > 0 && (isLongInRow || isLongGlobally));
-                          const isLongBar = wouldBeLong && dataKey !== 'Saldo';
-                          const style: React.CSSProperties = { fill: isLongBar ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: isLongBar ? 500 : undefined };
+                          const textW = text.length * 6;
+                          const putInside = width >= textW + 16;
+                          const style: React.CSSProperties = { fill: putInside ? '#fff' : '#e5e7eb', fontSize: 11, fontWeight: putInside ? 500 : undefined };
                           const numVal = Number(value);
                           let textX: number;
                           let textAnchor: 'start' | 'middle' | 'end';
                           if (numVal >= 0) {
-                            if (isLongBar) {
-                              textX = x + width - 8;
-                              textAnchor = 'end';
-                            } else {
-                              textX = x + width + 6;
-                              textAnchor = 'start';
-                            }
+                            textX = putInside ? x + width - 8 : x + width + 6;
+                            textAnchor = putInside ? 'end' : 'start';
                           } else {
-                            const barLeft = width >= 0 ? x : x + width;
-                            const labelEstWidth = Math.max(70, text.length * 7);
-                            const wouldOverflow = (barLeft - 6 - labelEstWidth) < 280;
-                            if (wouldOverflow || isLongBar) {
-                              textX = barLeft + 8;
-                              textAnchor = 'start';
-                            } else {
-                              textX = barLeft - 6;
-                              textAnchor = 'end';
-                            }
+                            const barLeft = Number(props.width ?? 0) >= 0 ? x : x + Number(props.width ?? 0);
+                            textX = putInside ? barLeft + 8 : barLeft - 6;
+                            textAnchor = putInside ? 'start' : 'end';
                           }
                           return (
                             <text x={textX} y={y + height / 2} dy={4} textAnchor={textAnchor} style={style}>
