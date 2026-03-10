@@ -14,7 +14,15 @@ import {
   Paperclip,
   Loader2,
   ArrowLeft,
-  AlertCircle
+  AlertCircle,
+  FileCheck,
+  HelpCircle,
+  MoreHorizontal,
+  LayoutList,
+  UserCircle,
+  Hash,
+  Calendar,
+  FileType
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
@@ -55,6 +63,18 @@ interface Submission {
   createdAt: string;
 }
 
+/** Payload do fluxo de atestado (enviado no submission MEDICAL_CERTIFICATE) */
+interface AtestadoPayload {
+  name?: string | null;
+  registration?: string | null;
+  atestadoType?: string | null;
+  atestadoTypeLabel?: string | null;
+  dataInicio?: string | null;
+  dataFim?: string | null;
+  fileReceived?: boolean;
+  fileNote?: string | null;
+}
+
 interface ConversationDetail {
   id: string;
   phone: string;
@@ -74,8 +94,64 @@ function formatPhone(phone: string) {
   return phone;
 }
 
+type TabFiltro = 'todas' | 'atestados' | 'duvidas' | 'outros';
+
+const ATESTADO_FLOW_STEPS = [
+  'ASK_NAME',
+  'ASK_REGISTRATION',
+  'ATESTADO_ASK_TYPE',
+  'ATESTADO_ASK_DATES',
+  'ATESTADO_ASK_FILE',
+  'ATESTADO_COMPLETE'
+];
+
+function getCategoriaConversa(flowStatus: string): TabFiltro {
+  const status = (flowStatus || 'MENU').toUpperCase();
+  if (ATESTADO_FLOW_STEPS.includes(status)) return 'atestados';
+  if (status === 'DUVIDAS') return 'duvidas';
+  return 'outros';
+}
+
+function filtrarPorAba(conversas: ConversationSummary[], aba: TabFiltro): ConversationSummary[] {
+  if (aba === 'todas') return conversas;
+  return conversas.filter((c) => getCategoriaConversa(c.flowStatus) === aba);
+}
+
+function isAtestadoPayload(p: Record<string, unknown> | null): p is AtestadoPayload {
+  return p !== null && typeof p === 'object';
+}
+
+function LinhaDado({
+  icon: Icon,
+  label,
+  value
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string | null | undefined;
+}) {
+  const display = value?.trim() || '—';
+  return (
+    <div className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+      <Icon className="w-4 h-4 text-gray-400 dark:text-gray-500 mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">{label}</p>
+        <p className="text-sm text-gray-900 dark:text-gray-100 mt-0.5 break-words">{display}</p>
+      </div>
+    </div>
+  );
+}
+
+const ABAS: { id: TabFiltro; label: string; icon: React.ElementType }[] = [
+  { id: 'todas', label: 'Todas', icon: LayoutList },
+  { id: 'atestados', label: 'Atestados', icon: FileCheck },
+  { id: 'duvidas', label: 'Dúvidas', icon: HelpCircle },
+  { id: 'outros', label: 'Outros', icon: MoreHorizontal }
+];
+
 export default function ConversasWhatsAppPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [abaAtiva, setAbaAtiva] = useState<TabFiltro>('todas');
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -110,6 +186,7 @@ export default function ConversasWhatsAppPage() {
   };
 
   const conversations: ConversationSummary[] = listData?.data ?? [];
+  const conversasFiltradas = filtrarPorAba(conversations, abaAtiva);
   const detail: ConversationDetail | null = detailData?.data ?? null;
   const isLoading = loadingUser || loadingList;
 
@@ -127,124 +204,366 @@ export default function ConversasWhatsAppPage() {
       userName={userData?.data?.name ?? ''}
       onLogout={handleLogout}
     >
-      <div className="p-4 md:p-6 max-w-6xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <MessageSquare className="w-7 h-7" />
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Título e subtítulo centralizados */}
+        <div className="text-center">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
             Conversas WhatsApp
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Conversas do chatbot para o pessoal ver. Clique em uma conversa para ver as mensagens e envios (atestados etc.).
+          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
+            Conversas do chatbot. Clique em uma conversa para ver mensagens e envios (atestados etc.).
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Lista de conversas */}
-          <Card className="lg:col-span-1 dark:bg-gray-800 dark:border-gray-700">
-            <CardHeader className="pb-2">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Conversas
+        {/* Abas por tipo */}
+        <div className="flex flex-wrap justify-center gap-1 sm:gap-2 p-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl w-fit mx-auto">
+          {ABAS.map((aba) => {
+            const Icon = aba.icon;
+            const count =
+              aba.id === 'todas'
+                ? conversations.length
+                : conversations.filter((c) => getCategoriaConversa(c.flowStatus) === aba.id).length;
+            return (
+              <button
+                key={aba.id}
+                type="button"
+                onClick={() => setAbaAtiva(aba.id)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  abaAtiva === aba.id
+                    ? 'bg-red-600 text-white dark:bg-red-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                {aba.label}
+                <span
+                  className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${
+                    abaAtiva === aba.id ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+          {/* Lista de conversas (filtrada pela aba) */}
+          <Card className="lg:col-span-1 shadow-sm">
+            <CardHeader className="pb-3">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {abaAtiva === 'todas' ? 'Conversas' : ABAS.find((a) => a.id === abaAtiva)?.label ?? 'Conversas'}
               </h2>
             </CardHeader>
             <CardContent className="p-0">
               {isLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" />
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Carregando...</span>
                 </div>
-              ) : conversations.length === 0 ? (
-                <div className="py-8 px-4 text-center text-gray-500 dark:text-gray-400 flex flex-col items-center gap-2">
-                  <AlertCircle className="w-10 h-10" />
-                  <span>Nenhuma conversa ainda.</span>
-                  <span className="text-sm">Quando alguém mandar mensagem no WhatsApp, aparecerá aqui.</span>
+              ) : conversasFiltradas.length === 0 ? (
+                <div className="py-10 px-6 text-center">
+                  <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gray-100 dark:bg-gray-700/60 mb-4">
+                    <AlertCircle className="w-7 h-7 text-gray-500 dark:text-gray-400" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {conversations.length === 0
+                      ? 'Nenhuma conversa ainda'
+                      : `Nenhuma conversa nesta categoria`}
+                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-[240px] mx-auto">
+                    {conversations.length === 0
+                      ? 'Quando alguém mandar mensagem no WhatsApp, aparecerá aqui.'
+                      : `Troque a aba "Todas" para ver todas as conversas.`}
+                  </p>
                 </div>
               ) : (
-                <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {conversations.map((c) => (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(c.id)}
-                        className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
-                          selectedId === c.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-600' : ''
-                        }`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Phone className="w-4 h-4 text-gray-500 shrink-0" />
-                            <span className="font-medium text-gray-900 dark:text-white truncate">
-                              {formatPhone(c.phone)}
-                            </span>
+                <ul className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[calc(100vh-20rem)] overflow-y-auto">
+                  {conversasFiltradas.map((c) => {
+                    const categoria = getCategoriaConversa(c.flowStatus);
+                    const IconCategoria =
+                      categoria === 'atestados' ? FileCheck : categoria === 'duvidas' ? HelpCircle : MoreHorizontal;
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(c.id)}
+                          className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors border-l-4 border-transparent hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                            selectedId === c.id
+                              ? 'bg-red-50 dark:bg-red-900/20 border-l-red-600 dark:border-l-red-500'
+                              : ''
+                          }`}
+                        >
+                          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 shrink-0">
+                            <IconCategoria className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                                {formatPhone(c.phone)}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                              {c.lastMessage || 'Sem mensagens'}
+                            </p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                              {c.lastMessageAt
+                                ? format(new Date(c.lastMessageAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                                : format(new Date(c.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
+                            </p>
                           </div>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                            {c.lastMessage || 'Sem mensagens'}
-                          </p>
-                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                            {c.lastMessageAt
-                              ? format(new Date(c.lastMessageAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
-                              : format(new Date(c.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
-                          </p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
-                      </button>
-                    </li>
-                  ))}
+                          <ChevronRight className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </CardContent>
           </Card>
 
           {/* Detalhe da conversa */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 min-h-[320px]">
             {!selectedId ? (
-              <Card className="dark:bg-gray-800 dark:border-gray-700 h-full min-h-[320px] flex items-center justify-center">
-                <div className="text-center text-gray-500 dark:text-gray-400 py-12 px-4">
-                  <MessageSquare className="w-14 h-14 mx-auto mb-3 opacity-50" />
-                  <p>Selecione uma conversa para ver as mensagens e envios.</p>
+              <Card className="h-full min-h-[320px] flex items-center justify-center shadow-sm">
+                <div className="text-center py-12 px-6">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-xl bg-gray-100 dark:bg-gray-700/60 mb-4">
+                    <MessageSquare className="w-8 h-8 text-gray-500 dark:text-gray-400" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Selecione uma conversa</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-[280px] mx-auto">
+                    Para ver as mensagens e envios (atestados etc.).
+                  </p>
                 </div>
               </Card>
             ) : loadingDetail ? (
-              <Card className="dark:bg-gray-800 dark:border-gray-700 min-h-[320px] flex items-center justify-center">
-                <Loader2 className="w-10 h-10 animate-spin text-gray-400" />
+              <Card className="min-h-[320px] flex flex-col items-center justify-center gap-3 shadow-sm">
+                <Loader2 className="w-10 h-10 animate-spin text-gray-400 dark:text-gray-500" />
+                <span className="text-sm text-gray-500 dark:text-gray-400">Carregando conversa...</span>
               </Card>
             ) : detail ? (
-              <Card className="dark:bg-gray-800 dark:border-gray-700">
+              <Card className="shadow-sm">
                 <CardHeader className="border-b border-gray-200 dark:border-gray-700 pb-3">
                   <button
                     type="button"
                     onClick={() => setSelectedId(null)}
-                    className="lg:hidden flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-2"
+                    className="lg:hidden flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-2 px-1 py-1 -ml-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                   >
                     <ArrowLeft className="w-4 h-4" /> Voltar
                   </button>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Phone className="w-5 h-5 text-gray-500" />
-                      <span className="font-semibold text-gray-900 dark:text-white">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/20 shrink-0">
+                        <Phone className="w-4 h-4 text-red-600 dark:text-red-400" />
+                      </span>
+                      <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
                         {formatPhone(detail.phone)}
                       </span>
                     </div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
                       {detail.messages.length} mensagens · {detail.submissions.length} envio(s)
                     </span>
                   </div>
                 </CardHeader>
-                <CardContent className="p-4 space-y-4">
-                  {/* Mensagens */}
+                <CardContent className="p-4 sm:p-6 space-y-6">
+                  {/* Dados estruturados (atestados) — em destaque primeiro */}
+                  {detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE').length > 0 && (
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                        <FileCheck className="w-4 h-4 text-red-600 dark:text-red-400" />
+                        Dados do atestado
+                      </h3>
+                      <div className="space-y-4">
+                        {detail.submissions
+                          .filter((s) => s.type === 'MEDICAL_CERTIFICATE')
+                          .map((s, idx) => {
+                            const p = s.payload as AtestadoPayload | undefined;
+                            const isPayload = isAtestadoPayload(p);
+                            return (
+                              <div
+                                key={s.id}
+                                className="rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden bg-white dark:bg-gray-800/50"
+                              >
+                                <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between flex-wrap gap-2 bg-gray-50 dark:bg-gray-800">
+                                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                    {detail.submissions.filter((x) => x.type === 'MEDICAL_CERTIFICATE').length > 1
+                                      ? `Atestado #${idx + 1}`
+                                      : 'Atestado médico'}
+                                  </span>
+                                  <span
+                                    className={`text-xs px-2 py-1 rounded-md ${
+                                      s.status === 'PENDING'
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                        : s.status === 'PROCESSED' || s.status === 'APPROVED'
+                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                        : 'bg-gray-100 text-gray-700 dark:bg-gray-600 dark:text-gray-300'
+                                    }`}
+                                  >
+                                    {s.status === 'PENDING' ? 'Pendente' : s.status === 'PROCESSED' || s.status === 'APPROVED' ? 'Processado' : s.status}
+                                  </span>
+                                </div>
+                                <div className="p-4 space-y-0">
+                                  {isPayload ? (
+                                    <>
+                                      <LinhaDado icon={UserCircle} label="Nome completo" value={p.name} />
+                                      <LinhaDado
+                                        icon={Hash}
+                                        label="Matrícula ou CPF"
+                                        value={p.registration ?? null}
+                                      />
+                                      <LinhaDado
+                                        icon={FileType}
+                                        label="Tipo de atestado"
+                                        value={p.atestadoTypeLabel ?? p.atestadoType ?? null}
+                                      />
+                                      <LinhaDado icon={Calendar} label="Data início" value={p.dataInicio ?? null} />
+                                      <LinhaDado icon={Calendar} label="Data fim" value={p.dataFim ?? null} />
+                                      {s.fileUrl && (
+                                        <div className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                                          <Paperclip className="w-4 h-4 text-gray-400 dark:text-gray-500 mt-0.5 shrink-0" />
+                                          <div className="min-w-0 flex-1">
+                                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                                              Arquivo do atestado
+                                            </p>
+                                            <a
+                                              href={s.fileUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1 mt-1 text-sm text-red-600 dark:text-red-400 hover:underline"
+                                            >
+                                              {s.fileName || 'Ver arquivo'}
+                                            </a>
+                                          </div>
+                                        </div>
+                                      )}
+                                      <div className="flex items-start gap-3 py-2">
+                                        <Clock className="w-4 h-4 text-gray-400 dark:text-gray-500 mt-0.5 shrink-0" />
+                                        <div className="min-w-0 flex-1">
+                                          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                                            Data do envio
+                                          </p>
+                                          <p className="text-sm text-gray-900 dark:text-gray-100 mt-0.5">
+                                            {format(new Date(s.createdAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="py-2 text-sm text-gray-500 dark:text-gray-400">
+                                        Dados não disponíveis neste formato.
+                                      </div>
+                                      {s.fileUrl && (
+                                        <a
+                                          href={s.fileUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-sm text-red-600 dark:text-red-400 hover:underline"
+                                        >
+                                          <Paperclip className="w-4 h-4" />
+                                          {s.fileName || 'Ver arquivo'}
+                                        </a>
+                                      )}
+                                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                                        <Clock className="w-3 h-3 inline mr-1" />
+                                        {format(new Date(s.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                                      </p>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Outros envios (não atestado) */}
+                  {detail.submissions.filter((s) => s.type !== 'MEDICAL_CERTIFICATE').length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        Outros envios
+                      </h3>
+                      <div className="space-y-2">
+                        {detail.submissions
+                          .filter((s) => s.type !== 'MEDICAL_CERTIFICATE')
+                          .map((s) => (
+                            <div
+                              key={s.id}
+                              className="rounded-lg border border-gray-200 dark:border-gray-600 p-3 bg-gray-50 dark:bg-gray-700/30"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{s.type}</span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {format(new Date(s.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                                </span>
+                              </div>
+                              {s.payload && typeof s.payload === 'object' && Object.keys(s.payload).length > 0 && (
+                                <pre className="text-xs text-gray-600 dark:text-gray-400 mt-2 overflow-x-auto whitespace-pre-wrap break-words">
+                                  {JSON.stringify(s.payload, null, 2)}
+                                </pre>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dados em preenchimento (payload da conversa sem submission ainda) */}
+                  {detail.payload &&
+                    typeof detail.payload === 'object' &&
+                    Object.keys(detail.payload).length > 0 &&
+                    detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE').length === 0 && (
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                          <FileCheck className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                          Dados informados (em andamento)
+                        </h3>
+                        <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 p-4 bg-gray-50 dark:bg-gray-800/30">
+                          {isAtestadoPayload(detail.payload as Record<string, unknown>) && (
+                            <div className="space-y-0">
+                              <LinhaDado icon={UserCircle} label="Nome completo" value={(detail.payload as AtestadoPayload).name} />
+                              <LinhaDado
+                                icon={Hash}
+                                label="Matrícula ou CPF"
+                                value={(detail.payload as AtestadoPayload).registration ?? null}
+                              />
+                              <LinhaDado
+                                icon={FileType}
+                                label="Tipo de atestado"
+                                value={(detail.payload as AtestadoPayload).atestadoTypeLabel ?? (detail.payload as AtestadoPayload).atestadoType ?? null}
+                              />
+                              <LinhaDado icon={Calendar} label="Data início" value={(detail.payload as AtestadoPayload).dataInicio ?? null} />
+                              <LinhaDado icon={Calendar} label="Data fim" value={(detail.payload as AtestadoPayload).dataFim ?? null} />
+                            </div>
+                          )}
+                          {!isAtestadoPayload(detail.payload as Record<string, unknown>) && (
+                            <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto whitespace-pre-wrap">
+                              {JSON.stringify(detail.payload, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                  {/* Conversa (mensagens) */}
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4" /> Conversa
+                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400" /> Conversa
                     </h3>
-                    <div className="space-y-3 max-h-[360px] overflow-y-auto pr-2">
+                    <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
                       {detail.messages.map((m) => (
                         <div
                           key={m.id}
                           className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
                           <div
-                            className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                            className={`max-w-[85%] rounded-xl px-3 py-2.5 ${
                               m.role === 'user'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                                ? 'bg-red-600 text-white dark:bg-red-500'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
                             }`}
                           >
                             <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
@@ -274,65 +593,14 @@ export default function ConversasWhatsAppPage() {
                       ))}
                     </div>
                   </div>
-
-                  {/* Envios (atestados etc.) */}
-                  {detail.submissions.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-                        <FileText className="w-4 h-4" /> Enviados para o sistema
-                      </h3>
-                      <div className="space-y-2">
-                        {detail.submissions.map((s) => (
-                          <div
-                            key={s.id}
-                            className="rounded-lg border border-gray-200 dark:border-gray-600 p-3 bg-gray-50 dark:bg-gray-700/50"
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium text-gray-900 dark:text-white">
-                                {s.type === 'MEDICAL_CERTIFICATE' ? 'Atestado médico' : s.type}
-                              </span>
-                              <span
-                                className={`text-xs px-2 py-0.5 rounded ${
-                                  s.status === 'PENDING'
-                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                    : s.status === 'PROCESSED' || s.status === 'APPROVED'
-                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                    : 'bg-gray-100 text-gray-700 dark:bg-gray-600 dark:text-gray-300'
-                                }`}
-                              >
-                                {s.status}
-                              </span>
-                            </div>
-                            {s.payload && typeof s.payload === 'object' && (
-                              <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto whitespace-pre-wrap break-words">
-                                {JSON.stringify(s.payload, null, 2)}
-                              </pre>
-                            )}
-                            {s.fileUrl && (
-                              <a
-                                href={s.fileUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                <Paperclip className="w-4 h-4" />
-                                {s.fileName || 'Ver arquivo'}
-                              </a>
-                            )}
-                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                              <Clock className="w-3 h-3 inline mr-1" />
-                              {format(new Date(s.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             ) : (
-              <Card className="dark:bg-gray-800 dark:border-gray-700 min-h-[320px] flex items-center justify-center">
-                <p className="text-gray-500 dark:text-gray-400">Conversa não encontrada.</p>
+              <Card className="min-h-[320px] flex items-center justify-center shadow-sm">
+                <div className="text-center py-8 px-4">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Conversa não encontrada</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Tente selecionar outra conversa.</p>
+                </div>
               </Card>
             )}
           </div>
