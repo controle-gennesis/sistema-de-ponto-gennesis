@@ -117,8 +117,8 @@ function filtrarPorAba(conversas: ConversationSummary[], aba: TabFiltro): Conver
   return conversas.filter((c) => getCategoriaConversa(c.flowStatus) === aba);
 }
 
-function isAtestadoPayload(p: Record<string, unknown> | null): p is AtestadoPayload {
-  return p !== null && typeof p === 'object';
+function isAtestadoPayload(p: unknown): p is AtestadoPayload {
+  return p !== null && typeof p === 'object' && !Array.isArray(p);
 }
 
 function LinhaDado({
