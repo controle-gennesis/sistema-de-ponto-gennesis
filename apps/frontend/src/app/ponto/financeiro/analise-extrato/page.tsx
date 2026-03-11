@@ -714,44 +714,7 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
 
   const VAZIAS_CODE = '__VAZIAS__';
 
-  const naturezaEntradasList = useMemo(() => {
-    const base = (budgetNaturesList || []).filter((n: any) => {
-      const code = String(n.code || n.Código || n.codigo || '').trim();
-      return code.startsWith('1');
-    });
-    return [...base, { code: VAZIAS_CODE, name: 'Vazias' }];
-  }, [budgetNaturesList]);
-
-  const naturezaSaidasList = useMemo(() => {
-    const base = (budgetNaturesList || []).filter((n: any) => {
-      const code = String(n.code || n.Código || n.codigo || '').trim();
-      return code.startsWith('2') || code.startsWith('3');
-    });
-    return [...base, { code: VAZIAS_CODE, name: 'Vazias' }];
-  }, [budgetNaturesList]);
-
-  // Por padrão, selecionar todas as naturezas ao importar planilha (polos serão preenchidos após getPoloForRecord/polosList)
-  useEffect(() => {
-    if (!displayReport) return;
-    const allEntrada = (naturezaEntradasList || []).map((n: any) => String(n.code || n.Código || n.codigo || ''));
-    const allSaida = (naturezaSaidasList || []).map((n: any) => String(n.code || n.Código || n.codigo || ''));
-    if (allEntrada.length > 0) setSelectedNatureEntrada(allEntrada);
-    if (allSaida.length > 0) setSelectedNatureSaida(allSaida);
-  }, [displayReport, naturezaEntradasList, naturezaSaidasList]);
-
-  const getNatureCodeForRecord = (record: any) => {
-    const raw = getNatureRawForRecord(record);
-    if (!raw) return '';
-    const { map: nmap, normalize: nnormalize } = natureLookup || {};
-    if (nmap) {
-      const found = nmap.get(raw) || nmap.get(nnormalize ? nnormalize(raw) : raw) || nmap.get(raw.replace(/[^0-9]/g, ''));
-      if (found) return found.code;
-    }
-    if (/^\d/.test(raw)) return raw;
-    return '';
-  };
-
-  // Mesma coluna que o filtro usa - extrai valor bruto da natureza (para relatório/gráfico)
+  // Mesma coluna que o filtro usa - extrai valor bruto da natureza (precisa vir antes das listas)
   const getNatureRawForRecord = (record: any): string => {
     if (!record) return '';
     const tryKeys = [
@@ -773,6 +736,71 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
     }
     return '';
   };
+
+  const getNatureCodeForRecord = (record: any) => {
+    const raw = getNatureRawForRecord(record);
+    if (!raw) return '';
+    const { map: nmap, normalize: nnormalize } = natureLookup || {};
+    if (nmap) {
+      const norm = nnormalize ? nnormalize(raw) : raw;
+      const found = nmap.get(raw) || nmap.get(norm) || nmap.get(raw.replace(/[^0-9]/g, ''));
+      if (found) return found.code;
+    }
+    if (/^\d/.test(raw)) return raw;
+    return '';
+  };
+
+  // 1) Só naturezas da planilha. 2) Entrada = só códigos 1.x. 3) Saída = só códigos 2.x/3.x. Totais corretos via entradaAll/saidaAll.
+  const naturezaEntradasList = useMemo(() => {
+    const raw = displayReport?.rawRecords || [];
+    const map = new Map<string, { code: string; name: string }>();
+    raw.forEach((r: any) => {
+      const v = Number(String(r.valortotal ?? 0).replace(/[^\d-.,]/g, '').replace(',', '.')) || 0;
+      if (v <= 0) return;
+      const rawNat = getNatureRawForRecord(r);
+      const resolvedCode = getNatureCodeForRecord(r);
+      const code = resolvedCode || (rawNat || VAZIAS_CODE);
+      const key = code || VAZIAS_CODE;
+      const isEntradaTipo = key === VAZIAS_CODE || !resolvedCode || String(resolvedCode).trim().startsWith('1');
+      if (!isEntradaTipo) return;
+      if (!map.has(key)) {
+        const { map: nmap } = natureLookup || {};
+        const name = (code && nmap?.get(code)?.name) || (rawNat && nmap?.get(rawNat)?.name) || rawNat || (key === VAZIAS_CODE ? 'Vazias' : key);
+        map.set(key, { code: key, name });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [displayReport, natureLookup]);
+
+  const naturezaSaidasList = useMemo(() => {
+    const raw = displayReport?.rawRecords || [];
+    const map = new Map<string, { code: string; name: string }>();
+    raw.forEach((r: any) => {
+      const v = Number(String(r.valortotal ?? 0).replace(/[^\d-.,]/g, '').replace(',', '.')) || 0;
+      if (v >= 0) return;
+      const rawNat = getNatureRawForRecord(r);
+      const resolvedCode = getNatureCodeForRecord(r);
+      const code = resolvedCode || (rawNat || VAZIAS_CODE);
+      const key = code || VAZIAS_CODE;
+      const isSaidaTipo = key === VAZIAS_CODE || !resolvedCode || /^[23]/.test(String(resolvedCode).trim());
+      if (!isSaidaTipo) return;
+      if (!map.has(key)) {
+        const { map: nmap } = natureLookup || {};
+        const name = (code && nmap?.get(code)?.name) || (rawNat && nmap?.get(rawNat)?.name) || rawNat || (key === VAZIAS_CODE ? 'Vazias' : key);
+        map.set(key, { code: key, name });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [displayReport, natureLookup]);
+
+  // Por padrão, selecionar todas as naturezas ao importar planilha (polos serão preenchidos após getPoloForRecord/polosList)
+  useEffect(() => {
+    if (!displayReport) return;
+    const allEntrada = (naturezaEntradasList || []).map((n: any) => String(n.code || n.Código || n.codigo || ''));
+    const allSaida = (naturezaSaidasList || []).map((n: any) => String(n.code || n.Código || n.codigo || ''));
+    if (allEntrada.length > 0) setSelectedNatureEntrada(allEntrada);
+    if (allSaida.length > 0) setSelectedNatureSaida(allSaida);
+  }, [displayReport, naturezaEntradasList, naturezaSaidasList]);
 
   const isDateHeader = (h: string) => {
     if (!h) return false;
@@ -884,28 +912,35 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
     return out;
   };
 
-  // Filtro de natureza (reutilizado em costCenterSummary)
+  const normCode = (c: string) => String(c || '').replace(/[^0-9]/g, '').toLowerCase();
+
+  // Filtro: "Nenhuma" (desmarcar tudo) = excluir todos daquele tipo; "Selecionar tudo" = incluir todos.
   const filterRecordsByNature = (rec: any) => {
-    const entradaSelected = Array.isArray(selectedNatureEntrada) && selectedNatureEntrada.length > 0;
-    const saidaSelected = Array.isArray(selectedNatureSaida) && selectedNatureSaida.length > 0;
-    const entradaAll = entradaSelected && selectedNatureEntrada.length === (naturezaEntradasList || []).length;
-    const saidaAll = saidaSelected && selectedNatureSaida.length === (naturezaSaidasList || []).length;
+    const listEntrada = naturezaEntradasList || [];
+    const listSaida = naturezaSaidasList || [];
+    const entradaSelected = selectedNatureEntrada.length > 0;
+    const saidaSelected = selectedNatureSaida.length > 0;
+    const entradaAll = entradaSelected && selectedNatureEntrada.length === listEntrada.length;
+    const saidaAll = saidaSelected && selectedNatureSaida.length === listSaida.length;
     const rawVal = rec.valortotal ?? 0;
     const n = Number(String(rawVal).replace(/[^\d-.,]/g, '').replace(',', '.'));
     const val = isNaN(n) ? 0 : n;
     const nat = String(getNatureCodeForRecord(rec) ?? '');
+    const natNorm = normCode(nat);
     const isEntry = val > 0;
     const isExit = val < 0;
-    // Se nenhum nos dois: não incluir nada (relatório zerado)
     if (!entradaSelected && !saidaSelected) return false;
-    // Se entrada sem seleção: excluir todos os registros de entrada
     if (!entradaSelected && isEntry) return false;
-    // Se saída sem seleção: excluir todos os registros de saída
     if (!saidaSelected && isExit) return false;
-    // Entrada: se "todas" selecionadas, incluir qualquer entrada; senão, só as que batem (incl. natureza vazia se "Vazias" selecionada)
-    if (isEntry) return entradaAll || selectedNatureEntrada.includes(nat) || (nat === '' && selectedNatureEntrada.includes(VAZIAS_CODE));
-    // Saída: se "todas" selecionadas, incluir qualquer saída; senão, só as que batem (incl. natureza vazia se "Vazias" selecionada)
-    if (isExit) return saidaAll || selectedNatureSaida.includes(nat) || (nat === '' && selectedNatureSaida.includes(VAZIAS_CODE));
+    const entradaInclui = selectedNatureEntrada.includes(nat) || (natNorm && selectedNatureEntrada.some((c: string) => normCode(c) === natNorm));
+    const saidaInclui = selectedNatureSaida.includes(nat) || (natNorm && selectedNatureSaida.some((c: string) => normCode(c) === natNorm));
+    const vaziaE = nat === '' && (selectedNatureEntrada.includes(VAZIAS_CODE) || selectedNatureEntrada.length > 1);
+    const vaziaS = nat === '' && (selectedNatureSaida.includes(VAZIAS_CODE) || selectedNatureSaida.length > 1);
+    const natForaListaEntrada = nat !== '' && natNorm && !listEntrada.some((n: any) => normCode(String(n.code || n.codigo || '')) === natNorm);
+    const natForaListaSaida = nat !== '' && natNorm && !listSaida.some((n: any) => normCode(String(n.code || n.codigo || '')) === natNorm);
+    // Com 2+ selecionadas incluir "fora da lista" (ex.: 2.x em linha positiva / 1.x em negativa) para total correto em "todos menos um"
+    if (isEntry) return entradaAll || entradaInclui || vaziaE || (selectedNatureEntrada.length > 1 && natForaListaEntrada);
+    if (isExit) return saidaAll || saidaInclui || vaziaS || (selectedNatureSaida.length > 1 && natForaListaSaida);
     return false;
   };
 
