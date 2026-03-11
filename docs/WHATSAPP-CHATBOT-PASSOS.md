@@ -1,93 +1,66 @@
-# O que fazer para o chatbot WhatsApp funcionar
+# O que fazer para o chatbot WhatsApp funcionar (API Meta)
 
-Resumo do que **você precisa fazer** para o fluxo ficar completo: contato no WhatsApp, conversas no sistema e envio de atestado.
-
----
-
-## 1. Subir a Evolution API
-
-- **Opção A – Docker (recomendado)**  
-  - Documentação: https://doc.evolution-api.com/  
-  - Exemplo: criar um `docker-compose` com a imagem da Evolution API e expor a porta (ex.: 8080).  
-  - Você vai acessar o painel da Evolution (ou usar a API REST) para criar a instância.
-
-- **Opção B – Serviço que já oferece Evolution (ou API WhatsApp parecida)**  
-  - **[Evolution API Cloud (evocloud.pro)](https://evocloud.pro/)** – Evolution API hospedada; você só cria a instância e configura o webhook. Planos pagos (ex.: ~R$ 29,90/mês).  
-  - **[Railway](https://railway.com/deploy/evolution-api-4)** – Deploy da Evolution API com um clique (PostgreSQL + Redis inclusos). Você paga o uso no Railway; não é um “SaaS de WhatsApp”, mas não precisa gerenciar VPS.  
-  - **[Z-API (z-api.io)](https://www.z-api.io/)** – API WhatsApp brasileira hospedada; não é Evolution, mas faz o mesmo papel (instância, webhook, envio/recebimento). Suporte e documentação em PT-BR; tem trial.  
-  - Outros: qualquer provedor que ofereça “Evolution API” ou “WhatsApp API” com instância + webhook.
-
-**Resultado:** uma URL base da Evolution (ex.: `http://seu-servidor:8080` ou a URL que o provedor der) e uma **instância** (nome, ex.: `gennesis`).
+Resumo do que **você precisa fazer** para o fluxo ficar completo usando a **WhatsApp Cloud API (Meta)**: contato no WhatsApp, conversas no sistema e envio de atestado.
 
 ---
 
-## 2. Conectar um número no WhatsApp
+## 1. Criar app e configurar WhatsApp no Meta for Developers
 
-- Na Evolution API (painel ou via API), **criar uma instância** (ex.: nome `gennesis`).
-- Conectar o WhatsApp: **gerar QR Code** e escanear com o celular do número que será o “atendente” (pode ser um número da empresa ou um celular dedicado).
-- Depois de conectado, esse número aparece como contato normal no WhatsApp para quem falar com ele.
+- Acesse [developers.facebook.com](https://developers.facebook.com) e crie um **App** (tipo “Business”).
+- No app, adicione o produto **WhatsApp** (WhatsApp > Introdução).
+- Em **WhatsApp > Configuração da API**:
+  - **Número de telefone:** adicione/verifique um número (pode ser número de teste da Meta ou um número real após verificação do negócio).
+  - Anote o **ID do número de telefone** (Phone Number ID) e o **Token de acesso** (Access Token). O token de teste expira em 24h; para produção use um **token permanente** (System User ou processo de aprovação da Meta).
 
-**Resultado:** número conectado; quando alguém mandar mensagem para esse número, a Evolution recebe e pode enviar para o seu backend via webhook.
-
----
-
-## 3. Deixar seu backend acessível pela internet (para o webhook)
-
-A Evolution precisa chamar uma **URL pública** do seu backend (não dá para usar só `localhost`).
-
-- **Produção:** backend já em um servidor com HTTPS (ex.: Railway, Render, VPS).  
-  - Exemplo de URL: `https://seu-backend.com/api/whatsapp/webhook`
-- **Desenvolvimento:** usar **ngrok** (ou similar) para expor o `localhost`.  
-  - Ex.: `ngrok http 5000` → você recebe uma URL tipo `https://xxxx.ngrok.io`.  
-  - A URL do webhook seria: `https://xxxx.ngrok.io/api/whatsapp/webhook`
-
-**Resultado:** uma URL fixa que a Evolution vai chamar quando chegar mensagem (ex.: `https://seu-dominio.com/api/whatsapp/webhook`).
+**Resultado:** você tem `WHATSAPP_PHONE_NUMBER_ID` e `WHATSAPP_ACCESS_TOKEN` para o `.env`.
 
 ---
 
-## 4. Configurar o webhook na Evolution API
+## 2. Deixar seu backend acessível pela internet (para o webhook)
 
-- Na Evolution, configurar o **webhook** da instância com:
-  - **URL:** a URL do passo 3 (ex.: `https://seu-backend.com/api/whatsapp/webhook`).
-  - **Eventos:** pelo menos `MESSAGES_UPSERT` (quando chega mensagem).
-- Guardar a **API Key** (ou token) da Evolution para o backend enviar mensagens.
+A Meta precisa chamar uma **URL pública** do seu backend (HTTPS em produção).
 
-**Resultado:** toda mensagem recebida no WhatsApp será enviada pela Evolution para o seu backend nessa URL.
+- **Produção:** backend em servidor com HTTPS (ex.: Railway, Render, VPS).  
+  - Exemplo: `https://seu-backend.com/api/whatsapp/webhook`
+- **Desenvolvimento:** use **ngrok** (ou similar).  
+  - Ex.: `ngrok http 5000` → URL tipo `https://xxxx.ngrok.io`.  
+  - Webhook: `https://xxxx.ngrok.io/api/whatsapp/webhook`
+
+**Resultado:** uma URL fixa para configurar no webhook do app Meta.
 
 ---
 
-## 5. Implementar no backend (o que ainda falta)
+## 3. Configurar o webhook no app Meta
 
-No seu projeto já existe:
+- No app, vá em **WhatsApp > Configuração** (ou Configurações do app > Webhooks).
+- Clique em **Configurar** ou **Editar** no campo “Webhook”.
+- **URL de callback:** a URL do passo 2 (ex.: `https://seu-backend.com/api/whatsapp/webhook`).
+- **Token de verificação (Verify token):** um valor que **você escolhe** e que está no `.env` como `WHATSAPP_VERIFY_TOKEN` (ex.: `gennesis_whatsapp_verify`).
+- Clique em **Verificar e salvar**. O backend responde ao GET com o `hub.challenge`; a Meta valida e ativa o webhook.
+- Inscreva-se no objeto **whatsapp_business_account** e no campo **messages**.
 
-- Tabelas e API para listar/ver conversas (página “Conversas WhatsApp”).
-- Modelos: `WhatsAppConversation`, `WhatsAppMessage`, `WhatsAppSubmission`.
+**Resultado:** toda mensagem recebida no número configurado será enviada pela Meta para o seu backend nessa URL.
 
-Ainda falta **criar no backend**:
+---
 
-1. **Rota de webhook (POST)**  
-   - Ex.: `POST /api/whatsapp/webhook`  
-   - Deve ser **pública** (sem auth), pois quem chama é a Evolution.  
-   - Receber o payload da Evolution (evento `MESSAGES_UPSERT`), extrair: número do remetente, conteúdo da mensagem, anexo (se houver).
+## 4. Variáveis de ambiente no backend
 
-2. **Serviço do bot (fluxo da conversa)**  
-   - Ao receber uma mensagem:  
-     - Buscar ou criar `WhatsAppConversation` pelo número (phone).  
-     - Salvar a mensagem do usuário em `WhatsAppMessage`.  
-     - Definir o fluxo (ex.: MENU → perguntar nome → perguntar dados → se escolheu atestado, pedir arquivo → ao receber arquivo e dados, criar `WhatsAppSubmission` e, se for atestado, criar também `MedicalCertificate`).  
-   - Enviar a resposta do bot chamando a **API da Evolution** (enviar mensagem para aquele número).
+No `.env` do backend:
 
-3. **Variáveis de ambiente**  
-   - No `.env` do backend, algo como:  
-     - `EVOLUTION_API_URL=https://sua-evolution.com`  
-     - `EVOLUTION_INSTANCE=gennesis`  
-     - `EVOLUTION_API_KEY=suachave`
+```env
+WHATSAPP_PHONE_NUMBER_ID=   # ID do número de telefone (Meta)
+WHATSAPP_ACCESS_TOKEN=      # Token de acesso (permanente em produção)
+WHATSAPP_VERIFY_TOKEN=gennesis_whatsapp_verify   # Mesmo valor definido no Webhook (Verify token)
+```
 
-Depois disso, quando alguém mandar mensagem no WhatsApp:
+---
 
-- A Evolution chama seu webhook.  
-- Seu backend grava a mensagem, processa o fluxo e responde (via Evolution).  
-- A conversa e os envios (atestados) aparecem na página **Conversas WhatsApp** no sistema.
+## 5. O que já está implementado no backend
+
+- **GET /api/whatsapp/webhook** – Verificação do webhook pela Meta (hub.mode, hub.verify_token, hub.challenge).
+- **POST /api/whatsapp/webhook** – Recebe eventos da Meta (mensagens de texto, imagem, documento etc.), extrai número e conteúdo, chama o bot.
+- **Serviço do bot** – Fluxo (menu, atestado, dúvidas), gravação em `WhatsAppConversation`, `WhatsAppMessage`, `WhatsAppSubmission` e envio de resposta via **Meta WhatsApp Cloud API**.
+- **Rotas autenticadas** – Listagem e detalhe de conversas em **Principal → Conversas WhatsApp**.
 
 ---
 
@@ -95,10 +68,11 @@ Depois disso, quando alguém mandar mensagem no WhatsApp:
 
 | # | O que fazer |
 |---|-------------|
-| 1 | Subir Evolution API (Docker ou provedor). |
-| 2 | Criar instância e conectar número WhatsApp (QR Code). |
-| 3 | Expor o backend na internet (produção ou ngrok em dev). |
-| 4 | Configurar na Evolution a URL do webhook e eventos (ex.: MESSAGES_UPSERT). |
-| 5 | No backend: criar rota POST do webhook, serviço do bot (fluxo + salvar conversa/mensagens/submissions e atestado) e envio de resposta via Evolution API; configurar .env. |
+| 1 | Criar app no Meta for Developers e configurar WhatsApp (número + token). |
+| 2 | Expor o backend na internet (produção ou ngrok em dev). |
+| 3 | Configurar webhook no app Meta (URL + Verify token) e inscrever em “messages”. |
+| 4 | Preencher no `.env`: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_VERIFY_TOKEN`. |
 
-Quando esses passos estiverem feitos, o contato aparece no WhatsApp, as conversas ficam salvas e visíveis na página em **Principal → Conversas WhatsApp**, e o atestado enviado pelo chat pode ser criado no sistema e aparecer para o pessoal.
+Quando isso estiver feito, as mensagens recebidas no número configurado serão processadas pelo bot, as conversas e atestados aparecerão em **Principal → Conversas WhatsApp**, e as respostas serão enviadas pela API oficial da Meta.
+
+Documentação oficial: [WhatsApp Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api).

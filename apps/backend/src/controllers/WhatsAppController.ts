@@ -4,76 +4,107 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { whatsAppBot } from '../services/WhatsAppBotService';
 
+/** Token que a Meta envia no GET do webhook; deve ser igual ao configurado no App. */
+const META_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'gennesis_whatsapp_verify';
+
 export class WhatsAppController {
   /**
-   * Webhook público - recebe eventos da Evolution API (MESSAGES_UPSERT)
+   * Verificação do webhook pela Meta (GET).
+   * Meta envia hub.mode, hub.verify_token, hub.challenge; respondemos com hub.challenge se o token bater.
+   */
+  async verifyWebhook(req: Request, res: Response) {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    // Meta exige resposta em texto com o valor exato de hub.challenge (string)
+    const challengeStr = Array.isArray(challenge) ? challenge[0] : challenge;
+
+    if (mode === 'subscribe' && token === META_VERIFY_TOKEN && challengeStr) {
+      console.log('[WhatsApp Webhook] Verificação Meta OK');
+      res.status(200).type('text').send(String(challengeStr));
+    } else {
+      console.warn('[WhatsApp Webhook] Verificação falhou:', { mode, tokenMatch: token === META_VERIFY_TOKEN, hasChallenge: !!challengeStr });
+      res.status(403).send('Forbidden');
+    }
+  }
+
+  /**
+   * Webhook público - recebe eventos da WhatsApp Cloud API (Meta).
+   * Payload: { object: "whatsapp_business_account", entry: [ { changes: [ { value: { messages: [...] } } ] } ] }
    */
   async handleWebhook(req: Request, res: Response, next: NextFunction) {
     try {
+      const body = req.body || {};
+
+      // Resposta rápida 200 para a Meta (evitar retentativas)
       res.status(200).send('OK');
 
-      const body = req.body || {};
-      const event = String(body.event || body.type || '').toLowerCase();
-
-      if (!event.includes('message') && !event.includes('upsert')) {
+      if (body.object !== 'whatsapp_business_account') {
         return;
       }
 
-      // Evolution pode enviar data como objeto ou como array de mensagens
-      let data = body.data ?? body;
-      if (Array.isArray(data) && data.length > 0) {
-        data = data[0];
+      const entries = Array.isArray(body.entry) ? body.entry : [];
+      for (const entry of entries) {
+        const changes = Array.isArray(entry.changes) ? entry.changes : [];
+        for (const change of changes) {
+          const value = change.value || {};
+          const messages = Array.isArray(value.messages) ? value.messages : [];
+          for (const msg of messages) {
+            const phone = String(msg.from || '').trim();
+            if (!phone) {
+              console.warn('[WhatsApp Webhook] Mensagem sem from:', JSON.stringify(msg).slice(0, 200));
+              continue;
+            }
+
+            let text = '';
+            let hasMedia = false;
+
+            switch (msg.type) {
+              case 'text':
+                text = msg.text?.body ?? '';
+                break;
+              case 'image':
+              case 'document':
+                hasMedia = true;
+                text = msg.caption ?? msg.image?.caption ?? msg.document?.caption ?? '';
+                break;
+              case 'audio':
+              case 'video':
+                hasMedia = true;
+                text = msg.caption ?? '';
+                break;
+              case 'button':
+                text = msg.button?.text ?? msg.button?.payload ?? '';
+                break;
+              case 'interactive':
+                if (msg.interactive?.type === 'button_reply') {
+                  text = msg.interactive.button_reply?.id ?? msg.interactive.button_reply?.title ?? '';
+                } else if (msg.interactive?.type === 'list_reply') {
+                  text = msg.interactive.list_reply?.id ?? msg.interactive.list_reply?.title ?? '';
+                }
+                break;
+              default:
+                text = '';
+            }
+
+            if (!text && !hasMedia) {
+              console.warn('[WhatsApp Webhook] Sem texto nem mídia, ignorando. phone=', phone);
+              continue;
+            }
+
+            console.log(
+              '[WhatsApp Webhook] Processando mensagem phone=',
+              phone,
+              'text=',
+              (text || '').slice(0, 50)
+            );
+            whatsAppBot.processMessage(phone, text || ' ', hasMedia).catch((err) => {
+              console.error('[WhatsApp Webhook] Erro ao processar:', err);
+            });
+          }
+        }
       }
-
-      const key = data?.key || {};
-      const fromMe = !!key.fromMe;
-      if (fromMe) return;
-
-      const remoteJid =
-        key.remoteJid || data?.remoteJid || key?.participant || data?.participant || '';
-      const phone = String(remoteJid)
-        .replace(/@s\.whatsapp\.net$/i, '')
-        .replace(/@c\.us$/i, '')
-        .replace(/@g\.us$/i, '')
-        .trim();
-      if (!phone) {
-        console.warn('[WhatsApp Webhook] Sem phone no payload:', JSON.stringify(body).slice(0, 300));
-        return;
-      }
-
-      let text = '';
-      let hasMedia = false;
-
-      const msg = data?.message || body.message || {};
-      if (typeof msg.conversation === 'string') {
-        text = msg.conversation;
-      } else if (msg.extendedTextMessage?.text) {
-        text = msg.extendedTextMessage.text;
-      } else if (msg.imageMessage) {
-        hasMedia = true;
-        text = msg.imageMessage.caption || '';
-      } else if (msg.documentMessage) {
-        hasMedia = true;
-        text = msg.documentMessage.caption || '';
-      } else if (msg.buttonsResponseMessage?.selectedButtonId) {
-        text = msg.buttonsResponseMessage.selectedButtonId;
-      } else if (msg.listResponseMessage?.singleSelectReply?.id) {
-        text = msg.listResponseMessage.singleSelectReply.id;
-      } else if (typeof msg.text === 'object' && msg.text?.body) {
-        text = msg.text.body;
-      } else if (typeof msg.text === 'string') {
-        text = msg.text;
-      }
-
-      if (!text && !hasMedia) {
-        console.warn('[WhatsApp Webhook] Sem texto nem mídia, ignorando. phone=', phone);
-        return;
-      }
-
-      console.log('[WhatsApp Webhook] Processando mensagem phone=', phone, 'text=', (text || '').slice(0, 50));
-      whatsAppBot.processMessage(phone, text || ' ', hasMedia).catch((err) => {
-        console.error('[WhatsApp Webhook] Erro ao processar:', err);
-      });
     } catch (error) {
       console.error('[WhatsApp Webhook] Erro:', error);
     }

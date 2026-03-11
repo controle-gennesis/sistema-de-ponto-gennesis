@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { evolutionApi } from './EvolutionApiService';
+import { metaWhatsApp } from './MetaWhatsAppService';
 
 type FlowStatus =
   | 'MENU'
@@ -238,7 +238,7 @@ export class WhatsAppBotService {
     });
 
     await delayNatural();
-    await evolutionApi.sendText(phone, reply);
+    await metaWhatsApp.sendText(phone, reply);
   }
 
   private getMenuMessage(): string {

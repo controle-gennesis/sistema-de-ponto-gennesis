@@ -6,7 +6,8 @@ import { requireRole } from '../middleware/roleAuth';
 const router = Router();
 const controller = new WhatsAppController();
 
-// Webhook PÚBLICO - Evolution API chama sem autenticação (antes do authenticate)
+// Webhook PÚBLICO - Meta WhatsApp Cloud API (verificação GET + eventos POST)
+router.get('/webhook', (req, res) => controller.verifyWebhook(req, res));
 router.post('/webhook', (req, res, next) => controller.handleWebhook(req, res, next));
 
 router.use(authenticate);

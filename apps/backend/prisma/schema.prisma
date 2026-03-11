@@ -1084,7 +1084,7 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
-// Conversas do chatbot WhatsApp (Evolution API)
+// Conversas do chatbot WhatsApp (Meta Cloud API)
 model WhatsAppConversation {
   id           String    @id @default(cuid())
   phone        String    @unique
