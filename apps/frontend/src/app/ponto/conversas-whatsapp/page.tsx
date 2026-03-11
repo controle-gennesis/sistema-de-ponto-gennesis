@@ -211,7 +211,7 @@ export default function ConversasWhatsAppPage() {
             Conversas WhatsApp
           </h1>
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
-            Conversas do chatbot. Clique em uma conversa para ver mensagens e envios (atestados etc.).
+            Chatbot.
           </p>
         </div>
 
