@@ -301,13 +301,26 @@ export default function BIPage() {
 
   // Marcar todos os filtros por padrão quando os dados carregam ou ao trocar de dataset
   useEffect(() => {
-    if (filiais.length > 0) setSelectedFiliais([...filiais]);
-    else setSelectedFiliais([]);
-    if (centrosCusto.length > 0) setSelectedCCs([...centrosCusto]);
-    else setSelectedCCs([]);
-    if (fornecedores.length > 0) setSelectedFornecedores([...fornecedores]);
-    else setSelectedFornecedores([]);
-  }, [filiais, centrosCusto, fornecedores]);
+    // Sempre que a lista base muda, garante que o estado reflete "tudo selecionado"
+    if (filiais.length > 0 && selectedFiliais.length !== filiais.length) {
+      setSelectedFiliais(filiais);
+    }
+    if (centrosCusto.length > 0 && selectedCCs.length !== centrosCusto.length) {
+      setSelectedCCs(centrosCusto);
+    }
+    if (fornecedores.length > 0 && selectedFornecedores.length !== fornecedores.length) {
+      setSelectedFornecedores(fornecedores);
+    }
+    if (filiais.length === 0 && selectedFiliais.length !== 0) {
+      setSelectedFiliais([]);
+    }
+    if (centrosCusto.length === 0 && selectedCCs.length !== 0) {
+      setSelectedCCs([]);
+    }
+    if (fornecedores.length === 0 && selectedFornecedores.length !== 0) {
+      setSelectedFornecedores([]);
+    }
+  }, [filiais, centrosCusto, fornecedores, selectedFiliais.length, selectedCCs.length, selectedFornecedores.length]);
 
   const hasActiveFilters =
     searchText.trim() !== '' ||

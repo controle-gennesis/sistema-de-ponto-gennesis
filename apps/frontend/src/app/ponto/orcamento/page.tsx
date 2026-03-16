@@ -17,7 +17,8 @@ import {
   ChevronUp,
   ChevronRight,
   Building2,
-  FileDown
+  FileDown,
+  FileText
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -41,6 +42,23 @@ export interface ItemServico {
   codigo: string;
   banco: string;
   descricao: string;
+}
+
+/** Linha de medição para memória de cálculo dos quantitativos (C, L, H, N, empolamento, descrição) */
+export interface LinhaMedicao {
+  descricao?: string;
+  C: number;
+  L: number;
+  H: number;
+  N: number;
+  empolamento: number; // fator 1,00 / 1,10 / 1,20 / 1,30 (legado: percPerda convertido)
+}
+
+export type TipoUnidadeFormula = 'm3' | 'm2' | 'm' | 'un';
+
+export interface DimensoesItem {
+  tipoUnidade: TipoUnidadeFormula;
+  linhas: LinhaMedicao[];
 }
 
 export interface Subtitulo {
@@ -194,6 +212,29 @@ function chavesParaBusca(codigo: string, banco: string, chave: string): string[]
   return Array.from(uniq);
 }
 
+/** Calcula A (área) = C×L×N, V (volume) = A×H ou C×L×H×N */
+function calcA(linha: LinhaMedicao): number {
+  const { C, L, N } = linha;
+  return (C || 0) * (L || 0) * (N || 1);
+}
+function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
+  const { C, L, H, N } = linha;
+  const A = calcA(linha);
+  switch (tipo) {
+    case 'm3': return A * (H || 0);
+    case 'm2': return A;
+    case 'm': return (C || 0) * (N || 1);
+    default: return N || 0;
+  }
+}
+/** Calcula SUBTOTAL = V × empolamento */
+function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
+  const fator = (linha.empolamento != null && linha.empolamento > 0)
+    ? linha.empolamento
+    : ((linha as unknown as { percPerda?: number }).percPerda != null ? 1 + (linha as unknown as { percPerda: number }).percPerda / 100 : 1);
+  return calcV(linha, tipo) * fator;
+}
+
 export default function OrcamentoPage() {
   const router = useRouter();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
@@ -207,10 +248,12 @@ export default function OrcamentoPage() {
   const [subtitulosSelecionados, setSubtitulosSelecionados] = useState<Set<string>>(new Set());
   const [subtitulosNoOrcamento, setSubtitulosNoOrcamento] = useState<string[]>([]);
   const [quantidadesPorItem, setQuantidadesPorItem] = useState<Record<string, number>>({});
+  const [dimensoesPorItem, setDimensoesPorItem] = useState<Record<string, DimensoesItem>>({});
   const [novoServicoNome, setNovoServicoNome] = useState('');
   const [showAddServico, setShowAddServico] = useState(false);
   const [isImportandoOrcamento, setIsImportandoOrcamento] = useState(false);
   const [servicosExpandidos, setServicosExpandidos] = useState<Set<string>>(new Set());
+  const [itensComDimensoesAbertos, setItensComDimensoesAbertos] = useState<Set<string>>(new Set());
   const [loadingFromApi, setLoadingFromApi] = useState(false);
   const [showServicosDropdown, setShowServicosDropdown] = useState(false);
   const [servicosSearch, setServicosSearch] = useState('');
@@ -283,6 +326,8 @@ export default function OrcamentoPage() {
     setSubtitulosNoOrcamento([]);
     setSubtitulosSelecionados(new Set());
     setQuantidadesPorItem({});
+    setDimensoesPorItem({});
+    setItensComDimensoesAbertos(new Set());
     saveServicos(centroCustoId, []);
     localStorage.setItem(storageKey(centroCustoId, 'imports'), '[]');
     persistToApi([], []);
@@ -533,11 +578,9 @@ export default function OrcamentoPage() {
 
   const removeItemFromServico = (servicoId: string, subtituloId: string, chave: string) => {
     const itemKey = `${servicoId}|${subtituloId}|${chave}`;
-    setQuantidadesPorItem(prev => {
-      const next = { ...prev };
-      delete next[itemKey];
-      return next;
-    });
+    setQuantidadesPorItem(prev => { const next = { ...prev }; delete next[itemKey]; return next; });
+    setDimensoesPorItem(prev => { const next = { ...prev }; delete next[itemKey]; return next; });
+    setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.delete(itemKey); return s; });
     const updated = servicos.map(s => {
       if (s.id !== servicoId) return s;
       return {
@@ -609,9 +652,12 @@ export default function OrcamentoPage() {
     setSubtitulosNoOrcamento(prev => prev.filter(k => k !== key));
     setQuantidadesPorItem(prev => {
       const next = { ...prev };
-      Object.keys(next).forEach(k => {
-        if (k.startsWith(key + '|')) delete next[k];
-      });
+      Object.keys(next).forEach(k => { if (k.startsWith(key + '|')) delete next[k]; });
+      return next;
+    });
+    setDimensoesPorItem(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(k => { if (k.startsWith(key + '|')) delete next[k]; });
       return next;
     });
   };
@@ -628,7 +674,7 @@ export default function OrcamentoPage() {
   }, [composicoes]);
 
   const { itensCalculados, total } = useMemo(() => {
-    const lista: { key: string; servicoNome: string; subtituloNome: string; item: ItemServico; precoUnitario: number; quantidade: number; total: number }[] = [];
+    const lista: { key: string; servicoNome: string; subtituloNome: string; item: ItemServico; precoUnitario: number; quantidade: number; total: number; dimensoes?: DimensoesItem }[] = [];
     for (const bloco of subtitulosAdicionados) {
       for (const i of bloco.itens) {
         const chaves = chavesParaBusca(i.codigo, i.banco, i.chave);
@@ -641,7 +687,13 @@ export default function OrcamentoPage() {
           }
         }
         const itemKey = `${bloco.key}|${i.chave}`;
-        const qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
+        const dim = dimensoesPorItem[itemKey];
+        let qtd = 0;
+        if (dim?.linhas?.length) {
+          qtd = dim.linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, dim.tipoUnidade), 0);
+        } else {
+          qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
+        }
         const totalItem = preco * qtd;
         lista.push({
           key: itemKey,
@@ -650,16 +702,166 @@ export default function OrcamentoPage() {
           item: i,
           precoUnitario: preco,
           quantidade: qtd,
-          total: totalItem
+          total: totalItem,
+          dimensoes: dim
         });
       }
     }
     const soma = lista.reduce((acc, x) => acc + x.total, 0);
     return { itensCalculados: lista, total: soma };
-  }, [subtitulosAdicionados, quantidadesPorItem, mapaPrecos]);
+  }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaPrecos]);
 
   const setQuantidadeItem = (itemKey: string, valor: number) => {
     setQuantidadesPorItem(prev => ({ ...prev, [itemKey]: Math.max(0, valor) }));
+  };
+
+  const setDimensoesItem = (itemKey: string, d: DimensoesItem | null) => {
+    if (!d) {
+      setDimensoesPorItem(prev => { const n = { ...prev }; delete n[itemKey]; return n; });
+      return;
+    }
+    setDimensoesPorItem(prev => ({ ...prev, [itemKey]: d }));
+  };
+
+  const addLinhaMedicao = (itemKey: string) => {
+    const atual = dimensoesPorItem[itemKey] || { tipoUnidade: 'm3', linhas: [] };
+    setDimensoesPorItem(prev => ({
+      ...prev,
+      [itemKey]: {
+        ...atual,
+        linhas: [...atual.linhas, { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 }]
+      }
+    }));
+  };
+
+  const updateLinhaMedicao = (itemKey: string, idx: number, campo: keyof LinhaMedicao, valor: number | string) => {
+    const atual = dimensoesPorItem[itemKey];
+    if (!atual?.linhas?.[idx]) return;
+    const novaLinhas = [...atual.linhas];
+    const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
+    novaLinhas[idx] = { ...novaLinhas[idx], [campo]: v };
+    setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhas: novaLinhas } }));
+  };
+
+  const removeLinhaMedicao = (itemKey: string, idx: number) => {
+    const atual = dimensoesPorItem[itemKey];
+    if (!atual?.linhas?.length) return;
+    const novaLinhas = atual.linhas.filter((_, i) => i !== idx);
+    if (novaLinhas.length === 0) {
+      setDimensoesPorItem(prev => { const n = { ...prev }; delete n[itemKey]; return n; });
+    } else {
+      setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhas: novaLinhas } }));
+    }
+  };
+
+  const setTipoUnidadeItem = (itemKey: string, tipo: TipoUnidadeFormula) => {
+    const atual = dimensoesPorItem[itemKey] || { tipoUnidade: 'm3', linhas: [{ descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 }] };
+    setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, tipoUnidade: tipo } }));
+  };
+
+  const exportarMemoriaCalculo = () => {
+    if (itensCalculados.length === 0) {
+      toast.error('Não há itens no orçamento para gerar a memória de cálculo.');
+      return;
+    }
+    const nomeContrato = costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name || costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code || centroCustoId || 'Contrato';
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['Gennesis Engenharia e Consultoria LTDA | CNPJ 17.851.596/0001-36 | gennesis.sedes@gmail.com | SHIS QI 15, Sobreloja 55, Lago Sul - Brasília/DF'],
+      [''],
+      ['PROJETO/SETOR:', nomeContrato, '', '', 'STATUS:', 'ORÇADO'],
+      ['DESCRIÇÃO:', '', '', '', 'DS/Nº da Pasta:', ''],
+      ['DATA DE ENVIO:', dataEmissao],
+      [''],
+      ['MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS'],
+      [''],
+      ['LEGENDA: C= Comprimento | L= Largura | H= Altura | E= Espessura | N= nº de repetições | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro'],
+      [''],
+      ['DISCRIMINAÇÃO DOS SERVIÇOS'],
+      ['CÓDIGO', 'DESCRIÇÃO', 'UN', 'C', 'L', 'H', '% EMPOL.', 'N', 'A', 'V', 'SUBTOTAL', 'Preço Unit.', 'TOTAL (R$)']
+    ];
+
+    const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
+    let idxServico = 0;
+    const formulaCells: { cell: string; formula: string }[] = [];
+
+    for (const row of itensCalculados) {
+      const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
+      const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
+      const un = unidadeLabel(row.dimensoes?.tipoUnidade || 'un');
+      const preco = row.precoUnitario;
+      const totalItem = row.total;
+
+      if (row.dimensoes?.linhas?.length) {
+        for (let i = 0; i < row.dimensoes.linhas.length; i++) {
+          const ln = row.dimensoes.linhas[i];
+          const descLinha = ln.descricao?.trim() || (i === 0 ? descricaoBase : '');
+          const descCol = i === 0 ? descricaoBase : descLinha;
+          const empol = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 1);
+          rows.push([
+            i === 0 ? codigo : '',
+            descCol,
+            un,
+            ln.C ?? '',
+            ln.L ?? '',
+            ln.H ?? '',
+            empol,
+            ln.N ?? 1,
+            '',
+            '',
+            '',
+            i === 0 ? preco : '',
+            i === 0 ? totalItem : ''
+          ]);
+          const r = rows.length;
+          const col = (c: number) => String.fromCharCode(64 + c);
+          const D = col(4); const E = col(5); const F = col(6); const G = col(7); const H = col(8); const I = col(9); const J = col(10); const K = col(11);
+          const tipo = row.dimensoes!.tipoUnidade;
+          if (tipo === 'm3') {
+            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
+            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}*${F}${r}` });
+            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
+          } else if (tipo === 'm2') {
+            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
+            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}` });
+            formulaCells.push({ cell: `${K}${r}`, formula: `=${I}${r}*${G}${r}` });
+          } else if (tipo === 'm') {
+            formulaCells.push({ cell: `${I}${r}`, formula: '' });
+            formulaCells.push({ cell: `${J}${r}`, formula: `=${D}${r}*${H}${r}` });
+            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
+          } else {
+            const qtd = calcularQuantidadeLinha(ln, tipo);
+            rows[rows.length - 1][8] = qtd; rows[rows.length - 1][9] = qtd; rows[rows.length - 1][10] = qtd;
+          }
+        }
+      } else {
+        rows.push([codigo, descricaoBase, un, '', '', '', '', '', row.quantidade, row.quantidade, row.quantidade, preco, totalItem]);
+      }
+      idxServico++;
+    }
+
+    rows.push(['']);
+    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL GERAL', '', '', total]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    formulaCells.forEach(({ cell, formula }) => {
+      if (formula) {
+        if (!ws[cell]) ws[cell] = {};
+        ws[cell].f = formula;
+        ws[cell].t = 'n';
+      }
+    });
+    ws['!cols'] = [
+      { wch: 8 }, { wch: 50 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 6 },
+      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Memória de Cálculo');
+    const nomeArquivo = `Memoria_Calculo_Quantitativos_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Memória de cálculo exportada com sucesso.');
   };
 
   return (
@@ -894,7 +1096,7 @@ export default function OrcamentoPage() {
                 {subtitulosAdicionados.length > 0 && (
                   <>
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Itens necessários — informe a quantidade de cada item (preço vem da planilha de composições)
+                      Itens necessários — informe quantidade direta ou use dimensões (C, L, H, N, %) para memória de cálculo
                     </p>
                     <div className="space-y-6">
                       {subtitulosAdicionados.map(bloco => {
@@ -921,30 +1123,56 @@ export default function OrcamentoPage() {
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Código</th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Banco</th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
+                                    <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-20">Un.</th>
                                     <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-28">Quantidade</th>
-                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">SUB MATERIAL</th>
-                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">SUB MAT + M.O</th>
-                                    <th className="px-4 py-2 w-10"></th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">SUB MAT+M.O</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total</th>
+                                    <th className="px-4 py-2 w-24"></th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                                   {rowsDoBloco.map((row) => {
                                     const [servicoId, subtituloId] = bloco.key.split('|');
+                                    const usaDimensoes = !!row.dimensoes?.linhas?.length;
+                                    const aberto = itensComDimensoesAbertos.has(row.key);
+                                    const dim = dimensoesPorItem[row.key] || { tipoUnidade: 'm3' as const, linhas: [] };
                                     return (
-                                    <tr key={row.key} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <React.Fragment key={row.key}>
+                                    <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                                       <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{row.item.codigo}</td>
                                       <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">{row.item.banco}</td>
                                       <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 max-w-md truncate">{row.item.descricao}</td>
+                                      <td className="px-4 py-2 text-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (!usaDimensoes) {
+                                              addLinhaMedicao(row.key);
+                                              setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.add(row.key); return s; });
+                                            } else {
+                                              setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.has(row.key) ? s.delete(row.key) : s.add(row.key); return s; });
+                                            }
+                                          }}
+                                          className={`text-xs px-2 py-1 rounded ${usaDimensoes ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
+                                          title="Usar dimensões C, L, H, N, %"
+                                        >
+                                          {usaDimensoes ? '📐 Dim' : 'Dimensões'}
+                                        </button>
+                                      </td>
                                       <td className="px-4 py-2 text-right">
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          step={0.01}
-                                          value={row.quantidade === 0 ? '' : row.quantidade}
-                                          onChange={e => setQuantidadeItem(row.key, parseFloat(e.target.value) || 0)}
-                                          placeholder="0"
-                                          className="w-20 px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                                        />
+                                        {usaDimensoes ? (
+                                          <span className="text-sm font-medium">{row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                                        ) : (
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            step={0.01}
+                                            value={row.quantidade === 0 ? '' : row.quantidade}
+                                            onChange={e => setQuantidadeItem(row.key, parseFloat(e.target.value) || 0)}
+                                            placeholder="0"
+                                            className="w-20 px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
+                                          />
+                                        )}
                                       </td>
                                       <td className="px-4 py-2 text-sm text-right">
                                         R$ {row.precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -952,7 +1180,15 @@ export default function OrcamentoPage() {
                                       <td className="px-4 py-2 text-sm text-right font-medium">
                                         R$ {row.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                       </td>
-                                      <td className="px-4 py-2">
+                                      <td className="px-4 py-2 flex gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.has(row.key) ? s.delete(row.key) : s.add(row.key); return s; })}
+                                          className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded"
+                                          title={aberto ? 'Fechar dimensões' : 'Abrir dimensões'}
+                                        >
+                                          {aberto ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                        </button>
                                         <button
                                           type="button"
                                           onClick={() => removeItemFromServico(servicoId, subtituloId, row.item.chave)}
@@ -963,6 +1199,93 @@ export default function OrcamentoPage() {
                                         </button>
                                       </td>
                                     </tr>
+                                    {aberto && usaDimensoes && (
+                                    <tr className="bg-gray-50 dark:bg-gray-800/50">
+                                      <td colSpan={8} className="px-4 py-4">
+                                        <div className="space-y-4">
+                                          <div className="flex items-center gap-6 flex-wrap">
+                                            <div>
+                                              <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">Unidade</label>
+                                              <select
+                                                value={dim.tipoUnidade}
+                                                onChange={e => setTipoUnidadeItem(row.key, e.target.value as TipoUnidadeFormula)}
+                                                className="h-9 px-3 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                                              >
+                                                <option value="m3">m³</option>
+                                                <option value="m2">m²</option>
+                                                <option value="m">m</option>
+                                                <option value="un">UN</option>
+                                              </select>
+                                            </div>
+                                            <div className="flex-1" />
+                                            <div className="flex items-center gap-3">
+                                              <button type="button" onClick={() => addLinhaMedicao(row.key)} className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium border border-dashed border-gray-400 dark:border-gray-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors">
+                                                <Plus className="w-4 h-4" /> Adicionar linha
+                                              </button>
+                                              <button type="button" onClick={() => { setDimensoesItem(row.key, null); setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.delete(row.key); return s; }); }} className="text-sm text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
+                                                Usar qtd. direta
+                                              </button>
+                                            </div>
+                                          </div>
+                                          <div className="space-y-3">
+                                            {dim.linhas.map((ln, idx) => (
+                                              <div key={idx} className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/60 p-4">
+                                                <div className="grid grid-cols-[minmax(140px,1fr)_70px_70px_70px_60px_70px_minmax(160px,1fr)_auto] gap-4 items-end min-w-[720px]">
+                                                <div>
+                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">Descrição</label>
+                                                  <input type="text" placeholder="Ex: COBERTURA DAS CALDEIRAS" value={ln.descricao || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'descricao', e.target.value)} className="w-full h-9 px-3 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+                                                </div>
+                                                <div>
+                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">C (m)</label>
+                                                  <input type="number" step={0.01} placeholder="0" value={ln.C || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'C', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+                                                </div>
+                                                <div>
+                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">L (m)</label>
+                                                  <input type="number" step={0.01} placeholder="0" value={ln.L || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'L', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+                                                </div>
+                                                <div>
+                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">H (m)</label>
+                                                  <input type="number" step={0.01} placeholder="0" value={ln.H || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'H', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+                                                </div>
+                                                <div>
+                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">N</label>
+                                                  <input type="number" step={0.01} placeholder="1" value={ln.N || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'N', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+                                                </div>
+                                                <div>
+                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">Empol.</label>
+                                                  <select value={String(ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 1))} onChange={e => updateLinhaMedicao(row.key, idx, 'empolamento', parseFloat(e.target.value))} className="w-full h-9 px-2 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                                                  <option value="1">1,00</option>
+                                                  <option value="1.05">1,05</option>
+                                                  <option value="1.1">1,10</option>
+                                                  <option value="1.15">1,15</option>
+                                                  <option value="1.2">1,20</option>
+                                                  <option value="1.25">1,25</option>
+                                                  <option value="1.3">1,30</option>
+                                                  </select>
+                                                </div>
+                                                <div className="flex items-end gap-3">
+                                                  <div className="flex flex-col gap-0.5">
+                                                    {dim.tipoUnidade === 'm3' && (
+                                                      <span className="text-xs text-gray-500 dark:text-gray-400">A: {calcA(ln).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} | V: {calcV(ln, dim.tipoUnidade).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>
+                                                    )}
+                                                    {dim.tipoUnidade === 'm2' && (
+                                                      <span className="text-xs text-gray-500 dark:text-gray-400">A: {calcA(ln).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>
+                                                    )}
+                                                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                                      SUBTOTAL = {calcularQuantidadeLinha(ln, dim.tipoUnidade).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                                    </span>
+                                                  </div>
+                                                  <button type="button" onClick={() => removeLinhaMedicao(row.key, idx)} className="h-9 w-9 flex items-center justify-center shrink-0 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors" title="Remover linha"><Trash2 className="w-4 h-4" /></button>
+                                                </div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                    )}
+                                    </React.Fragment>
                                     );
                                   })}
                                 </tbody>
@@ -973,11 +1296,22 @@ export default function OrcamentoPage() {
                       })}
                     </div>
 
-                    <div className="flex items-center justify-between rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
-                      <span className="font-semibold text-gray-900 dark:text-gray-100">Valor total do orçamento</span>
-                      <span className="text-xl font-bold text-red-600 dark:text-red-400">
-                        R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <span className="font-semibold text-gray-900 dark:text-gray-100">Valor total do orçamento</span>
+                        <span className="text-xl font-bold text-red-600 dark:text-red-400">
+                          R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={exportarMemoriaCalculo}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-medium transition-colors"
+                        title="Exporta documento com as fórmulas e referências de cálculo para auditoria"
+                      >
+                        <FileText className="w-5 h-5" />
+                        Exportar Memória de Cálculo
+                      </button>
                     </div>
                   </>
                 )}
