@@ -42,6 +42,9 @@ export class WhatsAppController {
     try {
       const body = req.body || {};
 
+      // Log para debug: ver se a Meta está chamando o webhook
+      console.log('[WhatsApp Webhook] POST recebido', { object: body.object, hasEntry: Array.isArray(body.entry) && body.entry.length > 0 });
+
       // Resposta rápida 200 para a Meta (evitar retentativas)
       res.status(200).send('OK');
 
