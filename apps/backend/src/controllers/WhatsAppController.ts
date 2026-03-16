@@ -24,7 +24,12 @@ export class WhatsAppController {
       console.log('[WhatsApp Webhook] Verificação Meta OK');
       res.status(200).type('text').send(String(challengeStr));
     } else {
-      console.warn('[WhatsApp Webhook] Verificação falhou:', { mode, tokenMatch: token === META_VERIFY_TOKEN, hasChallenge: !!challengeStr });
+      // GET sem hub.mode geralmente é health check, navegador ou outro serviço — não é a Meta
+      if (mode === undefined && !token && !challengeStr) {
+        console.log('[WhatsApp Webhook] GET sem parâmetros da Meta (ignorando)');
+      } else {
+        console.warn('[WhatsApp Webhook] Verificação falhou:', { mode, tokenMatch: token === META_VERIFY_TOKEN, hasChallenge: !!challengeStr });
+      }
       res.status(403).send('Forbidden');
     }
   }
