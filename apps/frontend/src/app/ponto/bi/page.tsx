@@ -998,6 +998,7 @@ export default function BIPage() {
             {!error && !isEmpty && filteredStatusList.length > 0 && (() => {
               const totalSolicitacoes = filteredStatusList.reduce((acc, [, rows]) => acc + rows.length, 0);
               const [etapaAtual, rowsAtuais] = filteredStatusList[selectedEtapaIndex] ?? filteredStatusList[0];
+              const showLeadTimeColumn = isLeadTimeEnabled && !!movimentoDataHoraCol && etapaAtual !== 'Finalizada';
               const getHistText = (r: Record<string, unknown>) => {
                 const val = r[historicoCol];
                 if (val == null) return '—';
@@ -1110,7 +1111,7 @@ export default function BIPage() {
                                   <th className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-28 ${isCompact ? 'py-2' : 'py-3'}`}>
                                     IdMov
                                   </th>
-                                  {isLeadTimeEnabled && movimentoDataHoraCol && (
+                                  {showLeadTimeColumn && (
                                     <th className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-32 ${isCompact ? 'py-2' : 'py-3'}`}>
                                       Lead time
                                     </th>
@@ -1133,7 +1134,7 @@ export default function BIPage() {
                                       <td className={`px-5 font-mono text-gray-700 dark:text-gray-300 align-middle ${isCompact ? 'py-1.5' : 'py-3'}`}>
                                         {String(row[idCol] ?? '—')}
                                       </td>
-                                      {isLeadTimeEnabled && movimentoDataHoraCol && (
+                                      {showLeadTimeColumn && (
                                         <td className={`px-5 text-gray-800 dark:text-gray-200 align-middle whitespace-nowrap ${isCompact ? 'py-1.5' : 'py-3'}`}>
                                           {getLeadTimeFromRow(row)}
                                         </td>
