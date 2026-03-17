@@ -34,9 +34,9 @@ export class MetaWhatsAppService {
   }
 
   /**
-   * Envia mensagem de texto via WhatsApp Cloud API.
+   * Faz POST genérico para o endpoint /messages.
    */
-  async sendText(phone: string, text: string): Promise<boolean> {
+  private async sendMessage(phone: string, payload: Record<string, unknown>): Promise<boolean> {
     if (!this.isConfigured()) {
       console.warn(
         '[MetaWhatsApp] Não configurado. Configure WHATSAPP_PHONE_NUMBER_ID e WHATSAPP_ACCESS_TOKEN.'
@@ -53,8 +53,7 @@ export class MetaWhatsAppService {
         {
           messaging_product: 'whatsapp',
           to,
-          type: 'text',
-          text: { body: text }
+          ...payload
         },
         {
           headers: {
@@ -82,6 +81,67 @@ export class MetaWhatsAppService {
       );
       return false;
     }
+  }
+
+  /**
+   * Envia mensagem de texto via WhatsApp Cloud API.
+   */
+  async sendText(phone: string, text: string): Promise<boolean> {
+    return this.sendMessage(phone, {
+      type: 'text',
+      text: { body: text }
+    });
+  }
+
+  /**
+   * Envia botões de resposta (máx. 3).
+   */
+  async sendButtons(
+    phone: string,
+    bodyText: string,
+    buttons: Array<{ id: string; title: string }>
+  ): Promise<boolean> {
+    const actionButtons = buttons.slice(0, 3).map((b) => ({
+      type: 'reply',
+      reply: { id: b.id, title: b.title.slice(0, 20) }
+    }));
+
+    return this.sendMessage(phone, {
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: bodyText },
+        action: { buttons: actionButtons }
+      }
+    });
+  }
+
+  /**
+   * Envia lista interativa.
+   */
+  async sendList(
+    phone: string,
+    bodyText: string,
+    buttonText: string,
+    sectionTitle: string,
+    rows: Array<{ id: string; title: string }>
+  ): Promise<boolean> {
+    return this.sendMessage(phone, {
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: bodyText },
+        action: {
+          button: buttonText.slice(0, 20),
+          sections: [
+            {
+              title: sectionTitle.slice(0, 24),
+              rows: rows.map((r) => ({ id: r.id, title: r.title.slice(0, 24) }))
+            }
+          ]
+        }
+      }
+    });
   }
 }
 
