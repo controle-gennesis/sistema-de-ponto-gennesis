@@ -331,28 +331,24 @@ export default function BIPage() {
     return () => document.removeEventListener('click', handler);
   }, []);
 
-  // Marcar todos os filtros por padrão quando os dados carregam ou ao trocar de dataset
+  // Marcar todos os filtros por padrão apenas quando a lista de opções muda (troca de dataset/dados), não quando o usuário altera a seleção
   useEffect(() => {
-    // Sempre que a lista base muda, garante que o estado reflete "tudo selecionado"
-    if (filiais.length > 0 && selectedFiliais.length !== filiais.length) {
+    if (filiais.length > 0) {
       setSelectedFiliais(filiais);
-    }
-    if (centrosCusto.length > 0 && selectedCCs.length !== centrosCusto.length) {
-      setSelectedCCs(centrosCusto);
-    }
-    if (fornecedores.length > 0 && selectedFornecedores.length !== fornecedores.length) {
-      setSelectedFornecedores(fornecedores);
-    }
-    if (filiais.length === 0 && selectedFiliais.length !== 0) {
+    } else {
       setSelectedFiliais([]);
     }
-    if (centrosCusto.length === 0 && selectedCCs.length !== 0) {
+    if (centrosCusto.length > 0) {
+      setSelectedCCs(centrosCusto);
+    } else {
       setSelectedCCs([]);
     }
-    if (fornecedores.length === 0 && selectedFornecedores.length !== 0) {
+    if (fornecedores.length > 0) {
+      setSelectedFornecedores(fornecedores);
+    } else {
       setSelectedFornecedores([]);
     }
-  }, [filiais, centrosCusto, fornecedores, selectedFiliais.length, selectedCCs.length, selectedFornecedores.length]);
+  }, [filiais, centrosCusto, fornecedores]);
 
   const hasActiveFilters =
     searchText.trim() !== '' ||
