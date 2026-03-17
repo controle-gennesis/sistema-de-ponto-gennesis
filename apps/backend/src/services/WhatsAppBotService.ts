@@ -30,12 +30,23 @@ const ATESTADO_LABELS: Record<string, string> = {
   '6': 'Outros'
 };
 
-/** Delay aleatório 5s a 7s para parecer mais natural (evitar bloqueio) */
+/** Delay curto (API oficial) — rápido sem parecer “instantâneo” */
 const delayNatural = () =>
-  new Promise((r) => setTimeout(r, 5000 + Math.random() * 2000));
+  new Promise((r) => setTimeout(r, 600 + Math.random() * 700));
 
 /** Escolhe uma opção aleatória de um array */
 const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+type SendAction =
+  | { type: 'text'; text: string }
+  | { type: 'buttons'; body: string; buttons: Array<{ id: string; title: string }> }
+  | {
+      type: 'list';
+      body: string;
+      buttonText: string;
+      sectionTitle: string;
+      rows: Array<{ id: string; title: string }>;
+    };
 
 export class WhatsAppBotService {
   async processMessage(phone: string, text: string, hasMedia = false): Promise<void> {
@@ -66,27 +77,65 @@ export class WhatsAppBotService {
       }
     });
 
-    let reply = '';
+    let sendAction: SendAction = { type: 'text', text: '' };
     let newStatus = flowStatus;
     const newPayload = { ...payload };
 
+    const menu = (): SendAction => ({
+      type: 'buttons',
+      body: pick([
+        'Olá! Como posso te ajudar hoje?',
+        'Oi! Em que posso ajudar?'
+      ]),
+      buttons: [
+        { id: 'ATESTADO', title: 'Enviar atestado' },
+        { id: 'DUVIDAS', title: 'Dúvidas' }
+      ]
+    });
+
+    const tipoAtestado = (): SendAction => ({
+      type: 'list',
+      body: 'Qual o tipo de atestado?',
+      buttonText: 'Escolher',
+      sectionTitle: 'Opções',
+      rows: Object.entries(ATESTADO_LABELS).map(([k, v]) => ({ id: `TYPE_${k}`, title: v }))
+    });
+
     switch (flowStatus) {
       case 'MENU': {
-        if (content === '1' || content.includes('atestado')) {
+        if (content === '1' || content.includes('atestado') || content === 'atestato' || content === 'atestados' || content === 'atest' || content === 'atestado' || content === 'atestados' || content === 'atest') {
           newStatus = 'ASK_NAME';
-          reply = pick([
-            '📋 *Envio de Atestado*\n\nPara começar, qual é o seu *nome completo*?',
-            '📋 *Atestado*\n\nCerto! Me informe seu *nome completo* por favor.'
-          ]);
+          sendAction = { type: 'text', text: 'Perfeito. Qual seu nome completo?' };
           newPayload.flow = 'ATESTADO';
         } else if (content === '2' || content.includes('dúvida') || content.includes('duvida')) {
           newStatus = 'DUVIDAS';
-          reply = pick([
-            '💬 Em breve teremos atendimento para dúvidas. Por enquanto, use a opção 1 para atestado ou digite *voltar* para o menu.',
-            '💬 O atendimento para dúvidas estará disponível em breve. Digite *voltar* para outras opções.'
-          ]);
+          sendAction = {
+            type: 'buttons',
+            body: 'Ainda não temos atendimento de dúvidas aqui. Quer enviar um atestado?',
+            buttons: [
+              { id: 'ATESTADO', title: 'Enviar atestado' },
+              { id: 'MENU', title: 'Voltar' }
+            ]
+          };
         } else {
-          reply = this.getMenuMessage();
+          // Preferir botões
+          if (content === 'atestato' || content === 'ATESTADO') {
+            newStatus = 'ASK_NAME';
+            newPayload.flow = 'ATESTADO';
+            sendAction = { type: 'text', text: 'Perfeito. Qual seu nome completo?' };
+          } else if (content === 'duvidas' || content === 'DUVIDAS') {
+            newStatus = 'DUVIDAS';
+            sendAction = {
+              type: 'buttons',
+              body: 'Ainda não temos atendimento de dúvidas aqui. Quer enviar um atestado?',
+              buttons: [
+                { id: 'ATESTADO', title: 'Enviar atestado' },
+                { id: 'MENU', title: 'Voltar' }
+              ]
+            };
+          } else {
+            sendAction = menu();
+          }
         }
         break;
       }
@@ -94,35 +143,42 @@ export class WhatsAppBotService {
       case 'ASK_NAME': {
         if (content === 'voltar' || content === 'menu') {
           newStatus = 'MENU';
-          reply = this.getMenuMessage();
+          sendAction = menu();
           Object.keys(newPayload).forEach((k) => delete newPayload[k]);
         } else if (content) {
           newPayload.name = text.trim();
           newStatus = 'ASK_REGISTRATION';
-          const nome = String(newPayload.name);
-          reply = pick([
-            `Obrigado, ${nome}! Qual é a sua *matrícula* ou *CPF*? (para identificarmos no sistema)\n\nSe não souber, digite *pular* para continuar.`,
-            `Perfeito, ${nome}! Agora preciso da sua *matrícula* ou *CPF*.\n\nSe não souber, digite *pular*.`
-          ]);
+          const nome = String(newPayload.name || '').trim();
+          sendAction = {
+            type: 'buttons',
+            body: `Obrigado, ${nome}! Você prefere informar matrícula/CPF agora?`,
+            buttons: [
+              { id: 'REG_OK', title: 'Sim' },
+              { id: 'REG_SKIP', title: 'Pular' }
+            ]
+          };
         } else {
-          reply = 'Por favor, informe seu *nome completo*.';
+          sendAction = { type: 'text', text: 'Pode me dizer seu nome completo?' };
         }
         break;
       }
 
       case 'ASK_REGISTRATION': {
-        if (content === 'voltar' || content === 'menu') {
+        if (content === 'voltar' || content === 'menu' || content === 'MENU') {
           newStatus = 'MENU';
-          reply = this.getMenuMessage();
+          sendAction = menu();
           Object.keys(newPayload).forEach((k) => delete newPayload[k]);
-        } else {
-          newPayload.registration = content === 'pular' ? null : text.trim();
+        } else if (content === 'reg_ok' || content === 'REG_OK') {
+          sendAction = { type: 'text', text: 'Me envie sua matrícula ou CPF.' };
+        } else if (content === 'reg_skip' || content === 'REG_SKIP' || content === 'pular') {
+          newPayload.registration = null;
           newStatus = 'ATESTADO_ASK_TYPE';
-          reply =
-            'Qual o *tipo de atestado*?\n\n' +
-            Object.entries(ATESTADO_LABELS)
-              .map(([k, v]) => `${k} - ${v}`)
-              .join('\n');
+          sendAction = tipoAtestado();
+        } else {
+          // usuário digitou matrícula/CPF
+          newPayload.registration = text.trim();
+          newStatus = 'ATESTADO_ASK_TYPE';
+          sendAction = tipoAtestado();
         }
         break;
       }
@@ -130,20 +186,34 @@ export class WhatsAppBotService {
       case 'ATESTADO_ASK_TYPE': {
         if (content === 'voltar' || content === 'menu') {
           newStatus = 'MENU';
-          reply = this.getMenuMessage();
+          sendAction = menu();
           Object.keys(newPayload).forEach((k) => delete newPayload[k]);
-        } else if (ATESTADO_TYPES[content]) {
-          newPayload.atestadoType = ATESTADO_TYPES[content];
-          newPayload.atestadoTypeLabel = ATESTADO_LABELS[content];
-          newStatus = 'ATESTADO_ASK_DATES';
-          reply =
-            'Informe as *datas do atestado* no formato:\n\n`Data início - Data fim`\n\nExemplo: 01/03/2025 - 05/03/2025';
+        } else if (content.startsWith('type_')) {
+          const key = content.replace('type_', '').trim();
+          if (ATESTADO_TYPES[key]) {
+            newPayload.atestadoType = ATESTADO_TYPES[key];
+            newPayload.atestadoTypeLabel = ATESTADO_LABELS[key];
+            newStatus = 'ATESTADO_ASK_DATES';
+            sendAction = {
+              type: 'text',
+              text: 'Agora me diga o período do atestado.\nEx.: 01/03/2026 - 05/03/2026'
+            };
+          } else {
+            sendAction = tipoAtestado();
+          }
         } else {
-          reply =
-            'Opção inválida. Escolha um número de 1 a 6:\n\n' +
-            Object.entries(ATESTADO_LABELS)
-              .map(([k, v]) => `${k} - ${v}`)
-              .join('\n');
+          // fallback (usuário digitou 1..6)
+          if (ATESTADO_TYPES[content]) {
+            newPayload.atestadoType = ATESTADO_TYPES[content];
+            newPayload.atestadoTypeLabel = ATESTADO_LABELS[content];
+            newStatus = 'ATESTADO_ASK_DATES';
+            sendAction = {
+              type: 'text',
+              text: 'Agora me diga o período do atestado.\nEx.: 01/03/2026 - 05/03/2026'
+            };
+          } else {
+            sendAction = tipoAtestado();
+          }
         }
         break;
       }
@@ -151,18 +221,22 @@ export class WhatsAppBotService {
       case 'ATESTADO_ASK_DATES': {
         if (content === 'voltar' || content === 'menu') {
           newStatus = 'MENU';
-          reply = this.getMenuMessage();
+          sendAction = menu();
           Object.keys(newPayload).forEach((k) => delete newPayload[k]);
         } else if (content && content.includes('-')) {
           const [start, end] = content.split('-').map((s) => s.trim());
           newPayload.dataInicio = start;
           newPayload.dataFim = end;
           newStatus = 'ATESTADO_ASK_FILE';
-          reply =
-            'Agora *envie a foto ou o PDF do atestado*.\n\nClique no ícone de anexo (📎) e escolha a imagem ou documento.';
+          sendAction = {
+            type: 'text',
+            text: 'Perfeito. Agora envie a foto ou PDF do atestado (📎).'
+          };
         } else {
-          reply =
-            'Use o formato: *Data início - Data fim*\n\nExemplo: 01/03/2025 - 05/03/2025';
+          sendAction = {
+            type: 'text',
+            text: 'Me envie no formato: 01/03/2026 - 05/03/2026'
+          };
         }
         break;
       }
@@ -170,7 +244,7 @@ export class WhatsAppBotService {
       case 'ATESTADO_ASK_FILE': {
         if (content === 'voltar' || content === 'menu') {
           newStatus = 'MENU';
-          reply = this.getMenuMessage();
+          sendAction = menu();
           Object.keys(newPayload).forEach((k) => delete newPayload[k]);
         } else if (hasMedia) {
           // Recebeu arquivo (imagem/documento) - criamos o submission
@@ -188,35 +262,40 @@ export class WhatsAppBotService {
           });
 
           newStatus = 'MENU';
-          reply = pick([
-            '✅ *Atestado recebido!*\n\nSua solicitação foi registrada e será analisada pelo departamento pessoal. Você pode acompanhar pelo sistema.\n\nDigite *menu* para novas opções.',
-            '✅ *Pronto!*\n\nRecebemos seu atestado. O departamento pessoal vai analisar e em breve você terá o retorno.\n\nDigite *menu* para outras opções.'
-          ]);
+          sendAction = {
+            type: 'buttons',
+            body: '✅ Recebido! Seu atestado foi registrado e o DP vai analisar.',
+            buttons: [{ id: 'MENU', title: 'Ver opções' }]
+          };
           Object.keys(newPayload).forEach((k) => delete newPayload[k]);
         } else if (content) {
-          reply =
-            'Por favor, *envie a foto ou o PDF do atestado*.\n\nClique no ícone de anexo (📎) e selecione o arquivo.';
+          sendAction = { type: 'text', text: 'Me envie a foto ou PDF do atestado (📎).' };
         } else {
-          reply =
-            'Clique no ícone de anexo (📎) e envie a imagem ou documento do atestado.';
+          sendAction = { type: 'text', text: 'Envie a foto ou PDF do atestado (📎).' };
         }
         break;
       }
 
       case 'DUVIDAS': {
-        if (content === 'voltar' || content === 'menu') {
+        if (content === 'voltar' || content === 'menu' || content === 'MENU') {
           newStatus = 'MENU';
-          reply = this.getMenuMessage();
+          sendAction = menu();
         } else {
-          reply =
-            'Em breve teremos atendimento para dúvidas. Digite *menu* para voltar.';
+          sendAction = {
+            type: 'buttons',
+            body: 'Ainda não temos dúvidas por aqui. Quer enviar um atestado?',
+            buttons: [
+              { id: 'ATESTADO', title: 'Enviar atestado' },
+              { id: 'MENU', title: 'Voltar' }
+            ]
+          };
         }
         break;
       }
 
       default:
         newStatus = 'MENU';
-        reply = this.getMenuMessage();
+        sendAction = menu();
     }
 
     await prisma.whatsAppConversation.update({
@@ -233,25 +312,24 @@ export class WhatsAppBotService {
       data: {
         conversationId: conversation.id,
         role: 'assistant',
-        content: reply
+        content: sendAction.type === 'text' ? sendAction.text : sendAction.body
       }
     });
 
     await delayNatural();
-    await metaWhatsApp.sendText(phone, reply);
-  }
-
-  private getMenuMessage(): string {
-    const intros = [
-      '👋 *Olá! Sou o assistente da Gennesis Engenharia.*\n\nComo posso ajudar?',
-      '👋 *Oi! Aqui é o assistente da Gennesis.*\n\nO que você precisa?',
-      '👋 *Olá! Em que posso ajudar?*\n\nSou o assistente da Gennesis Engenharia.'
-    ];
-    const options = [
-      '\n\n1️⃣ - Enviar atestado médico\n2️⃣ - Tirar dúvidas\n\nDigite o número da opção.',
-      '\n\n*Opções:*\n1 - Enviar atestado\n2 - Tirar dúvidas\n\nResponda com 1 ou 2.'
-    ];
-    return pick(intros) + pick(options);
+    if (sendAction.type === 'text') {
+      await metaWhatsApp.sendText(phone, sendAction.text);
+    } else if (sendAction.type === 'buttons') {
+      await metaWhatsApp.sendButtons(phone, sendAction.body, sendAction.buttons);
+    } else {
+      await metaWhatsApp.sendList(
+        phone,
+        sendAction.body,
+        sendAction.buttonText,
+        sendAction.sectionTitle,
+        sendAction.rows
+      );
+    }
   }
 }
 
