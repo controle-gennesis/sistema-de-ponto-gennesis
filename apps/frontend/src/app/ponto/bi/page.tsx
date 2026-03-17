@@ -38,6 +38,14 @@ const DATASET_TAB_LABELS: Record<(typeof BI_DATASETS)[number], string> = {
   DataSet_G5FollowUp: 'G5',
 };
 
+const FILIAIS_PERMITIDAS = [
+  '1 - GENNESIS ENGENHARIA E CONSULTORIA LTDA',
+  '2 - GENNESIS ENGENHARIA E CONSULTORIA LTDA',
+  '3 - GENNESIS ENGENHARIA E CONSULTORIA LTDA',
+  '4 - GENNESIS ENGENHARIA E CONSULTORIA LTDA',
+  '5 - GENNESIS ENGENHARIA E CONSULTORIA LTDA',
+] as const;
+
 const LABEL_ABBREV: Record<string, string> = {
   cod: 'Código',
   nr: 'Número',
@@ -243,12 +251,35 @@ export default function BIPage() {
   const currentContent = currentQuery?.data?.data?.content;
   const currentValues = (currentContent?.values || []) as Record<string, unknown>[];
   const currentColumns = (currentContent?.columns || (currentValues[0] ? Object.keys(currentValues[0]) : [])) as string[];
-  const { statusList: fullStatusList, idCol, historicoCol, statusCol } = useMemo(
-    () => buildStatusList(currentValues, currentColumns),
-    [currentValues, currentColumns, datasetId]
+
+  const filialCol = useMemo(
+    () =>
+      currentColumns.find((c: string) => /^filial$/i.test(c)) ??
+      currentColumns.find((c: string) => /filial/i.test(c)) ??
+      null,
+    [currentColumns]
   );
 
-  const filialCol = currentColumns.find((c: string) => /^filial$/i.test(c)) ?? null;
+  const getFilialValue = (row: Record<string, unknown>): string => {
+    if (!filialCol) return '';
+    const val = row[filialCol];
+    if (val != null && typeof val === 'object') {
+      const o = val as Record<string, unknown>;
+      return String(o.display ?? o.displayValue ?? o.value ?? o.internalValue ?? val).trim();
+    }
+    return String(val ?? '').trim();
+  };
+
+  const currentValuesFilteredByFilial = useMemo(() => {
+    if (!filialCol || currentValues.length === 0) return currentValues;
+    const allowedSet = new Set<string>(FILIAIS_PERMITIDAS);
+    return currentValues.filter((row) => allowedSet.has(getFilialValue(row)));
+  }, [currentValues, filialCol]);
+
+  const { statusList: fullStatusList, idCol, historicoCol, statusCol } = useMemo(
+    () => buildStatusList(currentValuesFilteredByFilial, currentColumns),
+    [currentValuesFilteredByFilial, currentColumns, datasetId]
+  );
   const ccColFromColumns = currentColumns.find((c: string) => {
     const t = c.trim();
     return (
@@ -280,12 +311,12 @@ export default function BIPage() {
   const filiais = useMemo(() => {
     if (!filialCol) return [];
     const set = new Set<string>();
-    currentValues.forEach((row: Record<string, unknown>) => {
-      const v = String(row[filialCol] ?? '').trim();
+    currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
+      const v = getFilialValue(row);
       if (v) set.add(v);
     });
     return Array.from(set).sort();
-  }, [currentValues, filialCol]);
+  }, [currentValuesFilteredByFilial, filialCol]);
 
   const getCCValue = (row: Record<string, unknown>): string => {
     if (!ccColResolved) return '';
@@ -300,22 +331,22 @@ export default function BIPage() {
   const centrosCusto = useMemo(() => {
     if (!ccColResolved) return [];
     const set = new Set<string>();
-    currentValues.forEach((row) => {
+    currentValuesFilteredByFilial.forEach((row) => {
       const v = getCCValue(row);
       if (v) set.add(v);
     });
     return Array.from(set).sort();
-  }, [currentValues, ccColResolved]);
+  }, [currentValuesFilteredByFilial, ccColResolved]);
 
   const fornecedores = useMemo(() => {
     if (!fornecedorCol) return [];
     const set = new Set<string>();
-    currentValues.forEach((row: Record<string, unknown>) => {
+    currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
       const v = String(row[fornecedorCol] ?? '').trim();
       if (v) set.add(v);
     });
     return Array.from(set).sort();
-  }, [currentValues, fornecedorCol]);
+  }, [currentValuesFilteredByFilial, fornecedorCol]);
 
   const filialRef = useRef<HTMLDivElement>(null);
   const ccRef = useRef<HTMLDivElement>(null);
@@ -366,7 +397,7 @@ export default function BIPage() {
       if (filialCol && filiais.length > 0 && selectedFiliais.length === 0) return false;
       if (ccColResolved && centrosCusto.length > 0 && selectedCCs.length === 0) return false;
       if (fornecedorCol && fornecedores.length > 0 && selectedFornecedores.length === 0) return false;
-      if (byFiliais && filialCol && !byFiliais.has(String(row[filialCol] ?? '').trim())) return false;
+      if (byFiliais && filialCol && !byFiliais.has(getFilialValue(row))) return false;
       if (byCCs && ccColResolved && !byCCs.has(getCCValue(row))) return false;
       if (byFornecedores && fornecedorCol && !byFornecedores.has(String(row[fornecedorCol] ?? '').trim())) return false;
       if (search) {
