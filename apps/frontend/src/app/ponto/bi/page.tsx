@@ -126,6 +126,35 @@ export default function BIPage() {
 
   const { costCenters: dbCostCenters } = useCostCenters();
 
+  const datasetId = BI_DATASETS[activeTab];
+
+  const normalizeStatus = (rawStatus: string): { key: string; label: string } => {
+    const s = rawStatus.trim();
+
+    if (datasetId === 'DataSet_G3FollowUp') {
+      if (/Etapa\s*108\b/i.test(s)) {
+        return { key: 'G3_ETAPA_108_ANALISE_CONTROLADORIA', label: 'Análise Controladoria' };
+      }
+      if (/Etapa\s*10\b/i.test(s)) {
+        return { key: 'G3_ETAPA_10_FINALIZADA', label: 'Finalizada' };
+      }
+    }
+
+    if (datasetId === 'DataSet_G4FollowUp') {
+      if (/Etapa\s*24\b/i.test(s) || /Etapa\s*147\b/i.test(s)) {
+        return { key: 'G4_ETAPAS_FINALIZADA_24_147', label: 'Finalizada' };
+      }
+    }
+
+    if (datasetId === 'DataSet_G5FollowUp') {
+      if (/Etapa\s*390\b/i.test(s)) {
+        return { key: 'G5_ETAPA_390_ANEXAR_NF', label: 'Anexar NF' };
+      }
+    }
+
+    return { key: s || '(sem etapa)', label: s || '(sem etapa)' };
+  };
+
   const ccCodeToName = useMemo(() => {
     const map = new Map<string, string>();
     (dbCostCenters || []).forEach((cc: { code?: string; name?: string }) => {
@@ -192,18 +221,21 @@ export default function BIPage() {
       ?? columns.find((c: string) => /^titulo_solicitacao$/i.test(c))
       ?? columns.find((c: string) => /^descricao$/i.test(c))
       ?? 'historico';
-    const byStatus: Record<string, Record<string, unknown>[]> = {};
+    const byStatus: Record<string, { label: string; rows: Record<string, unknown>[] }> = {};
     if (statusCol) {
       values.forEach((row: Record<string, unknown>) => {
-        const status = String(row[statusCol] ?? '(sem etapa)');
-        if (!byStatus[status]) byStatus[status] = [];
-        byStatus[status].push(row);
+        const rawStatus = String(row[statusCol] ?? '(sem etapa)');
+        const { key, label } = normalizeStatus(rawStatus);
+        if (!byStatus[key]) byStatus[key] = { label, rows: [] };
+        byStatus[key].rows.push(row);
       });
     }
     if (Object.keys(byStatus).length === 0 && values.length > 0) {
-      byStatus['(todos)'] = values;
+      byStatus['(todos)'] = { label: '(todos)', rows: values };
     }
-    const statusList = Object.entries(byStatus).sort(([, a], [, b]) => b.length - a.length);
+    const statusList = Object.values(byStatus)
+      .map(({ label, rows }) => [label, rows] as const)
+      .sort(([, a], [, b]) => b.length - a.length);
     return { statusList, idCol, historicoCol, statusCol };
   }
 
@@ -213,7 +245,7 @@ export default function BIPage() {
   const currentColumns = (currentContent?.columns || (currentValues[0] ? Object.keys(currentValues[0]) : [])) as string[];
   const { statusList: fullStatusList, idCol, historicoCol, statusCol } = useMemo(
     () => buildStatusList(currentValues, currentColumns),
-    [currentValues, currentColumns]
+    [currentValues, currentColumns, datasetId]
   );
 
   const filialCol = currentColumns.find((c: string) => /^filial$/i.test(c)) ?? null;
@@ -385,7 +417,6 @@ export default function BIPage() {
   }
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
-  const datasetId = BI_DATASETS[activeTab];
   const error = currentQuery?.error;
   const isEmpty = currentValues.length === 0;
 
