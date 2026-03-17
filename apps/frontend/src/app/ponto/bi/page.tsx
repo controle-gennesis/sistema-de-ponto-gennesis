@@ -83,6 +83,33 @@ function formatLabel(key: string): string {
   return label;
 }
 
+function parseFluigDateTime(val: unknown): Date | null {
+  if (val instanceof Date) return val;
+  const s = String(val ?? '').trim();
+  if (!s) return null;
+  const match = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/);
+  const iso = match ? `${match[1]}T${match[2]}` : s.replace(' ', 'T');
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function formatLeadTime(from: Date | null): string {
+  if (!from) return '—';
+  const now = new Date();
+  let diffMs = now.getTime() - from.getTime();
+  if (diffMs <= 0) return '0 min';
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0 && days === 0) parts.push(`${minutes}min`);
+  return parts.length > 0 ? parts.join(' ') : '0 min';
+}
+
 function formatValue(val: unknown): string {
   if (val == null) return '—';
   if (typeof val === 'boolean') return val ? 'Sim' : 'Não';
@@ -275,6 +302,25 @@ export default function BIPage() {
     const allowedSet = new Set<string>(FILIAIS_PERMITIDAS);
     return currentValues.filter((row) => allowedSet.has(getFilialValue(row)));
   }, [currentValues, filialCol]);
+
+  const isLeadTimeEnabled = datasetId === 'DataSet_G3FollowUp' || datasetId === 'DataSet_G4FollowUp';
+
+  const movimentoDataHoraCol = useMemo(() => {
+    if (!isLeadTimeEnabled) return null;
+    const byLabel = currentColumns.find((c) => {
+      const label = formatLabel(c).toLowerCase();
+      return label === 'movimento data hora' || (/movimento/.test(label) && /data/.test(label) && /hora/.test(label));
+    });
+    if (byLabel) return byLabel;
+    return currentColumns.find((c) => /movimento.*data.*hora|data.*hora.*movimento/i.test(c)) ?? null;
+  }, [currentColumns, isLeadTimeEnabled]);
+
+  const getLeadTimeFromRow = (row: Record<string, unknown>): string => {
+    if (!isLeadTimeEnabled || !movimentoDataHoraCol) return '—';
+    const val = row[movimentoDataHoraCol];
+    const date = parseFluigDateTime(val);
+    return formatLeadTime(date);
+  };
 
   const { statusList: fullStatusList, idCol, historicoCol, statusCol } = useMemo(
     () => buildStatusList(currentValuesFilteredByFilial, currentColumns),
@@ -1064,6 +1110,11 @@ export default function BIPage() {
                                   <th className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-28 ${isCompact ? 'py-2' : 'py-3'}`}>
                                     IdMov
                                   </th>
+                                  {isLeadTimeEnabled && movimentoDataHoraCol && (
+                                    <th className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-32 ${isCompact ? 'py-2' : 'py-3'}`}>
+                                      Lead time
+                                    </th>
+                                  )}
                                   <th className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider ${isCompact ? 'py-2' : 'py-3'}`}>
                                     {datasetId === 'DataSet_G5FollowUp' ? 'Título da Solicitação' : 'Histórico'}
                                   </th>
@@ -1082,6 +1133,11 @@ export default function BIPage() {
                                       <td className={`px-5 font-mono text-gray-700 dark:text-gray-300 align-middle ${isCompact ? 'py-1.5' : 'py-3'}`}>
                                         {String(row[idCol] ?? '—')}
                                       </td>
+                                      {isLeadTimeEnabled && movimentoDataHoraCol && (
+                                        <td className={`px-5 text-gray-800 dark:text-gray-200 align-middle whitespace-nowrap ${isCompact ? 'py-1.5' : 'py-3'}`}>
+                                          {getLeadTimeFromRow(row)}
+                                        </td>
+                                      )}
                                       <td className={`px-5 text-gray-800 dark:text-gray-200 align-middle overflow-hidden ${isCompact ? 'py-1.5 leading-snug' : 'py-3 leading-relaxed'}`}>
                                         <span className={`block min-w-0 ${isCompact ? 'truncate' : 'line-clamp-2'}`} title={hist}>
                                           {hist || '—'}
