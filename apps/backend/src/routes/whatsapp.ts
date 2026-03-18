@@ -25,4 +25,8 @@ router.delete('/conversations/:id', (req, res, next) =>
   controller.deleteConversation(req as any, res, next)
 );
 
+router.post('/conversations/:id/messages', (req, res, next) =>
+  controller.sendMessageToConversation(req as any, res, next)
+);
+
 export default router;

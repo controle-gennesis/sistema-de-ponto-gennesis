@@ -3,6 +3,7 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { whatsAppBot } from '../services/WhatsAppBotService';
+import { metaWhatsApp } from '../services/MetaWhatsAppService';
 
 /** Token que a Meta envia no GET do webhook; deve ser igual ao configurado no App. */
 const META_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'gennesis_whatsapp_verify';
@@ -237,6 +238,57 @@ export class WhatsAppController {
       res.json({
         success: true,
         message: 'Conversa removida com sucesso'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Enviar mensagem manual para uma conversa WhatsApp.
+   * (Mensagem do admin/DP via sistema)
+   */
+  async sendMessageToConversation(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const { content } = req.body || {};
+
+      if (!content || typeof content !== 'string' || !content.trim()) {
+        throw createError('Mensagem é obrigatória', 400);
+      }
+
+      const conversation = await prisma.whatsAppConversation.findUnique({
+        where: { id }
+      });
+
+      if (!conversation) {
+        throw createError('Conversa não encontrada', 404);
+      }
+
+      // Envia via Meta
+      await metaWhatsApp.sendText(conversation.phone, content.trim());
+
+      // Salva a mensagem no histórico do sistema
+      await prisma.whatsAppMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: content.trim()
+        }
+      });
+
+      // Marca como pendente se for uma conversa já concluída/cancelada (evita “travamento” visual)
+      await prisma.whatsAppConversation.update({
+        where: { id: conversation.id },
+        data: {
+          status: 'PENDING' as any,
+          updatedAt: new Date()
+        } as any
+      });
+
+      res.json({
+        success: true,
+        message: 'Mensagem enviada com sucesso'
       });
     } catch (error) {
       next(error);

@@ -741,7 +741,7 @@ export class WhatsAppBotService {
         } else {
           sendAction = {
             type: 'buttons',
-            body: 'Envie a foto ou PDF do atestado. 📎',
+            body: 'Envie a foto ou PDF do atestado.',
             buttons: [
               { id: 'MENU', title: 'Voltar' },
               { id: 'END', title: 'Encerrar' }

@@ -164,6 +164,8 @@ const ABAS: { id: TabFiltro; label: string; icon: React.ElementType }[] = [
 export default function ConversasWhatsAppPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [abaAtiva, setAbaAtiva] = useState<TabFiltro>('todas');
+  const [replyText, setReplyText] = useState('');
+  const [isSending, setIsSending] = useState(false);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -181,7 +183,7 @@ export default function ConversasWhatsAppPage() {
     }
   });
 
-  const { data: detailData, isLoading: loadingDetail } = useQuery({
+  const { data: detailData, isLoading: loadingDetail, refetch: refetchDetail } = useQuery({
     queryKey: ['whatsapp-conversation', selectedId],
     queryFn: async () => {
       if (!selectedId) return null;
@@ -231,6 +233,25 @@ export default function ConversasWhatsAppPage() {
     } catch (error) {
       console.error('Erro ao remover conversa:', error);
       alert('Erro ao remover a conversa.');
+    }
+  };
+
+  const handleSendManualMessage = async () => {
+    if (!selectedId) return;
+    const content = replyText.trim();
+    if (!content || isSending) return;
+
+    try {
+      setIsSending(true);
+      await api.post(`/whatsapp/conversations/${selectedId}/messages`, { content });
+      setReplyText('');
+      await refetchDetail();
+      await refetchList();
+    } catch (error) {
+      console.error('Erro ao enviar mensagem:', error);
+      alert('Erro ao enviar mensagem.');
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -756,6 +777,32 @@ export default function ConversasWhatsAppPage() {
                         </div>
                       ))}
                     </div>
+
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleSendManualMessage();
+                      }}
+                      className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 items-end"
+                    >
+                      <div className="flex-1">
+                        <textarea
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          placeholder="Digite uma mensagem para a pessoa..."
+                          className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-gray-200 resize-none"
+                          rows={1}
+                          style={{ minHeight: 42, maxHeight: 120 }}
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={!replyText.trim() || isSending}
+                        className="px-4 py-2.5 bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                      >
+                        {isSending ? 'Enviando...' : 'Enviar'}
+                      </button>
+                    </form>
                   </div>
                 </CardContent>
               </Card>
