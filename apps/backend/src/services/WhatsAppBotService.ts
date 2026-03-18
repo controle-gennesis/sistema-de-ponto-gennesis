@@ -143,8 +143,9 @@ export class WhatsAppBotService {
     const menu = (): SendAction => ({
       type: 'buttons',
       body: pick([
-        'Olá! Sou o assistente da Gennesis. Como posso ajudar?',
-        'Oi! Posso te ajudar com atestados médicos.'
+        'Olá! 😊 Eu sou a Luna, assistente virtual da Gennesis.\nEstou por aqui pra te ajudar — como posso te atender hoje?',
+        'Oi! Tudo bem? 😊\nSou a Luna, da Gennesis. Me conta como posso te ajudar!',
+        'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Luna, assistente virtual, e estou à disposição para ajudar no que precisar.'
       ]),
       buttons: [
         { id: 'ATESTADO', title: 'Enviar atestado' },
@@ -284,7 +285,7 @@ export class WhatsAppBotService {
       newConversationStatus = 'CANCELLED';
       return {
         type: 'text',
-        text: 'Atendimento encerrado. Se precisar de novo, é só enviar uma mensagem.'
+        text: 'Atendimento encerrado 😊\nSempre que precisar, é só me chamar por aqui!'
       };
     };
 
