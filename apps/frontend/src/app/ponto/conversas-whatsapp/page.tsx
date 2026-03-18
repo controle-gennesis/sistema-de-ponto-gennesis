@@ -15,6 +15,7 @@ import {
   Loader2,
   ArrowLeft,
   AlertCircle,
+  Trash2,
   FileCheck,
   HelpCircle,
   MoreHorizontal,
@@ -34,6 +35,7 @@ interface ConversationSummary {
   id: string;
   phone: string;
   flowStatus: string;
+  status: string;
   updatedAt: string;
   createdAt: string;
   messageCount: number;
@@ -66,9 +68,14 @@ interface Submission {
 /** Payload do fluxo de atestado (enviado no submission MEDICAL_CERTIFICATE) */
 interface AtestadoPayload {
   name?: string | null;
-  registration?: string | null;
+  forWhom?: 'SELF' | 'OTHER' | null;
+  requesterSector?: string | null;
+  costCenterId?: string | null;
+  costCenterCode?: string | null;
+  costCenterName?: string | null;
   atestadoType?: string | null;
   atestadoTypeLabel?: string | null;
+  atestadoOtherType?: string | null;
   dataInicio?: string | null;
   dataFim?: string | null;
   fileReceived?: boolean;
@@ -80,6 +87,7 @@ interface ConversationDetail {
   phone: string;
   flowStatus: string;
   currentStep: string | null;
+  status: string;
   payload: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
@@ -97,10 +105,14 @@ function formatPhone(phone: string) {
 type TabFiltro = 'todas' | 'atestados' | 'duvidas' | 'outros';
 
 const ATESTADO_FLOW_STEPS = [
-  'ASK_NAME',
-  'ASK_REGISTRATION',
+  'ATESTADO_ASK_FOR_WHOM',
+  'ATESTADO_ASK_PERSON_NAME',
+  'ATESTADO_ASK_REQUESTER_SECTOR',
+  'ATESTADO_ASK_COST_CENTER',
   'ATESTADO_ASK_TYPE',
-  'ATESTADO_ASK_DATES',
+  'ATESTADO_ASK_OTHER_TYPE',
+  'ATESTADO_ASK_START_DATE',
+  'ATESTADO_ASK_END_DATE',
   'ATESTADO_ASK_FILE',
   'ATESTADO_COMPLETE'
 ];
@@ -161,7 +173,7 @@ export default function ConversasWhatsAppPage() {
     }
   });
 
-  const { data: listData, isLoading: loadingList } = useQuery({
+  const { data: listData, isLoading: loadingList, refetch: refetchList } = useQuery({
     queryKey: ['whatsapp-conversations'],
     queryFn: async () => {
       const res = await api.get('/whatsapp/conversations');
@@ -189,6 +201,38 @@ export default function ConversasWhatsAppPage() {
   const conversasFiltradas = filtrarPorAba(conversations, abaAtiva);
   const detail: ConversationDetail | null = detailData?.data ?? null;
   const isLoading = loadingUser || loadingList;
+
+  const getAtestadoName = (source: unknown): string | null => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+    const maybe = (source as any).name;
+    if (typeof maybe !== 'string') return null;
+    const v = maybe.trim();
+    return v ? v : null;
+  };
+
+  const headerName = (() => {
+    if (!detail) return null;
+    const fromInProgress = detail.payload ? getAtestadoName(detail.payload) : null;
+    if (fromInProgress) return fromInProgress;
+    const certificateSubmissions = detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE');
+    if (certificateSubmissions.length === 0) return null;
+    const last = certificateSubmissions[certificateSubmissions.length - 1];
+    return last?.payload ? getAtestadoName(last.payload) : null;
+  })();
+
+  const handleRemoveConversation = async () => {
+    if (!selectedId) return;
+    if (!confirm('Tem certeza que deseja remover esta conversa?')) return;
+
+    try {
+      await api.delete(`/whatsapp/conversations/${selectedId}`);
+      setSelectedId(null);
+      await refetchList();
+    } catch (error) {
+      console.error('Erro ao remover conversa:', error);
+      alert('Erro ao remover a conversa.');
+    }
+  };
 
   if (loadingUser) {
     return (
@@ -312,6 +356,21 @@ export default function ConversasWhatsAppPage() {
                                 ? format(new Date(c.lastMessageAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
                                 : format(new Date(c.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
                             </p>
+                            <span
+                              className={`mt-2 inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                c.status === 'COMPLETED'
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                  : c.status === 'CANCELLED'
+                                    ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
+                                    : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                              }`}
+                            >
+                              {c.status === 'COMPLETED'
+                                ? 'Concluído'
+                                : c.status === 'CANCELLED'
+                                  ? 'Cancelado'
+                                  : 'Pendente'}
+                            </span>
                           </div>
                           <ChevronRight className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
                         </button>
@@ -359,11 +418,37 @@ export default function ConversasWhatsAppPage() {
                       </span>
                       <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
                         {formatPhone(detail.phone)}
+                        {headerName ? ` - ${headerName}` : ''}
                       </span>
                     </div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
-                      {detail.messages.length} mensagens · {detail.submissions.length} envio(s)
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
+                          detail.status === 'COMPLETED'
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                            : detail.status === 'CANCELLED'
+                              ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
+                              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                        }`}
+                      >
+                        {detail.status === 'COMPLETED'
+                          ? 'Concluído'
+                          : detail.status === 'CANCELLED'
+                            ? 'Cancelado'
+                            : 'Pendente'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRemoveConversation}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Remover
+                      </button>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                        {detail.messages.length} mensagens · {detail.submissions.length} envio(s)
+                      </span>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="p-4 sm:p-6 space-y-6">
@@ -407,33 +492,68 @@ export default function ConversasWhatsAppPage() {
                                   {isPayload ? (
                                     <>
                                       <LinhaDado icon={UserCircle} label="Nome completo" value={p.name} />
-                                      <LinhaDado
-                                        icon={Hash}
-                                        label="Matrícula ou CPF"
-                                        value={p.registration ?? null}
-                                      />
+                                          <LinhaDado
+                                            icon={UserCircle}
+                                            label="Para quem"
+                                            value={
+                                              p.forWhom === 'SELF'
+                                                ? 'Você'
+                                                : p.forWhom === 'OTHER'
+                                                  ? 'Outra pessoa'
+                                                  : null
+                                            }
+                                          />
+                                      {p.requesterSector && (
+                                        <LinhaDado
+                                          icon={Hash}
+                                          label="Setor solicitante"
+                                          value={p.requesterSector ?? null}
+                                        />
+                                      )}
+                                          <LinhaDado
+                                            icon={Hash}
+                                            label="Centro de custo/contrato"
+                                            value={
+                                              p.costCenterCode
+                                                ? `${p.costCenterCode}${p.costCenterName ? ` - ${p.costCenterName}` : ''}`
+                                                : null
+                                            }
+                                          />
                                       <LinhaDado
                                         icon={FileType}
                                         label="Tipo de atestado"
                                         value={p.atestadoTypeLabel ?? p.atestadoType ?? null}
                                       />
+                                          {p.atestadoOtherType && (
+                                            <LinhaDado
+                                              icon={FileType}
+                                              label="Tipo específico (Outros)"
+                                              value={p.atestadoOtherType}
+                                            />
+                                          )}
                                       <LinhaDado icon={Calendar} label="Data início" value={p.dataInicio ?? null} />
                                       <LinhaDado icon={Calendar} label="Data fim" value={p.dataFim ?? null} />
-                                      {s.fileUrl && (
+                                      {(s.fileUrl || s.fileName) && (
                                         <div className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
                                           <Paperclip className="w-4 h-4 text-gray-400 dark:text-gray-500 mt-0.5 shrink-0" />
                                           <div className="min-w-0 flex-1">
                                             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                                               Arquivo do atestado
                                             </p>
-                                            <a
-                                              href={s.fileUrl}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="inline-flex items-center gap-1 mt-1 text-sm text-red-600 dark:text-red-400 hover:underline"
-                                            >
-                                              {s.fileName || 'Ver arquivo'}
-                                            </a>
+                                            {s.fileUrl ? (
+                                              <a
+                                                href={s.fileUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1 mt-1 text-sm text-red-600 dark:text-red-400 hover:underline"
+                                              >
+                                                {s.fileName || 'Ver arquivo'}
+                                              </a>
+                                            ) : (
+                                              <p className="text-sm text-gray-900 dark:text-gray-100 mt-1 break-all">
+                                                {s.fileName || 'Arquivo recebido'}
+                                              </p>
+                                            )}
                                           </div>
                                         </div>
                                       )}
@@ -454,16 +574,24 @@ export default function ConversasWhatsAppPage() {
                                       <div className="py-2 text-sm text-gray-500 dark:text-gray-400">
                                         Dados não disponíveis neste formato.
                                       </div>
-                                      {s.fileUrl && (
-                                        <a
-                                          href={s.fileUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 text-sm text-red-600 dark:text-red-400 hover:underline"
-                                        >
-                                          <Paperclip className="w-4 h-4" />
-                                          {s.fileName || 'Ver arquivo'}
-                                        </a>
+                                      {(s.fileUrl || s.fileName) && (
+                                        <>
+                                          {s.fileUrl ? (
+                                            <a
+                                              href={s.fileUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1 text-sm text-red-600 dark:text-red-400 hover:underline"
+                                            >
+                                              <Paperclip className="w-4 h-4" />
+                                              {s.fileName || 'Ver arquivo'}
+                                            </a>
+                                          ) : (
+                                            <div className="mt-2 text-sm text-gray-900 dark:text-gray-100 break-all">
+                                              {s.fileName || 'Arquivo recebido'}
+                                            </div>
+                                          )}
+                                        </>
                                       )}
                                       <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                                         <Clock className="w-3 h-3 inline mr-1" />
@@ -526,15 +654,44 @@ export default function ConversasWhatsAppPage() {
                             <div className="space-y-0">
                               <LinhaDado icon={UserCircle} label="Nome completo" value={(detail.payload as AtestadoPayload).name} />
                               <LinhaDado
+                                icon={UserCircle}
+                                label="Para quem"
+                                value={
+                                  (detail.payload as AtestadoPayload).forWhom === 'SELF'
+                                    ? 'Você'
+                                    : (detail.payload as AtestadoPayload).forWhom === 'OTHER'
+                                      ? 'Outra pessoa'
+                                      : null
+                                }
+                              />
+                              {(detail.payload as AtestadoPayload).requesterSector && (
+                                <LinhaDado
+                                  icon={Hash}
+                                  label="Setor solicitante"
+                                  value={(detail.payload as AtestadoPayload).requesterSector ?? null}
+                                />
+                              )}
+                              <LinhaDado
                                 icon={Hash}
-                                label="Matrícula ou CPF"
-                                value={(detail.payload as AtestadoPayload).registration ?? null}
+                                label="Centro de custo/contrato"
+                                value={
+                                  (detail.payload as AtestadoPayload).costCenterCode
+                                    ? `${(detail.payload as AtestadoPayload).costCenterCode}${(detail.payload as AtestadoPayload).costCenterName ? ` - ${(detail.payload as AtestadoPayload).costCenterName}` : ''}`
+                                    : null
+                                }
                               />
                               <LinhaDado
                                 icon={FileType}
                                 label="Tipo de atestado"
                                 value={(detail.payload as AtestadoPayload).atestadoTypeLabel ?? (detail.payload as AtestadoPayload).atestadoType ?? null}
                               />
+                              {(detail.payload as AtestadoPayload).atestadoOtherType && (
+                                <LinhaDado
+                                  icon={FileType}
+                                  label="Tipo específico (Outros)"
+                                  value={(detail.payload as AtestadoPayload).atestadoOtherType ?? undefined}
+                                />
+                              )}
                               <LinhaDado icon={Calendar} label="Data início" value={(detail.payload as AtestadoPayload).dataInicio ?? null} />
                               <LinhaDado icon={Calendar} label="Data fim" value={(detail.payload as AtestadoPayload).dataFim ?? null} />
                             </div>
@@ -577,16 +734,23 @@ export default function ConversasWhatsAppPage() {
                               </span>
                             </div>
                             <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
-                            {m.mediaUrl && (
-                              <a
-                                href={m.mediaUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 mt-2 text-xs underline"
-                              >
-                                <Paperclip className="w-3 h-3" />
-                                {m.fileName || 'Anexo'}
-                              </a>
+                            {(m.mediaUrl || m.content === '[Arquivo enviado]') && (
+                              m.mediaUrl ? (
+                                <a
+                                  href={m.mediaUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 mt-2 text-xs underline"
+                                >
+                                  <Paperclip className="w-3 h-3" />
+                                  {m.fileName || 'Anexo'}
+                                </a>
+                              ) : (
+                                <div className="inline-flex items-center gap-1 mt-2 text-xs opacity-80">
+                                  <Paperclip className="w-3 h-3" />
+                                  <span>{m.fileName || 'Arquivo enviado'}</span>
+                                </div>
+                              )
                             )}
                           </div>
                         </div>

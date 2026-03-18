@@ -21,4 +21,8 @@ router.get('/conversations/:id', (req, res, next) =>
   controller.getConversation(req as any, res, next)
 );
 
+router.delete('/conversations/:id', (req, res, next) =>
+  controller.deleteConversation(req as any, res, next)
+);
+
 export default router;

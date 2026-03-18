@@ -140,6 +140,7 @@ export class WhatsAppController {
         phone: c.phone,
         flowStatus: c.flowStatus,
         currentStep: c.currentStep,
+        status: c.status,
         updatedAt: c.updatedAt,
         createdAt: c.createdAt,
         messageCount: c._count.messages,
@@ -184,6 +185,7 @@ export class WhatsAppController {
           phone: conversation.phone,
           flowStatus: conversation.flowStatus,
           currentStep: conversation.currentStep,
+          status: conversation.status,
           payload: conversation.payload,
           createdAt: conversation.createdAt,
           updatedAt: conversation.updatedAt,
@@ -207,6 +209,34 @@ export class WhatsAppController {
             createdAt: s.createdAt
           }))
         }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Remover uma conversa do WhatsApp (mensagens e submissions em cascade).
+   */
+  async deleteConversation(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      const existing = await prisma.whatsAppConversation.findUnique({
+        where: { id }
+      });
+
+      if (!existing) {
+        throw createError('Conversa não encontrada', 404);
+      }
+
+      await prisma.whatsAppConversation.delete({
+        where: { id }
+      });
+
+      res.json({
+        success: true,
+        message: 'Conversa removida com sucesso'
       });
     } catch (error) {
       next(error);

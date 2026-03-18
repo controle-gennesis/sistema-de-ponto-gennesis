@@ -1087,7 +1087,8 @@ model PasswordResetToken {
 // Conversas do chatbot WhatsApp (Meta Cloud API)
 model WhatsAppConversation {
   id           String    @id @default(cuid())
-  phone        String    @unique
+  phone        String
+  status       WhatsAppConversationStatus @default(PENDING)
   flowStatus   String    @default("MENU")
   currentStep  String?
   payload      Json?
@@ -1100,6 +1101,12 @@ model WhatsAppConversation {
   @@index([phone])
   @@index([updatedAt])
   @@map("whatsapp_conversations")
+}
+
+enum WhatsAppConversationStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
 }
 
 model WhatsAppMessage {
