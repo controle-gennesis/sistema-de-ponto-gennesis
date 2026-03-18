@@ -137,6 +137,9 @@ export default function BIPage() {
   const [showFornecedorDropdown, setShowFornecedorDropdown] = useState(false);
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
   const [searchText, setSearchText] = useState('');
+  // Quando o usuário mexe em um filtro (Filial/CC/Fornecedor), ele vira o "ativo".
+  // Os outros ficam temporariamente ignorados no resultado para evitar influência cruzada.
+  const [activeFilterCategory, setActiveFilterCategory] = useState<'filial' | 'cc' | 'fornecedor' | null>(null);
   const [selectedEtapaIndex, setSelectedEtapaIndex] = useState(0);
   const [compactView, setCompactView] = useState(true);
   const [recordsPerPage, setRecordsPerPage] = useState<25 | 50 | 100>(25);
@@ -238,6 +241,15 @@ export default function BIPage() {
     router.push('/auth/login');
   };
 
+  const handleDatasetTabClick = (idx: number) => {
+    setActiveTab(idx);
+    // Resetar estado de visualização e busca ao trocar de dataset
+    setSelectedEtapaIndex(0);
+    setCurrentPage(0);
+    setSearchText('');
+    setActiveFilterCategory(null);
+  };
+
   function buildStatusList(values: Record<string, unknown>[], columns: string[]) {
     const statusCol =
       columns.find((c: string) => /^Etapa_Atual$/i.test(c))
@@ -270,7 +282,45 @@ export default function BIPage() {
     }
     const statusList = Object.values(byStatus)
       .map(({ label, rows }) => [label, rows] as const)
-      .sort(([, a], [, b]) => b.length - a.length);
+
+    // Ordenar etapas por fluxo (G3/G4) em vez de ordenar por quantidade.
+    if (datasetId === 'DataSet_G3FollowUp' || datasetId === 'DataSet_G4FollowUp') {
+      const norm = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize('NFD')
+          // Evita \p{Diacritic} (Unicode property escapes), que pode falhar no build dependendo do target TS.
+          // NFD separa acentos em marks na faixa U+0300..U+036F.
+          .replace(/[\u0300-\u036f]/g, '');
+
+      const stageOrderIndex = (label: string): number => {
+        const l = norm(label);
+
+        // G3: Gestor de Compras -> Aprovação Setor Técnico -> Aprovação da diretoria -> Finalizada
+        if (datasetId === 'DataSet_G3FollowUp') {
+          if (l.includes('finalizada')) return 3;
+          if (l.includes('diretoria')) return 2;
+          if (l.includes('setor tecnico')) return 1;
+          if (l.includes('gestor de compras')) return 0;
+          return 999;
+        }
+
+        // G4: Anexar Comprovante -> Validação Compras -> Anexar Nota Fiscal -> Finalizada
+        if (datasetId === 'DataSet_G4FollowUp') {
+          if (l.includes('finalizada')) return 3;
+          if (l.includes('nota fiscal') || l.includes('nf')) return 2;
+          if (l.includes('validacao') || l.includes('validacao compras') || l.includes('validacao compras')) return 1;
+          if (l.includes('comprovante')) return 0;
+          return 999;
+        }
+
+        return 999;
+      };
+
+      statusList.sort((a, b) => stageOrderIndex(a[0]) - stageOrderIndex(b[0]));
+    } else {
+      statusList.sort(([, a], [, b]) => b.length - a.length);
+    }
     return { statusList, idCol, historicoCol, statusCol };
   }
 
@@ -435,17 +485,24 @@ export default function BIPage() {
 
   const filteredStatusList = useMemo(() => {
     const search = searchText.trim().toLowerCase();
-    const byFiliais = selectedFiliais.length > 0 ? new Set(selectedFiliais) : null;
-    const byCCs = selectedCCs.length > 0 ? new Set(selectedCCs) : null;
-    const byFornecedores = selectedFornecedores.length > 0 ? new Set(selectedFornecedores) : null;
+    const applyFilial = activeFilterCategory === 'filial';
+    const applyCC = activeFilterCategory === 'cc';
+    const applyFornecedor = activeFilterCategory === 'fornecedor';
+
+    const byFiliais = applyFilial && selectedFiliais.length > 0 ? new Set(selectedFiliais) : null;
+    const byCCs = applyCC && selectedCCs.length > 0 ? new Set(selectedCCs) : null;
+    const byFornecedores = applyFornecedor && selectedFornecedores.length > 0 ? new Set(selectedFornecedores) : null;
 
     const matchRow = (row: Record<string, unknown>) => {
-      if (filialCol && filiais.length > 0 && selectedFiliais.length === 0) return false;
-      if (ccColResolved && centrosCusto.length > 0 && selectedCCs.length === 0) return false;
-      if (fornecedorCol && fornecedores.length > 0 && selectedFornecedores.length === 0) return false;
+      // Aplica SOMENTE a categoria de filtro ativa; as outras não "interferem" no resultado.
+      if (applyFilial && filialCol && filiais.length > 0 && selectedFiliais.length === 0) return false;
+      if (applyCC && ccColResolved && centrosCusto.length > 0 && selectedCCs.length === 0) return false;
+      if (applyFornecedor && fornecedorCol && fornecedores.length > 0 && selectedFornecedores.length === 0) return false;
+
       if (byFiliais && filialCol && !byFiliais.has(getFilialValue(row))) return false;
       if (byCCs && ccColResolved && !byCCs.has(getCCValue(row))) return false;
-      if (byFornecedores && fornecedorCol && !byFornecedores.has(String(row[fornecedorCol] ?? '').trim())) return false;
+      if (byFornecedores && fornecedorCol && !byFornecedores.has(String(row[fornecedorCol] ?? '').trim()))
+        return false;
       if (search) {
         const found = currentColumns.some((col) => {
           const val = row[col];
@@ -465,7 +522,21 @@ export default function BIPage() {
         return [etapa, filtered] as const;
       })
       .filter(([, rows]) => rows.length > 0);
-  }, [fullStatusList, selectedFiliais, selectedCCs, selectedFornecedores, searchText, currentColumns, filialCol, ccColResolved, fornecedorCol, filiais.length, centrosCusto.length, fornecedores.length]);
+  }, [
+    fullStatusList,
+    selectedFiliais,
+    selectedCCs,
+    selectedFornecedores,
+    searchText,
+    currentColumns,
+    filialCol,
+    ccColResolved,
+    fornecedorCol,
+    filiais.length,
+    centrosCusto.length,
+    fornecedores.length,
+    activeFilterCategory,
+  ]);
 
   useEffect(() => {
     setSelectedEtapaIndex((prev) => Math.min(prev, Math.max(0, filteredStatusList.length - 1)));
@@ -483,6 +554,7 @@ export default function BIPage() {
     setSelectedCCSearch('');
     setSelectedFornecedoresSearch('');
     setSearchText('');
+    setActiveFilterCategory(null);
   };
 
   if (loadingUser || !userData) {
@@ -519,7 +591,7 @@ export default function BIPage() {
                   {BI_DATASETS.map((ds, idx) => (
                     <button
                       key={ds}
-                      onClick={() => setActiveTab(idx)}
+                      onClick={() => handleDatasetTabClick(idx)}
                       className={`px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                         activeTab === idx
                           ? 'bg-white dark:bg-gray-700 text-red-600 dark:text-red-400 shadow-sm'
@@ -584,22 +656,6 @@ export default function BIPage() {
               <CardContent className="p-4 sm:p-6 w-full">
                 <div className="space-y-4 w-full">
                   <div className="flex flex-wrap gap-4 w-full">
-                    <div className="flex-1 min-w-[200px] max-w-[400px]">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Buscar
-                      </label>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-                        <input
-                          type="text"
-                          placeholder="Buscar em qualquer coluna..."
-                          value={searchText}
-                          onChange={(e) => setSearchText(e.target.value)}
-                          className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                        />
-                      </div>
-                    </div>
-
                     {filialCol && (
                       <div ref={filialRef} className="relative flex-1 min-w-[180px]">
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Filial</label>
@@ -644,6 +700,7 @@ export default function BIPage() {
                                     type="checkbox"
                                     checked={selectedFiliais.length > 0 && selectedFiliais.length === filiais.length}
                                     onChange={(e) => {
+                                      setActiveFilterCategory('filial');
                                       if (e.target.checked) setSelectedFiliais([...filiais]);
                                       else setSelectedFiliais([]);
                                     }}
@@ -679,6 +736,7 @@ export default function BIPage() {
                                           checked={checked}
                                           onChange={(e) => {
                                             e.stopPropagation();
+                                            setActiveFilterCategory('filial');
                                             if (e.target.checked) setSelectedFiliais((prev) => Array.from(new Set([...prev, f])));
                                             else setSelectedFiliais((prev) => prev.filter((x) => x !== f));
                                           }}
@@ -752,6 +810,7 @@ export default function BIPage() {
                                     type="checkbox"
                                     checked={selectedCCs.length > 0 && selectedCCs.length === centrosCusto.length}
                                     onChange={(e) => {
+                                      setActiveFilterCategory('cc');
                                       if (e.target.checked) setSelectedCCs([...centrosCusto]);
                                       else setSelectedCCs([]);
                                     }}
@@ -794,6 +853,7 @@ export default function BIPage() {
                                           checked={checked}
                                           onChange={(e) => {
                                             e.stopPropagation();
+                                            setActiveFilterCategory('cc');
                                             if (e.target.checked) setSelectedCCs((prev) => Array.from(new Set([...prev, c])));
                                             else setSelectedCCs((prev) => prev.filter((x) => x !== c));
                                           }}
@@ -867,6 +927,7 @@ export default function BIPage() {
                                     type="checkbox"
                                     checked={selectedFornecedores.length > 0 && selectedFornecedores.length === fornecedores.length}
                                     onChange={(e) => {
+                                      setActiveFilterCategory('fornecedor');
                                       if (e.target.checked) setSelectedFornecedores([...fornecedores]);
                                       else setSelectedFornecedores([]);
                                     }}
@@ -902,6 +963,7 @@ export default function BIPage() {
                                           checked={checked}
                                           onChange={(e) => {
                                             e.stopPropagation();
+                                            setActiveFilterCategory('fornecedor');
                                             if (e.target.checked) setSelectedFornecedores((prev) => Array.from(new Set([...prev, f])));
                                             else setSelectedFornecedores((prev) => prev.filter((x) => x !== f));
                                           }}
@@ -1051,8 +1113,20 @@ export default function BIPage() {
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-5">
+                          <div className="flex-none min-w-[260px]">
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                              <input
+                                type="text"
+                                placeholder="Buscar..."
+                                value={searchText}
+                                onChange={(e) => setSearchText(e.target.value)}
+                                className="w-full min-w-0 pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                              />
+                            </div>
+                          </div>
                           {compactView && (
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex items-center gap-2.5 flex-shrink-0">
                               <label className="text-sm text-gray-600 dark:text-gray-400">
                                 Por página
                               </label>
@@ -1068,7 +1142,7 @@ export default function BIPage() {
                             </div>
                           )}
                           {compactView && <div className="hidden sm:block w-px h-6 bg-gray-200 dark:bg-gray-600" />}
-                          <label className="flex items-center gap-2.5 cursor-pointer group select-none">
+                          <label className="flex items-center gap-2.5 cursor-pointer group select-none flex-shrink-0">
                             <div className="relative">
                               <input
                                 type="checkbox"
@@ -1104,7 +1178,7 @@ export default function BIPage() {
                       const start = currentPage * recordsPerPage;
                       return (
                         <>
-                          <div className={`overflow-x-auto overflow-y-auto min-h-[200px] ${compactView ? 'max-h-[calc(100vh-420px)]' : 'max-h-[calc(100vh-380px)]'}`}>
+                          <div className={`overflow-x-auto overflow-y-auto min-h-[280px] ${compactView ? 'max-h-[calc(100vh-310px)]' : 'max-h-[calc(100vh-270px)]'}`}>
                             <table className={`w-full ${isCompact ? 'text-xs' : 'text-sm'}`}>
                               <thead className="bg-gray-50 dark:bg-gray-800/80 sticky top-0 z-10">
                                 <tr>

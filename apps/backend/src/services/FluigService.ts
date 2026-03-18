@@ -57,7 +57,6 @@ export class FluigService {
   private workingDatasetBase: string | null = null;
   private oauth: OAuth;
   private token: { key: string; secret: string };
-  private bearerToken: string | null;
 
   constructor() {
     const domain = (process.env.FLUIG_BASE_URL || 'https://gennesisengenharia160516.fluig.cloudtotvs.com.br').replace(/\/$/, '');
@@ -70,15 +69,13 @@ export class FluigService {
     } else {
       this.datasetBasePaths = DATASET_BASE_PATHS.map((p) => (p ? domain + p : domain));
     }
-    this.bearerToken = process.env.FLUIG_BEARER_TOKEN || null;
-
     const consumerKey = process.env.FLUIG_CONSUMER_KEY || '';
     const consumerSecret = process.env.FLUIG_CONSUMER_SECRET || '';
     const accessToken = process.env.FLUIG_ACCESS_TOKEN || '';
     const accessTokenSecret = process.env.FLUIG_ACCESS_TOKEN_SECRET || '';
 
-    if (!this.bearerToken && (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret)) {
-      console.warn('Fluig: Configure FLUIG_BEARER_TOKEN ou as variáveis OAuth (FLUIG_CONSUMER_KEY, FLUIG_CONSUMER_SECRET, FLUIG_ACCESS_TOKEN, FLUIG_ACCESS_TOKEN_SECRET)');
+    if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+      console.warn('Fluig: Configure as variáveis OAuth (FLUIG_CONSUMER_KEY, FLUIG_CONSUMER_SECRET, FLUIG_ACCESS_TOKEN, FLUIG_ACCESS_TOKEN_SECRET)');
     }
 
     this.oauth = new OAuth({
@@ -93,15 +90,15 @@ export class FluigService {
 
   private getAuthHeaders(url: string, method: string, useOAuth?: boolean): Record<string, string> {
     const hasOAuth = !!(process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN);
-    if (!useOAuth && this.bearerToken) {
-      return { Authorization: `Bearer ${this.bearerToken}` };
-    }
+    // Importante: não enviar Authorization Bearer.
+    // Alguns ambientes Fluig rejeitam Bearer (401) e funcionam apenas via OAuth 1.0.
+    // Por isso sempre tentamos apenas OAuth quando disponível.
     if (hasOAuth) {
       const requestData = { url, method };
       const authData = this.oauth.authorize(requestData, this.token);
       return this.oauth.toHeader(authData) as unknown as Record<string, string>;
     }
-    return this.bearerToken ? { Authorization: `Bearer ${this.bearerToken}` } : {};
+    return {};
   }
 
   private async request<T>(
@@ -118,7 +115,8 @@ export class FluigService {
     let lastErr: unknown;
     for (const base of bases) {
       const url = `${base}${path.startsWith('/') ? '' : '/'}${path}`;
-      for (const useOAuth of [false, true] as const) {
+      // Não tentar Bearer: vai direto para OAuth (quando existir).
+      for (const useOAuth of [true] as const) {
         if (useOAuth && !hasOAuth) break;
         const headers = this.getAuthHeaders(url, method, useOAuth);
         const config: {
@@ -139,16 +137,13 @@ export class FluigService {
           const response = await axios.request<T>(config);
           if (options?.useDatasetBase !== false && !this.workingDatasetBase) {
             this.workingDatasetBase = base;
-            console.log(`Fluig: Path funcionando: ${base} (auth: ${useOAuth ? 'OAuth 1.0' : 'Bearer'})`);
+            console.log(`Fluig: Path funcionando: ${base} (auth: OAuth 1.0)`);
           }
           return response.data;
         } catch (err) {
           lastErr = err;
+          // Se falhar, tenta o próximo path/base.
           const status = (err as AxiosError)?.response?.status;
-          if (status === 401 && this.bearerToken && hasOAuth && !useOAuth) {
-            console.warn(`Fluig: Bearer rejeitado (401) em ${url}, tentando OAuth 1.0...`);
-            continue;
-          }
           if (isRetryableError(err) && bases.length > 1) {
             console.warn(`Fluig: Falha em ${url} (${status}), tentando próximo path...`);
             break;
