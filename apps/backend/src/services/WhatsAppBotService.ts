@@ -298,7 +298,7 @@ export class WhatsAppBotService {
       ]
     });
 
-    /** Monta lista de centros de custo em múltiplas seções (máx 10 seções × 10 linhas na API) */
+    /** Monta lista de centros de custo. API WhatsApp: máx 10 linhas no total (todas as seções somadas) */
     const costCenterList = async (): Promise<SendAction> => {
       const costCenters = await prisma.costCenter.findMany({
         where: { isActive: true },
@@ -306,30 +306,34 @@ export class WhatsAppBotService {
         select: { id: true, code: true, name: true }
       });
 
-      const ROWS_PER_SECTION = 10;
-      const MAX_SECTIONS = 10;
-      const sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }> = [];
+      const MAX_TOTAL_ROWS = 10;
+      const ACTION_ROWS = 2; // Encerrar + Voltar
+      const MAX_CC_ROWS = MAX_TOTAL_ROWS - ACTION_ROWS; // 8 centros de custo na lista
 
-      // Divide centros de custo em seções de até 10 itens (WhatsApp permite até 10 seções)
-      for (let i = 0; i < costCenters.length && sections.length < MAX_SECTIONS - 1; i += ROWS_PER_SECTION) {
-        const chunk = costCenters.slice(i, i + ROWS_PER_SECTION);
-        sections.push({
-          title: `Centros ${i + 1} a ${i + chunk.length}`,
-          rows: chunk.map((cc) => ({ id: cc.code, title: `${cc.code} - ${cc.name}` }))
-        });
-      }
+      const ccRows = costCenters
+        .slice(0, MAX_CC_ROWS)
+        .map((cc) => ({ id: cc.code, title: `${cc.code} - ${cc.name}`.slice(0, 24) }));
 
-      sections.push({
-        title: 'Ações',
-        rows: [
-          { id: 'END', title: 'Encerrar atendimento' },
-          { id: 'MENU', title: 'Voltar' }
-        ]
-      });
+      const sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }> = [
+        {
+          title: ccRows.length === costCenters.length ? 'Centros de custo' : `Centros (1 a ${ccRows.length})`,
+          rows: ccRows
+        },
+        {
+          title: 'Ações',
+          rows: [
+            { id: 'END', title: 'Encerrar atendimento' },
+            { id: 'MENU', title: 'Voltar' }
+          ]
+        }
+      ];
 
       return {
         type: 'list',
-        body: 'Selecione o centro de custo/contrato no qual o atestado deve ser vinculado:',
+        body:
+          costCenters.length > MAX_CC_ROWS
+            ? `Selecione o centro de custo (mostrando ${MAX_CC_ROWS} de ${costCenters.length}). Ou envie o código por texto:`
+            : 'Selecione o centro de custo/contrato no qual o atestado deve ser vinculado:',
         buttonText: 'Escolher',
         sections
       };
