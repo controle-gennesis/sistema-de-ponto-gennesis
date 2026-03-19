@@ -516,12 +516,10 @@ export default function BIPage() {
       return true;
     };
 
-    return fullStatusList
-      .map(([etapa, rows]) => {
-        const filtered = rows.filter(matchRow);
-        return [etapa, filtered] as const;
-      })
-      .filter(([, rows]) => rows.length > 0);
+    return fullStatusList.map(([etapa, rows]) => {
+      const filtered = rows.filter(matchRow);
+      return [etapa, filtered] as const;
+    });
   }, [
     fullStatusList,
     selectedFiliais,
@@ -547,9 +545,9 @@ export default function BIPage() {
   }, [selectedEtapaIndex, recordsPerPage]);
 
   const handleClearFilters = () => {
-    setSelectedFiliais([]);
-    setSelectedCCs([]);
-    setSelectedFornecedores([]);
+    setSelectedFiliais([...filiais]);
+    setSelectedCCs([...centrosCusto]);
+    setSelectedFornecedores([...fornecedores]);
     setSelectedFiliaisSearch('');
     setSelectedCCSearch('');
     setSelectedFornecedoresSearch('');
@@ -1109,7 +1107,9 @@ export default function BIPage() {
                             {etapaAtual}
                           </h3>
                           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                            {rowsAtuais.length} registro(s) nesta etapa
+                            {rowsAtuais.length === 0
+                              ? 'Nenhuma solicitação'
+                              : `${rowsAtuais.length} registro(s) nesta etapa`}
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-5">
@@ -1197,7 +1197,17 @@ export default function BIPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {rowsToShow.map((row, i) => {
+                                {rowsToShow.length === 0 ? (
+                                  <tr>
+                                    <td
+                                      colSpan={showLeadTimeColumn ? 4 : 3}
+                                      className="px-5 py-12 text-center text-gray-500 dark:text-gray-400 text-sm"
+                                    >
+                                      Nenhuma solicitação nesta etapa. Tente outro termo na busca ou limpe os filtros.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                rowsToShow.map((row, i) => {
                                   const hist = getHistText(row);
                                   return (
                                     <tr
@@ -1225,7 +1235,8 @@ export default function BIPage() {
                                       </td>
                                     </tr>
                                   );
-                                })}
+                                })
+                                )}
                               </tbody>
                             </table>
                           </div>
@@ -1268,17 +1279,29 @@ export default function BIPage() {
             {!error && !isEmpty && filteredStatusList.length === 0 && hasActiveFilters && (
               <Card>
                 <CardContent className="p-4 sm:p-6">
-                  <div className="flex flex-col items-center justify-center py-12">
-                    <Search className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" />
+                  <div className="flex flex-col items-center justify-center py-12 gap-4">
+                    <Search className="w-12 h-12 text-gray-300 dark:text-gray-600" />
                     <p className="text-gray-600 dark:text-gray-400">Nenhum resultado para os filtros</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Tente outro termo ou etapa.</p>
-                    <button
-                      onClick={handleClearFilters}
-                      className="mt-4 flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm transition-colors"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      Limpar filtros
-                    </button>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Tente outro termo ou etapa.</p>
+                    <div className="flex flex-col sm:flex-row items-center gap-3 mt-2 w-full max-w-md">
+                      <div className="relative w-full">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                        <input
+                          type="text"
+                          placeholder="Buscar..."
+                          value={searchText}
+                          onChange={(e) => setSearchText(e.target.value)}
+                          className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                        />
+                      </div>
+                      <button
+                        onClick={handleClearFilters}
+                        className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm transition-colors whitespace-nowrap"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Limpar filtros
+                      </button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
