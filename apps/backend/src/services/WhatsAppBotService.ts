@@ -4,10 +4,11 @@ import { metaWhatsApp } from './MetaWhatsAppService';
 
 type FlowStatus =
   | 'MENU'
+  | 'ATESTADO_ASK_REQUESTER_NAME'
   | 'ATESTADO_ASK_FOR_WHOM'
+  | 'ATESTADO_ASK_REQUESTER_SECTOR'
   | 'ATESTADO_ASK_PERSON_NAME'
   | 'ATESTADO_ASK_COST_CENTER'
-  | 'ATESTADO_ASK_REQUESTER_SECTOR'
   | 'ATESTADO_ASK_TYPE'
   | 'ATESTADO_ASK_OTHER_TYPE'
   | 'ATESTADO_ASK_START_DATE'
@@ -19,18 +20,22 @@ const ATESTADO_TYPES: Record<string, string> = {
   '1': 'MEDICAL',
   '2': 'DENTAL',
   '3': 'PREVENTIVE',
-  '4': 'ACCIDENT',
-  '5': 'COVID',
-  '6': 'OTHER'
+  '4': 'MEDICAL', // "Acompanhamento" mapeado para MEDICAL (sem enum específico)
+  '5': 'ACCIDENT', // "Acidente de trabalho"
+  '6': 'ACCIDENT', // "Doença ocupacional" mapeado para ACCIDENT
+  '7': 'OTHER', // "Declaração de comparecimento" mapeado para OTHER
+  '8': 'OTHER' // "Outros"
 };
 
 const ATESTADO_LABELS: Record<string, string> = {
   '1': 'Atestado médico',
   '2': 'Atestado odontológico',
-  '3': 'Exame preventivo',
-  '4': 'Acidente de trabalho',
-  '5': 'COVID-19',
-  '6': 'Outros'
+  '3': 'Exame médico / preventivo',
+  '4': 'Acompanhamento',
+  '5': 'Acidente de trabalho',
+  '6': 'Doença ocupacional',
+  '7': 'Declaração de comparecimento',
+  '8': 'Outros'
 };
 
 const REQUESTER_SECTORS: Record<string, string> = {
@@ -153,6 +158,40 @@ export class WhatsAppBotService {
       ]
     });
 
+    const askRequesterName = (): SendAction => ({
+      type: 'buttons',
+      body: 'Qual é o nome completo da pessoa que está solicitando o atestado?',
+      buttons: [
+        { id: 'MENU', title: 'Voltar' },
+        { id: 'END', title: 'Encerrar' }
+      ]
+    });
+
+    const askForWhom = (): SendAction => ({
+      type: 'buttons',
+      body: 'Este atestado é para você ou para outra pessoa?',
+      buttons: [
+        { id: 'SELF', title: 'Para mim' },
+        { id: 'OTHER', title: 'Outra pessoa' },
+        { id: 'END', title: 'Encerrar' }
+      ]
+    });
+
+    const requesterSectorList = (): SendAction => ({
+      type: 'list',
+      body: 'Você pode me informar o seu setor?',
+      buttonText: 'Escolher',
+      sectionTitle: 'Setores',
+      rows: [
+        ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({
+          id: k,
+          title: v
+        })),
+        { id: 'END', title: 'Encerrar atendimento' },
+        { id: 'MENU', title: 'Voltar' }
+      ]
+    });
+
     const tipoAtestado = (): SendAction => ({
       type: 'list',
       body: 'Qual o tipo de atestado?',
@@ -258,19 +297,53 @@ export class WhatsAppBotService {
       const rows = presets.map((p) => {
         const start = addLocalDays(today, p.startOffset);
         const end = addLocalDays(today, p.endOffset);
-        const datePart = p.startOffset === p.endOffset ? `${formatDM(start)}` : `${formatDM(start)}-${formatDM(end)}`;
-        return { id: p.id, title: `${datePart} (${p.title})` };
+        const datePart =
+          p.startOffset === p.endOffset
+            ? `${formatDMY(start)}`
+            : `${formatDMY(start)}-${formatDMY(end)}`;
+
+        // Mostrar as datas "de verdade" (ano incluso) e sem o nome do preset.
+        return { id: p.id, title: datePart };
       });
 
       return {
         type: 'list',
-        body: 'Selecione o período do atestado (sem precisar digitar datas).',
+        body: 'Selecione o período do atestado pelas datas (com ano):',
         buttonText: 'Escolher',
         sectionTitle: 'Período',
         rows: [
           ...rows,
           { id: 'MENU', title: 'Voltar' },
           { id: 'END', title: 'Encerrar atendimento' }
+        ]
+      };
+    };
+
+    const costCenterList = async (): Promise<SendAction> => {
+      const costCenters = await prisma.costCenter.findMany({
+        where: { isActive: true },
+        orderBy: { code: 'asc' },
+        select: { id: true, code: true, name: true }
+      });
+
+      const MAX_LIST_ROWS = 10;
+      const includeMenuRow = costCenters.length <= MAX_LIST_ROWS - 2;
+      const maxCostCentersInList = MAX_LIST_ROWS - 1 - (includeMenuRow ? 1 : 0);
+      const sliced = costCenters.slice(0, maxCostCentersInList);
+
+      return {
+        type: 'list',
+        body: 'Selecione o centro de custo/contrato no qual o atestado deve ser vinculado:',
+        buttonText: 'Escolher',
+        sectionTitle: 'Centros de custo',
+        rows: [
+          ...sliced.map((cc) => ({
+            id: cc.code,
+            // Exibe apenas o nome na UI; o `id` continua sendo o code para o matching.
+            title: `${cc.name}`
+          })),
+          { id: 'END', title: 'Encerrar atendimento' },
+          ...(includeMenuRow ? [{ id: 'MENU', title: 'Voltar' }] : [])
         ]
       };
     };
@@ -310,20 +383,40 @@ export class WhatsAppBotService {
           content.includes('atestados') ||
           content.includes('atest')
         ) {
-          newStatus = 'ATESTADO_ASK_FOR_WHOM';
+          newStatus = 'ATESTADO_ASK_REQUESTER_NAME';
           newPayload.flow = 'ATESTADO';
-          sendAction = {
-            type: 'buttons',
-            body: 'Este atestado é para você ou para outra pessoa?',
-            buttons: [
-              { id: 'SELF', title: 'Para mim' },
-              { id: 'OTHER', title: 'Outra pessoa' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
+          sendAction = askRequesterName();
         } else {
           sendAction = menu();
         }
+        break;
+      }
+
+      case 'ATESTADO_ASK_REQUESTER_NAME': {
+        if (isEndRequest()) {
+          sendAction = endConversation();
+          break;
+        }
+        if (isMenuRequest()) {
+          sendAction = resetToMenu();
+          break;
+        }
+
+        if (!textRaw) {
+          sendAction = {
+            type: 'buttons',
+            body: 'Não recebi o nome. Qual é o nome completo da pessoa que está solicitando?',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        newPayload.requesterName = textRaw;
+        newStatus = 'ATESTADO_ASK_REQUESTER_SECTOR';
+        sendAction = requesterSectorList();
         break;
       }
 
@@ -339,19 +432,11 @@ export class WhatsAppBotService {
 
         if (content === 'self') {
           newPayload.forWhom = 'SELF';
-          delete (newPayload as any).requesterSector;
-          newStatus = 'ATESTADO_ASK_PERSON_NAME';
-          sendAction = {
-            type: 'buttons',
-            body: 'Perfeito. Qual é o seu nome completo (para o atestado)?',
-            buttons: [
-              { id: 'MENU', title: 'Voltar' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
+          newPayload.name = newPayload.requesterName;
+          newStatus = 'ATESTADO_ASK_COST_CENTER';
+          sendAction = await costCenterList();
         } else if (content === 'other') {
           newPayload.forWhom = 'OTHER';
-          delete (newPayload as any).requesterSector;
           newStatus = 'ATESTADO_ASK_PERSON_NAME';
           sendAction = {
             type: 'buttons',
@@ -402,49 +487,11 @@ export class WhatsAppBotService {
         if (newPayload.forWhom === 'OTHER') {
           // Para outra pessoa, não pedimos CPF: já seguimos para centro de custo/contrato.
           newStatus = 'ATESTADO_ASK_COST_CENTER';
-
-          const costCenters = await prisma.costCenter.findMany({
-            where: { isActive: true },
-            orderBy: { code: 'asc' },
-            select: { id: true, code: true, name: true }
-          });
-
-          const MAX_LIST_ROWS = 10;
-          const includeMenuRow = costCenters.length <= MAX_LIST_ROWS - 2;
-          const maxCostCentersInList = MAX_LIST_ROWS - 1 - (includeMenuRow ? 1 : 0);
-          const sliced = costCenters.slice(0, maxCostCentersInList);
-
-          sendAction = {
-            type: 'list',
-            body: 'Selecione o centro de custo/contrato no qual o atestado deve ser vinculado:',
-            buttonText: 'Escolher',
-            sectionTitle: 'Centros de custo',
-            rows: [
-              ...sliced.map((cc) => ({
-                id: cc.code,
-                title: `${cc.code} - ${cc.name}`
-              })),
-              { id: 'END', title: 'Encerrar atendimento' },
-              ...(includeMenuRow ? [{ id: 'MENU', title: 'Voltar' }] : [])
-            ]
-          };
+          sendAction = await costCenterList();
         } else {
-          // Para "para mim", pedimos o setor do solicitante (quem está enviando a solicitação no WhatsApp).
-          newStatus = 'ATESTADO_ASK_REQUESTER_SECTOR';
-          sendAction = {
-            type: 'list',
-            body: 'Selecione o setor da pessoa que está solicitando o atestado:',
-            buttonText: 'Escolher',
-            sectionTitle: 'Setores',
-            rows: [
-              ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({
-                id: k,
-                title: v
-              })),
-              { id: 'END', title: 'Encerrar atendimento' },
-              { id: 'MENU', title: 'Voltar' }
-            ]
-          };
+          // Caminho SELF (caso chegue aqui): seguimos para centro de custo/contrato.
+          newStatus = 'ATESTADO_ASK_COST_CENTER';
+          sendAction = await costCenterList();
         }
         break;
       }
@@ -483,32 +530,8 @@ export class WhatsAppBotService {
 
         newPayload.requesterSector = REQUESTER_SECTORS[sectorKey];
 
-        newStatus = 'ATESTADO_ASK_COST_CENTER';
-        const costCenters = await prisma.costCenter.findMany({
-          where: { isActive: true },
-          orderBy: { code: 'asc' },
-          select: { id: true, code: true, name: true }
-        });
-
-        const MAX_LIST_ROWS = 10;
-        const includeMenuRow = costCenters.length <= MAX_LIST_ROWS - 2;
-        const maxCostCentersInList = MAX_LIST_ROWS - 1 - (includeMenuRow ? 1 : 0);
-        const sliced = costCenters.slice(0, maxCostCentersInList);
-
-        sendAction = {
-          type: 'list',
-          body: 'Selecione o centro de custo/contrato no qual o atestado deve ser vinculado:',
-          buttonText: 'Escolher',
-          sectionTitle: 'Centros de custo',
-          rows: [
-            ...sliced.map((cc) => ({
-              id: cc.code,
-              title: `${cc.code} - ${cc.name}`
-            })),
-            { id: 'END', title: 'Encerrar atendimento' },
-            ...(includeMenuRow ? [{ id: 'MENU', title: 'Voltar' }] : [])
-          ]
-        };
+        newStatus = 'ATESTADO_ASK_FOR_WHOM';
+        sendAction = askForWhom();
         break;
       }
 
@@ -528,14 +551,43 @@ export class WhatsAppBotService {
           select: { id: true, code: true, name: true }
         });
 
-        const matchByCode =
-          costCenters.find((cc) => cc.code.toLowerCase() === content) ||
-          // fallback: se a pessoa colar "CC-2026-001 - Nome", pegamos o começo
+        // O WhatsApp pode retornar o "id" (que é o code) ou o "title" (que vem truncado).
+        // Então fazemos um matching tolerante, ignorando espaços e caracteres não-alfa-numéricos.
+        const normalizeText = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const contentNormalized = normalizeText(content.trim());
+
+        let matchByCode =
+          costCenters.find((cc) => cc.code.toLowerCase() === content) ??
+          // se for "CC-2026-001 - Nome", pegamos a parte antes de " - "
           (() => {
-            const codeMatch = content.match(/[a-z]{2,}-\d{4}-\d+/i)?.[0];
-            if (!codeMatch) return undefined;
-            return costCenters.find((cc) => cc.code.toLowerCase() === codeMatch.toLowerCase());
+            const beforeDash = content.split(' - ')[0]?.trim();
+            if (!beforeDash) return undefined;
+            return costCenters.find((cc) => cc.code.toLowerCase() === beforeDash.toLowerCase());
+          })() ??
+          costCenters.find((cc) => normalizeText(cc.code) === contentNormalized) ??
+          // por inclusão normalizada (quando vier truncado pelo WhatsApp) escolhe o "melhor" (maior)
+          (() => {
+            const matches = costCenters
+              .map((cc) => ({ cc, codeNorm: normalizeText(cc.code) }))
+              .filter((m) => m.codeNorm && contentNormalized.includes(m.codeNorm));
+
+            if (matches.length === 0) return undefined;
+            matches.sort((a, b) => b.codeNorm.length - a.codeNorm.length);
+            return matches[0]?.cc;
           })();
+
+        // Se a UI mostrou só o "nome" (title), o WhatsApp pode enviar apenas o title truncado.
+        // Neste caso, tentamos também casar por "name".
+        if (!matchByCode) {
+          const matches = costCenters
+            .map((cc) => ({ cc, nameNorm: normalizeText(cc.name) }))
+            .filter((m) => m.nameNorm && (m.nameNorm === contentNormalized || contentNormalized.includes(m.nameNorm)));
+
+          if (matches.length > 0) {
+            matches.sort((a, b) => b.nameNorm.length - a.nameNorm.length);
+            matchByCode = matches[0]?.cc;
+          }
+        }
 
         if (!matchByCode) {
           // Reexibe a lista para facilitar
@@ -590,7 +642,8 @@ export class WhatsAppBotService {
         newPayload.atestadoType = ATESTADO_TYPES[keyFromContent];
         newPayload.atestadoTypeLabel = ATESTADO_LABELS[keyFromContent];
 
-        if (newPayload.atestadoType === 'OTHER') {
+        // Apenas quando o usuário escolhe "Outros" (id=8) pedimos o tipo específico.
+        if (keyFromContent === '8') {
           newStatus = 'ATESTADO_ASK_OTHER_TYPE';
           sendAction = {
             type: 'buttons',
@@ -732,7 +785,7 @@ export class WhatsAppBotService {
           newConversationStatus = 'COMPLETED';
           sendAction = {
             type: 'buttons',
-            body: '✅ Recebido! Seus dados foram registrados e o DP vai analisar.',
+            body: '✅ Atestado recebido! Já registramos suas informações. O DP vai analisar e te dar retorno.',
             buttons: [
               { id: 'ATESTADO', title: 'Enviar outro' },
               { id: 'END', title: 'Encerrar' }
@@ -763,17 +816,9 @@ export class WhatsAppBotService {
         }
 
         if (content.includes('atestado') || content === '1' || content === 'atestados' || content === 'atestato') {
-          newStatus = 'ATESTADO_ASK_FOR_WHOM';
+          newStatus = 'ATESTADO_ASK_REQUESTER_NAME';
           newPayload.flow = 'ATESTADO';
-          sendAction = {
-            type: 'buttons',
-            body: 'Este atestado é para você ou para outra pessoa?',
-            buttons: [
-              { id: 'SELF', title: 'Para mim' },
-              { id: 'OTHER', title: 'Outra pessoa' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
+          sendAction = askRequesterName();
           break;
         }
 
