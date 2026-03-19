@@ -102,6 +102,17 @@ function formatPhone(phone: string) {
   return phone;
 }
 
+/** Resolve URL do arquivo: se for relativa, usa a base da API (backend) */
+function getFileHref(url: string | null | undefined): string {
+  if (!url) return '#';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  const base = (typeof window !== 'undefined'
+    ? process.env.NEXT_PUBLIC_API_URL
+    : process.env.NEXT_PUBLIC_API_URL
+  )?.replace(/\/api\/?$/, '') || '';
+  return base ? `${base}${url.startsWith('/') ? url : '/' + url}` : url;
+}
+
 type TabFiltro = 'todas' | 'atestados' | 'duvidas' | 'outros';
 
 const ATESTADO_FLOW_STEPS = [
@@ -563,7 +574,7 @@ export default function ConversasWhatsAppPage() {
                                             </p>
                                             {s.fileUrl ? (
                                               <a
-                                                href={s.fileUrl}
+                                                href={getFileHref(s.fileUrl)}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="inline-flex items-center gap-1 mt-1 text-sm text-red-600 dark:text-red-400 hover:underline"
@@ -599,7 +610,7 @@ export default function ConversasWhatsAppPage() {
                                         <>
                                           {s.fileUrl ? (
                                             <a
-                                              href={s.fileUrl}
+                                              href={getFileHref(s.fileUrl)}
                                               target="_blank"
                                               rel="noopener noreferrer"
                                               className="inline-flex items-center gap-1 text-sm text-red-600 dark:text-red-400 hover:underline"
@@ -758,7 +769,7 @@ export default function ConversasWhatsAppPage() {
                             {(m.mediaUrl || m.content === '[Arquivo enviado]') && (
                               m.mediaUrl ? (
                                 <a
-                                  href={m.mediaUrl}
+                                  href={getFileHref(m.mediaUrl)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 mt-2 text-xs underline"

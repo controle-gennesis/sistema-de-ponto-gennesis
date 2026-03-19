@@ -61,12 +61,18 @@ type SendAction =
       type: 'list';
       body: string;
       buttonText: string;
-      sectionTitle: string;
-      rows: Array<{ id: string; title: string }>;
+      sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }>;
     };
 
+export type MediaInfo = { mediaId: string; mimeType?: string; filename?: string };
+
 export class WhatsAppBotService {
-  async processMessage(phone: string, text: string, hasMedia = false): Promise<void> {
+  async processMessage(
+    phone: string,
+    text: string,
+    hasMedia = false,
+    mediaInfo?: MediaInfo
+  ): Promise<void> {
     let conversation = await prisma.whatsAppConversation.findFirst({
       where: { phone },
       orderBy: { updatedAt: 'desc' }
@@ -125,12 +131,33 @@ export class WhatsAppBotService {
     const payload = (conversation.payload as Record<string, unknown>) || {};
     const flowStatus = (conversation.flowStatus || 'MENU') as FlowStatus;
 
+    // Baixar e salvar mídia (S3 ou local)
+    let savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null = null;
+    if (hasMedia && mediaInfo?.mediaId) {
+      const result = await metaWhatsApp.downloadAndSaveMedia(
+        mediaInfo.mediaId,
+        conversation.id,
+        mediaInfo.mimeType,
+        mediaInfo.filename
+      );
+      if (result) {
+        savedMedia = {
+          fileUrl: result.fileUrl || '',
+          fileName: result.fileName,
+          fileKey: result.fileKey
+        };
+      }
+    }
+
     // Salvar mensagem do usuário
     await prisma.whatsAppMessage.create({
       data: {
         conversationId: conversation.id,
         role: 'user',
-        content: hasMedia ? '[Arquivo enviado]' : (text || '[sem texto]')
+        content: hasMedia ? '[Arquivo enviado]' : (text || '[sem texto]'),
+        mediaUrl: savedMedia?.fileUrl || undefined,
+        mediaKey: savedMedia?.fileKey,
+        fileName: savedMedia?.fileName
       }
     });
 
@@ -160,7 +187,7 @@ export class WhatsAppBotService {
 
     const askRequesterName = (): SendAction => ({
       type: 'buttons',
-      body: 'Qual é o nome completo da pessoa que está solicitando o atestado?',
+      body: 'Pode me informar seu nome completo?',
       buttons: [
         { id: 'MENU', title: 'Voltar' },
         { id: 'END', title: 'Encerrar' }
@@ -181,14 +208,15 @@ export class WhatsAppBotService {
       type: 'list',
       body: 'Você pode me informar o seu setor?',
       buttonText: 'Escolher',
-      sectionTitle: 'Setores',
-      rows: [
-        ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({
-          id: k,
-          title: v
-        })),
-        { id: 'END', title: 'Encerrar atendimento' },
-        { id: 'MENU', title: 'Voltar' }
+      sections: [
+        {
+          title: 'Setores',
+          rows: [
+            ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({ id: k, title: v })),
+            { id: 'END', title: 'Encerrar atendimento' },
+            { id: 'MENU', title: 'Voltar' }
+          ]
+        }
       ]
     });
 
@@ -196,11 +224,15 @@ export class WhatsAppBotService {
       type: 'list',
       body: 'Qual o tipo de atestado?',
       buttonText: 'Escolher',
-      sectionTitle: 'Opções',
-      rows: [
-        ...Object.entries(ATESTADO_LABELS).map(([k, v]) => ({ id: `TYPE_${k}`, title: v })),
-        { id: 'MENU', title: 'Voltar' },
-        { id: 'END', title: 'Encerrar atendimento' }
+      sections: [
+        {
+          title: 'Opções',
+          rows: [
+            ...Object.entries(ATESTADO_LABELS).map(([k, v]) => ({ id: `TYPE_${k}`, title: v })),
+            { id: 'MENU', title: 'Voltar' },
+            { id: 'END', title: 'Encerrar atendimento' }
+          ]
+        }
       ]
     });
 
@@ -253,72 +285,20 @@ export class WhatsAppBotService {
       return { start: startParsed.normalized, end: endParsed.normalized };
     };
 
-    const startOfLocalDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-    const addLocalDays = (d: Date, days: number) =>
-      new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, 0, 0, 0, 0);
-    const formatDMY = (d: Date) =>
-      `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-    const formatDM = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    /** Pede para digitar a data do atestado (formato DD/MM/AAAA ou início - fim) */
+    const askDateByTyping = (): SendAction => ({
+      type: 'buttons',
+      body:
+        'Digite o período do atestado.\n\n' +
+        '• Uma data só: *01/03/2026*\n' +
+        '• Intervalo: *01/03/2026 - 05/03/2026*',
+      buttons: [
+        { id: 'MENU', title: 'Voltar' },
+        { id: 'END', title: 'Encerrar' }
+      ]
+    });
 
-    const getDatePresetRange = (presetId: string): { start: Date; end: Date } | null => {
-      const today = startOfLocalDay(new Date());
-      const presets: Record<string, { startOffset: number; endOffset: number }> = {
-        preset_today: { startOffset: 0, endOffset: 0 },
-        preset_yesterday: { startOffset: -1, endOffset: -1 },
-        preset_last_3: { startOffset: -2, endOffset: 0 },
-        preset_last_5: { startOffset: -4, endOffset: 0 },
-        preset_last_7: { startOffset: -6, endOffset: 0 },
-        preset_last_10: { startOffset: -9, endOffset: 0 }
-      };
-      const p = presets[presetId];
-      if (!p) return null;
-      return {
-        start: addLocalDays(today, p.startOffset),
-        end: addLocalDays(today, p.endOffset)
-      };
-    };
-
-    const datePresetList = (): SendAction => {
-      const today = startOfLocalDay(new Date());
-      const presets: Array<{
-        id: string;
-        title: string;
-        startOffset: number;
-        endOffset: number;
-      }> = [
-        { id: 'preset_today', title: 'Hoje', startOffset: 0, endOffset: 0 },
-        { id: 'preset_yesterday', title: 'Ontem', startOffset: -1, endOffset: -1 },
-        { id: 'preset_last_3', title: 'Últimos 3 dias', startOffset: -2, endOffset: 0 },
-        { id: 'preset_last_5', title: 'Últimos 5 dias', startOffset: -4, endOffset: 0 },
-        { id: 'preset_last_7', title: 'Última semana (7 dias)', startOffset: -6, endOffset: 0 },
-        { id: 'preset_last_10', title: 'Últimos 10 dias', startOffset: -9, endOffset: 0 }
-      ];
-
-      const rows = presets.map((p) => {
-        const start = addLocalDays(today, p.startOffset);
-        const end = addLocalDays(today, p.endOffset);
-        const datePart =
-          p.startOffset === p.endOffset
-            ? `${formatDMY(start)}`
-            : `${formatDMY(start)}-${formatDMY(end)}`;
-
-        // Mostrar as datas "de verdade" (ano incluso) e sem o nome do preset.
-        return { id: p.id, title: datePart };
-      });
-
-      return {
-        type: 'list',
-        body: 'Selecione o período do atestado pelas datas (com ano):',
-        buttonText: 'Escolher',
-        sectionTitle: 'Período',
-        rows: [
-          ...rows,
-          { id: 'MENU', title: 'Voltar' },
-          { id: 'END', title: 'Encerrar atendimento' }
-        ]
-      };
-    };
-
+    /** Monta lista de centros de custo em múltiplas seções (máx 10 seções × 10 linhas na API) */
     const costCenterList = async (): Promise<SendAction> => {
       const costCenters = await prisma.costCenter.findMany({
         where: { isActive: true },
@@ -326,25 +306,32 @@ export class WhatsAppBotService {
         select: { id: true, code: true, name: true }
       });
 
-      const MAX_LIST_ROWS = 10;
-      const includeMenuRow = costCenters.length <= MAX_LIST_ROWS - 2;
-      const maxCostCentersInList = MAX_LIST_ROWS - 1 - (includeMenuRow ? 1 : 0);
-      const sliced = costCenters.slice(0, maxCostCentersInList);
+      const ROWS_PER_SECTION = 10;
+      const MAX_SECTIONS = 10;
+      const sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }> = [];
+
+      // Divide centros de custo em seções de até 10 itens (WhatsApp permite até 10 seções)
+      for (let i = 0; i < costCenters.length && sections.length < MAX_SECTIONS - 1; i += ROWS_PER_SECTION) {
+        const chunk = costCenters.slice(i, i + ROWS_PER_SECTION);
+        sections.push({
+          title: `Centros ${i + 1} a ${i + chunk.length}`,
+          rows: chunk.map((cc) => ({ id: cc.code, title: `${cc.code} - ${cc.name}` }))
+        });
+      }
+
+      sections.push({
+        title: 'Ações',
+        rows: [
+          { id: 'END', title: 'Encerrar atendimento' },
+          { id: 'MENU', title: 'Voltar' }
+        ]
+      });
 
       return {
         type: 'list',
         body: 'Selecione o centro de custo/contrato no qual o atestado deve ser vinculado:',
         buttonText: 'Escolher',
-        sectionTitle: 'Centros de custo',
-        rows: [
-          ...sliced.map((cc) => ({
-            id: cc.code,
-            // Exibe apenas o nome na UI; o `id` continua sendo o code para o matching.
-            title: `${cc.name}`
-          })),
-          { id: 'END', title: 'Encerrar atendimento' },
-          ...(includeMenuRow ? [{ id: 'MENU', title: 'Voltar' }] : [])
-        ]
+        sections
       };
     };
 
@@ -527,14 +514,15 @@ export class WhatsAppBotService {
             type: 'list',
             body: 'Não entendi qual setor foi selecionado. Selecione novamente:',
             buttonText: 'Escolher',
-            sectionTitle: 'Setores',
-            rows: [
-              ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({
-                id: k,
-                title: v
-              })),
-              { id: 'END', title: 'Encerrar atendimento' },
-              { id: 'MENU', title: 'Voltar' }
+            sections: [
+              {
+                title: 'Setores',
+                rows: [
+                  ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({ id: k, title: v })),
+                  { id: 'END', title: 'Encerrar atendimento' },
+                  { id: 'MENU', title: 'Voltar' }
+                ]
+              }
             ]
           };
           break;
@@ -602,23 +590,15 @@ export class WhatsAppBotService {
         }
 
         if (!matchByCode) {
-          // Reexibe a lista para facilitar
-          const MAX_LIST_ROWS = 10;
-          const includeMenuRow = costCenters.length <= MAX_LIST_ROWS - 2;
-          const maxCostCentersInList = MAX_LIST_ROWS - 1 - (includeMenuRow ? 1 : 0);
-          const sliced = costCenters.slice(0, maxCostCentersInList);
-
-          sendAction = {
-            type: 'list',
-            body: 'Não encontrei esse centro de custo. Selecione novamente pela lista (ou envie o código):',
-            buttonText: 'Escolher',
-            sectionTitle: 'Centros de custo',
-            rows: [
-              ...sliced.map((cc) => ({ id: cc.code, title: `${cc.code} - ${cc.name}` })),
-              { id: 'END', title: 'Encerrar atendimento' },
-              ...(includeMenuRow ? [{ id: 'MENU', title: 'Voltar' }] : [])
-            ]
-          };
+          const listAction = await costCenterList();
+          if (listAction.type === 'list') {
+            sendAction = {
+              ...listAction,
+              body: 'Não encontrei esse centro de custo. Selecione novamente pela lista (ou envie o código):'
+            };
+          } else {
+            sendAction = listAction;
+          }
           break;
         }
 
@@ -667,7 +647,7 @@ export class WhatsAppBotService {
           };
         } else {
           newStatus = 'ATESTADO_ASK_START_DATE';
-          sendAction = datePresetList();
+          sendAction = askDateByTyping();
         }
         break;
       }
@@ -696,7 +676,7 @@ export class WhatsAppBotService {
 
         newPayload.atestadoOtherType = textRaw;
         newStatus = 'ATESTADO_ASK_START_DATE';
-        sendAction = datePresetList();
+        sendAction = askDateByTyping();
         break;
       }
 
@@ -710,23 +690,7 @@ export class WhatsAppBotService {
           break;
         }
 
-        const presetRange = getDatePresetRange(content);
-        if (presetRange) {
-          newPayload.dataInicio = formatDMY(presetRange.start);
-          newPayload.dataFim = formatDMY(presetRange.end);
-          newStatus = 'ATESTADO_ASK_FILE';
-          sendAction = {
-            type: 'buttons',
-            body: 'Perfeito. Agora envie a foto ou PDF do atestado. 📎',
-            buttons: [
-              { id: 'MENU', title: 'Voltar' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
-          break;
-        }
-
-        // Fallback: ainda aceitamos digitar intervalo no texto (caso a pessoa não use as opções)
+        // Intervalo: "01/03/2026 - 05/03/2026"
         const range = extractDateRange(textRaw);
         if (range) {
           const startParsed = parseDateInput(range.start);
@@ -747,13 +711,37 @@ export class WhatsAppBotService {
           }
         }
 
-        // Se chegou aqui, não reconheceu: reenviar lista (sem precisar digitar)
-        sendAction = datePresetList();
+        // Data única: "01/03/2026" (início e fim iguais)
+        const singleParsed = parseDateInput(textRaw);
+        if (singleParsed) {
+          newPayload.dataInicio = singleParsed.normalized;
+          newPayload.dataFim = singleParsed.normalized;
+          newStatus = 'ATESTADO_ASK_FILE';
+          sendAction = {
+            type: 'buttons',
+            body: 'Perfeito. Agora envie a foto ou PDF do atestado. 📎',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        sendAction = {
+          type: 'buttons',
+          body:
+            'Formato inválido. Digite a data no formato DD/MM/AAAA.\n' +
+            'Ex.: *01/03/2026* ou *01/03/2026 - 05/03/2026* para intervalo.',
+          buttons: [
+            { id: 'MENU', title: 'Voltar' },
+            { id: 'END', title: 'Encerrar' }
+          ]
+        };
         break;
       }
 
       case 'ATESTADO_ASK_END_DATE': {
-        // Para conversas antigas que ficaram neste estado: reenviar a seleção do período completo.
         if (isEndRequest()) {
           sendAction = endConversation();
           break;
@@ -764,7 +752,7 @@ export class WhatsAppBotService {
         }
 
         newStatus = 'ATESTADO_ASK_START_DATE';
-        sendAction = datePresetList();
+        sendAction = askDateByTyping();
         break;
       }
 
@@ -779,9 +767,9 @@ export class WhatsAppBotService {
         }
 
         if (hasMedia) {
-          // Recebeu arquivo (imagem/documento) - criamos o submission
+          // Recebeu arquivo (imagem/documento) - criamos o submission com link para o arquivo
           newPayload.fileReceived = true;
-          newPayload.fileNote = 'Arquivo enviado pelo usuário (visualizar na conversa)';
+          newPayload.fileNote = 'Arquivo enviado pelo usuário';
 
           await prisma.whatsAppSubmission.create({
             data: {
@@ -789,7 +777,9 @@ export class WhatsAppBotService {
               type: 'MEDICAL_CERTIFICATE',
               payload: newPayload as Prisma.InputJsonValue,
               status: 'PENDING',
-              fileName: 'arquivo_enviado_whatsapp'
+              fileUrl: savedMedia?.fileUrl || undefined,
+              fileKey: savedMedia?.fileKey,
+              fileName: savedMedia?.fileName ?? 'atestado_enviado'
             }
           });
 
@@ -875,8 +865,7 @@ export class WhatsAppBotService {
         phone,
         sendAction.body,
         sendAction.buttonText,
-        sendAction.sectionTitle,
-        sendAction.rows
+        sendAction.sections
       );
     }
   }

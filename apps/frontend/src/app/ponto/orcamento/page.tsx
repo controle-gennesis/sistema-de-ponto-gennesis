@@ -18,7 +18,8 @@ import {
   ChevronRight,
   Building2,
   FileDown,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -254,6 +255,7 @@ export default function OrcamentoPage() {
   const [isImportandoOrcamento, setIsImportandoOrcamento] = useState(false);
   const [servicosExpandidos, setServicosExpandidos] = useState<Set<string>>(new Set());
   const [itensComDimensoesAbertos, setItensComDimensoesAbertos] = useState<Set<string>>(new Set());
+  const [itensOcultosNoOrcamento, setItensOcultosNoOrcamento] = useState<Set<string>>(new Set());
   const [loadingFromApi, setLoadingFromApi] = useState(false);
   const [showServicosDropdown, setShowServicosDropdown] = useState(false);
   const [servicosSearch, setServicosSearch] = useState('');
@@ -328,6 +330,7 @@ export default function OrcamentoPage() {
     setQuantidadesPorItem({});
     setDimensoesPorItem({});
     setItensComDimensoesAbertos(new Set());
+    setItensOcultosNoOrcamento(new Set());
     saveServicos(centroCustoId, []);
     localStorage.setItem(storageKey(centroCustoId, 'imports'), '[]');
     persistToApi([], []);
@@ -660,6 +663,20 @@ export default function OrcamentoPage() {
       Object.keys(next).forEach(k => { if (k.startsWith(key + '|')) delete next[k]; });
       return next;
     });
+    setItensOcultosNoOrcamento(prev => new Set(Array.from(prev).filter(k => !k.startsWith(key + '|'))));
+  };
+
+  const ocultarItemDoOrcamento = (itemKey: string) => {
+    setItensOcultosNoOrcamento(prev => new Set(prev).add(itemKey));
+    setQuantidadesPorItem(prev => { const next = { ...prev }; delete next[itemKey]; return next; });
+    setDimensoesPorItem(prev => { const next = { ...prev }; delete next[itemKey]; return next; });
+    setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.delete(itemKey); return s; });
+    toast.success('Item removido do orçamento. Use "Restaurar" para incluí-lo novamente.');
+  };
+
+  const restaurarItemNoOrcamento = (itemKey: string) => {
+    setItensOcultosNoOrcamento(prev => { const s = new Set(prev); s.delete(itemKey); return s; });
+    toast.success('Item restaurado ao orçamento.');
   };
 
   const mapaPrecos = useMemo(() => {
@@ -677,6 +694,8 @@ export default function OrcamentoPage() {
     const lista: { key: string; servicoNome: string; subtituloNome: string; item: ItemServico; precoUnitario: number; quantidade: number; total: number; dimensoes?: DimensoesItem }[] = [];
     for (const bloco of subtitulosAdicionados) {
       for (const i of bloco.itens) {
+        const itemKey = `${bloco.key}|${i.chave}`;
+        if (itensOcultosNoOrcamento.has(itemKey)) continue;
         const chaves = chavesParaBusca(i.codigo, i.banco, i.chave);
         let preco = 0;
         for (const k of chaves) {
@@ -686,7 +705,6 @@ export default function OrcamentoPage() {
             break;
           }
         }
-        const itemKey = `${bloco.key}|${i.chave}`;
         const dim = dimensoesPorItem[itemKey];
         let qtd = 0;
         if (dim?.linhas?.length) {
@@ -709,7 +727,7 @@ export default function OrcamentoPage() {
     }
     const soma = lista.reduce((acc, x) => acc + x.total, 0);
     return { itensCalculados: lista, total: soma };
-  }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaPrecos]);
+  }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaPrecos, itensOcultosNoOrcamento]);
 
   const setQuantidadeItem = (itemKey: string, valor: number) => {
     setQuantidadesPorItem(prev => ({ ...prev, [itemKey]: Math.max(0, valor) }));
@@ -1191,9 +1209,9 @@ export default function OrcamentoPage() {
                                         </button>
                                         <button
                                           type="button"
-                                          onClick={() => removeItemFromServico(servicoId, subtituloId, row.item.chave)}
+                                          onClick={() => ocultarItemDoOrcamento(row.key)}
                                           className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded"
-                                          title="Remover item"
+                                          title="Remover do orçamento (pode restaurar depois)"
                                         >
                                           <Trash2 className="w-4 h-4" />
                                         </button>
@@ -1291,6 +1309,32 @@ export default function OrcamentoPage() {
                                 </tbody>
                               </table>
                             </div>
+                            {(() => {
+                              const itensRemovidos = bloco.itens.filter(i => itensOcultosNoOrcamento.has(`${bloco.key}|${i.chave}`));
+                              if (itensRemovidos.length === 0) return null;
+                              return (
+                                <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
+                                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Itens removidos — clique para restaurar:</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {itensRemovidos.map(i => {
+                                      const itemKey = `${bloco.key}|${i.chave}`;
+                                      return (
+                                        <button
+                                          key={itemKey}
+                                          type="button"
+                                          onClick={() => restaurarItemNoOrcamento(itemKey)}
+                                          className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-md border border-dashed border-gray-400 dark:border-gray-500 text-gray-600 dark:text-gray-400 hover:border-green-500 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+                                          title={`Restaurar: ${i.codigo} ${i.banco}`}
+                                        >
+                                          <RotateCcw className="w-3 h-3" />
+                                          {i.codigo} {i.banco}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}

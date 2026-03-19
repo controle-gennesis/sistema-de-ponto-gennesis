@@ -68,6 +68,9 @@ export class WhatsAppController {
 
             let text = '';
             let hasMedia = false;
+            let mediaId: string | null = null;
+            let mediaMimeType: string | undefined;
+            let mediaFilename: string | undefined;
 
             switch (msg.type) {
               case 'text':
@@ -76,11 +79,16 @@ export class WhatsAppController {
               case 'image':
               case 'document':
                 hasMedia = true;
+                mediaId = msg.image?.id ?? msg.document?.id ?? null;
+                mediaMimeType = msg.image?.mime_type ?? msg.document?.mime_type;
+                mediaFilename = msg.document?.filename;
                 text = msg.caption ?? msg.image?.caption ?? msg.document?.caption ?? '';
                 break;
               case 'audio':
               case 'video':
                 hasMedia = true;
+                mediaId = msg.audio?.id ?? msg.video?.id ?? null;
+                mediaMimeType = msg.audio?.mime_type ?? msg.video?.mime_type;
                 text = msg.caption ?? '';
                 break;
               case 'button':
@@ -106,9 +114,11 @@ export class WhatsAppController {
               '[WhatsApp Webhook] Processando mensagem phone=',
               phone,
               'text=',
-              (text || '').slice(0, 50)
+              (text || '').slice(0, 50),
+              hasMedia ? ', hasMedia' : ''
             );
-            whatsAppBot.processMessage(phone, text || ' ', hasMedia).catch((err) => {
+            const mediaInfo = hasMedia && mediaId ? { mediaId, mimeType: mediaMimeType, filename: mediaFilename } : undefined;
+            whatsAppBot.processMessage(phone, text || ' ', hasMedia, mediaInfo).catch((err) => {
               console.error('[WhatsApp Webhook] Erro ao processar:', err);
             });
           }
@@ -179,6 +189,45 @@ export class WhatsAppController {
         throw createError('Conversa não encontrada', 404);
       }
 
+      const messages = await Promise.all(
+        conversation.messages.map(async (m) => {
+          let mediaUrl = m.mediaUrl;
+          if (m.mediaKey && !mediaUrl) {
+            const signed = await metaWhatsApp.getSignedUrlForMedia(m.mediaKey);
+            if (signed) mediaUrl = signed;
+          }
+          return {
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            mediaUrl,
+            fileName: m.fileName,
+            mimeType: m.mimeType,
+            createdAt: m.createdAt
+          };
+        })
+      );
+
+      const submissions = await Promise.all(
+        conversation.submissions.map(async (s) => {
+          let fileUrl = s.fileUrl;
+          if (s.fileKey && !fileUrl) {
+            const signed = await metaWhatsApp.getSignedUrlForMedia(s.fileKey);
+            if (signed) fileUrl = signed;
+          }
+          return {
+            id: s.id,
+            type: s.type,
+            payload: s.payload,
+            fileUrl,
+            fileName: s.fileName,
+            status: s.status,
+            medicalCertificateId: s.medicalCertificateId,
+            createdAt: s.createdAt
+          };
+        })
+      );
+
       res.json({
         success: true,
         data: {
@@ -190,25 +239,8 @@ export class WhatsAppController {
           payload: conversation.payload,
           createdAt: conversation.createdAt,
           updatedAt: conversation.updatedAt,
-          messages: conversation.messages.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            mediaUrl: m.mediaUrl,
-            fileName: m.fileName,
-            mimeType: m.mimeType,
-            createdAt: m.createdAt
-          })),
-          submissions: conversation.submissions.map((s) => ({
-            id: s.id,
-            type: s.type,
-            payload: s.payload,
-            fileUrl: s.fileUrl,
-            fileName: s.fileName,
-            status: s.status,
-            medicalCertificateId: s.medicalCertificateId,
-            createdAt: s.createdAt
-          }))
+          messages,
+          submissions
         }
       });
     } catch (error) {
