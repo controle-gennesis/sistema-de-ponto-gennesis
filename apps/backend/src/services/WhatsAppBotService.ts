@@ -362,6 +362,18 @@ export class WhatsAppBotService {
       };
     };
 
+    const finalizeConversation = (): SendAction => {
+      // Finalizar a solicitação após o envio do arquivo.
+      // Importante: não deve cancelar a submissão já concluída.
+      clearPayload();
+      newStatus = 'MENU';
+      newConversationStatus = 'COMPLETED';
+      return {
+        type: 'text',
+        text: 'Solicitação finalizada 😊\nSe precisar de algo mais, é só me chamar por aqui!'
+      };
+    };
+
     const resetToMenu = (): SendAction => {
       clearPayload();
       newStatus = 'MENU';
@@ -788,7 +800,7 @@ export class WhatsAppBotService {
             body: '✅ Atestado recebido! Já registramos suas informações. O DP vai analisar e te dar retorno.',
             buttons: [
               { id: 'ATESTADO', title: 'Enviar outro' },
-              { id: 'END', title: 'Encerrar' }
+              { id: 'FINALIZE', title: 'Finalizar' }
             ]
           };
           clearPayload();
@@ -806,6 +818,10 @@ export class WhatsAppBotService {
       }
 
       case 'ATESTADO_COMPLETE': {
+        if (content === 'finalize' || content === 'finalizar') {
+          sendAction = finalizeConversation();
+          break;
+        }
         if (isEndRequest()) {
           sendAction = endConversation();
           break;
