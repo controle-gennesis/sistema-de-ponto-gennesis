@@ -49,35 +49,40 @@ const REQUESTER_SECTORS: Record<string, string> = {
   SUPRIMENTOS: 'Suprimentos'
 };
 
-type FaqItem = { id: string; question: string; answer: string };
-type FaqTopic = { id: string; title: string; items: FaqItem[] };
+type FaqItem = { id: string; question: string; answer: string; label?: string };
+type FaqTopic = { id: string; title: string; items: FaqItem[]; label?: string };
 
 const FAQ_TOPICS: FaqTopic[] = [
   {
     id: 'PONTO_JORNADA',
     title: 'Dúvidas sobre ponto e jornada',
+    label: 'Ponto e Jornada',
     items: [
       {
         id: 'COMO_REGISTRAR',
         question: 'Como registrar meu ponto?',
+        label: 'Como registrar ponto',
         answer:
           'Você deve registrar seu ponto diariamente com as quatro batidas obrigatórias (entrada, saída para almoço, retorno do almoço e saída final) pelo aplicativo Quark.\n\nLogin: CPF (sem pontos e traços) + @eng.com.br\nSenha padrão: Gennesis123*.'
       },
       {
         id: 'ESQUECI_BATER',
         question: 'Esqueci de bater o ponto, o que fazer?',
+        label: 'Esqueci de bater ponto',
         answer:
           'Informe imediatamente seu gestor e solicite a regularização junto ao Departamento Pessoal (DP), para que o ajuste seja realizado corretamente no sistema.'
       },
       {
         id: 'FORA_HORARIO',
         question: 'Posso bater ponto fora do horário?',
+        label: 'Ponto fora do horário',
         answer:
           'O registro fora do horário padrão só deve ser realizado mediante autorização prévia do gestor, alinhado com a jornada e as atividades do dia.'
       },
       {
         id: 'HORA_EXTRA',
         question: 'Posso fazer horas extras?',
+        label: 'Horas extras',
         answer: 'A realização de horas extras só é permitida com autorização do Gestor e Diretoria.'
       }
     ]
@@ -85,25 +90,30 @@ const FAQ_TOPICS: FaqTopic[] = [
   {
     id: 'SALARIO_PAGAMENTOS',
     title: 'Dúvidas sobre salário e pagamentos',
+    label: 'Salário e Pagamentos',
     items: [
       {
         id: 'DATA_PAGAMENTO',
         question: 'Qual a data de pagamento?',
+        label: 'Data de pagamento',
         answer: 'Até o 5º dia útil de cada mês.'
       },
       {
         id: 'CONTRACHEQUE',
         question: 'Onde vejo meu contracheque?',
+        label: 'Ver contracheque',
         answer: 'Disponível no sistema/app Quark.'
       },
       {
         id: 'DESCONTO_SALARIO',
         question: 'Tive desconto no salário, por quê?',
+        label: 'Desconto no salário',
         answer: 'Pode ser por faltas, atrasos ou benefícios.'
       },
       {
         id: 'SALARIO_NAO_CAIU',
         question: 'O salário do meu colega já caiu e o meu ainda não, o que aconteceu?',
+        label: 'Salário ainda não caiu',
         answer: 'Aguarde até o fim do dia, pois o financeiro ainda está realizando os pagamentos.'
       }
     ]
@@ -111,45 +121,54 @@ const FAQ_TOPICS: FaqTopic[] = [
   {
     id: 'FERIAS',
     title: 'Dúvidas sobre férias',
+    label: 'Férias',
     items: [
       {
         id: 'QUANDO_TIRAR',
         question: 'Quando posso tirar férias?',
+        label: 'Quando tirar férias',
         answer: 'Após 12 meses de trabalho (período aquisitivo).'
       },
       {
         id: 'QUANTOS_DIAS',
         question: 'Quantos dias posso tirar?',
+        label: 'Quantos dias tirar',
         answer: 'Até 30 dias corridos (pode variar por faltas injustificadas).'
       },
       {
         id: 'DIVIDIR',
         question: 'Posso dividir minhas férias?',
+        label: 'Dividir férias',
         answer: 'Sim. Em até 3 períodos: um com no mínimo 14 dias e os demais com pelo menos 5 dias cada.'
       },
       {
         id: 'QUEM_DEFINE',
         question: 'Quem define o período?',
+        label: 'Quem define o período',
         answer: 'A empresa define, alinhando sempre que possível com o colaborador.'
       },
       {
         id: 'VENDER',
         question: 'Posso vender parte das férias?',
+        label: 'Vender férias',
         answer: 'Sim. Até 10 dias podem ser convertidos em abono.'
       },
       {
         id: 'QUANDO_RECEBE',
         question: 'Quando recebo?',
+        label: 'Quando recebo',
         answer: 'Até 2 dias antes do início das férias.'
       },
       {
         id: 'O_QUE_RECEBE',
         question: 'O que recebo no pagamento?',
+        label: 'O que recebo',
         answer: 'Salário + adicional de 1/3.'
       },
       {
         id: 'INICIO_QUALQUER_DIA',
         question: 'Posso começar férias em qualquer dia?',
+        label: 'Pode começar férias',
         answer: 'Não. Não podem iniciar nos dois dias que antecedem feriado ou DSR.'
       }
     ]
@@ -157,33 +176,39 @@ const FAQ_TOPICS: FaqTopic[] = [
   {
     id: 'ATESTADOS',
     title: 'Dúvidas sobre atestados',
+    label: 'Atestados',
     items: [
       {
         id: 'COMO_ENTREGAR',
         question: 'Como entregar atestado?',
+        label: 'Como entregar atestado',
         answer:
           'O atestado médico deve ser enviado ao responsável pelas alocações do seu contrato em até 48 horas após a emissão.\n\nAlém disso, o colaborador deve homologar o atestado na clínica Ambrac em até 24 horas após o término do afastamento.'
       },
       {
         id: 'QUANDO_INSS',
         question: 'Quando vai para o INSS?',
+        label: 'Vai para o INSS',
         answer:
           'Quando o afastamento por saúde ultrapassa 15 dias consecutivos, o colaborador deve ser encaminhado ao INSS. A partir do 16º dia, acompanhamento e pagamento passam a ser responsabilidade do INSS.'
       },
       {
         id: 'QUEM_PAGA',
         question: 'Quem paga?',
+        label: 'Quem paga',
         answer:
           'Nos primeiros 15 dias de afastamento, o pagamento do salário é da empresa. A partir do 16º dia, o pagamento passa a ser realizado pelo INSS, caso o benefício seja aprovado.'
       },
       {
         id: 'JA_DEI_ENTRADA_INSS',
         question: 'Já dei entrada no INSS, o que fazer agora?',
+        label: 'Já deu entrada no INSS',
         answer: 'Enviar ao DP o protocolo de agendamento e aguardar o resultado da perícia.'
       },
       {
         id: 'ATESTADO_ACABOU',
         question: 'O atestado acabou, o que devo fazer agora?',
+        label: 'Atestado acabou',
         answer: 'Se permanecer inapto, retorne ao médico e solicite novo atestado médico.'
       }
     ]
@@ -191,35 +216,42 @@ const FAQ_TOPICS: FaqTopic[] = [
   {
     id: 'BENEFICIOS',
     title: 'Dúvidas sobre benefícios',
+    label: 'Benefícios',
     items: [
       {
         id: 'VT_PAGAMENTO',
         question: 'Quando é pago o vale-transporte?',
+        label: 'Vale-transporte: quando',
         answer: 'É pago juntamente com a folha de pagamento, até o 5º dia útil do mês.'
       },
       {
         id: 'VA_PAGAMENTO',
         question: 'Quando é pago o vale-alimentação?',
+        label: 'Vale-alimentação: quando',
         answer: 'O benefício é pago até o último dia do mês.'
       },
       {
         id: 'DESCONTO_VT',
         question: 'Quanto é o desconto do vale-transporte?',
+        label: 'Desconto do VT',
         answer: 'Não há desconto no DF. No GO, o desconto é de 6% sobre o salário.'
       },
       {
         id: 'DESCONTO_VA',
         question: 'Quanto é o desconto do vale-alimentação?',
+        label: 'Desconto do VA',
         answer: 'No DF, o desconto é de 9% sobre o saldo. No GO, não há desconto.'
       },
       {
         id: 'PERDI_CARTAO',
         question: 'Perdi o meu cartão Beevale, o que fazer?',
+        label: 'Perdi o cartão Beevale',
         answer: 'No próprio aplicativo existe a opção de emitir a segunda via.'
       },
       {
         id: 'PRAZO_CARTAO',
         question: 'Qual o prazo para entrega do cartão Beevale?',
+        label: 'Prazo do cartão Beevale',
         answer: 'De 7 a 15 dias.'
       }
     ]
@@ -227,10 +259,12 @@ const FAQ_TOPICS: FaqTopic[] = [
   {
     id: 'RESCISAO',
     title: 'Dúvidas sobre rescisão',
+    label: 'Rescisão',
     items: [
       {
         id: 'PRAZO_PAGAMENTO',
         question: 'Qual o prazo de pagamento da rescisão?',
+        label: 'Prazo de pagamento',
         answer: 'Até 10 dias.'
       }
     ]
@@ -392,7 +426,7 @@ export class WhatsAppBotService {
           title: 'Tópicos',
           rows: FAQ_TOPICS.map((topic) => ({
             id: `FAQ_TOPIC_${topic.id}`,
-            title: topic.title.slice(0, 24)
+        title: topic.label ?? topic.title
           }))
         }
       ]
@@ -411,7 +445,7 @@ export class WhatsAppBotService {
             title: 'Perguntas',
             rows: topic.items.map((item) => ({
               id: `FAQ_Q_${topic.id}_${item.id}`,
-              title: item.question.slice(0, 24)
+          title: item.label ?? item.question
             }))
           }
         ]
