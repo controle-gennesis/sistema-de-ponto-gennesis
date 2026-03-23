@@ -4,6 +4,8 @@ import { metaWhatsApp } from './MetaWhatsAppService';
 
 type FlowStatus =
   | 'MENU'
+  | 'FAQ_TOPIC_SELECT'
+  | 'FAQ_QUESTION_SELECT'
   | 'ATESTADO_ASK_REQUESTER_NAME'
   | 'ATESTADO_ASK_FOR_WHOM'
   | 'ATESTADO_ASK_REQUESTER_SECTOR'
@@ -46,6 +48,194 @@ const REQUESTER_SECTORS: Record<string, string> = {
   TST_ADM: 'TST/ADM',
   SUPRIMENTOS: 'Suprimentos'
 };
+
+type FaqItem = { id: string; question: string; answer: string };
+type FaqTopic = { id: string; title: string; items: FaqItem[] };
+
+const FAQ_TOPICS: FaqTopic[] = [
+  {
+    id: 'PONTO_JORNADA',
+    title: 'Dúvidas sobre ponto e jornada',
+    items: [
+      {
+        id: 'COMO_REGISTRAR',
+        question: 'Como registrar meu ponto?',
+        answer:
+          'Você deve registrar seu ponto diariamente com as quatro batidas obrigatórias (entrada, saída para almoço, retorno do almoço e saída final) pelo aplicativo Quark.\n\nLogin: CPF (sem pontos e traços) + @eng.com.br\nSenha padrão: Gennesis123*.'
+      },
+      {
+        id: 'ESQUECI_BATER',
+        question: 'Esqueci de bater o ponto, o que fazer?',
+        answer:
+          'Informe imediatamente seu gestor e solicite a regularização junto ao Departamento Pessoal (DP), para que o ajuste seja realizado corretamente no sistema.'
+      },
+      {
+        id: 'FORA_HORARIO',
+        question: 'Posso bater ponto fora do horário?',
+        answer:
+          'O registro fora do horário padrão só deve ser realizado mediante autorização prévia do gestor, alinhado com a jornada e as atividades do dia.'
+      },
+      {
+        id: 'HORA_EXTRA',
+        question: 'Posso fazer horas extras?',
+        answer: 'A realização de horas extras só é permitida com autorização do Gestor e Diretoria.'
+      }
+    ]
+  },
+  {
+    id: 'SALARIO_PAGAMENTOS',
+    title: 'Dúvidas sobre salário e pagamentos',
+    items: [
+      {
+        id: 'DATA_PAGAMENTO',
+        question: 'Qual a data de pagamento?',
+        answer: 'Até o 5º dia útil de cada mês.'
+      },
+      {
+        id: 'CONTRACHEQUE',
+        question: 'Onde vejo meu contracheque?',
+        answer: 'Disponível no sistema/app Quark.'
+      },
+      {
+        id: 'DESCONTO_SALARIO',
+        question: 'Tive desconto no salário, por quê?',
+        answer: 'Pode ser por faltas, atrasos ou benefícios.'
+      },
+      {
+        id: 'SALARIO_NAO_CAIU',
+        question: 'O salário do meu colega já caiu e o meu ainda não, o que aconteceu?',
+        answer: 'Aguarde até o fim do dia, pois o financeiro ainda está realizando os pagamentos.'
+      }
+    ]
+  },
+  {
+    id: 'FERIAS',
+    title: 'Dúvidas sobre férias',
+    items: [
+      {
+        id: 'QUANDO_TIRAR',
+        question: 'Quando posso tirar férias?',
+        answer: 'Após 12 meses de trabalho (período aquisitivo).'
+      },
+      {
+        id: 'QUANTOS_DIAS',
+        question: 'Quantos dias posso tirar?',
+        answer: 'Até 30 dias corridos (pode variar por faltas injustificadas).'
+      },
+      {
+        id: 'DIVIDIR',
+        question: 'Posso dividir minhas férias?',
+        answer: 'Sim. Em até 3 períodos: um com no mínimo 14 dias e os demais com pelo menos 5 dias cada.'
+      },
+      {
+        id: 'QUEM_DEFINE',
+        question: 'Quem define o período?',
+        answer: 'A empresa define, alinhando sempre que possível com o colaborador.'
+      },
+      {
+        id: 'VENDER',
+        question: 'Posso vender parte das férias?',
+        answer: 'Sim. Até 10 dias podem ser convertidos em abono.'
+      },
+      {
+        id: 'QUANDO_RECEBE',
+        question: 'Quando recebo?',
+        answer: 'Até 2 dias antes do início das férias.'
+      },
+      {
+        id: 'O_QUE_RECEBE',
+        question: 'O que recebo no pagamento?',
+        answer: 'Salário + adicional de 1/3.'
+      },
+      {
+        id: 'INICIO_QUALQUER_DIA',
+        question: 'Posso começar férias em qualquer dia?',
+        answer: 'Não. Não podem iniciar nos dois dias que antecedem feriado ou DSR.'
+      }
+    ]
+  },
+  {
+    id: 'ATESTADOS',
+    title: 'Dúvidas sobre atestados',
+    items: [
+      {
+        id: 'COMO_ENTREGAR',
+        question: 'Como entregar atestado?',
+        answer:
+          'O atestado médico deve ser enviado ao responsável pelas alocações do seu contrato em até 48 horas após a emissão.\n\nAlém disso, o colaborador deve homologar o atestado na clínica Ambrac em até 24 horas após o término do afastamento.'
+      },
+      {
+        id: 'QUANDO_INSS',
+        question: 'Quando vai para o INSS?',
+        answer:
+          'Quando o afastamento por saúde ultrapassa 15 dias consecutivos, o colaborador deve ser encaminhado ao INSS. A partir do 16º dia, acompanhamento e pagamento passam a ser responsabilidade do INSS.'
+      },
+      {
+        id: 'QUEM_PAGA',
+        question: 'Quem paga?',
+        answer:
+          'Nos primeiros 15 dias de afastamento, o pagamento do salário é da empresa. A partir do 16º dia, o pagamento passa a ser realizado pelo INSS, caso o benefício seja aprovado.'
+      },
+      {
+        id: 'JA_DEI_ENTRADA_INSS',
+        question: 'Já dei entrada no INSS, o que fazer agora?',
+        answer: 'Enviar ao DP o protocolo de agendamento e aguardar o resultado da perícia.'
+      },
+      {
+        id: 'ATESTADO_ACABOU',
+        question: 'O atestado acabou, o que devo fazer agora?',
+        answer: 'Se permanecer inapto, retorne ao médico e solicite novo atestado médico.'
+      }
+    ]
+  },
+  {
+    id: 'BENEFICIOS',
+    title: 'Dúvidas sobre benefícios',
+    items: [
+      {
+        id: 'VT_PAGAMENTO',
+        question: 'Quando é pago o vale-transporte?',
+        answer: 'É pago juntamente com a folha de pagamento, até o 5º dia útil do mês.'
+      },
+      {
+        id: 'VA_PAGAMENTO',
+        question: 'Quando é pago o vale-alimentação?',
+        answer: 'O benefício é pago até o último dia do mês.'
+      },
+      {
+        id: 'DESCONTO_VT',
+        question: 'Quanto é o desconto do vale-transporte?',
+        answer: 'Não há desconto no DF. No GO, o desconto é de 6% sobre o salário.'
+      },
+      {
+        id: 'DESCONTO_VA',
+        question: 'Quanto é o desconto do vale-alimentação?',
+        answer: 'No DF, o desconto é de 9% sobre o saldo. No GO, não há desconto.'
+      },
+      {
+        id: 'PERDI_CARTAO',
+        question: 'Perdi o meu cartão Beevale, o que fazer?',
+        answer: 'No próprio aplicativo existe a opção de emitir a segunda via.'
+      },
+      {
+        id: 'PRAZO_CARTAO',
+        question: 'Qual o prazo para entrega do cartão Beevale?',
+        answer: 'De 7 a 15 dias.'
+      }
+    ]
+  },
+  {
+    id: 'RESCISAO',
+    title: 'Dúvidas sobre rescisão',
+    items: [
+      {
+        id: 'PRAZO_PAGAMENTO',
+        question: 'Qual o prazo de pagamento da rescisão?',
+        answer: 'Até 10 dias.'
+      }
+    ]
+  }
+];
 
 /** Delay curto (API oficial) — rápido sem parecer “instantâneo” */
 const delayNatural = () =>
@@ -98,6 +288,13 @@ export class WhatsAppBotService {
       content.includes('atestato') ||
       content.includes('atestados') ||
       content.includes('atest');
+
+    const isFaqStart = () =>
+      content === '2' ||
+      content.includes('duvida') ||
+      content.includes('dúvida') ||
+      content.includes('duvidas') ||
+      content.includes('dúvidas');
 
     // Regra: cada nova "iniciação" de atestado vira uma nova conversa (admin separa em blocos).
     let shouldStartNewConversation = false;
@@ -181,7 +378,63 @@ export class WhatsAppBotService {
       ]),
       buttons: [
         { id: 'ATESTADO', title: 'Enviar atestado' },
+        { id: 'DUVIDAS', title: 'Dúvidas' },
         { id: 'END', title: 'Encerrar' }
+      ]
+    });
+
+    const faqTopicList = (): SendAction => ({
+      type: 'list',
+      body: 'Selecione o tema da sua dúvida:',
+      buttonText: 'Escolher tema',
+      sections: [
+        {
+          title: 'Tópicos',
+          rows: FAQ_TOPICS.map((topic) => ({
+            id: `FAQ_TOPIC_${topic.id}`,
+            title: topic.title.slice(0, 24)
+          }))
+        }
+      ]
+    });
+
+    const faqQuestionList = (topicId: string): SendAction => {
+      const topic = FAQ_TOPICS.find((t) => t.id === topicId);
+      if (!topic) return faqTopicList();
+
+      return {
+        type: 'list',
+        body: `Tema: ${topic.title}\n\nEscolha uma pergunta:`,
+        buttonText: 'Ver perguntas',
+        sections: [
+          {
+            title: 'Perguntas',
+            rows: topic.items.map((item) => ({
+              id: `FAQ_Q_${topic.id}_${item.id}`,
+              title: item.question.slice(0, 24)
+            }))
+          }
+        ]
+      };
+    };
+
+    const faqTopicNotFound = (): SendAction => ({
+      type: 'buttons',
+      body: 'Não encontrei esse tópico. Quer tentar novamente?',
+      buttons: [
+        { id: 'DUVIDAS', title: 'Ver tópicos' },
+        { id: 'MENU', title: 'Menu principal' },
+        { id: 'END', title: 'Encerrar' }
+      ]
+    });
+
+    const faqQuestionNotFound = (): SendAction => ({
+      type: 'buttons',
+      body: 'Não encontrei essa pergunta. Quer ver a lista novamente?',
+      buttons: [
+        { id: 'FAQ_PERGUNTAS', title: 'Ver perguntas' },
+        { id: 'DUVIDAS', title: 'Trocar tópico' },
+        { id: 'MENU', title: 'Menu' }
       ]
     });
 
@@ -389,9 +642,101 @@ export class WhatsAppBotService {
           newStatus = 'ATESTADO_ASK_REQUESTER_NAME';
           newPayload.flow = 'ATESTADO';
           sendAction = askRequesterName();
+        } else if (isFaqStart() || content === 'duvidas') {
+          newStatus = 'FAQ_TOPIC_SELECT';
+          newPayload.flow = 'FAQ';
+          sendAction = faqTopicList();
         } else {
           sendAction = menu();
         }
+        break;
+      }
+
+      case 'FAQ_TOPIC_SELECT': {
+        if (isEndRequest()) {
+          sendAction = endConversation();
+          break;
+        }
+        if (isMenuRequest()) {
+          sendAction = resetToMenu();
+          break;
+        }
+
+        if (content === 'duvidas') {
+          sendAction = faqTopicList();
+          break;
+        }
+
+        const selectedTopicId = content.startsWith('faq_topic_')
+          ? content.replace('faq_topic_', '').trim().toUpperCase()
+          : undefined;
+
+        const topicExists = selectedTopicId && FAQ_TOPICS.some((topic) => topic.id === selectedTopicId);
+        if (!selectedTopicId || !topicExists) {
+          sendAction = faqTopicNotFound();
+          break;
+        }
+
+        newPayload.faqTopicId = selectedTopicId;
+        newStatus = 'FAQ_QUESTION_SELECT';
+        sendAction = faqQuestionList(selectedTopicId);
+        break;
+      }
+
+      case 'FAQ_QUESTION_SELECT': {
+        if (isEndRequest()) {
+          sendAction = endConversation();
+          break;
+        }
+        if (isMenuRequest()) {
+          sendAction = resetToMenu();
+          break;
+        }
+        if (content === 'duvidas') {
+          newStatus = 'FAQ_TOPIC_SELECT';
+          sendAction = faqTopicList();
+          break;
+        }
+        if (content === 'faq_perguntas') {
+          const currentTopicId = String(newPayload.faqTopicId || '').toUpperCase();
+          if (!currentTopicId) {
+            newStatus = 'FAQ_TOPIC_SELECT';
+            sendAction = faqTopicList();
+          } else {
+            sendAction = faqQuestionList(currentTopicId);
+          }
+          break;
+        }
+
+        const currentTopicId = String(newPayload.faqTopicId || '').toUpperCase();
+        const topic = FAQ_TOPICS.find((t) => t.id === currentTopicId);
+        if (!topic) {
+          newStatus = 'FAQ_TOPIC_SELECT';
+          sendAction = faqTopicList();
+          break;
+        }
+
+        const questionIdPrefix = `faq_q_${currentTopicId.toLowerCase()}_`;
+        const selectedQuestionId = content.startsWith(questionIdPrefix)
+          ? content.replace(questionIdPrefix, '').trim().toUpperCase()
+          : undefined;
+
+        const selectedQuestion = topic.items.find((item) => item.id === selectedQuestionId);
+        if (!selectedQuestion) {
+          sendAction = faqQuestionNotFound();
+          break;
+        }
+
+        sendAction = {
+          type: 'buttons',
+          body: `*${selectedQuestion.question}*\n\n${selectedQuestion.answer}`,
+          buttons: [
+            { id: 'FAQ_PERGUNTAS', title: 'Mais perguntas' },
+            { id: 'DUVIDAS', title: 'Trocar tópico' },
+            { id: 'END', title: 'Encerrar' },
+            { id: 'MENU', title: 'Menu principal' }
+          ]
+        };
         break;
       }
 
