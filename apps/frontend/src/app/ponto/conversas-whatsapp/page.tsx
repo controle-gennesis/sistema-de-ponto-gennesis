@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import {
@@ -36,6 +36,8 @@ interface ConversationSummary {
   phone: string;
   flowStatus: string;
   status: string;
+  attendantRequested?: boolean;
+  attendantInProgress?: boolean;
   updatedAt: string;
   createdAt: string;
   messageCount: number;
@@ -174,9 +176,11 @@ const ABAS: { id: TabFiltro; label: string; icon: React.ElementType }[] = [
 
 export default function ConversasWhatsAppPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [abaAtiva, setAbaAtiva] = useState<TabFiltro>('todas');
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const [atendimentoTab, setAtendimentoTab] = useState<'aguardando' | 'andamento' | 'encerradas'>('aguardando');
+  const [isEndingConversation, setIsEndingConversation] = useState(false);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -211,9 +215,30 @@ export default function ConversasWhatsAppPage() {
   };
 
   const conversations: ConversationSummary[] = listData?.data ?? [];
-  const conversasFiltradas = filtrarPorAba(conversations, abaAtiva);
+  const aguardandoAtendimento = conversations.filter((c) => c.status === 'PENDING' && !!c.attendantRequested);
+  const atendimentoEmAndamento = conversations.filter((c) => c.status === 'PENDING' && !!c.attendantInProgress);
+  const conversasEncerradas = conversations.filter((c) => c.status === 'COMPLETED' || c.status === 'CANCELLED');
+
+  const conversasFiltradas =
+    atendimentoTab === 'aguardando'
+      ? aguardandoAtendimento
+      : atendimentoTab === 'andamento'
+        ? atendimentoEmAndamento
+        : conversasEncerradas;
   const detail: ConversationDetail | null = detailData?.data ?? null;
   const isLoading = loadingUser || loadingList;
+  const showLegacyData = false;
+
+  useEffect(() => {
+    if (selectedId && !conversasFiltradas.some((c) => c.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [conversasFiltradas, selectedId]);
+
+  useEffect(() => {
+    // Garante que o admin veja as mensagens mais recentes.
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [selectedId, detail?.messages?.length]);
 
   const getAtestadoName = (source: unknown): string | null => {
     if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
@@ -225,6 +250,8 @@ export default function ConversasWhatsAppPage() {
 
   const headerName = (() => {
     if (!detail) return null;
+    if (!showLegacyData) return null;
+    if ((detail.payload as any)?.attendantRequested || (detail.payload as any)?.attendantInProgress) return null;
     const fromInProgress = detail.payload ? getAtestadoName(detail.payload) : null;
     if (fromInProgress) return fromInProgress;
     const certificateSubmissions = detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE');
@@ -244,6 +271,23 @@ export default function ConversasWhatsAppPage() {
     } catch (error) {
       console.error('Erro ao remover conversa:', error);
       alert('Erro ao remover a conversa.');
+    }
+  };
+
+  const handleEndConversation = async () => {
+    if (!selectedId) return;
+    if (!confirm('Tem certeza que deseja encerrar esta conversa?')) return;
+
+    try {
+      setIsEndingConversation(true);
+      await api.post(`/whatsapp/conversations/${selectedId}/end`);
+      setSelectedId(null);
+      await refetchList();
+    } catch (error) {
+      console.error('Erro ao encerrar conversa:', error);
+      alert('Erro ao encerrar a conversa.');
+    } finally {
+      setIsEndingConversation(false);
     }
   };
 
@@ -284,44 +328,60 @@ export default function ConversasWhatsAppPage() {
         {/* Título e subtítulo centralizados */}
         <div className="text-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-            Conversas WhatsApp
+            Central de Atendimentos
           </h1>
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
-            Chatbot.
+            Encaminhe, acompanhe e encerre conversas com atendente humano.
           </p>
         </div>
 
-        {/* Abas por tipo */}
-        <div className="flex flex-wrap justify-center gap-1 sm:gap-2 p-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl w-fit mx-auto">
-          {ABAS.map((aba) => {
-            const Icon = aba.icon;
-            const count =
-              aba.id === 'todas'
-                ? conversations.length
-                : conversations.filter((c) => getCategoriaConversa(c.flowStatus) === aba.id).length;
-            return (
-              <button
-                key={aba.id}
-                type="button"
-                onClick={() => setAbaAtiva(aba.id)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  abaAtiva === aba.id
-                    ? 'bg-red-600 text-white dark:bg-red-500'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
-                }`}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                {aba.label}
-                <span
-                  className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${
-                    abaAtiva === aba.id ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+        {/* Filtros por etapa */}
+        <div className="flex flex-wrap justify-center gap-2 p-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl w-fit mx-auto">
+          <button
+            type="button"
+            onClick={() => setAtendimentoTab('aguardando')}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              atendimentoTab === 'aguardando'
+                ? 'bg-blue-600 text-white dark:bg-blue-500'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+            }`}
+          >
+            <HelpCircle className="w-4 h-4 shrink-0" />
+            Aguardando
+            <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'aguardando' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+              {aguardandoAtendimento.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setAtendimentoTab('andamento')}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              atendimentoTab === 'andamento'
+                ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+            }`}
+          >
+            <Clock className="w-4 h-4 shrink-0" />
+            Em atendimento
+            <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'andamento' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+              {atendimentoEmAndamento.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setAtendimentoTab('encerradas')}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              atendimentoTab === 'encerradas'
+                ? 'bg-green-600 text-white dark:bg-green-500'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+            }`}
+          >
+            <FileCheck className="w-4 h-4 shrink-0" />
+            Encerradas
+            <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'encerradas' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+              {conversasEncerradas.length}
+            </span>
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
@@ -329,7 +389,11 @@ export default function ConversasWhatsAppPage() {
           <Card className="lg:col-span-1 shadow-sm">
             <CardHeader className="pb-3">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {abaAtiva === 'todas' ? 'Conversas' : ABAS.find((a) => a.id === abaAtiva)?.label ?? 'Conversas'}
+                  {atendimentoTab === 'aguardando'
+                    ? 'Aguardando atendimento'
+                    : atendimentoTab === 'andamento'
+                      ? 'Em atendimento'
+                      : 'Encerradas'}
               </h2>
             </CardHeader>
             <CardContent className="p-0">
@@ -344,22 +408,21 @@ export default function ConversasWhatsAppPage() {
                     <AlertCircle className="w-7 h-7 text-gray-500 dark:text-gray-400" />
                   </div>
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {conversations.length === 0
-                      ? 'Nenhuma conversa ainda'
-                      : `Nenhuma conversa nesta categoria`}
+                    {atendimentoTab === 'aguardando'
+                      ? 'Nenhuma conversa aguardando atendimento'
+                      : atendimentoTab === 'andamento'
+                        ? 'Nenhuma conversa em atendimento'
+                        : 'Nenhuma conversa finalizada'}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-[240px] mx-auto">
-                    {conversations.length === 0
-                      ? 'Quando alguém mandar mensagem no WhatsApp, aparecerá aqui.'
-                      : `Troque a aba "Todas" para ver todas as conversas.`}
+                    {atendimentoTab === 'encerradas'
+                      ? 'Quando a conversa for concluída ou cancelada, ela aparece aqui.'
+                      : 'Quando alguém solicitar atendimento humano, aparecerá aqui.'}
                   </p>
                 </div>
               ) : (
                 <ul className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[calc(100vh-20rem)] overflow-y-auto">
                   {conversasFiltradas.map((c) => {
-                    const categoria = getCategoriaConversa(c.flowStatus);
-                    const IconCategoria =
-                      categoria === 'atestados' ? FileCheck : categoria === 'duvidas' ? HelpCircle : MoreHorizontal;
                     return (
                       <li key={c.id}>
                         <button
@@ -372,7 +435,15 @@ export default function ConversasWhatsAppPage() {
                           }`}
                         >
                           <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 shrink-0">
-                            <IconCategoria className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                            {c.attendantRequested ? (
+                              <HelpCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            ) : c.attendantInProgress ? (
+                              <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                            ) : c.status === 'COMPLETED' ? (
+                              <FileCheck className="w-4 h-4 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <AlertCircle className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                            )}
                           </span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
@@ -388,21 +459,34 @@ export default function ConversasWhatsAppPage() {
                                 ? format(new Date(c.lastMessageAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
                                 : format(new Date(c.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
                             </p>
-                            <span
-                              className={`mt-2 inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
-                                c.status === 'COMPLETED'
-                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {c.status === 'PENDING' ? (
+                                c.attendantRequested ? (
+                                  <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
+                                    Aguardando atendente
+                                  </span>
+                                ) : c.attendantInProgress ? (
+                                  <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200">
+                                    Em atendimento
+                                  </span>
+                                ) : null
+                              ) : null}
+                              <span
+                                className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                  c.status === 'COMPLETED'
+                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                    : c.status === 'CANCELLED'
+                                      ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
+                                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                }`}
+                              >
+                                {c.status === 'COMPLETED'
+                                  ? 'Concluído'
                                   : c.status === 'CANCELLED'
-                                    ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
-                                    : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                              }`}
-                            >
-                              {c.status === 'COMPLETED'
-                                ? 'Concluído'
-                                : c.status === 'CANCELLED'
-                                  ? 'Cancelado'
-                                  : 'Pendente'}
-                            </span>
+                                    ? 'Cancelado'
+                                    : 'Pendente'}
+                              </span>
+                            </div>
                           </div>
                           <ChevronRight className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
                         </button>
@@ -424,7 +508,7 @@ export default function ConversasWhatsAppPage() {
                   </div>
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Selecione uma conversa</p>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-[280px] mx-auto">
-                    Para ver as mensagens e envios (atestados etc.).
+                    Para ver as mensagens e tratar o atendimento humano.
                   </p>
                 </div>
               </Card>
@@ -454,6 +538,15 @@ export default function ConversasWhatsAppPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
+                      {detail.payload && (detail.payload as any).attendantRequested ? (
+                        <span className="text-xs px-2 py-1 rounded-md shrink-0 font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
+                          Aguardando atendente
+                        </span>
+                      ) : detail.payload && (detail.payload as any).attendantInProgress ? (
+                        <span className="text-xs px-2 py-1 rounded-md shrink-0 font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200">
+                          Em atendimento
+                        </span>
+                      ) : null}
                       <span
                         className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
                           detail.status === 'COMPLETED'
@@ -471,6 +564,15 @@ export default function ConversasWhatsAppPage() {
                       </span>
                       <button
                         type="button"
+                        onClick={handleEndConversation}
+                        disabled={isEndingConversation}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors"
+                      >
+                        <AlertCircle className="w-4 h-4" />
+                        Encerrar
+                      </button>
+                      <button
+                        type="button"
                         onClick={handleRemoveConversation}
                         className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
                       >
@@ -484,8 +586,30 @@ export default function ConversasWhatsAppPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="p-4 sm:p-6 space-y-6">
+                  {detail.status === 'PENDING' && detail.payload && (detail.payload as any).attendantRequested ? (
+                    <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 flex items-start gap-3">
+                      <AlertCircle className="w-4 h-4 text-blue-700 dark:text-blue-300 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">Aguardando atendente</p>
+                        <p className="text-sm text-blue-800 dark:text-blue-200 mt-1 break-words">
+                          A pessoa solicitou atendimento humano. A conversa foi mantida aberta para o atendente responder no sistema.
+                        </p>
+                      </div>
+                    </div>
+                  ) : detail.status === 'PENDING' && detail.payload && (detail.payload as any).attendantInProgress ? (
+                    <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-4 flex items-start gap-3">
+                      <AlertCircle className="w-4 h-4 text-indigo-700 dark:text-indigo-300 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-indigo-900 dark:text-indigo-100">Em atendimento</p>
+                        <p className="text-sm text-indigo-800 dark:text-indigo-200 mt-1 break-words">
+                          O atendimento humano foi iniciado. Use a conversa abaixo para continuar o atendimento.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                   {/* Dados estruturados (atestados) — em destaque primeiro */}
-                  {detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE').length > 0 && (
+                  {showLegacyData &&
+                    detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE').length > 0 && (
                     <div className="space-y-4">
                       <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
                         <FileCheck className="w-4 h-4 text-red-600 dark:text-red-400" />
@@ -640,7 +764,8 @@ export default function ConversasWhatsAppPage() {
                   )}
 
                   {/* Outros envios (não atestado) */}
-                  {detail.submissions.filter((s) => s.type !== 'MEDICAL_CERTIFICATE').length > 0 && (
+                  {showLegacyData &&
+                    detail.submissions.filter((s) => s.type !== 'MEDICAL_CERTIFICATE').length > 0 && (
                     <div className="space-y-3">
                       <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
                         <FileText className="w-4 h-4 text-gray-500 dark:text-gray-400" />
@@ -672,7 +797,8 @@ export default function ConversasWhatsAppPage() {
                   )}
 
                   {/* Dados em preenchimento (payload da conversa sem submission ainda) */}
-                  {detail.payload &&
+                  {showLegacyData &&
+                    detail.payload &&
                     typeof detail.payload === 'object' &&
                     Object.keys(detail.payload).length > 0 &&
                     detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE').length === 0 && (
@@ -787,6 +913,7 @@ export default function ConversasWhatsAppPage() {
                           </div>
                         </div>
                       ))}
+                      <div ref={messagesEndRef} />
                     </div>
 
                     <form

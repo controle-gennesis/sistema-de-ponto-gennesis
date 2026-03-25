@@ -19,7 +19,11 @@ import {
   Building2,
   FileDown,
   FileText,
-  RotateCcw
+  RotateCcw,
+  Pencil,
+  Save,
+  ArrowLeft,
+  ListPlus
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -28,6 +32,7 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
+import { Modal } from '@/components/ui/Modal';
 
 // Tipos
 export interface ComposicaoItem {
@@ -35,7 +40,27 @@ export interface ComposicaoItem {
   banco: string;
   chave: string;
   descricao: string;
+  unidade?: string;
   precoUnitario: number;
+  maoDeObraUnitario?: number;
+  materialUnitario?: number;
+  analiticoLinhas?: LinhaAnaliticoComposicao[];
+}
+
+type CategoriaAnalitico = 'MATERIAL' | 'MÃO DE OBRA';
+
+export interface LinhaAnaliticoComposicao {
+  categoria: CategoriaAnalitico;
+  descricao: string;
+  unidade: string;
+  quantidade: number;
+  precoUnitario: number;
+  total: number;
+}
+
+export interface AnaliticoComposicao {
+  total: number;
+  linhas: LinhaAnaliticoComposicao[];
 }
 
 export interface ItemServico {
@@ -43,16 +68,25 @@ export interface ItemServico {
   codigo: string;
   banco: string;
   descricao: string;
+  precoUnitario?: number;
+  maoDeObraUnitario?: number;
+  materialUnitario?: number;
 }
 
 /** Linha de medição para memória de cálculo dos quantitativos (C, L, H, N, empolamento, descrição) */
 export interface LinhaMedicao {
   descricao?: string;
+  origemLinhaId?: string;
+  origemComposicaoDescricao?: string;
   C: number;
   L: number;
   H: number;
   N: number;
   empolamento: number; // fator 1,00 / 1,10 / 1,20 / 1,30 (legado: percPerda convertido)
+  valorManual?: number; // quando C,L,H vazios: valor digitado diretamente (área ou volume)
+  editavelC?: boolean;
+  editavelL?: boolean;
+  editavelH?: boolean;
 }
 
 export type TipoUnidadeFormula = 'm3' | 'm2' | 'm' | 'un';
@@ -77,8 +111,10 @@ export interface ServicoPadrao {
 const STORAGE_PREFIX = 'orcamento';
 const STORAGE_IMPORTS = 'orcamento-imports';
 
-function storageKey(centroCustoId: string, base: string) {
-  return `${STORAGE_PREFIX}-${base}-${centroCustoId}`;
+/** `orcamentoId` só para dados do orçamento (serviços, imports, sessão); composições não usam. */
+function storageKey(centroCustoId: string, base: string, orcamentoId?: string | null) {
+  const suffix = orcamentoId ? `-${orcamentoId}` : '';
+  return `${STORAGE_PREFIX}-${base}-${centroCustoId}${suffix}`;
 }
 
 export interface ImportRecord {
@@ -88,6 +124,44 @@ export interface ImportRecord {
   tipo: 'orçamento' | 'composições';
   servicosCount?: number;
   itensCount?: number;
+}
+
+/** Estado da montagem do orçamento (persistido por contrato). */
+interface SessaoOrcamentoPersist {
+  subtitulosNoOrcamento: string[];
+  quantidadesPorItem: Record<string, number>;
+  dimensoesPorItem: Record<string, DimensoesItem>;
+  itensOcultosNoOrcamento: string[];
+  showDetalhesFinanceiros: boolean;
+}
+
+function sessaoVazia(): SessaoOrcamentoPersist {
+  return {
+    subtitulosNoOrcamento: [],
+    quantidadesPorItem: {},
+    dimensoesPorItem: {},
+    itensOcultosNoOrcamento: [],
+    showDetalhesFinanceiros: false
+  };
+}
+
+function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string | null): SessaoOrcamentoPersist | null {
+  if (typeof window === 'undefined' || !centroCustoId || !orcamentoId) return null;
+  try {
+    const s = localStorage.getItem(storageKey(centroCustoId, 'sessao', orcamentoId));
+    if (!s) return null;
+    const p = JSON.parse(s) as Partial<SessaoOrcamentoPersist>;
+    if (!p || typeof p !== 'object') return null;
+    return {
+      subtitulosNoOrcamento: Array.isArray(p.subtitulosNoOrcamento) ? p.subtitulosNoOrcamento : [],
+      quantidadesPorItem: p.quantidadesPorItem && typeof p.quantidadesPorItem === 'object' ? p.quantidadesPorItem : {},
+      dimensoesPorItem: p.dimensoesPorItem && typeof p.dimensoesPorItem === 'object' ? p.dimensoesPorItem : {},
+      itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
+      showDetalhesFinanceiros: Boolean(p.showDetalhesFinanceiros)
+    };
+  } catch {
+    return null;
+  }
 }
 
 function loadComposicoes(centroCustoId: string | null): ComposicaoItem[] {
@@ -104,6 +178,7 @@ function saveComposicoes(centroCustoId: string, items: ComposicaoItem[]) {
   localStorage.setItem(storageKey(centroCustoId, 'composicoes'), JSON.stringify(items));
 }
 
+/** Serviços padrão e imports são compartilhados por todos os orçamentos do contrato. */
 function loadServicos(centroCustoId: string | null): ServicoPadrao[] {
   if (typeof window === 'undefined' || !centroCustoId) return [];
   try {
@@ -148,25 +223,81 @@ function addImport(centroCustoId: string, record: Omit<ImportRecord, 'id'>) {
   localStorage.setItem(storageKey(centroCustoId, 'imports'), JSON.stringify(list));
 }
 
-async function fetchFromApi(centroCustoId: string): Promise<{ servicos: ServicoPadrao[]; imports: ImportRecord[] } | null> {
-  try {
-    const res = await api.get(`/orcamento/${centroCustoId}`);
-    const d = res.data;
-    if (d && (d.servicos?.length > 0 || d.imports?.length > 0)) {
-      return { servicos: d.servicos || [], imports: d.imports || [] };
-    }
-  } catch {
-    /* ignora */
-  }
-  return null;
+async function fetchOrcamentosLista(centroCustoId: string): Promise<{
+  orcamentos: { id: string; nome: string; updatedAt: string }[];
+  ultimoOrcamentoId: string | null;
+}> {
+  const res = await api.get(`/orcamento/${centroCustoId}`);
+  const d = res.data;
+  return {
+    orcamentos: Array.isArray(d?.orcamentos) ? d.orcamentos : [],
+    ultimoOrcamentoId: d?.ultimoOrcamentoId ?? null
+  };
 }
 
-async function saveToApi(centroCustoId: string, data: { servicos: ServicoPadrao[]; imports: ImportRecord[] }) {
+async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string): Promise<{
+  servicos: ServicoPadrao[];
+  imports: ImportRecord[];
+  sessaoOrcamento: SessaoOrcamentoPersist | null;
+} | null> {
   try {
-    await api.put(`/orcamento/${centroCustoId}`, data);
-  } catch (err) {
-    console.warn('Erro ao salvar orçamento no S3:', err);
+    const res = await api.get(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`);
+    const d = res.data;
+    if (!d || typeof d !== 'object') return null;
+    const hasSessaoKey =
+      'sessaoOrcamento' in d && d.sessaoOrcamento != null && typeof d.sessaoOrcamento === 'object';
+    const so = d.sessaoOrcamento as Partial<SessaoOrcamentoPersist> | undefined;
+    const sessaoOrcamento: SessaoOrcamentoPersist | null =
+      hasSessaoKey && so
+        ? {
+            subtitulosNoOrcamento: Array.isArray(so.subtitulosNoOrcamento) ? so.subtitulosNoOrcamento : [],
+            quantidadesPorItem:
+              so.quantidadesPorItem && typeof so.quantidadesPorItem === 'object' ? so.quantidadesPorItem : {},
+            dimensoesPorItem:
+              so.dimensoesPorItem && typeof so.dimensoesPorItem === 'object' ? so.dimensoesPorItem : {},
+            itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
+            showDetalhesFinanceiros: Boolean(so.showDetalhesFinanceiros)
+          }
+        : null;
+    return {
+      servicos: Array.isArray(d.servicos) ? d.servicos : [],
+      imports: Array.isArray(d.imports) ? d.imports : [],
+      sessaoOrcamento
+    };
+  } catch {
+    return null;
   }
+}
+
+async function saveOrcamentoToApi(
+  centroCustoId: string,
+  orcamentoId: string,
+  data: { servicos: ServicoPadrao[]; imports: ImportRecord[]; sessaoOrcamento?: SessaoOrcamentoPersist | null }
+): Promise<void> {
+  await api.put(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, data);
+}
+
+async function criarOrcamentoApi(
+  centroCustoId: string,
+  nome?: string
+): Promise<{ id: string; nome: string; updatedAt: string }> {
+  const res = await api.post(`/orcamento/${centroCustoId}/orcamentos`, { nome });
+  return res.data;
+}
+
+async function excluirOrcamentoApi(centroCustoId: string, orcamentoId: string): Promise<void> {
+  await api.delete(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`);
+}
+
+async function renomearOrcamentoApi(centroCustoId: string, orcamentoId: string, nome: string): Promise<void> {
+  await api.patch(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, { nome });
+}
+
+async function saveServicosPadraoToApi(
+  centroCustoId: string,
+  data: { servicos: ServicoPadrao[]; imports: ImportRecord[] }
+): Promise<void> {
+  await api.put(`/orcamento/${centroCustoId}/servicos-padrao`, data);
 }
 
 async function fetchComposicoesGeral(): Promise<ComposicaoItem[]> {
@@ -194,6 +325,35 @@ function parsePreco(val: any): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** Avalia expressão matemática no padrão Excel (=10*8). Aceita vírgula como decimal. */
+function evalSimpleExpr(str: string): number | null {
+  const raw = String(str || '').trim();
+  if (!raw.startsWith('=')) return null;
+  const s = raw.slice(1).trim().replace(/,/g, '.');
+  if (!s) return null;
+  if (!/^[\d\s+\-*/.()]+$/.test(s)) return null;
+  try {
+    const result = new Function(`return (${s})`)();
+    return typeof result === 'number' && isFinite(result) ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizarTextoBusca(val: string): string {
+  return String(val || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim();
+}
+
+function normalizarCabecalhoColuna(val: string): string {
+  // Remove pontuação para casar cabeçalhos como "M. O." e "MAT."
+  return normalizarTextoBusca(val).replace(/[^a-z0-9+]/g, '');
+}
+
 function normalizarChave(codigo: string, banco: string): string {
   const c = String(codigo || '').trim();
   const b = String(banco || '').trim();
@@ -216,24 +376,162 @@ function chavesParaBusca(codigo: string, banco: string, chave: string): string[]
 /** Calcula A (área) = C×L×N, V (volume) = A×H ou C×L×H×N */
 function calcA(linha: LinhaMedicao): number {
   const { C, L, N } = linha;
-  return (C || 0) * (L || 0) * (N || 1);
+  return (C || 0) * (L || 0) * (N && N > 0 ? N : 1);
 }
 function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
-  const { C, L, H, N } = linha;
+  const { C, H, N } = linha;
   const A = calcA(linha);
+  const n = N && N > 0 ? N : 1;
   switch (tipo) {
     case 'm3': return A * (H || 0);
     case 'm2': return A;
-    case 'm': return (C || 0) * (N || 1);
-    default: return N || 0;
+    case 'm': return (C || 0) * n;
+    default: return 1;
   }
 }
-/** Calcula SUBTOTAL = V × empolamento */
+/** Calcula SUBTOTAL = V × empolamento. Se C,L,H vazios e valorManual preenchido, usa valorManual. */
 function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
   const fator = (linha.empolamento != null && linha.empolamento > 0)
     ? linha.empolamento
     : ((linha as unknown as { percPerda?: number }).percPerda != null ? 1 + (linha as unknown as { percPerda: number }).percPerda / 100 : 1);
+  const temDimensoes = (linha.C || 0) !== 0 || (linha.L || 0) !== 0 || (linha.H || 0) !== 0;
+  if (!temDimensoes && linha.valorManual != null && linha.valorManual >= 0) {
+    return linha.valorManual * fator;
+  }
   return calcV(linha, tipo) * fator;
+}
+
+function inferirTipoUnidadePorDimensao(linhas: LinhaMedicao[] | undefined): TipoUnidadeFormula {
+  if (!linhas?.length) return 'un';
+  const hasH = linhas.some(ln => (ln.H || 0) > 0);
+  if (hasH) return 'm3';
+  const hasL = linhas.some(ln => (ln.L || 0) > 0);
+  if (hasL) return 'm2';
+  const hasC = linhas.some(ln => (ln.C || 0) > 0);
+  if (hasC) return 'm';
+  return 'un';
+}
+
+/** Converte UND da planilha (M, M², M2, M³, M3, UN) para TipoUnidadeFormula */
+function parseUnidadeComposicao(und: string | undefined): TipoUnidadeFormula | null {
+  if (!und || !String(und).trim()) return null;
+  const u = String(und).toUpperCase().replace(/\s/g, '').replace(/²/g, '2').replace(/³/g, '3');
+  if (u === 'M3' || u.includes('CUBIC')) return 'm3';
+  if (u === 'M2' || u.includes('QUADRAD')) return 'm2';
+  if (u === 'M' || u === 'MT' || u === 'METRO' || u === 'METROS') return 'm';
+  if (u === 'UN' || u === 'UND' || u === 'UNID' || u.includes('UNIDADE')) return 'un';
+  return null;
+}
+
+/** Verifica se a descrição indica item de demolição, remoção ou retirada */
+function ehItemDemolicaoOuRemocao(descricao: string | undefined): boolean {
+  if (!descricao) return false;
+  const d = normalizarTextoBusca(descricao);
+  return (
+    d.includes('demolicao') || d.includes('demolicoes') ||
+    d.includes('remocao') || d.includes('remocoes') ||
+    d.includes('retirada') || d.includes('retiradas')
+  );
+}
+
+/** Verifica se a descrição indica composição de Carga Manual de Entulho */
+function ehComposicaoCargaEntulho(descricao: string | undefined): boolean {
+  if (!descricao) return false;
+  const d = normalizarTextoBusca(descricao);
+  return d.includes('carga') && d.includes('entulho') && (d.includes('caminhao') || d.includes('basculante'));
+}
+
+/** Verifica se a descrição indica composição de caçamba de 4m³ para entulho */
+function ehComposicaoCacamba4m3(descricao: string | undefined): boolean {
+  if (!descricao) return false;
+  const d = normalizarTextoBusca(descricao).replace(/\s/g, '');
+  return d.includes('cacamba') && d.includes('entulho') && (d.includes('4m3') || d.includes('4m³'));
+}
+
+function roundTo(n: number, decimals: number) {
+  const d = Math.pow(10, decimals);
+  return Math.round(n * d) / d;
+}
+
+/** Exibição em planilha exportada (pt-BR). */
+function formatarBRLExport(n: number) {
+  return `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatarPesoPctExport(n: number) {
+  return `${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function hashStringToInt(s: string): number {
+  let h = 0;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) {
+    h = (h * 31 + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function gerarAnaliticoComposicaoUnit(materialTotal: number, maoTotal: number, seedKey: string): AnaliticoComposicao {
+  const total = (materialTotal || 0) + (maoTotal || 0);
+  if (total <= 0) return { total: 0, linhas: [] };
+
+  const seed = hashStringToInt(seedKey);
+  const rnd = (offset: number) => ((seed + offset * 997) % 1000) / 1000; // 0..1
+
+  const materiais = ['Cimento', 'Areia', 'Brita', 'Aço CA-50', 'Argamassa', 'Tijolos', 'Concreto', 'Aditivo', 'Impermeabilizante', 'Forma'];
+  const maos = ['Pedreiro', 'Servente', 'Armador', 'Carpinteiro', 'Encarregado', 'Ajudante', 'Montador'];
+
+  const materialLinesCount = 1 + (seed % 3); // 1..3
+  const maoLinesCount = 1 + ((seed >> 2) % 3); // 1..3
+
+  const makeLines = (categoria: CategoriaAnalitico, totalCategoria: number, names: string[], count: number, unidadeFallback: string, offsetBase: number) => {
+    if (totalCategoria <= 0) return [];
+    const weights = Array.from({ length: count }).map((_, i) => 0.2 + rnd(offsetBase + i));
+    const sumW = weights.reduce((a, b) => a + b, 0) || 1;
+
+    // Quantidades "de tela": só para dar leitura ao analítico.
+    const unidades = Array.from({ length: count }).map((_, i) => {
+      const v = rnd(offsetBase + 100 + i);
+      return unidadeFallback || (v > 0.6 ? 'un' : 'm²');
+    });
+
+    const lines: LinhaAnaliticoComposicao[] = [];
+    let acumulado = 0;
+    for (let i = 0; i < count; i++) {
+      const peso = weights[i] / sumW;
+      const linhaTotal = i === count - 1 ? (totalCategoria - acumulado) : totalCategoria * peso;
+      acumulado += linhaTotal;
+
+      const qtdMin = categoria === 'MÃO DE OBRA' ? 1 : 0.5;
+      const qtdMax = categoria === 'MÃO DE OBRA' ? 40 : 25;
+      const quantidade = roundTo(qtdMin + rnd(offsetBase + 200 + i) * (qtdMax - qtdMin), 2);
+      const precoUnitario = quantidade > 0 ? linhaTotal / quantidade : 0;
+
+      lines.push({
+        categoria,
+        descricao: names[(seed + i + offsetBase) % names.length],
+        unidade: unidades[i],
+        quantidade,
+        precoUnitario,
+        total: linhaTotal
+      });
+    }
+    return lines;
+  };
+
+  const materialLines = makeLines('MATERIAL', materialTotal, materiais, materialLinesCount, 'un', 1);
+  const maoLines = makeLines('MÃO DE OBRA', maoTotal, maos, maoLinesCount, 'h', 2);
+  const linhas = [...materialLines, ...maoLines];
+
+  const somaLinhas = linhas.reduce((acc, l) => acc + l.total, 0);
+  const diff = total - somaLinhas;
+  if (linhas.length > 0 && Math.abs(diff) > 0.00001) {
+    linhas[linhas.length - 1].total += diff;
+    const last = linhas[linhas.length - 1];
+    if (last.quantidade > 0) last.precoUnitario = last.total / last.quantidade;
+  }
+
+  return { total, linhas };
 }
 
 export default function OrcamentoPage() {
@@ -258,8 +556,26 @@ export default function OrcamentoPage() {
   const [itensOcultosNoOrcamento, setItensOcultosNoOrcamento] = useState<Set<string>>(new Set());
   const [loadingFromApi, setLoadingFromApi] = useState(false);
   const [showServicosDropdown, setShowServicosDropdown] = useState(false);
+  const [showContratoDropdown, setShowContratoDropdown] = useState(false);
   const [servicosSearch, setServicosSearch] = useState('');
+  const [showDetalhesFinanceiros, setShowDetalhesFinanceiros] = useState(false);
   const servicosDropdownRef = useRef<HTMLDivElement | null>(null);
+  const contratoDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // Analítico (detalhamento) da composição para visualização/exportação.
+  const [analiticoModalOpen, setAnaliticoModalOpen] = useState(false);
+  const [analiticoModalInfo, setAnaliticoModalInfo] = useState<null | { codigo: string; banco: string; descricao: string }>(null);
+  const [analiticoModalData, setAnaliticoModalData] = useState<null | AnaliticoComposicao>(null);
+  // Cache do analítico por composição (por item) para não recalcular a cada clique.
+  const [analiticoCache, setAnaliticoCache] = useState<Record<string, AnaliticoComposicao>>({});
+  // Draft para campos que aceitam cálculos (2+3, 10/2, etc) - avalia no blur
+  const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
+  const [salvandoOrcamento, setSalvandoOrcamento] = useState(false);
+  const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(null);
+  const [listaOrcamentos, setListaOrcamentos] = useState<{ id: string; nome: string; updatedAt: string }[]>([]);
+  const [carregandoListaOrcamentos, setCarregandoListaOrcamentos] = useState(false);
+  const [nomeOrcamentoRascunho, setNomeOrcamentoRascunho] = useState('');
+  const sessaoRef = useRef<SessaoOrcamentoPersist>(sessaoVazia());
 
   useEffect(() => {
     if (costCenters?.length && !centroCustoId) {
@@ -282,47 +598,38 @@ export default function OrcamentoPage() {
   }, []);
 
   useEffect(() => {
-    if (!centroCustoId) return;
+    if (!centroCustoId) {
+      setListaOrcamentos([]);
+      setOrcamentoAtivoId(null);
+      setServicos([]);
+      setImports([]);
+      return;
+    }
+    setOrcamentoAtivoId(null);
+    setServicos([]);
+    setImports([]);
     let cancelled = false;
-    setLoadingFromApi(true);
-    fetchFromApi(centroCustoId).then(apiData => {
-      if (cancelled) return;
-      if (apiData && (apiData.servicos.length > 0 || apiData.imports.length > 0)) {
-        setServicos(apiData.servicos);
-        setImports(apiData.imports);
-        saveServicos(centroCustoId, apiData.servicos);
-        localStorage.setItem(storageKey(centroCustoId, 'imports'), JSON.stringify(apiData.imports));
-        if (apiData.servicos.length > 0) {
-          setServicosExpandidos(new Set([apiData.servicos[0].id]));
-        }
-      } else {
-        const svcs = loadServicos(centroCustoId);
-        setServicos(svcs);
-        setImports(loadImports(centroCustoId));
-        if (svcs.length > 0) setServicosExpandidos(new Set([svcs[0].id]));
-      }
-      setLoadingFromApi(false);
-    });
-    return () => { cancelled = true; setLoadingFromApi(false); };
+    setCarregandoListaOrcamentos(true);
+    fetchOrcamentosLista(centroCustoId)
+      .then(data => {
+        if (cancelled) return;
+        setListaOrcamentos(data.orcamentos);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error('Não foi possível carregar a lista de orçamentos.');
+      })
+      .finally(() => {
+        if (!cancelled) setCarregandoListaOrcamentos(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [centroCustoId]);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (servicosDropdownRef.current && !servicosDropdownRef.current.contains(e.target as Node)) {
-        setShowServicosDropdown(false);
-      }
-    };
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, []);
-
-  const persistToApi = (s: ServicoPadrao[], i: ImportRecord[]) => {
-    if (centroCustoId) saveToApi(centroCustoId, { servicos: s, imports: i });
-  };
-
-  const apagarOrcamento = () => {
-    if (!centroCustoId) return;
-    if (!confirm('Tem certeza que deseja apagar todo o orçamento perfeito deste contrato? Esta ação não pode ser desfeita.')) return;
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    let cancelled = false;
+    setLoadingFromApi(true);
     setServicos([]);
     setImports([]);
     setSubtitulosNoOrcamento([]);
@@ -331,10 +638,210 @@ export default function OrcamentoPage() {
     setDimensoesPorItem({});
     setItensComDimensoesAbertos(new Set());
     setItensOcultosNoOrcamento(new Set());
-    saveServicos(centroCustoId, []);
-    localStorage.setItem(storageKey(centroCustoId, 'imports'), '[]');
-    persistToApi([], []);
-    toast.success('Orçamento perfeito apagado.');
+    setShowDetalhesFinanceiros(false);
+
+    const aplicarSessao = (s: SessaoOrcamentoPersist | null) => {
+      if (!s) return;
+      setSubtitulosNoOrcamento(s.subtitulosNoOrcamento);
+      setQuantidadesPorItem(s.quantidadesPorItem);
+      setDimensoesPorItem(s.dimensoesPorItem);
+      setItensOcultosNoOrcamento(new Set(s.itensOcultosNoOrcamento));
+      setShowDetalhesFinanceiros(s.showDetalhesFinanceiros);
+    };
+
+    const oid = orcamentoAtivoId;
+    fetchOrcamentoDetail(centroCustoId, oid).then(apiData => {
+      if (cancelled) return;
+      if (apiData) {
+        setServicos(apiData.servicos);
+        setImports(apiData.imports);
+        saveServicos(centroCustoId, apiData.servicos);
+        localStorage.setItem(storageKey(centroCustoId, 'imports'), JSON.stringify(apiData.imports));
+        if (apiData.servicos.length > 0) {
+          setServicosExpandidos(new Set([apiData.servicos[0].id]));
+        }
+        aplicarSessao(apiData.sessaoOrcamento ?? loadSessaoOrcamento(centroCustoId, oid));
+      } else {
+        const svcs = loadServicos(centroCustoId);
+        setServicos(svcs);
+        setImports(loadImports(centroCustoId));
+        if (svcs.length > 0) setServicosExpandidos(new Set([svcs[0].id]));
+        aplicarSessao(loadSessaoOrcamento(centroCustoId, oid));
+      }
+      setLoadingFromApi(false);
+    });
+    return () => {
+      cancelled = true;
+      setLoadingFromApi(false);
+    };
+  }, [centroCustoId, orcamentoAtivoId]);
+
+  useEffect(() => {
+    sessaoRef.current = {
+      subtitulosNoOrcamento,
+      quantidadesPorItem,
+      dimensoesPorItem,
+      itensOcultosNoOrcamento: Array.from(itensOcultosNoOrcamento),
+      showDetalhesFinanceiros
+    };
+    if (centroCustoId && orcamentoAtivoId) {
+      try {
+        localStorage.setItem(storageKey(centroCustoId, 'sessao', orcamentoAtivoId), JSON.stringify(sessaoRef.current));
+      } catch {
+        /* quota */
+      }
+    }
+  }, [
+    centroCustoId,
+    orcamentoAtivoId,
+    subtitulosNoOrcamento,
+    quantidadesPorItem,
+    dimensoesPorItem,
+    itensOcultosNoOrcamento,
+    showDetalhesFinanceiros
+  ]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (servicosDropdownRef.current && !servicosDropdownRef.current.contains(e.target as Node)) {
+        setShowServicosDropdown(false);
+      }
+      if (contratoDropdownRef.current && !contratoDropdownRef.current.contains(e.target as Node)) {
+        setShowContratoDropdown(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
+
+  const refreshListaOrcamentos = async () => {
+    if (!centroCustoId) return;
+    try {
+      const d = await fetchOrcamentosLista(centroCustoId);
+      setListaOrcamentos(d.orcamentos);
+    } catch {
+      /* ignora */
+    }
+  };
+
+  const persistToApi = (
+    s: ServicoPadrao[],
+    i: ImportRecord[],
+    sessaoOverride?: SessaoOrcamentoPersist | null
+  ) => {
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    const sessao = sessaoOverride !== undefined ? sessaoOverride : sessaoRef.current;
+    saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, {
+      servicos: s,
+      imports: i,
+      sessaoOrcamento: sessao
+    }).catch(err => console.warn('Erro ao salvar orçamento no servidor:', err));
+  };
+
+  const salvarOrcamento = async () => {
+    if (!centroCustoId || !orcamentoAtivoId) {
+      toast.error('Abra ou crie um orçamento na lista para salvar.');
+      return;
+    }
+    setSalvandoOrcamento(true);
+    try {
+      await saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, {
+        servicos,
+        imports,
+        sessaoOrcamento: sessaoRef.current
+      });
+      await refreshListaOrcamentos();
+      toast.success('Orçamento salvo. Você pode fechar e voltar depois para continuar editando.');
+    } catch {
+      toast.error('Não foi possível salvar no servidor. O rascunho permanece neste navegador.');
+    } finally {
+      setSalvandoOrcamento(false);
+    }
+  };
+
+  const voltarParaListaOrcamentos = () => {
+    setOrcamentoAtivoId(null);
+    setNomeOrcamentoRascunho('');
+    refreshListaOrcamentos();
+  };
+
+  const criarNovoOrcamento = async () => {
+    if (!centroCustoId) return;
+    try {
+      const entry = await criarOrcamentoApi(centroCustoId);
+      setListaOrcamentos(prev => [entry, ...prev.filter(o => o.id !== entry.id)]);
+      setNomeOrcamentoRascunho(entry.nome);
+      setOrcamentoAtivoId(entry.id);
+      setActiveTab('orcamento');
+      toast.success('Novo orçamento criado. Os serviços padrão são os mesmos do contrato (aba Serviços Padrão).');
+    } catch {
+      toast.error('Não foi possível criar o orçamento.');
+    }
+  };
+
+  const abrirOrcamentoDaLista = (id: string) => {
+    const meta = listaOrcamentos.find(o => o.id === id);
+    setNomeOrcamentoRascunho(meta?.nome ?? '');
+    setOrcamentoAtivoId(id);
+    setActiveTab('orcamento');
+  };
+
+  const excluirOrcamentoDaLista = async (id: string, nome: string) => {
+    if (!centroCustoId) return;
+    if (!confirm(`Excluir o orçamento "${nome}"? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await excluirOrcamentoApi(centroCustoId, id);
+      localStorage.removeItem(storageKey(centroCustoId, 'sessao', id));
+      setListaOrcamentos(prev => prev.filter(o => o.id !== id));
+      if (orcamentoAtivoId === id) {
+        setOrcamentoAtivoId(null);
+        setNomeOrcamentoRascunho('');
+        setServicos([]);
+        setImports([]);
+      }
+      toast.success('Orçamento excluído.');
+    } catch {
+      toast.error('Não foi possível excluir o orçamento.');
+    }
+  };
+
+  const salvarNomeOrcamento = async () => {
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    const n = nomeOrcamentoRascunho.trim();
+    if (!n) {
+      toast.error('Informe um nome.');
+      return;
+    }
+    try {
+      await renomearOrcamentoApi(centroCustoId, orcamentoAtivoId, n);
+      setListaOrcamentos(prev =>
+        prev.map(o => (o.id === orcamentoAtivoId ? { ...o, nome: n } : o))
+      );
+      toast.success('Nome atualizado.');
+    } catch {
+      toast.error('Não foi possível renomear.');
+    }
+  };
+
+  /** Copia serviços + histórico de imports de outro orçamento do mesmo contrato (equivale a repetir o orçamento perfeito já importado lá). */
+  const apagarOrcamento = () => {
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    if (!confirm('Tem certeza que deseja apagar este orçamento? Esta ação não pode ser desfeita.')) return;
+    void (async () => {
+      try {
+        await excluirOrcamentoApi(centroCustoId, orcamentoAtivoId);
+        const oid = orcamentoAtivoId;
+        localStorage.removeItem(storageKey(centroCustoId, 'sessao', oid));
+        setListaOrcamentos(prev => prev.filter(o => o.id !== oid));
+        setOrcamentoAtivoId(null);
+        setNomeOrcamentoRascunho('');
+        setServicos([]);
+        setImports([]);
+        toast.success('Orçamento apagado.');
+      } catch {
+        toast.error('Não foi possível apagar no servidor.');
+      }
+    })();
   };
 
   const handleLogout = () => {
@@ -356,27 +863,121 @@ export default function OrcamentoPage() {
         toast.error('Planilha vazia ou sem dados');
         return;
       }
-      const header = (rows[0] || []).map((h: any) => String(h || '').toLowerCase().trim());
-      const chaveIdx = header.findIndex(h => h === 'chave');
-      const codigoIdx = header.findIndex(h => h.includes('código') || h.includes('codigo'));
-      const bancoIdx = header.findIndex(h => h === 'banco');
-      const descIdx = header.findIndex(h => h === 'descrição' || h.includes('descri'));
-      const matMoIdx = header.findIndex(h =>
-        (h.includes('mat') && (h.includes('m.o') || h.includes('m. o') || h.includes('mo'))) ||
-        h === 'mat + m.o'
+      // Detecta automaticamente a linha de cabeçalho (algumas planilhas trazem linhas acima do header).
+      const detectarLinhaCabecalho = () => {
+        const limite = Math.min(rows.length, 30);
+        for (let r = 0; r < limite; r++) {
+          const h = (rows[r] || []).map((x: any) => normalizarTextoBusca(String(x || '')));
+          const hk = h.map((x: string) => normalizarCabecalhoColuna(x));
+          const temCodigo = hk.some((c: string) => c.includes('codigo'));
+          const temBanco = hk.some((c: string) => c === 'banco');
+          const temDescricao = hk.some((c: string) => c.includes('descri'));
+          const temMatMo = hk.some((c: string) =>
+            c.includes('mat+mo') ||
+            c === 'matmo' ||
+            c === 'matm.o'
+          );
+          if ((temCodigo && temDescricao) || (temBanco && temDescricao) || (temCodigo && temMatMo)) {
+            return r;
+          }
+        }
+        return 0;
+      };
+
+      const headerRowIdx = detectarLinhaCabecalho();
+      const header = (rows[headerRowIdx] || []).map((h: any) => normalizarTextoBusca(String(h || '')));
+      const headerKey = header.map(h => normalizarCabecalhoColuna(h));
+      const chaveIdx = headerKey.findIndex(h => h === 'chave');
+      const codigoIdx = headerKey.findIndex(h => h.includes('codigo'));
+      const bancoIdx = headerKey.findIndex(h => h === 'banco');
+      const descIdx = headerKey.findIndex(h => h === 'descricao' || h.includes('descri'));
+      const tipoIdx = headerKey.findIndex(h => h === 'tipo');
+      const undIdx = headerKey.findIndex(h => h === 'und' || h === 'un' || h.includes('unidade'));
+      const quantIdx = headerKey.findIndex(h => h.includes('quant'));
+      const valorUnitIdx = headerKey.findIndex(h => h.includes('valorunit') || h === 'valorunit' || h === 'valoruni');
+      const totalIdx = headerKey.findIndex(h => h === 'total');
+      const matMoIdx = headerKey.findIndex(h =>
+        h === 'mat+mo' ||
+        h === 'matm.o' ||
+        h === 'matmo' ||
+        h === 'mat+m.o' ||
+        h.includes('mat+mo')
       );
-      const items: ComposicaoItem[] = [];
-      for (let i = 1; i < rows.length; i++) {
+      const maoIdx = headerKey.findIndex(h =>
+        h === 'mo' ||
+        h === 'mao' ||
+        h === 'maodeobra' ||
+        h.includes('maodeobra')
+      );
+      const materialIdx = headerKey.findIndex(h =>
+        h === 'mat' ||
+        h === 'material' ||
+        (h.includes('material') && !h.includes('submaterial'))
+      );
+      const itemsMap = new Map<string, ComposicaoItem>();
+      let composicaoAtualKey: string | null = null;
+      for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const row = rows[i] || [];
         const codigo = String(row[codigoIdx] ?? row[1] ?? '').trim();
         const banco = String(row[bancoIdx] ?? row[2] ?? '').trim();
         const chave = String(row[chaveIdx] ?? '').trim() || normalizarChave(codigo, banco);
         const descricao = String(row[descIdx] ?? row[4] ?? '').trim();
+        const tipoRaw = normalizarTextoBusca(String(row[tipoIdx] ?? ''));
         const preco = matMoIdx >= 0 ? parsePreco(row[matMoIdx]) : parsePreco(row[6] ?? row[7]);
-        if (codigo || banco || chave || descricao) {
-          items.push({ codigo, banco, chave, descricao, precoUnitario: preco });
+        // Valores fixos: vêm exclusivamente da planilha.
+        const mao = maoIdx >= 0 ? parsePreco(row[maoIdx]) : 0;
+        const material = materialIdx >= 0 ? parsePreco(row[materialIdx]) : 0;
+
+        const ehComposicao = tipoRaw.includes('composicao') || (!tipoRaw && (codigo || banco) && !!descricao);
+        const ehInsumo = tipoRaw.includes('insumo') || tipoRaw.includes('mao de obra') || tipoRaw.includes('material');
+
+        if (ehComposicao && (codigo || banco || chave || descricao)) {
+          const unidade = String(row[undIdx] ?? '').trim() || undefined;
+          const comp: ComposicaoItem = {
+            codigo,
+            banco,
+            chave,
+            descricao,
+            unidade,
+            precoUnitario: preco,
+            maoDeObraUnitario: mao,
+            materialUnitario: material,
+            analiticoLinhas: itemsMap.get(chave)?.analiticoLinhas || []
+          };
+          itemsMap.set(chave, comp);
+          composicaoAtualKey = chave;
+          continue;
+        }
+
+        if (ehInsumo) {
+          const destinoKey = (chave && itemsMap.has(chave)) ? chave : composicaoAtualKey;
+          if (!destinoKey) continue;
+          const comp = itemsMap.get(destinoKey);
+          if (!comp) continue;
+
+          const categoria: CategoriaAnalitico = tipoRaw.includes('mao de obra') ? 'MÃO DE OBRA' : 'MATERIAL';
+          const unidade = String(row[undIdx] ?? '').trim() || 'un';
+          const quantidade = quantIdx >= 0 ? parsePreco(row[quantIdx]) : 0;
+          const precoUnitario = valorUnitIdx >= 0 ? parsePreco(row[valorUnitIdx]) : 0;
+          const totalInsumo = totalIdx >= 0 ? parsePreco(row[totalIdx]) : (quantidade * precoUnitario);
+
+          if (descricao) {
+            comp.analiticoLinhas = [
+              ...(comp.analiticoLinhas || []),
+              {
+                categoria,
+                descricao,
+                unidade,
+                quantidade,
+                precoUnitario,
+                total: totalInsumo
+              }
+            ];
+            itemsMap.set(destinoKey, comp);
+          }
         }
       }
+      const items = Array.from(itemsMap.values());
       setComposicoes(items);
       await saveComposicoesGeralToApi(items);
       toast.success(`${items.length} composições importadas e salvas no S3.`);
@@ -385,6 +986,21 @@ export default function OrcamentoPage() {
     } finally {
       setIsUploading(false);
       e.target.value = '';
+    }
+  };
+
+  const apagarPlanilhaComposicoes = async () => {
+    if (composicoes.length === 0) {
+      toast('Não há composições carregadas para apagar.');
+      return;
+    }
+    if (!confirm('Tem certeza que deseja apagar a planilha de composições carregada?')) return;
+    try {
+      setComposicoes([]);
+      await saveComposicoesGeralToApi([]);
+      toast.success('Planilha de composições apagada com sucesso.');
+    } catch {
+      toast.error('Erro ao apagar composições.');
     }
   };
 
@@ -412,7 +1028,7 @@ export default function OrcamentoPage() {
     };
     const updated = [...servicos, novo];
     setServicos(updated);
-    if (centroCustoId) {
+    if (centroCustoId && orcamentoAtivoId) {
       saveServicos(centroCustoId, updated);
       persistToApi(updated, imports);
     }
@@ -424,7 +1040,7 @@ export default function OrcamentoPage() {
   const removeServico = (id: string) => {
     const updated = servicos.filter(s => s.id !== id);
     setServicos(updated);
-    if (centroCustoId) {
+    if (centroCustoId && orcamentoAtivoId) {
       saveServicos(centroCustoId, updated);
       persistToApi(updated, imports);
     }
@@ -453,7 +1069,7 @@ export default function OrcamentoPage() {
       banco: item.banco,
       descricao: item.descricao
     };
-    const updated = servicos.map(s => {
+    let updated = servicos.map(s => {
       if (s.id !== servicoId) return s;
       return {
         ...s,
@@ -462,8 +1078,35 @@ export default function OrcamentoPage() {
         )
       };
     });
+    // Se for item de demolição/remoção, adiciona Carga de Entulho no mesmo subtítulo se ainda não existir
+    if (ehItemDemolicaoOuRemocao(item.descricao)) {
+      const cargaEntulho = composicoes.find(c => ehComposicaoCargaEntulho(c.descricao));
+      if (cargaEntulho) {
+        const subAtualizado = updated.find(s => s.id === servicoId)?.subtitulos.find(sb => sb.id === subtituloId);
+        const cargaJaExiste = subAtualizado?.itens.some(i =>
+          i.chave === cargaEntulho.chave || (i.codigo === cargaEntulho.codigo && i.banco === cargaEntulho.banco)
+        );
+        if (!cargaJaExiste) {
+          const itemCarga: ItemServico = {
+            chave: cargaEntulho.chave || normalizarChave(cargaEntulho.codigo, cargaEntulho.banco),
+            codigo: cargaEntulho.codigo,
+            banco: cargaEntulho.banco,
+            descricao: cargaEntulho.descricao
+          };
+          updated = updated.map(s => {
+            if (s.id !== servicoId) return s;
+            return {
+              ...s,
+              subtitulos: s.subtitulos.map(sb =>
+                sb.id === subtituloId ? { ...sb, itens: [...sb.itens, itemCarga] } : sb
+              )
+            };
+          });
+        }
+      }
+    }
     setServicos(updated);
-    if (centroCustoId) {
+    if (centroCustoId && orcamentoAtivoId) {
       saveServicos(centroCustoId, updated);
       persistToApi(updated, imports);
     }
@@ -488,13 +1131,26 @@ export default function OrcamentoPage() {
         return;
       }
       const HEADER_ROW = 10;
-      const header = (rows[HEADER_ROW] || []).map((h: any) =>
-        String(h || '').toLowerCase().trim().replace(/[.\s]+$/, '').replace(/^[.\s]+/, '')
-      );
+      const header = (rows[HEADER_ROW] || []).map((h: any) => normalizarTextoBusca(String(h || '')));
       const itemIdx = header.findIndex(h => h === 'item');
       const codigoIdx = header.findIndex(h => h.includes('código') || h.includes('codigo'));
       const bancoIdx = header.findIndex(h => h === 'banco');
       const descIdx = header.findIndex(h => h.includes('descri') && !h.includes('serviço') && !h.includes('servico'));
+      const matMoIdx = header.findIndex(h =>
+        (h.includes('mat') && (h.includes('m.o') || h.includes('m. o') || h.includes('mo'))) ||
+        h === 'mat + m.o' ||
+        h === 'mat+m.o' ||
+        h.includes('mat+mo')
+      );
+      const maoIdx = header.findIndex(h =>
+        (h.includes('mao') && h.includes('obra') && !h.includes('sub mao')) ||
+        h === 'm.o' ||
+        h === 'mo'
+      );
+      const materialIdx = header.findIndex(h =>
+        (h === 'material' || h === 'mat' || h.includes(' material')) &&
+        !h.includes('sub material')
+      );
 
       type ServicoImport = { nome: string; subtitulos: Map<string, ItemServico[]> };
       const servicosMap = new Map<string, ServicoImport>();
@@ -509,6 +1165,9 @@ export default function OrcamentoPage() {
         const banco = String(row[bancoIdx] ?? '').trim();
         const descricao = String(row[descIdx] ?? '').trim();
         const chave = normalizarChave(codigo, banco);
+        const precoUnitario = matMoIdx >= 0 ? parsePreco(row[matMoIdx]) : 0;
+        const maoDeObraUnitario = maoIdx >= 0 ? parsePreco(row[maoIdx]) : 0;
+        const materialUnitario = materialIdx >= 0 ? parsePreco(row[materialIdx]) : 0;
 
         const partes = itemVal ? String(itemVal).split('.').filter(Boolean) : [];
         const nivel = partes.length;
@@ -525,7 +1184,7 @@ export default function OrcamentoPage() {
         const ehItem = (codigo || banco) && descricao && nivel >= 2;
         if (ehItem && topicoAtual) {
           const nomeSubtitulo = subdivisaoAtual || topicoAtual;
-          const item: ItemServico = { chave, codigo, banco, descricao };
+          const item: ItemServico = { chave, codigo, banco, descricao, precoUnitario, maoDeObraUnitario, materialUnitario };
           let servico = servicosMap.get(topicoAtual);
           if (!servico) {
             servico = { nome: topicoAtual, subtitulos: new Map() };
@@ -567,9 +1226,22 @@ export default function OrcamentoPage() {
         tipo: 'orçamento',
         servicosCount: servicosImportados.length
       });
-      setImports(loadImports(centroCustoId));
-      persistToApi(servicosImportados, loadImports(centroCustoId));
-      toast.success(`${servicosImportados.length} serviço(s) importados para o contrato selecionado e salvos no S3.`);
+      const importsAtualizados = loadImports(centroCustoId);
+      setImports(importsAtualizados);
+      if (orcamentoAtivoId) {
+        persistToApi(servicosImportados, importsAtualizados);
+      } else {
+        await saveServicosPadraoToApi(centroCustoId, {
+          servicos: servicosImportados,
+          imports: importsAtualizados
+        });
+      }
+      toast.success(
+        `${servicosImportados.length} serviço(s) importados para o contrato e salvos. ` +
+          (orcamentoAtivoId
+            ? 'Use a lista para criar ou abrir um orçamento quando quiser.'
+            : 'Você pode criar um orçamento na lista — os serviços já estarão disponíveis.')
+      );
       setActiveTab('orcamento');
     } catch (err) {
       toast.error('Erro ao processar o arquivo. Verifique o formato.');
@@ -594,7 +1266,7 @@ export default function OrcamentoPage() {
       };
     });
     setServicos(updated);
-    if (centroCustoId) {
+    if (centroCustoId && orcamentoAtivoId) {
       saveServicos(centroCustoId, updated);
       persistToApi(updated, imports);
     }
@@ -679,55 +1351,193 @@ export default function OrcamentoPage() {
     toast.success('Item restaurado ao orçamento.');
   };
 
-  const mapaPrecos = useMemo(() => {
-    const m: Record<string, number> = {};
+  const mapaComposicoes = useMemo(() => {
+    const m: Record<string, ComposicaoItem> = {};
     composicoes.forEach(c => {
       const chaves = chavesParaBusca(c.codigo, c.banco, c.chave);
       chaves.forEach(k => {
-        if (k) m[k] = c.precoUnitario;
+        if (k) m[k] = c;
       });
     });
     return m;
   }, [composicoes]);
 
   const { itensCalculados, total } = useMemo(() => {
-    const lista: { key: string; servicoNome: string; subtituloNome: string; item: ItemServico; precoUnitario: number; quantidade: number; total: number; dimensoes?: DimensoesItem }[] = [];
+    const lista: {
+      key: string;
+      blocoKey: string;
+      servicoNome: string;
+      subtituloNome: string;
+      item: ItemServico;
+      precoUnitario: number;
+      maoDeObraUnitario: number;
+      materialUnitario: number;
+      subMaoDeObra: number;
+      subMaterial: number;
+      subMatMaisMo: number;
+      quantidade: number;
+      total: number;
+      dimensoes?: DimensoesItem;
+      tipoUnidade: TipoUnidadeFormula;
+      unidadeComposicao?: string;
+    }[] = [];
     for (const bloco of subtitulosAdicionados) {
       for (const i of bloco.itens) {
         const itemKey = `${bloco.key}|${i.chave}`;
         if (itensOcultosNoOrcamento.has(itemKey)) continue;
         const chaves = chavesParaBusca(i.codigo, i.banco, i.chave);
-        let preco = 0;
+        let composicao: ComposicaoItem | null = null;
         for (const k of chaves) {
-          const p = mapaPrecos[k];
-          if (p != null && !Number.isNaN(p)) {
-            preco = p;
+          const c = mapaComposicoes[k];
+          if (c) {
+            composicao = c;
             break;
           }
         }
+        const preco = i.precoUnitario ?? composicao?.precoUnitario ?? 0;
+        const maoDeObraUnitario = i.maoDeObraUnitario ?? composicao?.maoDeObraUnitario ?? 0;
+        const materialUnitario = i.materialUnitario ?? composicao?.materialUnitario ?? 0;
         const dim = dimensoesPorItem[itemKey];
+        const tipoAuto = inferirTipoUnidadePorDimensao(dim?.linhas);
+        const tipoDaComp = parseUnidadeComposicao(composicao?.unidade);
+        const tipoUnidade: TipoUnidadeFormula = (tipoDaComp && tipoDaComp !== 'un') ? tipoDaComp : tipoAuto;
         let qtd = 0;
-        if (dim?.linhas?.length) {
-          qtd = dim.linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, dim.tipoUnidade), 0);
+        if (tipoUnidade === 'un') {
+          qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
+        } else if (dim?.linhas?.length) {
+          qtd = dim.linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, tipoUnidade), 0);
         } else {
           qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
         }
-        const totalItem = preco * qtd;
+        const subMaoDeObra = maoDeObraUnitario * qtd;
+        const subMaterial = materialUnitario * qtd;
+        const subMatMaisMo = subMaoDeObra + subMaterial;
+        const totalItem = subMatMaisMo;
         lista.push({
           key: itemKey,
+          blocoKey: bloco.key,
           servicoNome: bloco.servicoNome,
           subtituloNome: bloco.subtituloNome,
           item: i,
           precoUnitario: preco,
+          maoDeObraUnitario,
+          materialUnitario,
+          subMaoDeObra,
+          subMaterial,
+          subMatMaisMo,
           quantidade: qtd,
           total: totalItem,
-          dimensoes: dim
+          dimensoes: dim,
+          tipoUnidade,
+          unidadeComposicao: composicao?.unidade
         });
       }
     }
-    const soma = lista.reduce((acc, x) => acc + x.total, 0);
-    return { itensCalculados: lista, total: soma };
-  }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaPrecos, itensOcultosNoOrcamento]);
+    // Regra: quantidade da caçamba 4m³ = quantidade da Carga Manual de Entulho / 4 (mesmo subtítulo).
+    const cargaPorBloco = new Map<string, number>();
+    for (const row of lista) {
+      if (ehComposicaoCargaEntulho(row.item.descricao)) {
+        cargaPorBloco.set(row.blocoKey, row.quantidade);
+      }
+    }
+
+    const listaComCacamba = lista.map(row => {
+      if (!ehComposicaoCacamba4m3(row.item.descricao)) return row;
+      const qtdCarga = cargaPorBloco.get(row.blocoKey) ?? 0;
+      const qtdCacamba = Math.ceil(qtdCarga / 4);
+      const subMaoDeObra = row.maoDeObraUnitario * qtdCacamba;
+      const subMaterial = row.materialUnitario * qtdCacamba;
+      const subMatMaisMo = subMaoDeObra + subMaterial;
+      return {
+        ...row,
+        quantidade: qtdCacamba,
+        subMaoDeObra,
+        subMaterial,
+        subMatMaisMo,
+        total: subMatMaisMo
+      };
+    });
+
+    const soma = listaComCacamba.reduce((acc, x) => acc + x.total, 0);
+    return { itensCalculados: listaComCacamba, total: soma };
+  }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaComposicoes, itensOcultosNoOrcamento]);
+
+  const resumoFinanceiro = useMemo(() => {
+    const descontoPct = 25.01 / 100;
+    const bdiPct = 28.35 / 100;
+    const ipca1Pct = 3.93583 / 100;
+    const ipca2Pct = 3.92595 / 100;
+    const ipca3Pct = 5.31964 / 100;
+
+    const totalBase = total;
+    const valorDesconto = totalBase * descontoPct;
+    const totalComDesconto = totalBase - valorDesconto;
+    const totalComDescontoEBdi = totalComDesconto * (1 + bdiPct);
+    const reajuste1 = totalComDescontoEBdi * (1 + ipca1Pct);
+    const reajuste2 = reajuste1 * (1 + ipca2Pct);
+    const reajuste3 = reajuste2 * (1 + ipca3Pct);
+
+    return {
+      descontoPct,
+      bdiPct,
+      ipca1Pct,
+      ipca2Pct,
+      ipca3Pct,
+      totalBase,
+      valorDesconto,
+      totalComDesconto,
+      totalComDescontoEBdi,
+      reajuste1,
+      reajuste2,
+      reajuste3
+    };
+  }, [total]);
+
+  // Sincroniza linhas de itens de demolição/remoção para a composição Carga de Entulho
+  useEffect(() => {
+    const cargaRow = itensCalculados.find(r => ehComposicaoCargaEntulho(r.item.descricao));
+    if (!cargaRow) return;
+    const cargaKey = cargaRow.key;
+    const linhasCargaAtuais = dimensoesPorItem[cargaKey]?.linhas ?? [];
+    const linhasAgregadas: LinhaMedicao[] = [];
+    for (const row of itensCalculados) {
+      if (row.key === cargaKey) continue;
+      if (!ehItemDemolicaoOuRemocao(row.item.descricao)) continue;
+      const dim = dimensoesPorItem[row.key];
+      if (dim?.linhas?.length) {
+        for (let sourceIdx = 0; sourceIdx < dim.linhas.length; sourceIdx++) {
+          const ln = dim.linhas[sourceIdx];
+          const origemLinhaId = `${row.key}|${sourceIdx}`;
+          const descricaoLinha = `${ln.descricao?.trim() || row.item.descricao || ''}`.trim().slice(0, 120);
+          const linhaCargaExistente = linhasCargaAtuais.find(x => x.origemLinhaId === origemLinhaId)
+            || linhasCargaAtuais.find(x => (x.descricao || '').trim() === descricaoLinha);
+          linhasAgregadas.push({
+            ...ln,
+            origemLinhaId,
+            origemComposicaoDescricao: row.item.descricao || '',
+            descricao: descricaoLinha,
+            // Mantém ajustes manuais feitos na Carga de Entulho.
+            C: (ln.C || 0) === 0 ? (linhaCargaExistente?.C ?? ln.C) : ln.C,
+            L: (ln.L || 0) === 0 ? (linhaCargaExistente?.L ?? ln.L) : ln.L,
+            H: (ln.H || 0) === 0 ? (linhaCargaExistente?.H ?? ln.H) : ln.H,
+            empolamento: linhaCargaExistente?.empolamento ?? ln.empolamento,
+            // Campo que nasceu vazio na origem permanece editável na Carga.
+            editavelC: (ln.C || 0) === 0,
+            editavelL: (ln.L || 0) === 0,
+            editavelH: (ln.H || 0) === 0
+          });
+        }
+      }
+    }
+    const atualCarga = dimensoesPorItem[cargaKey];
+    const atualLinhas = atualCarga?.linhas ?? [];
+    if (linhasAgregadas.length === 0 && atualLinhas.length === 0) return;
+    if (JSON.stringify(linhasAgregadas.map(l => ({ ...l }))) === JSON.stringify(atualLinhas.map(l => ({ ...l })))) return;
+    setDimensoesPorItem(prev => ({
+      ...prev,
+      [cargaKey]: { tipoUnidade: 'm3' as const, linhas: linhasAgregadas }
+    }));
+  }, [itensCalculados, dimensoesPorItem]);
 
   const setQuantidadeItem = (itemKey: string, valor: number) => {
     setQuantidadesPorItem(prev => ({ ...prev, [itemKey]: Math.max(0, valor) }));
@@ -747,7 +1557,7 @@ export default function OrcamentoPage() {
       ...prev,
       [itemKey]: {
         ...atual,
-        linhas: [...atual.linhas, { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 }]
+        linhas: [...atual.linhas, { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 0 }]
       }
     }));
   };
@@ -757,8 +1567,19 @@ export default function OrcamentoPage() {
     if (!atual?.linhas?.[idx]) return;
     const novaLinhas = [...atual.linhas];
     const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
-    novaLinhas[idx] = { ...novaLinhas[idx], [campo]: v };
+    const updated: LinhaMedicao = { ...novaLinhas[idx], [campo]: v } as LinhaMedicao;
+    if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
+      updated.valorManual = undefined;
+    }
+    novaLinhas[idx] = updated;
     setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhas: novaLinhas } }));
+  };
+
+  const handleCalcBlur = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
+    const r = evalSimpleExpr(raw);
+    const rawSemIgual = String(raw).trim().replace(/^=/, '').replace(/,/g, '.');
+    onCommit(r !== null ? r : parseFloat(rawSemIgual) || 0);
+    setDraftCalc(p => { const n = { ...p }; delete n[draftKey]; return n; });
   };
 
   const removeLinhaMedicao = (itemKey: string, idx: number) => {
@@ -770,11 +1591,6 @@ export default function OrcamentoPage() {
     } else {
       setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhas: novaLinhas } }));
     }
-  };
-
-  const setTipoUnidadeItem = (itemKey: string, tipo: TipoUnidadeFormula) => {
-    const atual = dimensoesPorItem[itemKey] || { tipoUnidade: 'm3', linhas: [{ descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 }] };
-    setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, tipoUnidade: tipo } }));
   };
 
   const exportarMemoriaCalculo = () => {
@@ -795,7 +1611,7 @@ export default function OrcamentoPage() {
       [''],
       ['MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS'],
       [''],
-      ['LEGENDA: C= Comprimento | L= Largura | H= Altura | E= Espessura | N= nº de repetições | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro'],
+      ['LEGENDA: C= Comprimento | L= Largura | H= Altura | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro'],
       [''],
       ['DISCRIMINAÇÃO DOS SERVIÇOS'],
       ['CÓDIGO', 'DESCRIÇÃO', 'UN', 'C', 'L', 'H', '% EMPOL.', 'N', 'A', 'V', 'SUBTOTAL', 'Preço Unit.', 'TOTAL (R$)']
@@ -808,7 +1624,8 @@ export default function OrcamentoPage() {
     for (const row of itensCalculados) {
       const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
       const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
-      const un = unidadeLabel(row.dimensoes?.tipoUnidade || 'un');
+      const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(row.dimensoes?.linhas);
+      const un = row.unidadeComposicao?.trim() || unidadeLabel(tipoAuto);
       const preco = row.precoUnitario;
       const totalItem = row.total;
 
@@ -817,7 +1634,8 @@ export default function OrcamentoPage() {
           const ln = row.dimensoes.linhas[i];
           const descLinha = ln.descricao?.trim() || (i === 0 ? descricaoBase : '');
           const descCol = i === 0 ? descricaoBase : descLinha;
-          const empol = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 1);
+          const empolRaw = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 0);
+          const empol = (empolRaw != null && empolRaw > 0) ? empolRaw : 1;
           rows.push([
             i === 0 ? codigo : '',
             descCol,
@@ -836,7 +1654,7 @@ export default function OrcamentoPage() {
           const r = rows.length;
           const col = (c: number) => String.fromCharCode(64 + c);
           const D = col(4); const E = col(5); const F = col(6); const G = col(7); const H = col(8); const I = col(9); const J = col(10); const K = col(11);
-          const tipo = row.dimensoes!.tipoUnidade;
+          const tipo = tipoAuto;
           if (tipo === 'm3') {
             formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
             formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}*${F}${r}` });
@@ -882,6 +1700,286 @@ export default function OrcamentoPage() {
     toast.success('Memória de cálculo exportada com sucesso.');
   };
 
+  const exportarOrcamentoDetalhado = () => {
+    if (itensCalculados.length === 0) {
+      toast.error('Não há itens no orçamento para exportar.');
+      return;
+    }
+
+    const nomeContrato =
+      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name ||
+      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code ||
+      centroCustoId ||
+      'Contrato';
+
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    const numeracaoExport: { servicoNum: number; subNum: number }[] = [];
+    let lastServicoNome = '';
+    let servicoNumExport = 0;
+    let subNumExport = 0;
+    for (const b of subtitulosAdicionados) {
+      if (b.servicoNome !== lastServicoNome) {
+        servicoNumExport++;
+        subNumExport = 0;
+        lastServicoNome = b.servicoNome;
+      }
+      subNumExport++;
+      numeracaoExport.push({ servicoNum: servicoNumExport, subNum: subNumExport });
+    }
+
+    const linhaVaziaOrcExport = () =>
+      ['', '', '', '', '', '', '', '', '', '', '', '', '', ''] as (string | number)[];
+
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['ORÇAMENTO DETALHADO'],
+      ['CONTRATO', nomeContrato],
+      ['DATA', dataEmissao],
+      [''],
+      [
+        'ITEM',
+        'CÓDIGO',
+        'BANCO',
+        'CHAVE',
+        'DESCRIÇÃO',
+        'UNIDADE',
+        'QUANTIDADE',
+        'MÃO DE OBRA',
+        'MATERIAL',
+        'MAT + M.O',
+        'SUB MÃO DE OBRA',
+        'SUB MATERIAL',
+        'SUB MAT + M.O',
+        'PESO %'
+      ]
+    ];
+
+    let prevServicoExport = '';
+    subtitulosAdicionados.forEach((bloco, blocoIdx) => {
+      const { servicoNum, subNum } = numeracaoExport[blocoIdx] ?? { servicoNum: blocoIdx + 1, subNum: 1 };
+      const mesmoTituloSubtitulo =
+        bloco.servicoNome.trim().toLowerCase() === bloco.subtituloNome.trim().toLowerCase();
+
+      if (bloco.servicoNome !== prevServicoExport) {
+        const linhaTitulo = linhaVaziaOrcExport();
+        linhaTitulo[0] = servicoNum;
+        linhaTitulo[4] = String(bloco.servicoNome || '').toUpperCase();
+        rows.push(linhaTitulo);
+        prevServicoExport = bloco.servicoNome;
+      }
+
+      if (!mesmoTituloSubtitulo) {
+        const linhaSub = linhaVaziaOrcExport();
+        linhaSub[0] = `${servicoNum}.${subNum}`;
+        linhaSub[4] = String(bloco.subtituloNome || '').toUpperCase();
+        rows.push(linhaSub);
+      }
+
+      const rowsDoBloco = itensCalculados.filter(
+        r => r.servicoNome === bloco.servicoNome && r.subtituloNome === bloco.subtituloNome
+      );
+
+      rowsDoBloco.forEach((row, rowIdx) => {
+        const itemN = mesmoTituloSubtitulo
+          ? `${servicoNum}.${rowIdx + 1}`
+          : `${servicoNum}.${subNum}.${rowIdx + 1}`;
+        const chaveItem = row.item.chave || normalizarChave(row.item.codigo, row.item.banco);
+        rows.push([
+          itemN,
+          row.item.codigo,
+          row.item.banco,
+          chaveItem,
+          row.item.descricao || '',
+          row.unidadeComposicao || '',
+          roundTo(row.quantidade, 4),
+          formatarBRLExport(row.maoDeObraUnitario),
+          formatarBRLExport(row.materialUnitario),
+          formatarBRLExport(row.precoUnitario),
+          formatarBRLExport(row.subMaoDeObra),
+          formatarBRLExport(row.subMaterial),
+          formatarBRLExport(row.total),
+          formatarPesoPctExport(total > 0 ? (row.total / total) * 100 : 0)
+        ]);
+      });
+    });
+
+    const rf = resumoFinanceiro;
+    const pctLabel2 = (p: number) =>
+      (p * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const pctLabel5 = (p: number) =>
+      (p * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 });
+
+    const pushLinhaResumo = (rotulo: string, valor: number) => {
+      const r = linhaVaziaOrcExport();
+      r[11] = rotulo;
+      r[12] = formatarBRLExport(valor);
+      rows.push(r);
+    };
+
+    rows.push(linhaVaziaOrcExport());
+    pushLinhaResumo('TOTAL', rf.totalBase);
+    pushLinhaResumo(`DESCONTO (${pctLabel2(rf.descontoPct)}%)`, rf.valorDesconto);
+    pushLinhaResumo('TOTAL COM DESCONTO', rf.totalComDesconto);
+    pushLinhaResumo(`TOTAL GERAL COM DESCONTO E BDI (${pctLabel2(rf.bdiPct)}%)`, rf.totalComDescontoEBdi);
+    pushLinhaResumo(`1º REAJUSTE IPCA (${pctLabel5(rf.ipca1Pct)}%)`, rf.reajuste1);
+    pushLinhaResumo(`2º REAJUSTE IPCA (${pctLabel5(rf.ipca2Pct)}%)`, rf.reajuste2);
+    pushLinhaResumo(`3º REAJUSTE IPCA (${pctLabel5(rf.ipca3Pct)}%)`, rf.reajuste3);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 48 },
+      { wch: 9 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 12 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Orçamento Detalhado');
+    const nomeArquivo = `Orcamento_Detalhado_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Orçamento detalhado exportado com sucesso.');
+  };
+
+  const abrirAnaliticoDaComposicao = (linha: any) => {
+    const item: ItemServico = linha?.item;
+    if (!item) return;
+
+    const composicaoDaLinha = (() => {
+      const chaves = chavesParaBusca(item.codigo, item.banco, item.chave);
+      for (const k of chaves) {
+        const c = mapaComposicoes[k];
+        if (c) return c;
+      }
+      return null;
+    })();
+
+    if (composicaoDaLinha?.analiticoLinhas?.length) {
+      const totalAnalitico = composicaoDaLinha.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0);
+      setAnaliticoModalInfo({
+        codigo: item.codigo,
+        banco: item.banco,
+        descricao: item.descricao || ''
+      });
+      setAnaliticoModalData({
+        total: totalAnalitico,
+        linhas: composicaoDaLinha.analiticoLinhas
+      });
+      setAnaliticoModalOpen(true);
+      return;
+    }
+
+    const materialUnitario = Number(linha?.materialUnitario ?? 0);
+    const maoDeObraUnitario = Number(linha?.maoDeObraUnitario ?? 0);
+
+    const seedKey = `${item.codigo}|${item.banco}|${item.chave || ''}`;
+    const unitAnalitico = analiticoCache[seedKey] ?? gerarAnaliticoComposicaoUnit(materialUnitario, maoDeObraUnitario, seedKey);
+
+    if (!analiticoCache[seedKey]) {
+      setAnaliticoCache(prev => ({ ...prev, [seedKey]: unitAnalitico }));
+    }
+
+    setAnaliticoModalInfo({
+      codigo: item.codigo,
+      banco: item.banco,
+      descricao: item.descricao || ''
+    });
+    // O modal exibe o analítico unitário da composição (CPU), não o total escalado pela qtd. do item.
+    setAnaliticoModalData(unitAnalitico);
+    setAnaliticoModalOpen(true);
+  };
+
+  const exportarAnalitico = () => {
+    if (itensCalculados.length === 0) {
+      toast.error('Não há itens no orçamento para gerar o analítico.');
+      return;
+    }
+
+    const nomeContrato =
+      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name ||
+      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code ||
+      centroCustoId ||
+      'Contrato';
+
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['Gennesis Engenharia e Consultoria LTDA | CNPJ 17.851.596/0001-36 | gennesis.sedes@gmail.com | SHIS QI 15, Sobreloja 55, Lago Sul - Brasília/DF'],
+      [''],
+      ['PROJETO/SETOR:', nomeContrato, '', '', 'STATUS:', 'ORÇADO'],
+      ['DATA DE ENVIO:', dataEmissao],
+      [''],
+      ['ANALÍTICO DO ORÇAMENTO (COMPOSIÇÕES)'],
+      [''],
+      ['SERVIÇO', 'SUBTÍTULO', 'CÓDIGO', 'BANCO', 'DESCRIÇÃO', 'CATEGORIA', 'DESCRIÇÃO INSUMO', 'UN', 'QUANTIDADE', 'Preço Unit.', 'TOTAL (R$)']
+    ];
+
+    let totalGeral = 0;
+    for (const linha of itensCalculados) {
+      totalGeral += linha.total;
+      const item = linha.item;
+      const quantidadeItem = Number(linha.quantidade ?? 0);
+
+      const materialUnitario = Number(linha.materialUnitario ?? 0);
+      const maoDeObraUnitario = Number(linha.maoDeObraUnitario ?? 0);
+      const seedKey = `${item.codigo}|${item.banco}|${item.chave || ''}`;
+      const composicaoDaLinha = (() => {
+        const chaves = chavesParaBusca(item.codigo, item.banco, item.chave);
+        for (const k of chaves) {
+          const c = mapaComposicoes[k];
+          if (c) return c;
+        }
+        return null;
+      })();
+
+      const unitAnalitico = composicaoDaLinha?.analiticoLinhas?.length
+        ? {
+            total: composicaoDaLinha.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0),
+            linhas: composicaoDaLinha.analiticoLinhas
+          }
+        : (analiticoCache[seedKey] ?? gerarAnaliticoComposicaoUnit(materialUnitario, maoDeObraUnitario, seedKey));
+
+      for (const l of unitAnalitico.linhas) {
+        rows.push([
+          linha.servicoNome,
+          linha.subtituloNome,
+          item.codigo,
+          item.banco,
+          item.descricao || '',
+          l.categoria,
+          l.descricao,
+          l.unidade,
+          roundTo(l.quantidade * quantidadeItem, 4),
+          l.precoUnitario,
+          roundTo(l.total * quantidadeItem, 2)
+        ]);
+      }
+    }
+
+    rows.push(['TOTAL GERAL', '', '', '', '', '', '', '', '', '', roundTo(totalGeral, 2)]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 26 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 44 },
+      { wch: 16 }, { wch: 30 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 14 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Analítico');
+    const nomeArquivo = `Analitico_Composicoes_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Analítico exportado com sucesso.');
+  };
+
   return (
     <ProtectedRoute route="/ponto/orcamento">
       <MainLayout userRole="EMPLOYEE" userName="" onLogout={handleLogout}>
@@ -895,56 +1993,107 @@ export default function OrcamentoPage() {
 
           {/* Seletor de Contrato (Centro de Custo) */}
           <Card>
-            <CardContent className="py-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    <Building2 className="w-4 h-4 inline mr-1" />
+            <CardContent className="py-5">
+              <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                <div className="xl:col-span-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/40 p-4">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+                    <Building2 className="w-4 h-4" />
                     Contrato (Centro de Custo)
                   </label>
-                  <select
-                    value={centroCustoId || ''}
-                    onChange={e => setCentroCustoId(e.target.value || null)}
-                    disabled={loadingCentros}
-                    className="w-full max-w-md px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                  >
-                    <option value="">{loadingCentros ? 'Carregando...' : 'Selecione o contrato'}</option>
-                    {costCenters?.map((cc: { id?: string; code?: string; name?: string }) => (
-                      <option key={cc.id} value={cc.id || ''}>
-                        {cc.code || ''} — {cc.name || cc.code || 'Sem nome'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {centroCustoId && (
-                  <div className="flex flex-col gap-2">
-                    <div className="text-sm">
-                      <p className="font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        <FileDown className="w-4 h-4 inline mr-1" />
-                        {loadingFromApi ? 'Carregando do S3...' : `Documentos salvos no S3 (${imports.length})`}
-                      </p>
-                    {(servicos.length > 0 || composicoes.length > 0) && (
-                      <button
-                        type="button"
-                        onClick={apagarOrcamento}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 transition-colors"
+                  <div ref={contratoDropdownRef} className="relative">
+                    <button
+                      type="button"
+                      disabled={loadingCentros}
+                      onClick={e => {
+                        e.stopPropagation();
+                        setShowContratoDropdown(v => !v);
+                      }}
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-left flex items-center justify-between gap-2 disabled:opacity-50 outline-none focus:ring-2 focus:ring-red-500/80 dark:focus:ring-red-500/70 focus:border-red-500 dark:focus:border-red-500"
+                    >
+                      <span className="truncate min-w-0">
+                        {loadingCentros
+                          ? 'Carregando...'
+                          : (() => {
+                              if (!centroCustoId) return 'Selecione o contrato';
+                              const cc = costCenters?.find((c: { id?: string }) => c.id === centroCustoId);
+                              if (!cc) return 'Selecione o contrato';
+                              return `${cc.code || ''} — ${cc.name || cc.code || 'Sem nome'}`;
+                            })()}
+                      </span>
+                      {showContratoDropdown ? (
+                        <ChevronUp className="w-4 h-4 shrink-0 opacity-60" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 shrink-0 opacity-60" />
+                      )}
+                    </button>
+                    {showContratoDropdown && !loadingCentros && (
+                      <div
+                        className="absolute z-[100] mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg max-h-64 overflow-y-auto py-1"
+                        onClick={e => e.stopPropagation()}
                       >
-                        <Trash2 className="w-4 h-4" />
-                        Apagar orçamento perfeito
-                      </button>
+                        <button
+                          type="button"
+                          className={`w-full px-4 py-2.5 text-left text-sm ${!centroCustoId ? 'bg-red-600 text-white' : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white'}`}
+                          onClick={() => {
+                            setCentroCustoId(null);
+                            setShowContratoDropdown(false);
+                          }}
+                        >
+                          Selecione o contrato
+                        </button>
+                        {costCenters?.map((cc: { id?: string; code?: string; name?: string }) => (
+                          <button
+                            key={cc.id}
+                            type="button"
+                            className={`w-full px-4 py-2.5 text-left text-sm ${
+                              centroCustoId === cc.id
+                                ? 'bg-red-600 text-white'
+                                : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white'
+                            }`}
+                            onClick={() => {
+                              setCentroCustoId(cc.id || null);
+                              setShowContratoDropdown(false);
+                            }}
+                          >
+                            {cc.code || ''} — {cc.name || cc.code || 'Sem nome'}
+                          </button>
+                        ))}
+                      </div>
                     )}
-                    {imports.length > 0 && (
-                    <div className="max-h-24 overflow-y-auto text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
-                      {imports.slice(0, 5).map(imp => (
-                        <div key={imp.id}>
-                          {imp.fileName} — {imp.tipo} — {imp.date ? new Date(imp.date).toLocaleString('pt-BR') : ''}
-                          {imp.servicosCount != null && ` (${imp.servicosCount} serviços)`}
-                          {imp.itensCount != null && ` (${imp.itensCount} itens)`}
-                        </div>
-                      ))}
+                  </div>
+                </div>
+
+                {centroCustoId && orcamentoAtivoId && (
+                  <div className="xl:col-span-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/40 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                        <FileDown className="w-4 h-4 inline mr-1.5" />
+                        {loadingFromApi ? 'Carregando do S3...' : `Documentos deste orçamento (${imports.length})`}
+                      </p>
+                      {(servicos.length > 0 || composicoes.length > 0) && (
+                        <button
+                          type="button"
+                          onClick={apagarOrcamento}
+                          className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Apagar
+                        </button>
+                      )}
                     </div>
+                    {imports.length > 0 ? (
+                      <div className="mt-2 max-h-24 overflow-y-auto text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                        {imports.slice(0, 5).map(imp => (
+                          <div key={imp.id} className="truncate">
+                            {imp.fileName} — {imp.tipo} — {imp.date ? new Date(imp.date).toLocaleString('pt-BR') : ''}
+                            {imp.servicosCount != null && ` (${imp.servicosCount} serviços)`}
+                            {imp.itensCount != null && ` (${imp.itensCount} itens)`}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Nenhum documento recente neste orçamento.</p>
                     )}
-                    </div>
                   </div>
                 )}
               </div>
@@ -981,17 +2130,143 @@ export default function OrcamentoPage() {
                   Selecione um contrato acima para criar orçamentos.
                 </CardContent>
               </Card>
+            ) : !orcamentoAtivoId ? (
+              <Card>
+                <CardHeader>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Orçamentos deste contrato</h2>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Crie vários cenários e abra um para continuar editando
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer transition-colors disabled:opacity-50">
+                        {isImportandoOrcamento ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
+                        <span>{isImportandoOrcamento ? 'Importando...' : 'Importar orçamento perfeito'}</span>
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls,.csv"
+                          onChange={handleImportOrcamentoPerfeito}
+                          disabled={isImportandoOrcamento || carregandoListaOrcamentos}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={criarNovoOrcamento}
+                        disabled={carregandoListaOrcamentos}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none font-medium transition-colors"
+                      >
+                        {carregandoListaOrcamentos ? <Loader2 className="w-5 h-5 animate-spin" /> : <ListPlus className="w-5 h-5" />}
+                        Novo orçamento
+                      </button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {carregandoListaOrcamentos ? (
+                    <div className="flex justify-center py-16 text-gray-500 dark:text-gray-400">
+                      <Loader2 className="w-10 h-10 animate-spin" />
+                    </div>
+                  ) : listaOrcamentos.length === 0 ? (
+                    <p className="text-center py-14 text-gray-500 dark:text-gray-400">
+                      Nenhum orçamento ainda. Você pode <strong className="text-gray-700 dark:text-gray-300">importar o orçamento perfeito</strong> acima (vale para todo o contrato) ou criar um novo orçamento.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                      <table className="min-w-full">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+                              Nome
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+                              Atualizado
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+                              Ações
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                          {listaOrcamentos.map(o => (
+                            <tr key={o.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-800/50">
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{o.nome}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                                {o.updatedAt ? new Date(o.updatedAt).toLocaleString('pt-BR') : '—'}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm font-medium">
+                                <div className="inline-flex flex-wrap gap-2 justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirOrcamentoDaLista(o.id)}
+                                    className="px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700"
+                                  >
+                                    Abrir
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => excluirOrcamentoDaLista(o.id, o.nome)}
+                                    className="px-3 py-1.5 rounded-md border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                  >
+                                    Excluir
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             ) : (
             <Card>
               <CardHeader>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Criar orçamento</h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Selecione um serviço padrão e informe a quantidade para calcular o valor total
-                </p>
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={voltarParaListaOrcamentos}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-sm"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      Voltar à lista
+                    </button>
+                    <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[200px]">
+                      <input
+                        type="text"
+                        value={nomeOrcamentoRascunho}
+                        onChange={e => setNomeOrcamentoRascunho(e.target.value)}
+                        className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                        placeholder="Nome do orçamento"
+                      />
+                      <button
+                        type="button"
+                        onClick={salvarNomeOrcamento}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Salvar nome
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Montar orçamento</h2>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Selecione um serviço padrão e informe a quantidade para calcular o valor total
+                    </p>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="flex gap-2 items-end flex-wrap">
-                  <div ref={servicosDropdownRef} className="relative flex-1 min-w-[200px]">
+                  <div
+                    ref={servicosDropdownRef}
+                    className={`relative flex-1 min-w-[200px] ${showServicosDropdown ? 'z-[200]' : ''}`}
+                  >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Adicionar serviços ao orçamento
                     </label>
@@ -1013,7 +2288,7 @@ export default function OrcamentoPage() {
                       </span>
                     </button>
                   {showServicosDropdown && (
-                    <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3 max-h-[min(24rem,70vh)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                    <div className="absolute left-0 right-0 top-full z-[201] mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3 max-h-[min(24rem,70vh)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="text"
                         placeholder="Pesquisar..."
@@ -1113,54 +2388,135 @@ export default function OrcamentoPage() {
 
                 {subtitulosAdicionados.length > 0 && (
                   <>
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Itens necessários — informe quantidade direta ou use dimensões (C, L, H, N, %) para memória de cálculo
-                    </p>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setShowDetalhesFinanceiros(v => !v)}
+                        className="text-xs px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        {showDetalhesFinanceiros ? 'Ocultar detalhes financeiros' : 'Ver detalhes financeiros'}
+                      </button>
+                    </div>
                     <div className="space-y-6">
                       {subtitulosAdicionados.map(bloco => {
                         const rowsDoBloco = itensCalculados.filter(r => r.servicoNome === bloco.servicoNome && r.subtituloNome === bloco.subtituloNome);
+                        const mesmoTituloSubtitulo =
+                          bloco.servicoNome.trim().toLowerCase() === bloco.subtituloNome.trim().toLowerCase();
+                        const bordaEntreFaixas = 'border-b border-gray-200 dark:border-gray-700';
                         return (
-                          <div key={bloco.key} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                            <div className="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                              <span className="font-medium text-gray-900 dark:text-gray-100">
-                                {bloco.servicoNome} › {bloco.subtituloNome}
+                          <div key={bloco.key} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm dark:shadow-none">
+                            <div
+                              className={`relative flex items-center justify-center py-2.5 px-10 bg-gray-50 dark:bg-gray-900 ${bordaEntreFaixas}`}
+                            >
+                              <span className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase text-center leading-tight">
+                                {bloco.servicoNome}
                               </span>
                               <button
                                 type="button"
                                 onClick={() => removeSubtituloDoOrcamento(bloco.key)}
-                                className="p-1 text-gray-500 hover:text-red-600 dark:hover:text-gray-400 dark:hover:text-red-400 rounded"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-200/80 dark:hover:bg-gray-800/80"
                                 title="Remover este serviço"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
+                            {!mesmoTituloSubtitulo && (
+                              <div
+                                className={`flex items-center justify-center py-2 px-4 bg-white dark:bg-gray-800 ${bordaEntreFaixas}`}
+                              >
+                                <span className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200 uppercase text-center leading-tight">
+                                  {bloco.subtituloNome}
+                                </span>
+                              </div>
+                            )}
                             <div className="overflow-x-auto">
                               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                 <thead>
-                                  <tr className="bg-gray-50 dark:bg-gray-800">
-                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Código</th>
-                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Banco</th>
-                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
-                                    <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-20">Un.</th>
-                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-28">Quantidade</th>
-                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">SUB MAT+M.O</th>
-                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total</th>
+                                  <tr className="bg-white dark:bg-gray-900/10">
+                                    <th className="w-[90px] px-4 py-2 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">Código</th>
+                                    <th className="w-[90px] px-4 py-2 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">Banco</th>
+                                    <th className="min-w-[280px] px-4 py-2 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">Descrição</th>
+                                    <th className="px-4 py-2 text-center text-xs font-medium text-gray-600 dark:text-gray-400 uppercase w-20">Un.</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase w-28">Quantidade</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">MÃO DE OBRA</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">MATERIAL</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">Custo Direto</th>
+                                    {showDetalhesFinanceiros && (
+                                      <>
+                                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">SUB MÃO DE OBRA</th>
+                                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">SUB MATERIAL</th>
+                                      </>
+                                    )}
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">Total</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 dark:text-gray-400 uppercase w-24">Peso %</th>
                                     <th className="px-4 py-2 w-24"></th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                  {rowsDoBloco.map((row) => {
+                                  {rowsDoBloco.map((row, rowIdx) => {
                                     const [servicoId, subtituloId] = bloco.key.split('|');
                                     const usaDimensoes = !!row.dimensoes?.linhas?.length;
                                     const aberto = itensComDimensoesAbertos.has(row.key);
                                     const dim = dimensoesPorItem[row.key] || { tipoUnidade: 'm3' as const, linhas: [] };
+                                    const tipoAuto = inferirTipoUnidadePorDimensao(dim.linhas);
+                                    const ehCargaEntulho = ehComposicaoCargaEntulho(row.item.descricao);
+                                    const ehCacamba4m3 = ehComposicaoCacamba4m3(row.item.descricao);
+                                    const pesoPctOrcamento = total > 0 ? (row.total / total) * 100 : 0;
                                     return (
                                     <React.Fragment key={row.key}>
-                                    <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                                      <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{row.item.codigo}</td>
-                                      <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">{row.item.banco}</td>
-                                      <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 max-w-md truncate">{row.item.descricao}</td>
+                                    <tr className={`${rowIdx % 2 === 0 ? 'bg-white dark:bg-gray-900/10' : 'bg-gray-50/40 dark:bg-gray-900/20'} hover:bg-gray-50 dark:hover:bg-gray-800/50`}>
+                                      <td className="w-[90px] px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{row.item.codigo}</td>
+                                      <td className="w-[90px] px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{row.item.banco}</td>
+                                      <td className="min-w-[280px] px-4 py-2 text-sm text-gray-900 dark:text-gray-100 max-w-md truncate">{row.item.descricao}</td>
                                       <td className="px-4 py-2 text-center">
+                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                          {row.unidadeComposicao?.trim()
+                                            ? row.unidadeComposicao.trim()
+                                            : (usaDimensoes ? (tipoAuto === 'm3' ? 'm³' : tipoAuto === 'm2' ? 'm²' : tipoAuto === 'm' ? 'm' : 'UN') : 'UN')}
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-2 text-right">
+                                        {row.tipoUnidade !== 'un' || ehCacamba4m3 ? (
+                                          <span className="text-sm font-medium">{row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                                        ) : (
+                                          <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={draftCalc[`qtd|${row.key}`] ?? (row.quantidade === 0 ? '' : String(row.quantidade))}
+                                            onChange={e => setDraftCalc(p => ({ ...p, [`qtd|${row.key}`]: e.target.value }))}
+                                            onBlur={e => handleCalcBlur(`qtd|${row.key}`, draftCalc[`qtd|${row.key}`] ?? e.target.value, n => setQuantidadeItem(row.key, Math.max(0, n)))}
+                                            placeholder="0"
+                                            className="w-20 px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
+                                          />
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-2 text-sm text-right">
+                                        R$ {row.maoDeObraUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="px-4 py-2 text-sm text-right">
+                                        R$ {row.materialUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="px-4 py-2 text-sm text-right">
+                                        R$ {row.precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </td>
+                                      {showDetalhesFinanceiros && (
+                                        <>
+                                          <td className="px-4 py-2 text-sm text-right">
+                                            R$ {row.subMaoDeObra.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          </td>
+                                          <td className="px-4 py-2 text-sm text-right">
+                                            R$ {row.subMaterial.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          </td>
+                                        </>
+                                      )}
+                                      <td className="px-4 py-2 text-sm text-right font-medium">
+                                        R$ {row.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="px-4 py-2 text-sm text-right text-gray-700 dark:text-gray-300 tabular-nums">
+                                        {pesoPctOrcamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                                      </td>
+                                      <td className="px-4 py-2 flex items-center justify-end gap-1 whitespace-nowrap">
+                                        {row.tipoUnidade !== 'un' && (
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -1171,41 +2527,19 @@ export default function OrcamentoPage() {
                                               setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.has(row.key) ? s.delete(row.key) : s.add(row.key); return s; });
                                             }
                                           }}
-                                          className={`text-xs px-2 py-1 rounded ${usaDimensoes ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
-                                          title="Usar dimensões C, L, H, N, %"
+                                          className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded"
+                                          title={aberto ? 'Fechar dimensões' : 'Editar linhas (comprimento C, L, H)'}
                                         >
-                                          {usaDimensoes ? '📐 Dim' : 'Dimensões'}
+                                          <Pencil className="w-4 h-4" />
                                         </button>
-                                      </td>
-                                      <td className="px-4 py-2 text-right">
-                                        {usaDimensoes ? (
-                                          <span className="text-sm font-medium">{row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
-                                        ) : (
-                                          <input
-                                            type="number"
-                                            min={0}
-                                            step={0.01}
-                                            value={row.quantidade === 0 ? '' : row.quantidade}
-                                            onChange={e => setQuantidadeItem(row.key, parseFloat(e.target.value) || 0)}
-                                            placeholder="0"
-                                            className="w-20 px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                                          />
                                         )}
-                                      </td>
-                                      <td className="px-4 py-2 text-sm text-right">
-                                        R$ {row.precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                      </td>
-                                      <td className="px-4 py-2 text-sm text-right font-medium">
-                                        R$ {row.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                      </td>
-                                      <td className="px-4 py-2 flex gap-1">
                                         <button
                                           type="button"
-                                          onClick={() => setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.has(row.key) ? s.delete(row.key) : s.add(row.key); return s; })}
-                                          className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded"
-                                          title={aberto ? 'Fechar dimensões' : 'Abrir dimensões'}
+                                          onClick={() => abrirAnaliticoDaComposicao(row)}
+                                          className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded"
+                                          title="Ver analítico da composição"
                                         >
-                                          {aberto ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                          <FileText className="w-4 h-4" />
                                         </button>
                                         <button
                                           type="button"
@@ -1219,85 +2553,225 @@ export default function OrcamentoPage() {
                                     </tr>
                                     {aberto && usaDimensoes && (
                                     <tr className="bg-gray-50 dark:bg-gray-800/50">
-                                      <td colSpan={8} className="px-4 py-4">
+                                      <td colSpan={8 + (showDetalhesFinanceiros ? 2 : 0) + 3} className="px-4 py-4">
                                         <div className="space-y-4">
-                                          <div className="flex items-center gap-6 flex-wrap">
-                                            <div>
-                                              <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">Unidade</label>
-                                              <select
-                                                value={dim.tipoUnidade}
-                                                onChange={e => setTipoUnidadeItem(row.key, e.target.value as TipoUnidadeFormula)}
-                                                className="h-9 px-3 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                                              >
-                                                <option value="m3">m³</option>
-                                                <option value="m2">m²</option>
-                                                <option value="m">m</option>
-                                                <option value="un">UN</option>
-                                              </select>
-                                            </div>
-                                            <div className="flex-1" />
-                                            <div className="flex items-center gap-3">
-                                              <button type="button" onClick={() => addLinhaMedicao(row.key)} className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium border border-dashed border-gray-400 dark:border-gray-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors">
-                                                <Plus className="w-4 h-4" /> Adicionar linha
-                                              </button>
-                                              <button type="button" onClick={() => { setDimensoesItem(row.key, null); setItensComDimensoesAbertos(prev => { const s = new Set(prev); s.delete(row.key); return s; }); }} className="text-sm text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
-                                                Usar qtd. direta
-                                              </button>
-                                            </div>
-                                          </div>
                                           <div className="space-y-3">
-                                            {dim.linhas.map((ln, idx) => (
-                                              <div key={idx} className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/60 p-4">
-                                                <div className="grid grid-cols-[minmax(140px,1fr)_70px_70px_70px_60px_70px_minmax(160px,1fr)_auto] gap-4 items-end min-w-[720px]">
-                                                <div>
-                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">Descrição</label>
-                                                  <input type="text" placeholder="Ex: COBERTURA DAS CALDEIRAS" value={ln.descricao || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'descricao', e.target.value)} className="w-full h-9 px-3 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
-                                                </div>
-                                                <div>
-                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">C (m)</label>
-                                                  <input type="number" step={0.01} placeholder="0" value={ln.C || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'C', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
-                                                </div>
-                                                <div>
-                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">L (m)</label>
-                                                  <input type="number" step={0.01} placeholder="0" value={ln.L || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'L', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
-                                                </div>
-                                                <div>
-                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">H (m)</label>
-                                                  <input type="number" step={0.01} placeholder="0" value={ln.H || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'H', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
-                                                </div>
-                                                <div>
-                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">N</label>
-                                                  <input type="number" step={0.01} placeholder="1" value={ln.N || ''} onChange={e => updateLinhaMedicao(row.key, idx, 'N', parseFloat(e.target.value) || 0)} className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
-                                                </div>
-                                                <div>
-                                                  <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1.5">Empol.</label>
-                                                  <select value={String(ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 1))} onChange={e => updateLinhaMedicao(row.key, idx, 'empolamento', parseFloat(e.target.value))} className="w-full h-9 px-2 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
-                                                  <option value="1">1,00</option>
-                                                  <option value="1.05">1,05</option>
-                                                  <option value="1.1">1,10</option>
-                                                  <option value="1.15">1,15</option>
-                                                  <option value="1.2">1,20</option>
-                                                  <option value="1.25">1,25</option>
-                                                  <option value="1.3">1,30</option>
-                                                  </select>
-                                                </div>
-                                                <div className="flex items-end gap-3">
-                                                  <div className="flex flex-col gap-0.5">
-                                                    {dim.tipoUnidade === 'm3' && (
-                                                      <span className="text-xs text-gray-500 dark:text-gray-400">A: {calcA(ln).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} | V: {calcV(ln, dim.tipoUnidade).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>
-                                                    )}
-                                                    {dim.tipoUnidade === 'm2' && (
-                                                      <span className="text-xs text-gray-500 dark:text-gray-400">A: {calcA(ln).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>
-                                                    )}
-                                                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                                      SUBTOTAL = {calcularQuantidadeLinha(ln, dim.tipoUnidade).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                                                    </span>
+                                            {(() => {
+                                              const renderLinhaCampos = (ln: LinhaMedicao, idx: number) => (
+                                                <>
+                                                  {(() => {
+                                                  const tipo = row.tipoUnidade;
+                                                  const temDimensoes = (ln.C || 0) !== 0 || (ln.L || 0) !== 0 || (ln.H || 0) !== 0;
+                                                  const valorA = calcA(ln);
+                                                  const valorV = calcV(ln, tipo);
+                                                  const valorSubtotal = calcularQuantidadeLinha(ln, tipo);
+                                                  const empolVal = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 0);
+                                                  const mostrarC = tipo !== 'un';
+                                                  const mostrarL = tipo === 'm2' || tipo === 'm3';
+                                                  const mostrarH = tipo === 'm3';
+                                                  const mostrarN = tipo !== 'un';
+                                                  const mostrarA = tipo === 'm2' || tipo === 'un' || ehCargaEntulho;
+                                                  const mostrarV = tipo === 'm3' || tipo === 'un';
+                                                  const podeEditarCNaCarga = ehCargaEntulho && !!ln.editavelC;
+                                                  const podeEditarLNaCarga = ehCargaEntulho && !!ln.editavelL;
+                                                  const podeEditarHNaCarga = ehCargaEntulho && !!ln.editavelH;
+                                                  const descricaoComposicaoLinha = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`.trim().slice(0, 120);
+                                                  const bloquearDescricao = ehCargaEntulho;
+                                                  const bloquearN = ehCargaEntulho;
+                                                  return (
+                                                    <div className="flex flex-wrap items-end gap-2">
+                                                      <div className="flex-1 min-w-[200px]">
+                                                        <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">Descrição</label>
+                                                        <input
+                                                          type="text"
+                                                          placeholder="Ex: COBERTURA DAS CALDEIRAS"
+                                                          value={ln.descricao || ''}
+                                                          onChange={e => !bloquearDescricao && updateLinhaMedicao(row.key, idx, 'descricao', e.target.value)}
+                                                          readOnly={bloquearDescricao}
+                                                          className={`w-full h-9 px-2 text-sm rounded-md border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500 ${bloquearDescricao ? 'bg-gray-100 dark:bg-gray-700/45 cursor-not-allowed' : 'bg-white dark:bg-gray-800'}`}
+                                                        />
+                                                      </div>
+                                                      {mostrarC && (
+                                                        <div className="w-[90px] shrink-0">
+                                                          <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">C (m)</label>
+                                                          <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            placeholder="0"
+                                                            value={draftCalc[`${row.key}|${idx}|C`] ?? ((ln.C || 0) === 0 ? '' : String(ln.C))}
+                                                            onChange={e => (ehCargaEntulho ? podeEditarCNaCarga : true) && setDraftCalc(p => ({ ...p, [`${row.key}|${idx}|C`]: e.target.value }))}
+                                                            onBlur={e => (ehCargaEntulho ? podeEditarCNaCarga : true) && handleCalcBlur(`${row.key}|${idx}|C`, draftCalc[`${row.key}|${idx}|C`] ?? e.target.value, (n) => updateLinhaMedicao(row.key, idx, 'C', n))}
+                                                            readOnly={ehCargaEntulho ? !podeEditarCNaCarga : false}
+                                                            className={`w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500 ${(ehCargaEntulho ? !podeEditarCNaCarga : false) ? 'bg-gray-100 dark:bg-gray-700/45 cursor-not-allowed' : 'bg-white dark:bg-gray-800'}`}
+                                                          />
+                                                        </div>
+                                                      )}
+                                                      {mostrarL && (
+                                                        <div className="w-[90px] shrink-0">
+                                                          <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">L (m)</label>
+                                                          <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            placeholder="0"
+                                                            value={draftCalc[`${row.key}|${idx}|L`] ?? ((ln.L || 0) === 0 ? '' : String(ln.L))}
+                                                            onChange={e => (ehCargaEntulho ? podeEditarLNaCarga : true) && setDraftCalc(p => ({ ...p, [`${row.key}|${idx}|L`]: e.target.value }))}
+                                                            onBlur={e => (ehCargaEntulho ? podeEditarLNaCarga : true) && handleCalcBlur(`${row.key}|${idx}|L`, draftCalc[`${row.key}|${idx}|L`] ?? e.target.value, (n) => updateLinhaMedicao(row.key, idx, 'L', n))}
+                                                            readOnly={ehCargaEntulho ? !podeEditarLNaCarga : false}
+                                                            className={`w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500 ${(ehCargaEntulho ? !podeEditarLNaCarga : false) ? 'bg-gray-100 dark:bg-gray-700/45 cursor-not-allowed' : 'bg-white dark:bg-gray-800'}`}
+                                                          />
+                                                        </div>
+                                                      )}
+                                                      {mostrarH && (
+                                                        <div className="w-[90px] shrink-0">
+                                                          <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">H (m)</label>
+                                                          <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            placeholder="0"
+                                                            value={draftCalc[`${row.key}|${idx}|H`] ?? ((ln.H || 0) === 0 ? '' : String(ln.H))}
+                                                            onChange={e => (ehCargaEntulho ? podeEditarHNaCarga : true) && setDraftCalc(p => ({ ...p, [`${row.key}|${idx}|H`]: e.target.value }))}
+                                                            onBlur={e => (ehCargaEntulho ? podeEditarHNaCarga : true) && handleCalcBlur(`${row.key}|${idx}|H`, draftCalc[`${row.key}|${idx}|H`] ?? e.target.value, (n) => updateLinhaMedicao(row.key, idx, 'H', n))}
+                                                            readOnly={ehCargaEntulho ? !podeEditarHNaCarga : false}
+                                                            className={`w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500 ${(ehCargaEntulho ? !podeEditarHNaCarga : false) ? 'bg-gray-100 dark:bg-gray-700/45 cursor-not-allowed' : 'bg-white dark:bg-gray-800'}`}
+                                                          />
+                                                        </div>
+                                                      )}
+                                                      {mostrarN && (
+                                                        <div className="w-[70px] shrink-0">
+                                                          <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">N</label>
+                                                          <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            placeholder="1"
+                                                            value={draftCalc[`${row.key}|${idx}|N`] ?? String(ln.N ?? 1)}
+                                                            onChange={e => !bloquearN && setDraftCalc(p => ({ ...p, [`${row.key}|${idx}|N`]: e.target.value }))}
+                                                            onBlur={e => !bloquearN && handleCalcBlur(`${row.key}|${idx}|N`, draftCalc[`${row.key}|${idx}|N`] ?? e.target.value, (n) => updateLinhaMedicao(row.key, idx, 'N', Math.max(1, n)))}
+                                                            readOnly={bloquearN}
+                                                            className={`w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500 ${bloquearN ? 'bg-gray-100 dark:bg-gray-700/45 cursor-not-allowed' : 'bg-white dark:bg-gray-800'}`}
+                                                          />
+                                                        </div>
+                                                      )}
+                                                      <div className="w-[90px] shrink-0">
+                                                        <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">%</label>
+                                                        <input
+                                                          type="text"
+                                                          inputMode="decimal"
+                                                          placeholder="1"
+                                                          value={draftCalc[`${row.key}|${idx}|empol`] ?? (empolVal === 0 ? '0' : (empolVal === 1 ? '1' : String(empolVal)))}
+                                                          onChange={e => setDraftCalc(p => ({ ...p, [`${row.key}|${idx}|empol`]: e.target.value }))}
+                                                          onBlur={e => handleCalcBlur(`${row.key}|${idx}|empol`, draftCalc[`${row.key}|${idx}|empol`] ?? e.target.value, (n) => updateLinhaMedicao(row.key, idx, 'empolamento', Math.max(0, n)))}
+                                                          className="w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500"
+                                                        />
+                                                      </div>
+                                                      {mostrarA && (
+                                                        <div className="w-[90px] shrink-0">
+                                                          <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">A</label>
+                                                          {!temDimensoes ? (
+                                                            <input
+                                                              type="text"
+                                                              inputMode="decimal"
+                                                              placeholder="0"
+                                                              value={draftCalc[`${row.key}|${idx}|A`] ?? (ln.valorManual == null || ln.valorManual === 0 ? '' : String(ln.valorManual))}
+                                                              onChange={e => !ehCargaEntulho && setDraftCalc(p => ({ ...p, [`${row.key}|${idx}|A`]: e.target.value }))}
+                                                              onBlur={e => !ehCargaEntulho && handleCalcBlur(`${row.key}|${idx}|A`, draftCalc[`${row.key}|${idx}|A`] ?? e.target.value, n => updateLinhaMedicao(row.key, idx, 'valorManual', n))}
+                                                              readOnly={ehCargaEntulho}
+                                                              className={`w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500 ${ehCargaEntulho ? 'bg-gray-100 dark:bg-gray-700/45 cursor-not-allowed' : 'bg-white dark:bg-gray-800'}`}
+                                                            />
+                                                          ) : (
+                                                            <div className={`h-9 px-2 rounded-md border border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center justify-end ${ehCargaEntulho ? 'bg-gray-100 dark:bg-gray-700/45' : 'bg-white dark:bg-gray-800'}`}>
+                                                              {valorA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                                            </div>
+                                                          )}
+                                                        </div>
+                                                      )}
+                                                      {mostrarV && (
+                                                        <div className="w-[90px] shrink-0">
+                                                          <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">V</label>
+                                                          {!temDimensoes ? (
+                                                            <input
+                                                              type="text"
+                                                              inputMode="decimal"
+                                                              placeholder="0"
+                                                              value={draftCalc[`${row.key}|${idx}|V`] ?? (ln.valorManual == null || ln.valorManual === 0 ? '' : String(ln.valorManual))}
+                                                              onChange={e => !ehCargaEntulho && setDraftCalc(p => ({ ...p, [`${row.key}|${idx}|V`]: e.target.value }))}
+                                                              onBlur={e => !ehCargaEntulho && handleCalcBlur(`${row.key}|${idx}|V`, draftCalc[`${row.key}|${idx}|V`] ?? e.target.value, n => updateLinhaMedicao(row.key, idx, 'valorManual', n))}
+                                                              readOnly={ehCargaEntulho}
+                                                              className={`w-full h-9 px-2 text-sm text-right rounded-md border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/30 dark:focus:ring-red-400/30 focus:border-red-400 dark:focus:border-red-500 ${ehCargaEntulho ? 'bg-gray-100 dark:bg-gray-700/45 cursor-not-allowed' : 'bg-white dark:bg-gray-800'}`}
+                                                            />
+                                                          ) : (
+                                                            <div className={`h-9 px-2 rounded-md border border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center justify-end ${ehCargaEntulho ? 'bg-gray-100 dark:bg-gray-700/45' : 'bg-white dark:bg-gray-800'}`}>
+                                                              {valorV.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                                            </div>
+                                                          )}
+                                                        </div>
+                                                      )}
+                                                      <div className="w-[110px] shrink-0">
+                                                        <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 block mb-1">Subtotal</label>
+                                                        <div className="h-9 px-2 rounded-md border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-sm font-semibold text-red-700 dark:text-red-300 flex items-center justify-end">
+                                                          {valorSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                                        </div>
+                                                      </div>
+                                                      {!ehCargaEntulho && (
+                                                        <div className="w-[34px] shrink-0">
+                                                          <label className="text-[11px] font-medium text-transparent block mb-1">.</label>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => removeLinhaMedicao(row.key, idx)}
+                                                            className="h-9 w-9 flex items-center justify-center shrink-0 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                                                            title="Remover linha"
+                                                          >
+                                                            <Trash2 className="w-4 h-4" />
+                                                          </button>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                })()}
+                                                </>
+                                              );
+
+                                              if (!ehCargaEntulho) {
+                                                return (
+                                                  <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/60 p-4 space-y-3">
+                                                    {dim.linhas.map((ln, idx) => (
+                                                      <div key={idx} className={idx > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}>
+                                                        {renderLinhaCampos(ln, idx)}
+                                                      </div>
+                                                    ))}
+                                                    <div className="pt-1">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => addLinhaMedicao(row.key)}
+                                                        className="inline-flex items-center gap-2 h-8 px-3 text-sm font-medium border border-dashed border-gray-400 dark:border-gray-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+                                                      >
+                                                        <Plus className="w-4 h-4" /> Adicionar linha
+                                                      </button>
+                                                    </div>
                                                   </div>
-                                                  <button type="button" onClick={() => removeLinhaMedicao(row.key, idx)} className="h-9 w-9 flex items-center justify-center shrink-0 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors" title="Remover linha"><Trash2 className="w-4 h-4" /></button>
+                                                );
+                                              }
+
+                                              const grupos = new Map<string, { ln: LinhaMedicao; idx: number }[]>();
+                                              dim.linhas.forEach((ln, idx) => {
+                                                const titulo = `${ln.origemComposicaoDescricao || row.item.descricao || ''}`.trim().slice(0, 120) || `Linha ${idx + 1}`;
+                                                const lista = grupos.get(titulo) || [];
+                                                lista.push({ ln, idx });
+                                                grupos.set(titulo, lista);
+                                              });
+
+                                              return Array.from(grupos.entries()).map(([titulo, linhas]) => (
+                                                <div key={titulo} className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/60 p-4 space-y-3">
+                                                  <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{titulo}</div>
+                                                  <div className="space-y-3">
+                                                    {linhas.map(({ ln, idx }, i) => (
+                                                      <div key={idx} className={i > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}>
+                                                        {renderLinhaCampos(ln, idx)}
+                                                      </div>
+                                                    ))}
+                                                  </div>
                                                 </div>
-                                                </div>
-                                              </div>
-                                            ))}
+                                              ));
+                                            })()}
                                           </div>
                                         </div>
                                       </td>
@@ -1340,23 +2814,75 @@ export default function OrcamentoPage() {
                       })}
                     </div>
 
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
-                      <div className="flex items-center gap-4 flex-wrap">
-                        <span className="font-semibold text-gray-900 dark:text-gray-100">Valor total do orçamento</span>
-                        <span className="text-xl font-bold text-red-600 dark:text-red-400">
-                          R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
+                      <div className="flex items-center justify-center px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                        <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase text-center leading-tight">
+                          Fechamento financeiro
+                        </h4>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                            {[
+                              ['TOTAL', resumoFinanceiro.totalBase],
+                              [`DESCONTO (${(resumoFinanceiro.descontoPct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, resumoFinanceiro.valorDesconto],
+                              ['TOTAL COM DESCONTO', resumoFinanceiro.totalComDesconto],
+                              [`TOTAL GERAL COM DESCONTO E BDI (${(resumoFinanceiro.bdiPct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, resumoFinanceiro.totalComDescontoEBdi],
+                              [`1º REAJUSTE IPCA (${(resumoFinanceiro.ipca1Pct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 })}%)`, resumoFinanceiro.reajuste1],
+                              [`2º REAJUSTE IPCA (${(resumoFinanceiro.ipca2Pct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 })}%)`, resumoFinanceiro.reajuste2],
+                              [`3º REAJUSTE IPCA (${(resumoFinanceiro.ipca3Pct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 })}%)`, resumoFinanceiro.reajuste3]
+                            ].map(([label, value], idx) => (
+                              <tr key={String(label)} className={`${idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/40 dark:bg-gray-800/60'} hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors`}>
+                                <td className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300">{label}</td>
+                                <td className="px-4 py-2.5 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                  R$ {Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/60 flex items-center justify-between">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Valor final</span>
+                        <span className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                          R$ {resumoFinanceiro.reajuste3.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={salvarOrcamento}
+                        disabled={salvandoOrcamento || !centroCustoId || !orcamentoAtivoId}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none font-medium transition-colors"
+                        title="Grava o orçamento em montagem (itens, quantidades e medições) no servidor"
+                      >
+                        {salvandoOrcamento ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                        Salvar orçamento
+                      </button>
+                      <button
+                        type="button"
+                        onClick={exportarOrcamentoDetalhado}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-medium transition-colors"
+                        title="Exporta o orçamento"
+                      >
+                        <FileSpreadsheet className="w-5 h-5" />
+                        Exportar Orçamento
+                      </button>
                       <button
                         type="button"
                         onClick={exportarMemoriaCalculo}
                         className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-medium transition-colors"
-                        title="Exporta documento com as fórmulas e referências de cálculo para auditoria"
+                        title="Exporta o memorial de cálculo"
                       >
                         <FileText className="w-5 h-5" />
-                        Exportar Memória de Cálculo
+                        Exportar Memorial
                       </button>
                     </div>
+
                   </>
                 )}
               </CardContent>
@@ -1372,19 +2898,30 @@ export default function OrcamentoPage() {
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Arquivo de composições</h2>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Importe uma planilha Excel com os itens (Código, Banco, Chave, Descrição, Preço)
+                      Importe uma planilha Excel com os itens (Código, Banco, Chave, Descrição, UND, M.O, Material, Custo Direto)
                     </p>
                   </div>
-                  <label className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer transition-colors">
-                    {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                    <span>{isUploading ? 'Processando...' : 'Importar planilha'}</span>
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      onChange={handleFileUploadComposicoes}
-                      className="hidden"
-                    />
-                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer transition-colors">
+                      {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                      <span>{isUploading ? 'Processando...' : 'Importar planilha'}</span>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={handleFileUploadComposicoes}
+                        className="hidden"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={apagarPlanilhaComposicoes}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      title="Apagar planilha de composições carregada"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Apagar planilha
+                    </button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -1413,7 +2950,10 @@ export default function OrcamentoPage() {
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Banco</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Chave</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Descrição</th>
-                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">Preço Unit.</th>
+                          <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 w-16">UND</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">M.O</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">Material</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">Custo Direto</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -1423,6 +2963,13 @@ export default function OrcamentoPage() {
                             <td className="px-4 py-2 text-sm">{c.banco}</td>
                             <td className="px-4 py-2 text-sm">{c.chave}</td>
                             <td className="px-4 py-2 text-sm max-w-xs truncate">{c.descricao}</td>
+                            <td className="px-4 py-2 text-sm text-center">{c.unidade || '—'}</td>
+                            <td className="px-4 py-2 text-sm text-right">
+                              R$ {(c.maoDeObraUnitario ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-right">
+                              R$ {(c.materialUnitario ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </td>
                             <td className="px-4 py-2 text-sm text-right">
                               R$ {c.precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </td>
@@ -1440,6 +2987,31 @@ export default function OrcamentoPage() {
           {activeTab === 'servicos' && (
             !centroCustoId ? (
               <Card><CardContent className="py-12 text-center text-gray-500 dark:text-gray-400">Selecione um contrato acima para importar o orçamento perfeito.</CardContent></Card>
+            ) : !orcamentoAtivoId ? (
+              <Card>
+                <CardHeader>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Serviços padrão (contrato)</h2>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Não precisa criar um orçamento: importe o orçamento perfeito e a estrutura ficará disponível para todos os orçamentos deste contrato.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer transition-colors">
+                    {isImportandoOrcamento ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
+                    <span>{isImportandoOrcamento ? 'Importando...' : 'Importar orçamento perfeito'}</span>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleImportOrcamentoPerfeito}
+                      disabled={isImportandoOrcamento}
+                      className="hidden"
+                    />
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Para editar serviços um a um ou ver o detalhamento, abra um orçamento na aba Novo Orçamento.
+                  </p>
+                </CardContent>
+              </Card>
             ) : (
             <Card>
               <CardHeader>
@@ -1447,7 +3019,7 @@ export default function OrcamentoPage() {
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Serviços padrão</h2>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Importe um orçamento perfeito. Estrutura: Serviço › Subtítulos › Itens
+                      A estrutura de serviços é <strong className="font-semibold text-gray-800 dark:text-gray-200">única para este contrato</strong>: importe uma vez e todos os orçamentos passam a usar a mesma lista. Estrutura: Serviço › Subtítulos › Itens
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1487,6 +3059,11 @@ export default function OrcamentoPage() {
                     </div>
                     )}
                   </div>
+                </div>
+                <div className="px-6 pb-5 -mt-1 border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Alterações aqui valem para <strong className="text-gray-700 dark:text-gray-300">todos os orçamentos</strong> deste contrato. Cada orçamento mantém só a montagem (quantidades e itens na aba Novo Orçamento).
+                  </p>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1591,6 +3168,67 @@ export default function OrcamentoPage() {
           )}
         </div>
       </MainLayout>
+      <Modal
+        isOpen={analiticoModalOpen}
+        onClose={() => setAnaliticoModalOpen(false)}
+        title={analiticoModalInfo ? `Analítico da Composição: ${analiticoModalInfo.codigo} (${analiticoModalInfo.banco})` : 'Analítico da Composição'}
+        size="lg"
+        closeOnOverlayClick
+      >
+        {analiticoModalInfo && analiticoModalData ? (
+          <div className="space-y-4">
+            <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="font-medium text-gray-800 dark:text-gray-200">{analiticoModalInfo.descricao}</div>
+              <div>
+                Custo Direto (Preço Unitário CPU): R${' '}
+                {Number(analiticoModalData.total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <table className="min-w-full">
+                <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Categoria</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Un.</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-24">Qtd.</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-32">Preço Unit.</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-36">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {analiticoModalData.linhas.map((l, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{l.categoria}</td>
+                      <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{l.descricao}</td>
+                      <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{l.unidade}</td>
+                      <td className="px-4 py-2 text-right text-sm text-gray-700 dark:text-gray-300">
+                        {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                      </td>
+                      <td className="px-4 py-2 text-right text-sm text-gray-700 dark:text-gray-300">
+                        R$ {l.precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-4 py-2 text-right text-sm font-medium text-gray-900 dark:text-gray-100">
+                        R$ {l.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 text-sm">
+              <span className="text-gray-600 dark:text-gray-400">Total</span>
+              <span className="font-semibold text-gray-900 dark:text-gray-100">
+                R$ {analiticoModalData.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-600 dark:text-gray-400">Carregando analítico...</div>
+        )}
+      </Modal>
     </ProtectedRoute>
   );
 }

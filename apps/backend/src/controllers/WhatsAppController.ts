@@ -139,6 +139,8 @@ export class WhatsAppController {
           _count: {
             select: { messages: true, submissions: true }
           },
+          // O payload pode conter indicadores como escalonamento para atendente.
+          // Usamos o payload na camada de mapeamento abaixo.
           messages: {
             orderBy: { createdAt: 'desc' },
             take: 1
@@ -152,6 +154,8 @@ export class WhatsAppController {
         flowStatus: c.flowStatus,
         currentStep: c.currentStep,
         status: c.status,
+        attendantRequested: !!(c.payload as any)?.attendantRequested,
+        attendantInProgress: !!(c.payload as any)?.attendantInProgress,
         updatedAt: c.updatedAt,
         createdAt: c.createdAt,
         messageCount: c._count.messages,
@@ -310,17 +314,82 @@ export class WhatsAppController {
       });
 
       // Marca como pendente se for uma conversa já concluída/cancelada (evita “travamento” visual)
+      const currentPayload = (conversation.payload as any) ?? {};
+      const shouldTransitionToInProgress = !!currentPayload?.attendantRequested;
       await prisma.whatsAppConversation.update({
         where: { id: conversation.id },
         data: {
           status: 'PENDING' as any,
+          payload: {
+            ...currentPayload,
+            attendantRequested: shouldTransitionToInProgress ? false : currentPayload?.attendantRequested,
+            attendantInProgress: shouldTransitionToInProgress ? true : currentPayload?.attendantInProgress,
+            attendantInProgressAt: shouldTransitionToInProgress
+              ? new Date().toISOString()
+              : currentPayload?.attendantInProgressAt ?? null
+          } as any,
           updatedAt: new Date()
         } as any
       });
 
+      // Garante encerramento automático caso a pessoa não responda.
+      whatsAppBot.scheduleInactivityTimeoutForConversation(conversation.id, conversation.phone);
+
       res.json({
         success: true,
         message: 'Mensagem enviada com sucesso'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Encerrar conversa manualmente (admin/atendente).
+   * Marca status como CANCELLED, limpa payload e envia mensagem de encerramento.
+   */
+  async endConversation(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      const conversation = await prisma.whatsAppConversation.findUnique({
+        where: { id }
+      });
+
+      if (!conversation) {
+        throw createError('Conversa não encontrada', 404);
+      }
+
+      const endText = 'Atendimento encerrado 😊\nSempre que precisar, é só me chamar por aqui!';
+
+      // Para conversas que estavam em timer, evitamos disparos posteriores.
+      whatsAppBot.clearInactivityTimeoutsForConversation(conversation.id);
+
+      await prisma.whatsAppConversation.update({
+        where: { id: conversation.id },
+        data: {
+          status: 'CANCELLED' as any,
+          flowStatus: 'MENU',
+          currentStep: 'MENU',
+          payload: {} as any,
+          updatedAt: new Date()
+        } as any
+      });
+
+      await prisma.whatsAppMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: endText
+        }
+      });
+
+      // Envia aviso ao usuário no WhatsApp.
+      await metaWhatsApp.sendText(conversation.phone, endText);
+
+      res.json({
+        success: true,
+        message: 'Conversa encerrada com sucesso'
       });
     } catch (error) {
       next(error);

@@ -291,6 +291,188 @@ type SendAction =
 export type MediaInfo = { mediaId: string; mimeType?: string; filename?: string };
 
 export class WhatsAppBotService {
+  /**
+   * Timer em memória para encerrar conversas por inatividade.
+   * Observação: se o processo do backend reiniciar, os timers pendentes se perdem.
+   */
+  private inactivityTimers = new Map<string, NodeJS.Timeout>();
+  private inactivityTokens = new Map<string, string>();
+
+  private reminderTimers = new Map<string, NodeJS.Timeout>();
+  private reminderTokens = new Map<string, string>();
+
+  private getReminderTimeoutMs(): number {
+    const raw = process.env.WHATSAPP_BOT_REMINDER_TIMEOUT_MS;
+    const parsed = raw ? Number(raw) : NaN;
+    // Default: 5 minutos
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 5 * 60 * 1000;
+  }
+
+  private getIdleTimeoutMs(): number {
+    const raw = process.env.WHATSAPP_BOT_END_TIMEOUT_MS || process.env.WHATSAPP_BOT_IDLE_TIMEOUT_MS;
+    const parsed = raw ? Number(raw) : NaN;
+    // Default: 10 minutos (5 min para lembrete + 5 min após o lembrete)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 10 * 60 * 1000;
+  }
+
+  private clearInactivityTimeout(conversationId: string) {
+    const t = this.inactivityTimers.get(conversationId);
+    if (t) clearTimeout(t);
+    this.inactivityTimers.delete(conversationId);
+    this.inactivityTokens.delete(conversationId);
+
+    const r = this.reminderTimers.get(conversationId);
+    if (r) clearTimeout(r);
+    this.reminderTimers.delete(conversationId);
+    this.reminderTokens.delete(conversationId);
+  }
+
+  public clearInactivityTimeoutsForConversation(conversationId: string) {
+    // Usado pelo admin ao encerrar manualmente uma conversa.
+    this.clearInactivityTimeout(conversationId);
+  }
+
+  private clearReminderTimeout(conversationId: string) {
+    const r = this.reminderTimers.get(conversationId);
+    if (r) clearTimeout(r);
+    this.reminderTimers.delete(conversationId);
+    this.reminderTokens.delete(conversationId);
+  }
+
+  private async handleInactivityTimeout(conversationId: string, phone: string, token: string) {
+    // Garante que não é um timer antigo (race condition).
+    if (this.inactivityTokens.get(conversationId) !== token) return;
+
+    const endText = 'Atendimento encerrado 😊\nSempre que precisar, é só me chamar por aqui!';
+
+    try {
+      // Verificações de segurança: se a conversa já foi encerrada/concluída, não fazemos nada.
+      const conversation = await prisma.whatsAppConversation.findUnique({
+        where: { id: conversationId },
+        select: { id: true, phone: true, status: true }
+      });
+      if (!conversation) return;
+
+      const status = (conversation.status as 'PENDING' | 'COMPLETED' | 'CANCELLED' | null) ?? 'PENDING';
+      if (status !== 'PENDING') return;
+
+      const lastMessage = await prisma.whatsAppMessage.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, role: true, content: true, createdAt: true }
+      });
+
+      // Só encerra se a última mensagem registrada for do assistente (significa que a pessoa não respondeu).
+      if (!lastMessage || lastMessage.role !== 'assistant') return;
+
+      // Encerrar: volta para MENU, limpa payload e marca como CANCELLED.
+      await prisma.whatsAppConversation.update({
+        where: { id: conversationId },
+        data: {
+          flowStatus: 'MENU',
+          currentStep: 'MENU',
+          payload: {} as Prisma.InputJsonValue,
+          status: 'CANCELLED' as any,
+          updatedAt: new Date()
+        } as any
+      });
+
+      await prisma.whatsAppMessage.create({
+        data: {
+          conversationId,
+          role: 'assistant',
+          content: endText
+        }
+      });
+
+      // Dispara a mensagem para o WhatsApp.
+      await metaWhatsApp.sendText(phone || conversation.phone, endText);
+    } finally {
+      // Remove o token/timer apenas se ainda for o mesmo agendamento.
+      if (this.inactivityTokens.get(conversationId) === token) {
+        this.clearInactivityTimeout(conversationId);
+      }
+    }
+  }
+
+  private async handleReminderTimeout(conversationId: string, phone: string, token: string) {
+    // Garante que não é um timer antigo (race condition).
+    if (this.reminderTokens.get(conversationId) !== token) return;
+
+    const reminderText =
+      'Oi! Vou continuar por aqui 😊\nSe quiser seguir, me responda por favor. Caso não responda, encerro o atendimento mais tarde.';
+
+    try {
+      const conversation = await prisma.whatsAppConversation.findUnique({
+        where: { id: conversationId },
+        select: { id: true, phone: true, status: true }
+      });
+      if (!conversation) return;
+
+      const status = (conversation.status as 'PENDING' | 'COMPLETED' | 'CANCELLED' | null) ?? 'PENDING';
+      if (status !== 'PENDING') return;
+
+      const lastMessage = await prisma.whatsAppMessage.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, role: true }
+      });
+
+      // Só manda lembrete se a última mensagem registrada for do assistente (a pessoa não respondeu).
+      if (!lastMessage || lastMessage.role !== 'assistant') return;
+
+      await prisma.whatsAppMessage.create({
+        data: {
+          conversationId,
+          role: 'assistant',
+          content: reminderText
+        }
+      });
+
+      await metaWhatsApp.sendText(phone || conversation.phone, reminderText);
+    } finally {
+      // Remove token/timer do lembrete apenas se ainda for o mesmo agendamento.
+      if (this.reminderTokens.get(conversationId) === token) {
+        this.clearReminderTimeout(conversationId);
+      }
+    }
+  }
+
+  /**
+   * Agendamento externo (ex.: mensagem manual do admin).
+   * O timer só dispara se a conversa continuar em PENDING e sem resposta do usuário.
+   */
+  public scheduleInactivityTimeoutForConversation(conversationId: string, phone: string) {
+    const reminderMs = this.getReminderTimeoutMs();
+    const endMs = this.getIdleTimeoutMs();
+
+    if (!endMs || endMs <= 0) return;
+    if (!reminderMs || reminderMs <= 0) return;
+    if (reminderMs >= endMs) return;
+
+    this.clearInactivityTimeout(conversationId);
+
+    const reminderToken = `${Date.now()}-rem-${Math.random().toString(16).slice(2)}`;
+    const endToken = `${Date.now()}-end-${Math.random().toString(16).slice(2)}`;
+
+    this.reminderTokens.set(conversationId, reminderToken);
+    this.inactivityTokens.set(conversationId, endToken);
+
+    const reminderTimer = setTimeout(() => {
+      this.handleReminderTimeout(conversationId, phone, reminderToken).catch((err) => {
+        console.error('[WhatsAppBotService] Erro no idle reminder timeout:', err);
+      });
+    }, reminderMs);
+    this.reminderTimers.set(conversationId, reminderTimer);
+
+    const endTimer = setTimeout(() => {
+      this.handleInactivityTimeout(conversationId, phone, endToken).catch((err) => {
+        console.error('[WhatsAppBotService] Erro no idle end timeout:', err);
+      });
+    }, endMs);
+    this.inactivityTimers.set(conversationId, endTimer);
+  }
+
   async processMessage(
     phone: string,
     text: string,
@@ -312,16 +494,12 @@ export class WhatsAppBotService {
       });
     }
 
+    // A pessoa acabou de responder (chegou webhook): cancela qualquer timer anterior.
+    this.clearInactivityTimeout(conversation.id);
+
     const textRaw = (text || '').trim();
     const content = textRaw.toLowerCase();
     const flowStatusBefore = (conversation.flowStatus || 'MENU') as FlowStatus;
-
-    const isAtestadoStart = () =>
-      content === '1' ||
-      content.includes('atestado') ||
-      content.includes('atestato') ||
-      content.includes('atestados') ||
-      content.includes('atest');
 
     const isFaqStart = () =>
       content === '2' ||
@@ -330,37 +508,9 @@ export class WhatsAppBotService {
       content.includes('duvidas') ||
       content.includes('dúvidas');
 
-    // Regra: cada nova "iniciação" de atestado vira uma nova conversa (admin separa em blocos).
-    let shouldStartNewConversation = false;
-
-    if (flowStatusBefore === 'ATESTADO_COMPLETE' && isAtestadoStart()) {
-      shouldStartNewConversation = true;
-    }
-
-    if (flowStatusBefore === 'MENU' && isAtestadoStart()) {
-      const [messageCount, submissionCount] = await Promise.all([
-        prisma.whatsAppMessage.count({ where: { conversationId: conversation.id } }),
-        prisma.whatsAppSubmission.count({ where: { conversationId: conversation.id } })
-      ]);
-
-      // Se já existe histórico nesta conversa, uma nova iniciação deve criar outro bloco.
-      if (messageCount > 0 || submissionCount > 0) {
-        shouldStartNewConversation = true;
-      }
-    }
-
-    if (shouldStartNewConversation) {
-      conversation = await prisma.whatsAppConversation.create({
-        data: {
-          phone,
-          flowStatus: 'MENU',
-          payload: {}
-        }
-      });
-    }
-
     const payload = (conversation.payload as Record<string, unknown>) || {};
     const flowStatus = (conversation.flowStatus || 'MENU') as FlowStatus;
+    const normalizedFlowStatus = (String(flowStatus).startsWith('ATESTADO') ? 'MENU' : flowStatus) as FlowStatus;
 
     // Baixar e salvar mídia (S3 ou local)
     let savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null = null;
@@ -401,6 +551,16 @@ export class WhatsAppBotService {
     const isEndRequest = () =>
       ['end', 'encerrar', 'sair', 'cancelar', 'parar', 'fim'].includes(content);
 
+    const isAttendantRequest = () => ['atendente', 'atendimento', 'humano', 'falar'].includes(content);
+
+    // Se o usuário pedir atendimento humano, não queremos que o idle timeout feche a conversa.
+    let skipInactivityTimeout = false;
+
+    // Se estava CANCELLED (por encerramento manual ou por inatividade), a próxima mensagem deve reativar.
+    if (newConversationStatus === 'CANCELLED' && !isEndRequest()) {
+      newConversationStatus = 'PENDING';
+    }
+
     const isMenuRequest = () => ['menu', 'voltar', 'inicio'].includes(content);
 
     const menu = (): SendAction => ({
@@ -411,7 +571,7 @@ export class WhatsAppBotService {
         'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Luna, assistente virtual, e estou à disposição para ajudar no que precisar.'
       ]),
       buttons: [
-        { id: 'ATESTADO', title: 'Enviar atestado' },
+        { id: 'ATENDENTE', title: 'Falar com atendente' },
         { id: 'DUVIDAS', title: 'Dúvidas' },
         { id: 'END', title: 'Encerrar' }
       ]
@@ -457,6 +617,7 @@ export class WhatsAppBotService {
       body: 'Não encontrei esse tópico. Quer tentar novamente?',
       buttons: [
         { id: 'DUVIDAS', title: 'Ver tópicos' },
+        { id: 'ATENDENTE', title: 'Falar com atendente' },
         { id: 'MENU', title: 'Menu principal' },
         { id: 'END', title: 'Encerrar' }
       ]
@@ -468,6 +629,7 @@ export class WhatsAppBotService {
       buttons: [
         { id: 'FAQ_PERGUNTAS', title: 'Ver perguntas' },
         { id: 'DUVIDAS', title: 'Trocar tópico' },
+        { id: 'ATENDENTE', title: 'Falar com atendente' },
         { id: 'MENU', title: 'Menu' }
       ]
     });
@@ -659,24 +821,46 @@ export class WhatsAppBotService {
       return menu();
     };
 
-    switch (flowStatus) {
+    const talkToAttendant = (): SendAction => {
+      clearPayload();
+      newStatus = 'MENU';
+      newConversationStatus = 'PENDING';
+      skipInactivityTimeout = true;
+      // Indicador para o admin: essa conversa foi escalada para atendente humano.
+      (newPayload as any).attendantRequested = true;
+      (newPayload as any).attendantRequestedAt = new Date().toISOString();
+      (newPayload as any).attendantInProgress = false;
+      (newPayload as any).attendantInProgressAt = null;
+      return {
+        type: 'text',
+        text: 'Claro! Vou encaminhar seu atendimento para um atendente humano.\nPor favor, aguarde um instante. O atendente irá responder no sistema e continuar por aqui.'
+      };
+    };
+
+    switch (normalizedFlowStatus) {
       case 'MENU': {
         if (isEndRequest()) {
           sendAction = endConversation();
           break;
         }
 
-        if (
-          content === '1' ||
+        if (isAttendantRequest()) {
+          sendAction = talkToAttendant();
+          break;
+        }
+
+        if (content === '1' || isFaqStart() || content === 'duvidas') {
+          newStatus = 'FAQ_TOPIC_SELECT';
+          newPayload.flow = 'FAQ';
+          sendAction = faqTopicList();
+        } else if (
           content.includes('atestado') ||
           content.includes('atestato') ||
           content.includes('atestados') ||
           content.includes('atest')
         ) {
-          newStatus = 'ATESTADO_ASK_REQUESTER_NAME';
-          newPayload.flow = 'ATESTADO';
-          sendAction = askRequesterName();
-        } else if (isFaqStart() || content === 'duvidas') {
+          // Removido o fluxo de "Enviar atestado". Para manter o chatbot útil,
+          // direcionamos para as dúvidas relacionadas (FAQ).
           newStatus = 'FAQ_TOPIC_SELECT';
           newPayload.flow = 'FAQ';
           sendAction = faqTopicList();
@@ -689,6 +873,10 @@ export class WhatsAppBotService {
       case 'FAQ_TOPIC_SELECT': {
         if (isEndRequest()) {
           sendAction = endConversation();
+          break;
+        }
+        if (isAttendantRequest()) {
+          sendAction = talkToAttendant();
           break;
         }
         if (isMenuRequest()) {
@@ -720,6 +908,10 @@ export class WhatsAppBotService {
       case 'FAQ_QUESTION_SELECT': {
         if (isEndRequest()) {
           sendAction = endConversation();
+          break;
+        }
+        if (isAttendantRequest()) {
+          sendAction = talkToAttendant();
           break;
         }
         if (isMenuRequest()) {
@@ -767,6 +959,7 @@ export class WhatsAppBotService {
           buttons: [
             { id: 'FAQ_PERGUNTAS', title: 'Mais perguntas' },
             { id: 'DUVIDAS', title: 'Trocar tópico' },
+            { id: 'ATENDENTE', title: 'Falar com atendente' },
             { id: 'END', title: 'Encerrar' },
             { id: 'MENU', title: 'Menu principal' }
           ]
@@ -1250,6 +1443,12 @@ export class WhatsAppBotService {
         sendAction.buttonText,
         sendAction.sections
       );
+    }
+
+    // Se a conversa continuar em andamento (PENDING), agendar encerrar por inatividade.
+    // Quando o usuário pede "atendente humano", não fechamos automaticamente.
+    if (newConversationStatus === 'PENDING' && !skipInactivityTimeout) {
+      this.scheduleInactivityTimeoutForConversation(conversation.id, phone);
     }
   }
 }
