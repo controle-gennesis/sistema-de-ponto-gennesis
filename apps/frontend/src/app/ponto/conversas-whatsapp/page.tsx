@@ -196,7 +196,9 @@ export default function ConversasWhatsAppPage() {
     queryFn: async () => {
       const res = await api.get('/whatsapp/conversations');
       return res.data;
-    }
+    },
+    // Atualiza preview/ordem da lista quando chegam mensagens no WhatsApp (sem F5).
+    refetchInterval: () => (typeof document !== 'undefined' && document.hidden ? false : 5000)
   });
 
   const { data: detailData, isLoading: loadingDetail, refetch: refetchDetail } = useQuery({
@@ -206,7 +208,15 @@ export default function ConversasWhatsAppPage() {
       const res = await api.get(`/whatsapp/conversations/${selectedId}`);
       return res.data;
     },
-    enabled: !!selectedId
+    enabled: !!selectedId,
+    // Mensagens do cliente chegam pelo webhook; polling mantém o chat em tempo quase real.
+    refetchInterval: (query) => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
+      const body = query.state.data as { data?: ConversationDetail } | undefined;
+      const status = body?.data?.status;
+      if (status === undefined || status === 'PENDING') return 2500;
+      return false;
+    }
   });
 
   const handleLogout = () => {
