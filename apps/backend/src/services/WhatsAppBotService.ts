@@ -562,6 +562,25 @@ export class WhatsAppBotService {
       newConversationStatus = 'PENDING';
     }
 
+    /**
+     * Atendimento humano (ou fila após nome): não rodar o fluxo da Luna em cada mensagem —
+     * senão o default do MENU cai em `menu()` e sorteia de novo "Oi! Tudo bem?...".
+     * A mensagem do usuário já foi salva acima; só atualizamos updatedAt.
+     */
+    const pHand = newPayload as any;
+    const inHumanHandover =
+      pHand.attendantInProgress === true ||
+      (pHand.attendantRequested === true && !!String(pHand.name || '').trim());
+
+    if (inHumanHandover) {
+      skipInactivityTimeout = true;
+      await prisma.whatsAppConversation.update({
+        where: { id: conversation.id },
+        data: { updatedAt: new Date() }
+      });
+      return;
+    }
+
     const isMenuRequest = () => ['menu', 'voltar', 'inicio'].includes(content);
 
     const tryExtractNameFromText = (rawText: string): string | null => {

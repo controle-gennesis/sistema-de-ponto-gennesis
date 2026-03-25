@@ -230,29 +230,57 @@ export default function ConversasWhatsAppPage() {
   const isLoading = loadingUser || loadingList;
   const showLegacyData = false;
 
-  useEffect(() => {
-    if (!selectedId) return;
+  /** Categoria da conversa selecionada (para acompanhar aba só quando o status mudar na mesma conversa, ex. após refetch). */
+  const lastSelectedIdForCategoryRef = useRef<string | null>(null);
+  const selectedConversationCategoryKeyRef = useRef<string | null>(null);
 
-    const selected = conversations.find((c) => c.id === selectedId);
-    if (!selected) {
-      // Se a conversa não existe mais na lista (ex.: removida), limpa a seleção.
+  const tabForConversation = (c: ConversationSummary) =>
+    c.status === 'PENDING' && !!c.attendantInProgress
+      ? 'andamento'
+      : c.status === 'PENDING' && !!c.attendantRequested
+        ? 'aguardando'
+        : 'encerradas';
+
+  const conversationBelongsToTab = (
+    c: ConversationSummary,
+    tab: 'aguardando' | 'andamento' | 'encerradas'
+  ) => tabForConversation(c) === tab;
+
+  const handleAtendimentoTabChange = (tab: 'aguardando' | 'andamento' | 'encerradas') => {
+    setAtendimentoTab(tab);
+    if (!selectedId) return;
+    const selected = conversations.find((x) => x.id === selectedId);
+    if (!selected || !conversationBelongsToTab(selected, tab)) {
       setSelectedId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedId) {
+      lastSelectedIdForCategoryRef.current = null;
+      selectedConversationCategoryKeyRef.current = null;
       return;
     }
 
-    // Se a conversa mudou de status (aguardando -> em atendimento -> encerrada),
-    // troca automaticamente a aba para manter o usuário "junto" na conversa selecionada.
-    const nextTab =
-      selected.status === 'PENDING' && !!selected.attendantInProgress
-        ? 'andamento'
-        : selected.status === 'PENDING' && !!selected.attendantRequested
-          ? 'aguardando'
-          : 'encerradas';
-
-    if (nextTab !== atendimentoTab) {
-      setAtendimentoTab(nextTab);
+    const selected = conversations.find((c) => c.id === selectedId);
+    if (!selected) {
+      setSelectedId(null);
+      lastSelectedIdForCategoryRef.current = null;
+      selectedConversationCategoryKeyRef.current = null;
+      return;
     }
-  }, [selectedId, conversations, atendimentoTab]);
+
+    const categoryKey = `${selected.status}:${String(!!selected.attendantRequested)}:${String(!!selected.attendantInProgress)}`;
+    const sameSelection = lastSelectedIdForCategoryRef.current === selectedId;
+    const prevKey = selectedConversationCategoryKeyRef.current;
+
+    if (sameSelection && prevKey !== null && prevKey !== categoryKey) {
+      setAtendimentoTab(tabForConversation(selected));
+    }
+
+    lastSelectedIdForCategoryRef.current = selectedId;
+    selectedConversationCategoryKeyRef.current = categoryKey;
+  }, [selectedId, conversations]);
 
   useEffect(() => {
     // Garante que o admin veja as mensagens mais recentes.
@@ -368,7 +396,7 @@ export default function ConversasWhatsAppPage() {
         <div className="flex flex-wrap justify-center gap-2 p-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl w-fit mx-auto">
           <button
             type="button"
-            onClick={() => setAtendimentoTab('aguardando')}
+            onClick={() => handleAtendimentoTabChange('aguardando')}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               atendimentoTab === 'aguardando'
                 ? 'bg-blue-600 text-white dark:bg-blue-500'
@@ -383,7 +411,7 @@ export default function ConversasWhatsAppPage() {
           </button>
           <button
             type="button"
-            onClick={() => setAtendimentoTab('andamento')}
+            onClick={() => handleAtendimentoTabChange('andamento')}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               atendimentoTab === 'andamento'
                 ? 'bg-indigo-600 text-white dark:bg-indigo-500'
@@ -398,7 +426,7 @@ export default function ConversasWhatsAppPage() {
           </button>
           <button
             type="button"
-            onClick={() => setAtendimentoTab('encerradas')}
+            onClick={() => handleAtendimentoTabChange('encerradas')}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               atendimentoTab === 'encerradas'
                 ? 'bg-green-600 text-white dark:bg-green-500'
