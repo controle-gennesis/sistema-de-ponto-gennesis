@@ -599,15 +599,17 @@ export default function ConversasWhatsAppPage() {
                               : detail.status}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        onClick={handleEndConversation}
-                        disabled={isEndingConversation}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors"
-                      >
-                        <AlertCircle className="w-4 h-4" />
-                        Encerrar
-                      </button>
+                      {detail.status === 'PENDING' && (
+                        <button
+                          type="button"
+                          onClick={handleEndConversation}
+                          disabled={isEndingConversation}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors"
+                        >
+                          <AlertCircle className="w-4 h-4" />
+                          Encerrar
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={handleRemoveConversation}
