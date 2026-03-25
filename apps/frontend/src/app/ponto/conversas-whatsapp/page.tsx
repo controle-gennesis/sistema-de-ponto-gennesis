@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import {
   MessageSquare,
@@ -176,6 +176,7 @@ const ABAS: { id: TabFiltro; label: string; icon: React.ElementType }[] = [
 ];
 
 export default function ConversasWhatsAppPage() {
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -191,17 +192,23 @@ export default function ConversasWhatsAppPage() {
     }
   });
 
-  const { data: listData, isLoading: loadingList, refetch: refetchList } = useQuery({
+  const { data: listData, isLoading: loadingList } = useQuery({
     queryKey: ['whatsapp-conversations'],
     queryFn: async () => {
       const res = await api.get('/whatsapp/conversations');
       return res.data;
     },
-    // Atualiza preview/ordem da lista quando chegam mensagens no WhatsApp (sem F5).
-    refetchInterval: () => (typeof document !== 'undefined' && document.hidden ? false : 5000)
+    // Sobrescreve o padrão global (staleTime 5min + refetchOnWindowFocus false) para a lista aparecer quase em tempo real.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    // Nova conversa / contadores: polling curto enquanto a aba do navegador está visível.
+    refetchInterval: () => {
+      if (typeof document === 'undefined') return false;
+      return document.hidden ? false : 2000;
+    }
   });
 
-  const { data: detailData, isLoading: loadingDetail, refetch: refetchDetail } = useQuery({
+  const { data: detailData, isLoading: loadingDetail } = useQuery({
     queryKey: ['whatsapp-conversation', selectedId],
     queryFn: async () => {
       if (!selectedId) return null;
@@ -209,12 +216,14 @@ export default function ConversasWhatsAppPage() {
       return res.data;
     },
     enabled: !!selectedId,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     // Mensagens do cliente chegam pelo webhook; polling mantém o chat em tempo quase real.
     refetchInterval: (query) => {
       if (typeof document !== 'undefined' && document.hidden) return false;
       const body = query.state.data as { data?: ConversationDetail } | undefined;
       const status = body?.data?.status;
-      if (status === undefined || status === 'PENDING') return 2500;
+      if (status === undefined || status === 'PENDING') return 2000;
       return false;
     }
   });
@@ -313,7 +322,9 @@ export default function ConversasWhatsAppPage() {
         ? payloadAny.name.trim()
         : typeof payloadAny?.requesterName === 'string' && payloadAny.requesterName.trim()
           ? payloadAny.requesterName.trim()
-          : null;
+          : typeof payloadAny?.waProfileName === 'string' && payloadAny.waProfileName.trim()
+            ? payloadAny.waProfileName.trim()
+            : null;
     if (payloadName) return payloadName;
 
     if (!showLegacyData) return null;
@@ -334,7 +345,7 @@ export default function ConversasWhatsAppPage() {
     try {
       await api.delete(`/whatsapp/conversations/${selectedId}`);
       setSelectedId(null);
-      await refetchList();
+      await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
     } catch (error) {
       console.error('Erro ao remover conversa:', error);
       alert('Erro ao remover a conversa.');
@@ -349,7 +360,7 @@ export default function ConversasWhatsAppPage() {
       setIsEndingConversation(true);
       await api.post(`/whatsapp/conversations/${selectedId}/end`);
       setSelectedId(null);
-      await refetchList();
+      await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
     } catch (error) {
       console.error('Erro ao encerrar conversa:', error);
       alert('Erro ao encerrar a conversa.');
@@ -367,8 +378,8 @@ export default function ConversasWhatsAppPage() {
       setIsSending(true);
       await api.post(`/whatsapp/conversations/${selectedId}/messages`, { content });
       setReplyText('');
-      await refetchDetail();
-      await refetchList();
+      await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
+      await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversation', selectedId] });
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
       alert('Erro ao enviar mensagem.');
@@ -957,10 +968,13 @@ export default function ConversasWhatsAppPage() {
                           >
                             <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
                               {m.role === 'user' ? (
-                                <User className="w-3 h-3" />
+                                <User className="w-3 h-3 shrink-0" />
                               ) : (
-                                <Bot className="w-3 h-3" />
+                                <Bot className="w-3 h-3 shrink-0" />
                               )}
+                              <span className="font-medium text-gray-600 dark:text-gray-300">
+                                {m.role === 'user' ? 'Cliente' : 'Sistema'}
+                              </span>
                               <span>
                                 {format(new Date(m.createdAt), "dd/MM HH:mm", { locale: ptBR })}
                               </span>
@@ -1001,15 +1015,20 @@ export default function ConversasWhatsAppPage() {
                         <textarea
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
-                          placeholder="Digite uma mensagem para a pessoa..."
-                          className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-gray-200 resize-none"
+                          placeholder={
+                            detail.status === 'PENDING'
+                              ? 'Digite uma mensagem para a pessoa...'
+                              : 'Conversa encerrada — não é possível enviar novas mensagens.'
+                          }
+                          disabled={detail.status !== 'PENDING' || isSending}
+                          className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-gray-200 resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                           rows={1}
                           style={{ minHeight: 42, maxHeight: 120 }}
                         />
                       </div>
                       <button
                         type="submit"
-                        disabled={!replyText.trim() || isSending}
+                        disabled={detail.status !== 'PENDING' || !replyText.trim() || isSending}
                         className="px-4 py-2.5 bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                       >
                         {isSending ? 'Enviando...' : 'Enviar'}

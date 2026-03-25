@@ -58,6 +58,15 @@ export class WhatsAppController {
         const changes = Array.isArray(entry.changes) ? entry.changes : [];
         for (const change of changes) {
           const value = change.value || {};
+          const contacts = Array.isArray(value.contacts) ? value.contacts : [];
+          const profileByWaDigits = new Map<string, string>();
+          for (const c of contacts) {
+            const waId = String((c as { wa_id?: string }).wa_id || '').replace(/\D/g, '');
+            const pname = (c as { profile?: { name?: string } }).profile?.name;
+            if (waId && typeof pname === 'string' && pname.trim()) {
+              profileByWaDigits.set(waId, pname.trim().slice(0, 120));
+            }
+          }
           const messages = Array.isArray(value.messages) ? value.messages : [];
           for (const msg of messages) {
             const phone = String(msg.from || '').trim();
@@ -65,6 +74,8 @@ export class WhatsAppController {
               console.warn('[WhatsApp Webhook] Mensagem sem from:', JSON.stringify(msg).slice(0, 200));
               continue;
             }
+            const phoneDigits = phone.replace(/\D/g, '');
+            const whatsappProfileName = profileByWaDigits.get(phoneDigits);
 
             let text = '';
             let hasMedia = false;
@@ -118,9 +129,13 @@ export class WhatsAppController {
               hasMedia ? ', hasMedia' : ''
             );
             const mediaInfo = hasMedia && mediaId ? { mediaId, mimeType: mediaMimeType, filename: mediaFilename } : undefined;
-            whatsAppBot.processMessage(phone, text || ' ', hasMedia, mediaInfo).catch((err) => {
-              console.error('[WhatsApp Webhook] Erro ao processar:', err);
-            });
+            whatsAppBot
+              .processMessage(phone, text || ' ', hasMedia, mediaInfo, {
+                whatsappProfileName: whatsappProfileName || undefined
+              })
+              .catch((err) => {
+                console.error('[WhatsApp Webhook] Erro ao processar:', err);
+              });
           }
         }
       }
@@ -151,7 +166,11 @@ export class WhatsAppController {
       const data = conversations.map((c) => ({
         id: c.id,
         phone: c.phone,
-        name: ((c.payload as any)?.name ?? (c.payload as any)?.requesterName) || null,
+        name:
+          ((c.payload as any)?.name ??
+            (c.payload as any)?.requesterName ??
+            (c.payload as any)?.waProfileName) ||
+          null,
         flowStatus: c.flowStatus,
         currentStep: c.currentStep,
         status: c.status,
@@ -370,8 +389,10 @@ export class WhatsAppController {
       const keptContact: Record<string, string> = {};
       const n = prevPayload.name;
       const r = prevPayload.requesterName;
+      const w = prevPayload.waProfileName;
       if (typeof n === 'string' && n.trim()) keptContact.name = n.trim().slice(0, 120);
       if (typeof r === 'string' && r.trim()) keptContact.requesterName = r.trim().slice(0, 120);
+      if (typeof w === 'string' && w.trim()) keptContact.waProfileName = w.trim().slice(0, 120);
 
       await prisma.whatsAppConversation.update({
         where: { id: conversation.id },

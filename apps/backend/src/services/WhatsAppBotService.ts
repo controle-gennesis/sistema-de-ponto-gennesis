@@ -478,7 +478,8 @@ export class WhatsAppBotService {
     phone: string,
     text: string,
     hasMedia = false,
-    mediaInfo?: MediaInfo
+    mediaInfo?: MediaInfo,
+    opts?: { whatsappProfileName?: string }
   ): Promise<void> {
     let conversation = await prisma.whatsAppConversation.findFirst({
       where: { phone },
@@ -549,6 +550,10 @@ export class WhatsAppBotService {
     let newConversationStatus: ConversationStatus = ((conversation as any).status as ConversationStatus) || 'PENDING';
     const newPayload = { ...payload };
 
+    if (opts?.whatsappProfileName?.trim()) {
+      (newPayload as any).waProfileName = opts.whatsappProfileName.trim().slice(0, 120);
+    }
+
     const isEndRequest = () =>
       ['end', 'encerrar', 'sair', 'cancelar', 'parar', 'fim'].includes(content);
 
@@ -576,7 +581,10 @@ export class WhatsAppBotService {
       skipInactivityTimeout = true;
       await prisma.whatsAppConversation.update({
         where: { id: conversation.id },
-        data: { updatedAt: new Date() }
+        data: {
+          updatedAt: new Date(),
+          payload: newPayload as Prisma.InputJsonValue
+        }
       });
       return;
     }
@@ -848,9 +856,14 @@ export class WhatsAppBotService {
         typeof (newPayload as any).requesterName === 'string'
           ? String((newPayload as any).requesterName).trim().slice(0, 120)
           : '';
+      const waKeep =
+        typeof (newPayload as any).waProfileName === 'string'
+          ? String((newPayload as any).waProfileName).trim().slice(0, 120)
+          : '';
       clearPayload();
       if (nameKeep) (newPayload as any).name = nameKeep;
       if (requesterKeep) (newPayload as any).requesterName = requesterKeep;
+      if (waKeep) (newPayload as any).waProfileName = waKeep;
       newStatus = 'MENU';
       newConversationStatus = 'CANCELLED';
       return {
@@ -868,9 +881,14 @@ export class WhatsAppBotService {
         typeof (newPayload as any).requesterName === 'string'
           ? String((newPayload as any).requesterName).trim().slice(0, 120)
           : '';
+      const waKeep =
+        typeof (newPayload as any).waProfileName === 'string'
+          ? String((newPayload as any).waProfileName).trim().slice(0, 120)
+          : '';
       clearPayload();
       if (nameKeep) (newPayload as any).name = nameKeep;
       if (requesterKeep) (newPayload as any).requesterName = requesterKeep;
+      if (waKeep) (newPayload as any).waProfileName = waKeep;
       newStatus = 'MENU';
       newConversationStatus = 'COMPLETED';
       return {
