@@ -231,10 +231,28 @@ export default function ConversasWhatsAppPage() {
   const showLegacyData = false;
 
   useEffect(() => {
-    if (selectedId && !conversasFiltradas.some((c) => c.id === selectedId)) {
+    if (!selectedId) return;
+
+    const selected = conversations.find((c) => c.id === selectedId);
+    if (!selected) {
+      // Se a conversa não existe mais na lista (ex.: removida), limpa a seleção.
       setSelectedId(null);
+      return;
     }
-  }, [conversasFiltradas, selectedId]);
+
+    // Se a conversa mudou de status (aguardando -> em atendimento -> encerrada),
+    // troca automaticamente a aba para manter o usuário "junto" na conversa selecionada.
+    const nextTab =
+      selected.status === 'PENDING' && !!selected.attendantInProgress
+        ? 'andamento'
+        : selected.status === 'PENDING' && !!selected.attendantRequested
+          ? 'aguardando'
+          : 'encerradas';
+
+    if (nextTab !== atendimentoTab) {
+      setAtendimentoTab(nextTab);
+    }
+  }, [selectedId, conversations, atendimentoTab]);
 
   useEffect(() => {
     // Garante que o admin veja as mensagens mais recentes.

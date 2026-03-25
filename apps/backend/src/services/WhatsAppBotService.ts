@@ -16,7 +16,8 @@ type FlowStatus =
   | 'ATESTADO_ASK_START_DATE'
   | 'ATESTADO_ASK_END_DATE'
   | 'ATESTADO_ASK_FILE'
-  | 'ATESTADO_COMPLETE';
+  | 'ATESTADO_COMPLETE'
+  | 'ATENDANT_ASK_NAME';
 
 const ATESTADO_TYPES: Record<string, string> = {
   '1': 'MEDICAL',
@@ -563,6 +564,35 @@ export class WhatsAppBotService {
 
     const isMenuRequest = () => ['menu', 'voltar', 'inicio'].includes(content);
 
+    const tryExtractNameFromText = (rawText: string): string | null => {
+      const t = (rawText || '').trim();
+      if (!t) return null;
+
+      // Heurísticas simples para extrair nome quando a pessoa envia algo como:
+      // "me chamo Lucas Ribeiro", "eu sou Lucas", "sou Lucas Ribeiro", etc.
+      const regexes: RegExp[] = [
+        /(?:me chamo|eu sou|sou|meu nome é|meu nome|nome é)\s+(.{3,80})/i,
+      ];
+
+      for (const r of regexes) {
+        const m = t.match(r);
+        if (!m?.[1]) continue;
+        const candidate = String(m[1])
+          .trim()
+          .replace(/[\r\n]+/g, ' ')
+          .split(/[!?.\n\r]/)[0]
+          .replace(/^[^A-Za-zÀ-ÖØ-öø-ÿ]+/, '')
+          .replace(/[^A-Za-zÀ-ÖØ-öø-ÿ\s'.-]+/g, '')
+          .trim();
+
+        if (!candidate) continue;
+        if (candidate.split(/\s+/).length < 2) continue;
+        return candidate.slice(0, 60);
+      }
+
+      return null;
+    };
+
     const menu = (): SendAction => ({
       type: 'buttons',
       body: pick([
@@ -823,17 +853,34 @@ export class WhatsAppBotService {
 
     const talkToAttendant = (): SendAction => {
       clearPayload();
-      newStatus = 'MENU';
-      newConversationStatus = 'PENDING';
       skipInactivityTimeout = true;
       // Indicador para o admin: essa conversa foi escalada para atendente humano.
       (newPayload as any).attendantRequested = true;
       (newPayload as any).attendantRequestedAt = new Date().toISOString();
       (newPayload as any).attendantInProgress = false;
       (newPayload as any).attendantInProgressAt = null;
+
+      newConversationStatus = 'PENDING';
+
+      const extractedName = tryExtractNameFromText(textRaw);
+      if (extractedName) {
+        (newPayload as any).name = extractedName;
+        newStatus = 'MENU';
+        return {
+          type: 'text',
+          text: `Claro! Obrigado, ${extractedName}.\nVou encaminhar seu atendimento para um atendente humano.\nPor favor, aguarde um instante. O atendente irá responder no sistema e continuar por aqui.`
+        };
+      }
+
+      // Se a pessoa não enviou o nome no mesmo texto, pedimos para armazenar em payload.name.
+      newStatus = 'ATENDANT_ASK_NAME';
       return {
-        type: 'text',
-        text: 'Claro! Vou encaminhar seu atendimento para um atendente humano.\nPor favor, aguarde um instante. O atendente irá responder no sistema e continuar por aqui.'
+        type: 'buttons',
+        body: 'Perfeito! Para eu encaminhar seu atendimento para um atendente humano, qual é seu nome completo?',
+        buttons: [
+          { id: 'MENU', title: 'Voltar' },
+          { id: 'END', title: 'Encerrar' }
+        ]
       };
     };
 
@@ -846,6 +893,20 @@ export class WhatsAppBotService {
 
         if (isAttendantRequest()) {
           sendAction = talkToAttendant();
+          break;
+        }
+
+        // Se já está escalado para atendente, e ainda não temos o nome, pedimos.
+        if ((newPayload as any)?.attendantRequested && !(newPayload as any)?.name) {
+          newStatus = 'ATENDANT_ASK_NAME';
+          sendAction = {
+            type: 'buttons',
+            body: 'Só pra eu encaminhar direitinho: qual é seu nome completo?',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
           break;
         }
 
@@ -867,6 +928,48 @@ export class WhatsAppBotService {
         } else {
           sendAction = menu();
         }
+        break;
+      }
+
+      case 'ATENDANT_ASK_NAME': {
+        if (isEndRequest()) {
+          sendAction = endConversation();
+          break;
+        }
+
+        if (isMenuRequest()) {
+          // Voltar: não limpamos o payload; só retornamos para o menu.
+          newStatus = 'MENU';
+          newConversationStatus = 'PENDING';
+          skipInactivityTimeout = true;
+          sendAction = {
+            type: 'text',
+            text: 'Tudo bem. Por favor aguarde um instante. O atendente irá responder no sistema.'
+          };
+          break;
+        }
+
+        const rawCandidate = (textRaw || '').trim();
+        if (!rawCandidate) {
+          sendAction = {
+            type: 'buttons',
+            body: 'Não entendi seu nome. Pode me informar seu nome completo?',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        (newPayload as any).name = rawCandidate.slice(0, 60);
+        newStatus = 'MENU';
+        newConversationStatus = 'PENDING';
+        skipInactivityTimeout = true;
+        sendAction = {
+          type: 'text',
+          text: `Obrigado! Agora já tenho seu nome e vou encaminhar para o atendente humano. Por favor aguarde um instante.`
+        };
         break;
       }
 
