@@ -366,13 +366,21 @@ export class WhatsAppController {
       // Para conversas que estavam em timer, evitamos disparos posteriores.
       whatsAppBot.clearInactivityTimeoutsForConversation(conversation.id);
 
+      const prevPayload = (conversation.payload as Record<string, unknown>) || {};
+      const keptContact: Record<string, string> = {};
+      const n = prevPayload.name;
+      const r = prevPayload.requesterName;
+      if (typeof n === 'string' && n.trim()) keptContact.name = n.trim().slice(0, 120);
+      if (typeof r === 'string' && r.trim()) keptContact.requesterName = r.trim().slice(0, 120);
+
       await prisma.whatsAppConversation.update({
         where: { id: conversation.id },
         data: {
           status: 'CANCELLED' as any,
           flowStatus: 'MENU',
           currentStep: 'MENU',
-          payload: {} as any,
+          // Mantém nome para a lista / detalhe não voltarem a mostrar só o telefone após encerrar.
+          payload: Object.keys(keptContact).length ? (keptContact as any) : ({} as any),
           updatedAt: new Date()
         } as any
       });

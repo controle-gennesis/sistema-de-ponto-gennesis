@@ -842,7 +842,15 @@ export class WhatsAppBotService {
     };
 
     const endConversation = (): SendAction => {
+      const nameKeep =
+        typeof (newPayload as any).name === 'string' ? String((newPayload as any).name).trim().slice(0, 120) : '';
+      const requesterKeep =
+        typeof (newPayload as any).requesterName === 'string'
+          ? String((newPayload as any).requesterName).trim().slice(0, 120)
+          : '';
       clearPayload();
+      if (nameKeep) (newPayload as any).name = nameKeep;
+      if (requesterKeep) (newPayload as any).requesterName = requesterKeep;
       newStatus = 'MENU';
       newConversationStatus = 'CANCELLED';
       return {
@@ -854,7 +862,15 @@ export class WhatsAppBotService {
     const finalizeConversation = (): SendAction => {
       // Finalizar a solicitação após o envio do arquivo.
       // Importante: não deve cancelar a submissão já concluída.
+      const nameKeep =
+        typeof (newPayload as any).name === 'string' ? String((newPayload as any).name).trim().slice(0, 120) : '';
+      const requesterKeep =
+        typeof (newPayload as any).requesterName === 'string'
+          ? String((newPayload as any).requesterName).trim().slice(0, 120)
+          : '';
       clearPayload();
+      if (nameKeep) (newPayload as any).name = nameKeep;
+      if (requesterKeep) (newPayload as any).requesterName = requesterKeep;
       newStatus = 'MENU';
       newConversationStatus = 'COMPLETED';
       return {
