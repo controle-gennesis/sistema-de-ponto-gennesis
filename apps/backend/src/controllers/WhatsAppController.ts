@@ -151,6 +151,7 @@ export class WhatsAppController {
       const data = conversations.map((c) => ({
         id: c.id,
         phone: c.phone,
+        name: ((c.payload as any)?.name ?? (c.payload as any)?.requesterName) || null,
         flowStatus: c.flowStatus,
         currentStep: c.currentStep,
         status: c.status,

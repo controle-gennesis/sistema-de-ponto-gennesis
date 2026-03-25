@@ -34,6 +34,7 @@ import { ptBR } from 'date-fns/locale';
 interface ConversationSummary {
   id: string;
   phone: string;
+  name?: string | null;
   flowStatus: string;
   status: string;
   attendantRequested?: boolean;
@@ -250,8 +251,18 @@ export default function ConversasWhatsAppPage() {
 
   const headerName = (() => {
     if (!detail) return null;
+    const payloadAny = detail.payload as any;
+    const payloadName =
+      typeof payloadAny?.name === 'string' && payloadAny.name.trim()
+        ? payloadAny.name.trim()
+        : typeof payloadAny?.requesterName === 'string' && payloadAny.requesterName.trim()
+          ? payloadAny.requesterName.trim()
+          : null;
+    if (payloadName) return payloadName;
+
     if (!showLegacyData) return null;
-    if ((detail.payload as any)?.attendantRequested || (detail.payload as any)?.attendantInProgress) return null;
+    if (payloadAny?.attendantRequested || payloadAny?.attendantInProgress) return null;
+
     const fromInProgress = detail.payload ? getAtestadoName(detail.payload) : null;
     if (fromInProgress) return fromInProgress;
     const certificateSubmissions = detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE');
@@ -347,7 +358,7 @@ export default function ConversasWhatsAppPage() {
             }`}
           >
             <HelpCircle className="w-4 h-4 shrink-0" />
-            Aguardando
+            Aguardando atendente
             <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'aguardando' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
               {aguardandoAtendimento.length}
             </span>
@@ -390,7 +401,7 @@ export default function ConversasWhatsAppPage() {
             <CardHeader className="pb-3">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   {atendimentoTab === 'aguardando'
-                    ? 'Aguardando atendimento'
+                    ? 'Aguardando atendente'
                     : atendimentoTab === 'andamento'
                       ? 'Em atendimento'
                       : 'Encerradas'}
@@ -448,7 +459,7 @@ export default function ConversasWhatsAppPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-gray-900 dark:text-gray-100 truncate">
-                                {formatPhone(c.phone)}
+                                {c.name ? c.name : formatPhone(c.phone)}
                               </span>
                             </div>
                             <p className="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">
@@ -471,21 +482,23 @@ export default function ConversasWhatsAppPage() {
                                   </span>
                                 ) : null
                               ) : null}
-                              <span
-                                className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
-                                  c.status === 'COMPLETED'
-                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                              {c.status !== 'PENDING' && (
+                                <span
+                                  className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                    c.status === 'COMPLETED'
+                                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                      : c.status === 'CANCELLED'
+                                        ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
+                                        : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                  }`}
+                                >
+                                  {c.status === 'COMPLETED'
+                                    ? 'Concluído'
                                     : c.status === 'CANCELLED'
-                                      ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
-                                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                }`}
-                              >
-                                {c.status === 'COMPLETED'
-                                  ? 'Concluído'
-                                  : c.status === 'CANCELLED'
-                                    ? 'Cancelado'
-                                    : 'Pendente'}
-                              </span>
+                                      ? 'Cancelado'
+                                      : c.status}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <ChevronRight className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
@@ -532,10 +545,14 @@ export default function ConversasWhatsAppPage() {
                       <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/20 shrink-0">
                         <Phone className="w-4 h-4 text-red-600 dark:text-red-400" />
                       </span>
-                      <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {formatPhone(detail.phone)}
-                        {headerName ? ` - ${headerName}` : ''}
-                      </span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                          {headerName ?? formatPhone(detail.phone)}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                          {formatPhone(detail.phone)}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {detail.payload && (detail.payload as any).attendantRequested ? (
@@ -547,21 +564,23 @@ export default function ConversasWhatsAppPage() {
                           Em atendimento
                         </span>
                       ) : null}
-                      <span
-                        className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
-                          detail.status === 'COMPLETED'
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                      {detail.status !== 'PENDING' && (
+                        <span
+                          className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
+                            detail.status === 'COMPLETED'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                              : detail.status === 'CANCELLED'
+                                ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
+                                : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                          }`}
+                        >
+                          {detail.status === 'COMPLETED'
+                            ? 'Concluído'
                             : detail.status === 'CANCELLED'
-                              ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
-                              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                        }`}
-                      >
-                        {detail.status === 'COMPLETED'
-                          ? 'Concluído'
-                          : detail.status === 'CANCELLED'
-                            ? 'Cancelado'
-                            : 'Pendente'}
-                      </span>
+                              ? 'Cancelado'
+                              : detail.status}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={handleEndConversation}
@@ -579,9 +598,6 @@ export default function ConversasWhatsAppPage() {
                         <Trash2 className="w-4 h-4" />
                         Remover
                       </button>
-                      <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
-                        {detail.messages.length} mensagens · {detail.submissions.length} envio(s)
-                      </span>
                     </div>
                   </div>
                 </CardHeader>
@@ -592,7 +608,7 @@ export default function ConversasWhatsAppPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">Aguardando atendente</p>
                         <p className="text-sm text-blue-800 dark:text-blue-200 mt-1 break-words">
-                          A pessoa solicitou atendimento humano. A conversa foi mantida aberta para o atendente responder no sistema.
+                          A pessoa solicitou atendimento. A conversa foi mantida aberta para o atendente responder no sistema.
                         </p>
                       </div>
                     </div>
