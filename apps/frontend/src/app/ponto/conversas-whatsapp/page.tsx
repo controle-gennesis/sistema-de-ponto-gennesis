@@ -513,7 +513,7 @@ export default function ConversasWhatsAppPage() {
                                   {c.status === 'COMPLETED'
                                     ? 'Concluído'
                                     : c.status === 'CANCELLED'
-                                      ? 'Cancelado'
+                                      ? 'Encerrado'
                                       : c.status}
                                 </span>
                               )}
@@ -595,7 +595,7 @@ export default function ConversasWhatsAppPage() {
                           {detail.status === 'COMPLETED'
                             ? 'Concluído'
                             : detail.status === 'CANCELLED'
-                              ? 'Cancelado'
+                              ? 'Encerrado'
                               : detail.status}
                         </span>
                       )}
