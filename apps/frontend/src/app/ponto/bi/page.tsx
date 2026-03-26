@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Layers,
   Truck,
+  X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -1121,8 +1122,18 @@ export default function BIPage() {
                                 placeholder="Buscar..."
                                 value={searchText}
                                 onChange={(e) => setSearchText(e.target.value)}
-                                className="w-full min-w-0 pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                                className="w-full min-w-0 pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                               />
+                              {searchText && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSearchText('')}
+                                  aria-label="Limpar busca"
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </div>
                           {compactView && (
@@ -1291,8 +1302,18 @@ export default function BIPage() {
                           placeholder="Buscar..."
                           value={searchText}
                           onChange={(e) => setSearchText(e.target.value)}
-                          className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                          className="w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                         />
+                        {searchText && (
+                          <button
+                            type="button"
+                            onClick={() => setSearchText('')}
+                            aria-label="Limpar busca"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                       <button
                         onClick={handleClearFilters}
