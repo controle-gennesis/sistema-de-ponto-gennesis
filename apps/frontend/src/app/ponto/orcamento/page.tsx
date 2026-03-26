@@ -126,6 +126,36 @@ export interface ImportRecord {
   itensCount?: number;
 }
 
+type OrcamentoMeta = {
+  osNumeroPasta: string;
+  dataAbertura: string; // yyyy-mm-dd
+  dataEnvio: string; // yyyy-mm-dd (atualiza ao salvar)
+  prazoExecucaoDias: string; // mantém como string p/ input
+  responsavelOrcamento: string;
+  descricao: string;
+  orcamentoRealizadoPor: string;
+  revisaoCount: number; // 0 = sem revisão; ao salvar vira 1 => R01
+};
+
+function todayInputDate(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatRevisaoLabel(revisaoCount: number | null | undefined): string {
+  const n = typeof revisaoCount === 'number' && isFinite(revisaoCount) ? revisaoCount : 0;
+  if (n <= 0) return 'Sem revisão';
+  return `R${String(n).padStart(2, '0')}`;
+}
+
+type EmployeeOption = {
+  id: string;
+  name: string;
+};
+
 /** Estado da montagem do orçamento (persistido por contrato). */
 interface SessaoOrcamentoPersist {
   subtitulosNoOrcamento: string[];
@@ -133,6 +163,7 @@ interface SessaoOrcamentoPersist {
   dimensoesPorItem: Record<string, DimensoesItem>;
   itensOcultosNoOrcamento: string[];
   showDetalhesFinanceiros: boolean;
+  meta?: OrcamentoMeta;
 }
 
 function sessaoVazia(): SessaoOrcamentoPersist {
@@ -141,7 +172,17 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     quantidadesPorItem: {},
     dimensoesPorItem: {},
     itensOcultosNoOrcamento: [],
-    showDetalhesFinanceiros: false
+    showDetalhesFinanceiros: false,
+    meta: {
+      osNumeroPasta: '',
+      dataAbertura: '',
+      dataEnvio: '',
+      prazoExecucaoDias: '',
+      responsavelOrcamento: '',
+      descricao: '',
+      orcamentoRealizadoPor: '',
+      revisaoCount: 0
+    }
   };
 }
 
@@ -152,12 +193,28 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
     if (!s) return null;
     const p = JSON.parse(s) as Partial<SessaoOrcamentoPersist>;
     if (!p || typeof p !== 'object') return null;
+    const metaRaw = (p as any).meta;
+    const hasMeta = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw);
+    const meta: OrcamentoMeta = hasMeta
+      ? {
+          osNumeroPasta: typeof metaRaw.osNumeroPasta === 'string' ? metaRaw.osNumeroPasta : '',
+          dataAbertura: typeof metaRaw.dataAbertura === 'string' ? metaRaw.dataAbertura : '',
+          dataEnvio: typeof metaRaw.dataEnvio === 'string' ? metaRaw.dataEnvio : '',
+          prazoExecucaoDias: typeof metaRaw.prazoExecucaoDias === 'string' ? metaRaw.prazoExecucaoDias : '',
+          responsavelOrcamento: typeof metaRaw.responsavelOrcamento === 'string' ? metaRaw.responsavelOrcamento : '',
+          descricao: typeof metaRaw.descricao === 'string' ? metaRaw.descricao : '',
+          orcamentoRealizadoPor: typeof metaRaw.orcamentoRealizadoPor === 'string' ? metaRaw.orcamentoRealizadoPor : '',
+          revisaoCount:
+            typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0
+        }
+      : sessaoVazia().meta!;
     return {
       subtitulosNoOrcamento: Array.isArray(p.subtitulosNoOrcamento) ? p.subtitulosNoOrcamento : [],
       quantidadesPorItem: p.quantidadesPorItem && typeof p.quantidadesPorItem === 'object' ? p.quantidadesPorItem : {},
       dimensoesPorItem: p.dimensoesPorItem && typeof p.dimensoesPorItem === 'object' ? p.dimensoesPorItem : {},
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
-      showDetalhesFinanceiros: Boolean(p.showDetalhesFinanceiros)
+      showDetalhesFinanceiros: Boolean(p.showDetalhesFinanceiros),
+      meta
     };
   } catch {
     return null;
@@ -247,6 +304,21 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
     const hasSessaoKey =
       'sessaoOrcamento' in d && d.sessaoOrcamento != null && typeof d.sessaoOrcamento === 'object';
     const so = d.sessaoOrcamento as Partial<SessaoOrcamentoPersist> | undefined;
+    const metaRaw = (so as any)?.meta;
+    const hasMeta = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw);
+    const meta: OrcamentoMeta = hasMeta
+      ? {
+          osNumeroPasta: typeof metaRaw.osNumeroPasta === 'string' ? metaRaw.osNumeroPasta : '',
+          dataAbertura: typeof metaRaw.dataAbertura === 'string' ? metaRaw.dataAbertura : '',
+          dataEnvio: typeof metaRaw.dataEnvio === 'string' ? metaRaw.dataEnvio : '',
+          prazoExecucaoDias: typeof metaRaw.prazoExecucaoDias === 'string' ? metaRaw.prazoExecucaoDias : '',
+          responsavelOrcamento: typeof metaRaw.responsavelOrcamento === 'string' ? metaRaw.responsavelOrcamento : '',
+          descricao: typeof metaRaw.descricao === 'string' ? metaRaw.descricao : '',
+          orcamentoRealizadoPor: typeof metaRaw.orcamentoRealizadoPor === 'string' ? metaRaw.orcamentoRealizadoPor : '',
+          revisaoCount:
+            typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0
+        }
+      : sessaoVazia().meta!;
     const sessaoOrcamento: SessaoOrcamentoPersist | null =
       hasSessaoKey && so
         ? {
@@ -256,7 +328,8 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
             dimensoesPorItem:
               so.dimensoesPorItem && typeof so.dimensoesPorItem === 'object' ? so.dimensoesPorItem : {},
             itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
-            showDetalhesFinanceiros: Boolean(so.showDetalhesFinanceiros)
+            showDetalhesFinanceiros: Boolean(so.showDetalhesFinanceiros),
+            meta
           }
         : null;
     return {
@@ -558,9 +631,22 @@ export default function OrcamentoPage() {
   const [showServicosDropdown, setShowServicosDropdown] = useState(false);
   const [showContratoDropdown, setShowContratoDropdown] = useState(false);
   const [servicosSearch, setServicosSearch] = useState('');
+  const [contratoSearch, setContratoSearch] = useState('');
   const [showDetalhesFinanceiros, setShowDetalhesFinanceiros] = useState(false);
   const servicosDropdownRef = useRef<HTMLDivElement | null>(null);
   const contratoDropdownRef = useRef<HTMLDivElement | null>(null);
+  const contratoSearchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const filteredCostCenters = useMemo(() => {
+    const q = contratoSearch.trim().toLowerCase();
+    const list = costCenters ?? [];
+    if (!q) return list;
+    return list.filter((cc: { code?: string; name?: string }) => {
+      const code = (cc.code ?? '').toLowerCase();
+      const name = (cc.name ?? '').toLowerCase();
+      return code.includes(q) || name.includes(q) || `${code} ${name}`.includes(q);
+    });
+  }, [costCenters, contratoSearch]);
 
   // Analítico (detalhamento) da composição para visualização/exportação.
   const [analiticoModalOpen, setAnaliticoModalOpen] = useState(false);
@@ -575,7 +661,24 @@ export default function OrcamentoPage() {
   const [listaOrcamentos, setListaOrcamentos] = useState<{ id: string; nome: string; updatedAt: string }[]>([]);
   const [carregandoListaOrcamentos, setCarregandoListaOrcamentos] = useState(false);
   const [nomeOrcamentoRascunho, setNomeOrcamentoRascunho] = useState('');
+  const [orcamentosSearch, setOrcamentosSearch] = useState('');
   const sessaoRef = useRef<SessaoOrcamentoPersist>(sessaoVazia());
+
+  const filteredListaOrcamentos = useMemo(() => {
+    const q = orcamentosSearch.trim().toLowerCase();
+    if (!q) return listaOrcamentos;
+    return listaOrcamentos.filter((o) => (o.nome || '').toLowerCase().includes(q));
+  }, [listaOrcamentos, orcamentosSearch]);
+
+  const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
+  const [novoOrcamentoMetaOpen, setNovoOrcamentoMetaOpen] = useState(false);
+  const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta>(() => ({
+    ...sessaoVazia().meta!,
+    dataAbertura: todayInputDate()
+  }));
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
+  const [loadingEmployeeOptions, setLoadingEmployeeOptions] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState('');
 
   useEffect(() => {
     if (costCenters?.length && !centroCustoId) {
@@ -583,6 +686,51 @@ export default function OrcamentoPage() {
       if (first?.id) setCentroCustoId(first.id);
     }
   }, [costCenters, centroCustoId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadMetaFormOptions = async () => {
+      setLoadingEmployeeOptions(true);
+      try {
+        const now = new Date();
+        const month = now.getMonth() + 1;
+        const year = now.getFullYear();
+        const [meRes, employeesRes] = await Promise.all([
+          api.get('/auth/me'),
+          api.get(`/payroll/employees?month=${month}&year=${year}&page=1&limit=500`)
+        ]);
+        if (cancelled) return;
+        const userName = meRes?.data?.data?.name ? String(meRes.data.data.name) : '';
+        setCurrentUserName(userName);
+        const employees = Array.isArray(employeesRes?.data?.data?.employees)
+          ? employeesRes.data.data.employees
+          : [];
+        const options = employees
+          .map((e: any) => ({
+            id: String(e?.id ?? ''),
+            name: String(e?.name ?? '').trim()
+          }))
+          .filter((e: EmployeeOption) => e.id && e.name);
+        const uniqueMap = new Map<string, EmployeeOption>();
+        for (const e of options) {
+          if (!uniqueMap.has(e.id)) uniqueMap.set(e.id, e);
+        }
+        setEmployeeOptions(
+          Array.from(uniqueMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+        );
+      } catch {
+        if (!cancelled) {
+          setEmployeeOptions([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingEmployeeOptions(false);
+      }
+    };
+    void loadMetaFormOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -647,6 +795,7 @@ export default function OrcamentoPage() {
       setDimensoesPorItem(s.dimensoesPorItem);
       setItensOcultosNoOrcamento(new Set(s.itensOcultosNoOrcamento));
       setShowDetalhesFinanceiros(s.showDetalhesFinanceiros);
+      setMeta(s.meta ? s.meta : sessaoVazia().meta!);
     };
 
     const oid = orcamentoAtivoId;
@@ -682,7 +831,8 @@ export default function OrcamentoPage() {
       quantidadesPorItem,
       dimensoesPorItem,
       itensOcultosNoOrcamento: Array.from(itensOcultosNoOrcamento),
-      showDetalhesFinanceiros
+      showDetalhesFinanceiros,
+      meta
     };
     if (centroCustoId && orcamentoAtivoId) {
       try {
@@ -698,7 +848,8 @@ export default function OrcamentoPage() {
     quantidadesPorItem,
     dimensoesPorItem,
     itensOcultosNoOrcamento,
-    showDetalhesFinanceiros
+    showDetalhesFinanceiros,
+    meta
   ]);
 
   useEffect(() => {
@@ -713,6 +864,15 @@ export default function OrcamentoPage() {
     document.addEventListener('click', handler);
     return () => document.removeEventListener('click', handler);
   }, []);
+
+  useEffect(() => {
+    if (!showContratoDropdown) return;
+    setContratoSearch('');
+    const t = window.setTimeout(() => {
+      contratoSearchInputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [showContratoDropdown]);
 
   const refreshListaOrcamentos = async () => {
     if (!centroCustoId) return;
@@ -745,11 +905,21 @@ export default function OrcamentoPage() {
     }
     setSalvandoOrcamento(true);
     try {
+      const nextMeta: OrcamentoMeta = {
+        ...meta,
+        revisaoCount: (meta.revisaoCount || 0) + 1,
+        dataEnvio: todayInputDate()
+      };
+      const nextSessao: SessaoOrcamentoPersist = {
+        ...sessaoRef.current,
+        meta: nextMeta
+      };
       await saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, {
         servicos,
         imports,
-        sessaoOrcamento: sessaoRef.current
+        sessaoOrcamento: nextSessao
       });
+      setMeta(nextMeta);
       await refreshListaOrcamentos();
       toast.success('Orçamento salvo. Você pode fechar e voltar depois para continuar editando.');
     } catch {
@@ -767,13 +937,47 @@ export default function OrcamentoPage() {
 
   const criarNovoOrcamento = async () => {
     if (!centroCustoId) return;
+    setNovoOrcamentoMetaDraft({
+      ...sessaoVazia().meta!,
+      dataAbertura: todayInputDate()
+    });
+    setNovoOrcamentoMetaOpen(true);
+  };
+
+  const confirmarCriacaoNovoOrcamento = async () => {
+    if (!centroCustoId) return;
+    const d = {
+      ...novoOrcamentoMetaDraft,
+      osNumeroPasta: novoOrcamentoMetaDraft.osNumeroPasta.trim(),
+      responsavelOrcamento: novoOrcamentoMetaDraft.responsavelOrcamento.trim(),
+      descricao: novoOrcamentoMetaDraft.descricao.trim(),
+      orcamentoRealizadoPor: currentUserName || novoOrcamentoMetaDraft.orcamentoRealizadoPor.trim(),
+      prazoExecucaoDias: novoOrcamentoMetaDraft.prazoExecucaoDias.trim(),
+      dataAbertura: novoOrcamentoMetaDraft.dataAbertura || todayInputDate(),
+      dataEnvio: ''
+    };
+    if (!d.osNumeroPasta || !d.descricao) {
+      toast.error('Preencha OS/Nº da pasta e descrição.');
+      return;
+    }
     try {
       const entry = await criarOrcamentoApi(centroCustoId);
       setListaOrcamentos(prev => [entry, ...prev.filter(o => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(entry.nome);
       setOrcamentoAtivoId(entry.id);
       setActiveTab('orcamento');
-      toast.success('Novo orçamento criado. Os serviços padrão são os mesmos do contrato (aba Serviços Padrão).');
+      setMeta({ ...d, revisaoCount: 0 });
+      // salva imediatamente os metadados (a revisão continua "Sem revisão" até o primeiro salvar)
+      await saveOrcamentoToApi(centroCustoId, entry.id, {
+        servicos: [],
+        imports: [],
+        sessaoOrcamento: {
+          ...sessaoVazia(),
+          meta: { ...d, revisaoCount: 0 }
+        }
+      });
+      setNovoOrcamentoMetaOpen(false);
+      toast.success('Novo orçamento criado. Preencha os serviços e clique em salvar para gerar a revisão R01.');
     } catch {
       toast.error('Não foi possível criar o orçamento.');
     }
@@ -1984,9 +2188,9 @@ export default function OrcamentoPage() {
     <ProtectedRoute route="/ponto/orcamento">
       <MainLayout userRole="EMPLOYEE" userName="" onLogout={handleLogout}>
         <div className="space-y-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Orçamento</h1>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          <div className="text-center">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Orçamento</h1>
+            <p className="mt-2 text-gray-600 dark:text-gray-400">
               Automação de orçamentos com composições e serviços padrão por contrato
             </p>
           </div>
@@ -2031,33 +2235,57 @@ export default function OrcamentoPage() {
                         className="absolute z-[100] mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg max-h-64 overflow-y-auto py-1"
                         onClick={e => e.stopPropagation()}
                       >
-                        <button
-                          type="button"
-                          className={`w-full px-4 py-2.5 text-left text-sm ${!centroCustoId ? 'bg-red-600 text-white' : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white'}`}
-                          onClick={() => {
-                            setCentroCustoId(null);
-                            setShowContratoDropdown(false);
-                          }}
-                        >
-                          Selecione o contrato
-                        </button>
-                        {costCenters?.map((cc: { id?: string; code?: string; name?: string }) => (
+                        <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 px-3 pt-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+                          <div className="relative">
+                            <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <input
+                              ref={contratoSearchInputRef}
+                              value={contratoSearch}
+                              onChange={(e) => setContratoSearch(e.target.value)}
+                              placeholder="Pesquisar contrato..."
+                              className="w-full pl-9 pr-3 py-2 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-red-500/70 focus:border-red-500 dark:focus:border-red-500"
+                            />
+                          </div>
+                        </div>
+                        {contratoSearch.trim() === '' && (
                           <button
-                            key={cc.id}
                             type="button"
                             className={`w-full px-4 py-2.5 text-left text-sm ${
-                              centroCustoId === cc.id
+                              !centroCustoId
                                 ? 'bg-red-600 text-white'
                                 : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white'
                             }`}
                             onClick={() => {
-                              setCentroCustoId(cc.id || null);
+                              setCentroCustoId(null);
                               setShowContratoDropdown(false);
                             }}
                           >
-                            {cc.code || ''} — {cc.name || cc.code || 'Sem nome'}
+                            {!centroCustoId ? 'Selecione o contrato' : 'Limpar seleção'}
                           </button>
-                        ))}
+                        )}
+                        {filteredCostCenters.length === 0 ? (
+                          <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                            Nenhum contrato encontrado.
+                          </div>
+                        ) : (
+                          filteredCostCenters.map((cc: { id?: string; code?: string; name?: string }) => (
+                            <button
+                              key={cc.id}
+                              type="button"
+                              className={`w-full px-4 py-2.5 text-left text-sm ${
+                                centroCustoId === cc.id
+                                  ? 'bg-red-600 text-white'
+                                  : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white'
+                              }`}
+                              onClick={() => {
+                                setCentroCustoId(cc.id || null);
+                                setShowContratoDropdown(false);
+                              }}
+                            >
+                              {cc.code || ''} — {cc.name || cc.code || 'Sem nome'}
+                            </button>
+                          ))
+                        )}
                       </div>
                     )}
                   </div>
@@ -2174,50 +2402,81 @@ export default function OrcamentoPage() {
                       Nenhum orçamento ainda. Você pode <strong className="text-gray-700 dark:text-gray-300">importar o orçamento perfeito</strong> acima (vale para todo o contrato) ou criar um novo orçamento.
                     </p>
                   ) : (
-                    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                      <table className="min-w-full">
-                        <thead className="bg-gray-50 dark:bg-gray-800">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
-                              Nome
-                            </th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
-                              Atualizado
-                            </th>
-                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
-                              Ações
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                          {listaOrcamentos.map(o => (
-                            <tr key={o.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-800/50">
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{o.nome}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                                {o.updatedAt ? new Date(o.updatedAt).toLocaleString('pt-BR') : '—'}
-                              </td>
-                              <td className="px-4 py-3 text-right text-sm font-medium">
-                                <div className="inline-flex flex-wrap gap-2 justify-end">
-                                  <button
-                                    type="button"
-                                    onClick={() => abrirOrcamentoDaLista(o.id)}
-                                    className="px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700"
-                                  >
-                                    Abrir
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => excluirOrcamentoDaLista(o.id, o.nome)}
-                                    className="px-3 py-1.5 rounded-md border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-                                  >
-                                    Excluir
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          <span className="font-medium text-gray-900 dark:text-gray-100">{filteredListaOrcamentos.length}</span>
+                          {' '}de {listaOrcamentos.length} orçamento(s)
+                        </div>
+                        <div className="relative w-full sm:w-72">
+                          <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={orcamentosSearch}
+                            onChange={(e) => setOrcamentosSearch(e.target.value)}
+                            placeholder="Buscar orçamento..."
+                            className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                      <div className="hidden md:grid md:grid-cols-12 gap-3 px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+                        <div className="md:col-span-6 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Orçamento
+                        </div>
+                        <div className="md:col-span-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Atualizado
+                        </div>
+                        <div className="md:col-span-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-right">
+                          Ações
+                        </div>
+                      </div>
+
+                      <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                        {filteredListaOrcamentos.map((o) => (
+                          <div
+                            key={o.id}
+                            className="grid grid-cols-1 md:grid-cols-12 gap-3 px-4 py-3.5 hover:bg-gray-50/80 dark:hover:bg-gray-800/30 transition-colors"
+                          >
+                            <div className="md:col-span-6 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+                                <p className="text-sm sm:text-base font-medium text-gray-900 dark:text-gray-100 truncate">
+                                  {o.nome}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="md:col-span-3 flex items-center text-xs sm:text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+                              {o.updatedAt ? new Date(o.updatedAt).toLocaleString('pt-BR') : '—'}
+                            </div>
+
+                            <div className="md:col-span-3 flex items-center gap-2 md:justify-end">
+                              <button
+                                type="button"
+                                onClick={() => abrirOrcamentoDaLista(o.id)}
+                                className="px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 text-sm font-medium transition-colors"
+                              >
+                                Abrir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => excluirOrcamentoDaLista(o.id, o.nome)}
+                                className="px-3 py-1.5 rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {filteredListaOrcamentos.length === 0 && (
+                          <div className="px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                            Nenhum orçamento encontrado para essa busca.
+                          </div>
+                        )}
+                      </div>
+                    </div>
                     </div>
                   )}
                 </CardContent>
@@ -2262,6 +2521,47 @@ export default function OrcamentoPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
+                <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                      Dados do orçamento
+                    </div>
+                    <div className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                      Revisão: <span className="text-gray-900 dark:text-gray-100">{formatRevisaoLabel(meta.revisaoCount)}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 text-sm">
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/20 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">OS/Nº da pasta</div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100 break-words">{meta.osNumeroPasta || '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/20 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Data de abertura</div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100">{meta.dataAbertura || '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/20 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Data de envio</div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100">{meta.dataEnvio || '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/20 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Prazo de execução (dias)</div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100">{meta.prazoExecucaoDias || '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/20 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Responsável pelo orçamento</div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100 break-words">{meta.responsavelOrcamento || '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/20 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Orçamento realizado por</div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100 break-words">{meta.orcamentoRealizadoPor || '—'}</div>
+                    </div>
+                    <div className="sm:col-span-2 xl:col-span-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/20 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Descrição</div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100 break-words">{meta.descricao || '—'}</div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex gap-2 items-end flex-wrap">
                   <div
                     ref={servicosDropdownRef}
@@ -3228,6 +3528,106 @@ export default function OrcamentoPage() {
         ) : (
           <div className="text-sm text-gray-600 dark:text-gray-400">Carregando analítico...</div>
         )}
+      </Modal>
+
+      <Modal
+        isOpen={novoOrcamentoMetaOpen}
+        onClose={() => setNovoOrcamentoMetaOpen(false)}
+        title="Criar novo orçamento"
+        size="lg"
+        closeOnOverlayClick
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Informe os dados base do orçamento. A revisão inicia como <strong>Sem revisão</strong> e ao salvar será <strong>R01</strong>, <strong>R02</strong>…
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">OS/Nº da pasta *</label>
+              <input
+                value={novoOrcamentoMetaDraft.osNumeroPasta}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, osNumeroPasta: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: XX/2025 - Nº241"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Prazo de execução (dias)</label>
+              <input
+                value={novoOrcamentoMetaDraft.prazoExecucaoDias}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, prazoExecucaoDias: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: 150"
+                inputMode="numeric"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de abertura *</label>
+              <input
+                type="date"
+                value={novoOrcamentoMetaDraft.dataAbertura}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataAbertura: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de envio</label>
+              <input
+                type="date"
+                value={novoOrcamentoMetaDraft.dataEnvio}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataEnvio: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+              />
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Observação: ao salvar, a data de envio será atualizada automaticamente.
+              </div>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Responsável pelo orçamento</label>
+              <select
+                value={novoOrcamentoMetaDraft.responsavelOrcamento}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, responsavelOrcamento: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                disabled={loadingEmployeeOptions}
+              >
+                <option value="">
+                  {loadingEmployeeOptions ? 'Carregando funcionários...' : 'Selecione o responsável'}
+                </option>
+                {employeeOptions.map((employee) => (
+                  <option key={employee.id} value={employee.name}>
+                    {employee.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição *</label>
+              <input
+                value={novoOrcamentoMetaDraft.descricao}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, descricao: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: Manutenção geral da unidade"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setNovoOrcamentoMetaOpen(false)}
+              className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmarCriacaoNovoOrcamento}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-medium"
+            >
+              Criar orçamento
+            </button>
+          </div>
+        </div>
       </Modal>
     </ProtectedRoute>
   );
