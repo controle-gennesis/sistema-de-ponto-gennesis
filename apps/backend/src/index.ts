@@ -23,6 +23,7 @@ import rateLimit from 'express-rate-limit';
 
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
+import { backendUploadsRoot } from './lib/uploads';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import timeRecordRoutes from './routes/timeRecords';
@@ -41,6 +42,7 @@ import pointCorrectionRoutes from './routes/pointCorrections';
 import holidayRoutes from './routes/holidays';
 import chatRoutes from './routes/chats';
 import costCenterRoutes from './routes/costCenters';
+import contractRoutes from './routes/contracts';
 import constructionMaterialRoutes from './routes/constructionMaterials';
 import chatGPTRoutes from './routes/chatgpt';
 import borderRoutes from './routes/border';
@@ -50,8 +52,10 @@ import supplierRoutes from './routes/suppliers';
 import purchaseOrderRoutes from './routes/purchaseOrders';
 import budgetNatureRoutes from './routes/budgetNatures';
 import orcamentoRoutes from './routes/orcamento';
+import pleitoRoutes from './routes/pleitos';
 import fluigRoutes from './routes/fluig';
 import whatsappRoutes from './routes/whatsapp';
+import quoteMapRoutes from './routes/quoteMaps';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -196,9 +200,9 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-if ((process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' || !process.env.AWS_ACCESS_KEY_ID) {
-  app.use('/uploads', express.static(path.join(process.cwd(), 'apps', 'backend', 'uploads')));
-}
+// Sempre servir ficheiros gravados em disco (RM, OC/boleto, mensagens, etc.).
+// O uso de S3 para fotos de ponto não impede estes anexos locais.
+app.use('/uploads', express.static(backendUploadsRoot));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -230,6 +234,7 @@ app.use('/api/solicitacoes', pointCorrectionRoutes);
 app.use('/api/holidays', holidayRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/cost-centers', costCenterRoutes);
+app.use('/api/contracts', contractRoutes);
 app.use('/api/construction-materials', constructionMaterialRoutes);
 app.use('/api/chatgpt', chatGPTRoutes);
 app.use('/api/border', borderRoutes);
@@ -237,8 +242,10 @@ app.use('/api/material-requests', materialRequestRoutes);
 app.use('/api/financial-analysis', financialAnalysisRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/quote-maps', quoteMapRoutes);
 app.use('/api/budget-natures', budgetNatureRoutes);
 app.use('/api/orcamento', orcamentoRoutes);
+app.use('/api/pleitos', pleitoRoutes);
 app.use('/api/fluig', fluigRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 
