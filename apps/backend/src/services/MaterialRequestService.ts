@@ -4,12 +4,15 @@ export interface CreateMaterialRequestData {
   requestedBy: string;
   costCenterId: string;
   projectId?: string;
+  serviceOrder?: string;
   description?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   items: {
     materialId: string;
     quantity: number;
     notes?: string;
+    attachmentUrl?: string | null;
+    attachmentName?: string | null;
   }[];
 }
 
@@ -18,6 +21,23 @@ export interface UpdateMaterialRequestStatusData {
   approvedBy?: string;
   rejectedBy?: string;
   rejectionReason?: string;
+}
+
+export interface UpdateMaterialRequestCorrectionData {
+  costCenterId: string;
+  projectId?: string;
+  serviceOrder?: string;
+  description?: string;
+  priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  items: {
+    materialId: string;
+    quantity: number;
+    notes?: string;
+    attachmentUrl?: string | null;
+    attachmentName?: string | null;
+  }[];
+  /** Se true, volta para PENDING após salvar (reenvio para aprovação). */
+  submitForApproval?: boolean;
 }
 
 export class MaterialRequestService {
@@ -59,13 +79,10 @@ export class MaterialRequestService {
       throw new Error('Centro de custo não encontrado ou inativo');
     }
 
-    // Validar projeto se informado (apenas se for um ID válido de projeto)
-    // Se for uma string de ordem de serviço, não validar como projeto
+    // Validar projeto se informado (apenas se for um ID válido de projeto - CUID)
     if (data.projectId) {
-      // Tentar encontrar como projeto apenas se parecer um ID válido (CUID)
-      // IDs CUID têm 25 caracteres e começam com 'c'
       const isProjectId = data.projectId.length === 25 && data.projectId.startsWith('c');
-      
+
       if (isProjectId) {
         const project = await prisma.project.findUnique({
           where: { id: data.projectId }
@@ -77,9 +94,7 @@ export class MaterialRequestService {
             throw new Error('O projeto não pertence ao centro de custo informado');
           }
         }
-        // Se não encontrar como projeto, tratar como ordem de serviço (texto livre)
       }
-      // Se não for um ID válido, tratar como ordem de serviço (texto livre)
     }
 
     // Validar materiais
@@ -87,12 +102,13 @@ export class MaterialRequestService {
       throw new Error('É necessário informar pelo menos um item');
     }
 
-    // Validar quantidades
+    // Validar quantidades (usar Number.isFinite — evita strings inválidas passarem na checagem antiga)
     for (const item of data.items) {
       if (!item.materialId) {
         throw new Error('ID do material é obrigatório para todos os itens');
       }
-      if (!item.quantity || item.quantity <= 0) {
+      const qty = Number(item.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
         throw new Error('Quantidade deve ser maior que zero para todos os itens');
       }
     }
@@ -116,9 +132,17 @@ export class MaterialRequestService {
     const materialMap = new Map(materials.map(m => [m.id, m]));
 
     // projectId só pode ser usado se for ID válido de projeto (CUID) - senão viola FK
-    const projectId = data.projectId && data.projectId.length === 25 && data.projectId.startsWith('c')
-      ? data.projectId
-      : undefined;
+    const projectId =
+      data.projectId && data.projectId.length === 25 && data.projectId.startsWith('c')
+        ? data.projectId
+        : undefined;
+
+    // Ordem de serviço: preferir campo explícito; fallback para projectId quando vier texto livre
+    const serviceOrder =
+      (data.serviceOrder || '').trim() ||
+      (data.projectId && !(data.projectId.length === 25 && data.projectId.startsWith('c'))
+        ? data.projectId.trim()
+        : undefined);
 
     // Criar requisição com itens
     const request = await prisma.materialRequest.create({
@@ -127,22 +151,29 @@ export class MaterialRequestService {
         requestedBy: data.requestedBy,
         costCenterId: data.costCenterId,
         projectId,
+        serviceOrder,
         description: data.description,
         priority: data.priority || 'MEDIUM',
         status: 'PENDING',
         items: {
           create: data.items.map(item => {
             const material = materialMap.get(item.materialId);
-            const unitPrice = material?.medianPrice || 0;
-            const totalPrice = Number(unitPrice) * item.quantity;
+            const qty = Number(item.quantity);
+            const rawMedian = material?.medianPrice;
+            const unitPriceNum = rawMedian != null ? Number(rawMedian) : 0;
+            const safeUnit = Number.isFinite(unitPriceNum) ? unitPriceNum : 0;
+            const totalPrice = safeUnit * qty;
+            const safeTotal = Number.isFinite(totalPrice) ? totalPrice : 0;
 
             return {
               materialId: item.materialId,
-              quantity: item.quantity,
+              quantity: qty,
               unit: material?.unit || 'UN',
-              unitPrice: unitPrice,
-              totalPrice: totalPrice,
+              unitPrice: safeUnit,
+              totalPrice: safeTotal,
               notes: item.notes,
+              attachmentUrl: item.attachmentUrl ?? null,
+              attachmentName: item.attachmentName ?? null,
               status: 'PENDING'
             };
           })
@@ -310,24 +341,56 @@ export class MaterialRequestService {
     data: UpdateMaterialRequestStatusData,
     userId: string
   ) {
+    const existing = await prisma.materialRequest.findUnique({ where: { id } });
+    if (!existing) {
+      throw new Error('Requisição não encontrada');
+    }
+
+    // Fase "REJECTED" foi removida do fluxo: tratar como CANCELLED por compatibilidade.
+    const nextStatus = (data.status === 'REJECTED' ? 'CANCELLED' : data.status) as UpdateMaterialRequestStatusData['status'];
+
+    if (data.status === 'IN_REVIEW') {
+      if (existing.status !== 'PENDING') {
+        throw new Error('Apenas requisições pendentes podem ser enviadas para correção');
+      }
+    }
+
+    if (data.status === 'PENDING' && existing.status === 'IN_REVIEW') {
+      if (existing.requestedBy !== userId) {
+        throw new Error('Apenas o solicitante pode reenviar a requisição após correção');
+      }
+    }
+
+    if (nextStatus === 'APPROVED') {
+      if (existing.status !== 'PENDING') {
+        throw new Error('Aprove apenas requisições pendentes');
+      }
+    }
+
+    if (nextStatus === 'CANCELLED') {
+      if (existing.requestedBy === userId) {
+        if (existing.status === 'FULFILLED' || existing.status === 'CANCELLED') {
+          throw new Error('Não é possível cancelar uma requisição já atendida ou cancelada');
+        }
+      } else {
+        if (existing.status !== 'PENDING' && existing.status !== 'IN_REVIEW') {
+          throw new Error('Apenas requisições pendentes ou em correção podem ser canceladas pelo compras');
+        }
+      }
+    }
+
     const updateData: any = {
-      status: data.status,
+      status: nextStatus,
       updatedAt: new Date()
     };
 
-    if (data.status === 'APPROVED' && data.approvedBy) {
+    if (nextStatus === 'APPROVED' && data.approvedBy) {
       updateData.approvedBy = data.approvedBy;
       updateData.approvedAt = new Date();
     }
 
-    if (data.status === 'REJECTED' && data.rejectedBy) {
-      updateData.rejectedBy = data.rejectedBy;
-      updateData.rejectedAt = new Date();
-      updateData.rejectionReason = data.rejectionReason;
-    }
-
     // Se todos os itens foram atendidos, marcar como FULFILLED
-    if (data.status === 'FULFILLED') {
+    if (nextStatus === 'FULFILLED') {
       updateData.completedAt = new Date();
     }
 
@@ -351,6 +414,124 @@ export class MaterialRequestService {
         }
       }
     });
+  }
+
+  /**
+   * Solicitante edita a RM em Correção RM (IN_REVIEW). Opcionalmente reenvia para análise (PENDING).
+   */
+  async updateMaterialRequestInCorrection(
+    id: string,
+    userId: string,
+    data: UpdateMaterialRequestCorrectionData
+  ) {
+    const existing = await prisma.materialRequest.findUnique({
+      where: { id },
+      include: { items: true }
+    });
+
+    if (!existing) {
+      throw new Error('Requisição não encontrada');
+    }
+    if (existing.requestedBy !== userId) {
+      throw new Error('Apenas o solicitante pode editar esta requisição');
+    }
+    if (existing.status !== 'IN_REVIEW') {
+      throw new Error('Só é possível editar requisições em Correção RM');
+    }
+
+    const costCenter = await prisma.costCenter.findUnique({
+      where: { id: data.costCenterId }
+    });
+    if (!costCenter || !costCenter.isActive) {
+      throw new Error('Centro de custo não encontrado ou inativo');
+    }
+
+    if (!data.items || data.items.length === 0) {
+      throw new Error('É necessário informar pelo menos um item');
+    }
+    for (const item of data.items) {
+      if (!item.materialId) {
+        throw new Error('ID do material é obrigatório para todos os itens');
+      }
+      const qty = Number(item.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new Error('Quantidade deve ser maior que zero para todos os itens');
+      }
+    }
+
+    if (data.projectId) {
+      const isProjectId = data.projectId.length === 25 && data.projectId.startsWith('c');
+      if (isProjectId) {
+        const project = await prisma.project.findUnique({
+          where: { id: data.projectId }
+        });
+        if (project && project.isActive && project.costCenterId !== data.costCenterId) {
+          throw new Error('O projeto não pertence ao centro de custo informado');
+        }
+      }
+    }
+
+    const materials = await prisma.engineeringMaterial.findMany({
+      where: {
+        id: { in: data.items.map((i) => i.materialId) },
+        isActive: true
+      }
+    });
+    if (materials.length !== data.items.length) {
+      throw new Error('Um ou mais materiais não foram encontrados ou estão inativos');
+    }
+    const materialMap = new Map(materials.map((m) => [m.id, m]));
+
+    const projectId =
+      data.projectId && data.projectId.length === 25 && data.projectId.startsWith('c')
+        ? data.projectId
+        : null;
+
+    const serviceOrder =
+      (data.serviceOrder || '').trim() ||
+      (data.projectId && !(data.projectId.length === 25 && data.projectId.startsWith('c'))
+        ? data.projectId.trim()
+        : null);
+
+    const itemCreates = data.items.map((item) => {
+      const material = materialMap.get(item.materialId)!;
+      const qty = Number(item.quantity);
+      const rawMedian = material.medianPrice;
+      const unitPriceNum = rawMedian != null ? Number(rawMedian) : 0;
+      const safeUnit = Number.isFinite(unitPriceNum) ? unitPriceNum : 0;
+      const totalPrice = safeUnit * qty;
+      const safeTotal = Number.isFinite(totalPrice) ? totalPrice : 0;
+      return {
+        materialId: item.materialId,
+        quantity: qty,
+        unit: material.unit || 'UN',
+        unitPrice: safeUnit,
+        totalPrice: safeTotal,
+        notes: item.notes || null,
+        attachmentUrl: item.attachmentUrl ?? null,
+        attachmentName: item.attachmentName ?? null,
+        status: 'PENDING' as const
+      };
+    });
+
+    await prisma.materialRequest.update({
+      where: { id },
+      data: {
+        costCenterId: data.costCenterId,
+        projectId,
+        serviceOrder,
+        description: data.description ?? null,
+        priority: data.priority || existing.priority,
+        ...(data.submitForApproval ? { status: 'PENDING' } : {}),
+        updatedAt: new Date(),
+        items: {
+          deleteMany: {},
+          create: itemCreates
+        }
+      }
+    });
+
+    return await this.getMaterialRequestById(id);
   }
 
   /**

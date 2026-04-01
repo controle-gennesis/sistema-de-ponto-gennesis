@@ -159,6 +159,7 @@ export function useRoutePermission(route: string) {
     '/relatorios/alocacao': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
     '/ponto/centros-custo': isAdministrator || isDepartmentPessoal, // Apenas Administrador ou Departamento Pessoal
     '/ponto/materiais-construcao': isAdministrator || isDepartmentPessoal, // Apenas Administrador ou Departamento Pessoal
+    '/ponto/andamento-da-os': true, // Engenharia — andamento das OS (mesmo acesso dos demais itens da área)
   };
 
   return {

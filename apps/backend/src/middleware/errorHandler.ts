@@ -43,7 +43,12 @@ export const errorHandler = (
 
   // 🔸 Erros do Prisma
   if (err.name === 'PrismaClientValidationError') {
-    error = { message: 'Dados inválidos fornecidos', statusCode: 400 } as AppError;
+    const prismaMsg = err.message || '';
+    const message =
+      process.env.NODE_ENV === 'development'
+        ? `Dados inválidos: ${prismaMsg}`
+        : 'Dados inválidos fornecidos';
+    error = { message, statusCode: 400 } as AppError;
   }
 
   if (err.name === 'PrismaClientKnownRequestError') {

@@ -41,7 +41,9 @@ import {
   Building2,
   Bot,
   Cake,
-  Calculator
+  Calculator,
+  ClipboardList,
+  FileCheck
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTheme } from '@/context/ThemeContext';
@@ -299,6 +301,34 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: Calculator,
             description: 'Criar orçamentos com composições e serviços padrão',
             permission: true
+          },
+          {
+            name: 'Contratos',
+            href: '/ponto/contratos',
+            icon: FileText,
+            description: 'Cadastro de contratos da engenharia',
+            permission: true
+          },
+          {
+            name: 'Controle Geral de Contratos',
+            href: '/ponto/contratos/controle-geral',
+            icon: LayoutDashboard,
+            description: 'Visão consolidada de todos os contratos',
+            permission: true
+          },
+          {
+            name: 'Ordem de Serviço',
+            href: '/ponto/andamento-da-os',
+            icon: ClipboardList,
+            description: 'Acompanhamento e controle das ordens de serviço',
+            permission: true
+          },
+          {
+            name: 'Pleitos Gerados',
+            href: '/ponto/pleitos-gerados',
+            icon: FileCheck,
+            description: 'Visualizar todos os pleitos com valor pleiteado',
+            permission: true
           }
         ]
       },
@@ -319,6 +349,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/gerenciar-materiais',
             icon: Package,
             description: 'Aprovar SC e criar OC',
+            permission: isAdministrator || isDepartmentCompras
+          },
+          {
+            name: 'Mapa de Cotação',
+            href: '/ponto/mapa-cotacao',
+            icon: FileSpreadsheet,
+            description: 'Comparar cotações entre fornecedores e gerar OC por vencedor',
             permission: isAdministrator || isDepartmentCompras
           },
           {

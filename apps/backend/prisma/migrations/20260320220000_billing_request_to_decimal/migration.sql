@@ -1,0 +1,3 @@
+-- AlterTable (TEXT -> DECIMAL)
+ALTER TABLE "pleitos" ALTER COLUMN "billingRequest" DROP DEFAULT;
+ALTER TABLE "pleitos" ALTER COLUMN "billingRequest" TYPE DECIMAL(15,2) USING NULL;

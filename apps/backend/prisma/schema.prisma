@@ -47,6 +47,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   purchaseOrdersCreated     PurchaseOrder[]        @relation("PurchaseOrderCreator")
   purchaseOrdersApproved    PurchaseOrder[]        @relation("PurchaseOrderApprover")
+  quoteMapsCreated          QuoteMap[]             @relation("QuoteMapCreator")
 
   @@map("users")
 }
@@ -695,10 +696,130 @@ model CostCenter {
   engineeringMaterials EngineeringMaterial[]
   projects             Project[]
   materialRequests     MaterialRequest[]
+  contracts            Contract[]
 
   @@index([code])
   @@index([isActive])
   @@map("cost_centers")
+}
+
+// Modelo de Contrato (Engenharia)
+model Contract {
+  id               String    @id @default(cuid())
+  name             String    // Nome do contrato
+  number           String    @unique // Número do contrato
+  startDate        DateTime  // Início da vigência
+  endDate          DateTime  // Fim da vigência
+  costCenterId     String    // Centro de custo associado
+  valuePlusAddenda Decimal   @db.Decimal(15, 2) // Valor mais aditivos
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relacionamentos
+  costCenter CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  billings     ContractBilling[]
+  annualValues ContractAnnualValue[]
+  pleitos      Pleito[]
+  weeklyProductions ContractWeeklyProduction[]
+
+  @@index([costCenterId])
+  @@index([number])
+  @@map("contracts")
+}
+
+// Valor anual customizado por ano (permite valor diferente a cada ano)
+model ContractAnnualValue {
+  id         String   @id @default(cuid())
+  contractId String
+  year       Int      // Ano (ex: 2025)
+  value      Decimal  @db.Decimal(15, 2) // Valor anual para este ano
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relacionamentos
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@unique([contractId, year])
+  @@index([contractId])
+  @@map("contract_annual_values")
+}
+
+// Modelo de Faturamento do Contrato
+model ContractBilling {
+  id            String   @id @default(cuid())
+  contractId    String
+  issueDate     DateTime // Data de emissão
+  invoiceNumber String   // Número da nota fiscal
+  serviceOrder  String   // Ordem de serviço
+  divSe         String?  // OS / SE
+  grossValue    Decimal  @db.Decimal(15, 2) // Valor bruto
+  netValue      Decimal  @db.Decimal(15, 2) // Valor líquido
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relacionamentos
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@map("contract_billings")
+}
+
+// Produção Semanal do contrato
+model ContractWeeklyProduction {
+  id                    String   @id @default(cuid())
+  contractId            String
+  fillingDate           DateTime  @default(now()) // Data em que o usuário preencheu (não editável)
+  divSe                 String   // OS / SE
+  weeklyProductionValue Decimal  @db.Decimal(15, 2) // Valor da Produção Semanal
+  responsiblePerson     String   // Responsável pelo Preenchimento
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@map("contract_weekly_productions")
+}
+
+// Andamento da OS — acompanhamento de ordens de serviço (Engenharia); tabela API: pleitos
+model Pleito {
+  id                   String    @id @default(cuid())
+  creationMonth        String?   // Mês de criação (01-12)
+  creationYear         Int?      // Ano de criação
+  startDate            DateTime? // Data início
+  endDate              DateTime? // Data término
+  budgetStatus         String?   // Status orçamento
+  folderNumber         String?   // Nº pasta
+  lot                  String?   // Lote
+  divSe                String?   // Div SE
+  location             String?   // Local
+  unit                 String?   // Unidade
+  serviceDescription   String    @db.Text // Descrição do serviço
+  budget               String?   // Orçamento (referência/texto)
+  executionStatus      String?   // Status execução
+  billingStatus        String?   // Status faturamento
+  updatedContractId    String?   // ID atualizado contrato
+  accumulatedBilled    Decimal?  @db.Decimal(15, 2) // Acumulado faturado (moeda)
+  billingRequest       Decimal?  @db.Decimal(15, 2) // Pendente faturamento (moeda)
+  invoiceNumber        String?   // Nº nota
+  estimator            String?   // Orçamentista
+  budgetAmount1        Decimal?  @db.Decimal(15, 2) // Orçamento R$ 1
+  budgetAmount2        Decimal?  @db.Decimal(15, 2)
+  budgetAmount3        Decimal?  @db.Decimal(15, 2)
+  budgetAmount4        Decimal?  @db.Decimal(15, 2)
+  pv                   String?   // RVI — FEITO ou PENDENTE
+  ipi                  String?   // RVF — FEITO ou PENDENTE
+  reportsBilling       String?   // Cobrança laudos
+  engineer             String?   // Engenheiro
+  supervisor           String?   // Encarregado
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  updatedContract Contract? @relation(fields: [updatedContractId], references: [id], onDelete: SetNull)
+
+  @@index([folderNumber])
+  @@index([updatedContractId])
+  @@map("pleitos")
 }
 
 // Modelo de Obra/Projeto
@@ -741,6 +862,7 @@ model MaterialRequest {
   requestedBy  String  // ID do usuário que solicitou
   costCenterId String  // Centro de custo
   projectId    String? // Obra/Projeto (opcional)
+  serviceOrder String? // Ordem de serviço (texto livre)
   description  String? // Descrição/observações da requisição
   status       MaterialRequestStatus @default(PENDING) // Status da requisição
   priority     MaterialRequestPriority @default(MEDIUM) // Prioridade
@@ -762,6 +884,7 @@ model MaterialRequest {
   project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   items        MaterialRequestItem[]
   purchaseOrders PurchaseOrder[]
+  quoteMaps    QuoteMap[] @relation("QuoteMapMaterialRequest")
 
   @@index([requestNumber])
   @@index([requestedBy])
@@ -774,7 +897,7 @@ model MaterialRequest {
 
 enum MaterialRequestStatus {
   PENDING     // Pendente - Aguardando análise de compras
-  IN_REVIEW   // Em análise - Compras está analisando
+  IN_REVIEW   // Correção RM - aguardando ajuste do solicitante
   APPROVED    // Aprovada - Compras aprovou e está processando
   PARTIALLY_FULFILLED // Parcialmente atendida - Alguns itens foram atendidos
   FULFILLED   // Atendida - Todos os itens foram atendidos
@@ -799,6 +922,8 @@ model MaterialRequestItem {
   unitPrice         Decimal? @db.Decimal(12, 2) // Preço unitário no momento da requisição
   totalPrice        Decimal? @db.Decimal(12, 2) // Preço total (quantity * unitPrice)
   notes             String?  // Observações sobre o item
+  attachmentUrl     String?  // URL relativa do anexo (ex.: /uploads/material-request-items/...)
+  attachmentName    String?  // Nome original do arquivo
   status            MaterialRequestItemStatus @default(PENDING) // Status do item
   fulfilledQuantity Decimal? @db.Decimal(10, 2) // Quantidade já atendida
   createdAt         DateTime @default(now())
@@ -808,6 +933,8 @@ model MaterialRequestItem {
   materialRequest   MaterialRequest @relation(fields: [materialRequestId], references: [id], onDelete: Cascade)
   material          EngineeringMaterial @relation(fields: [materialId], references: [id], onDelete: Restrict)
   purchaseOrderItems PurchaseOrderItem[]
+  quoteMapSupplierItems QuoteMapSupplierItem[]
+  quoteMapWinnerItems   QuoteMapWinnerItem[]
 
   @@index([materialRequestId])
   @@index([materialId])
@@ -842,6 +969,9 @@ model Supplier {
   updatedAt   DateTime @updatedAt
 
   purchaseOrders PurchaseOrder[]
+  quoteMapSuppliers     QuoteMapSupplier[]     @relation("QuoteMapSupplierSupplier")
+  quoteMapSupplierItems QuoteMapSupplierItem[] @relation("QuoteMapSupplierItemSupplier")
+  quoteMapWinnerItems   QuoteMapWinnerItem[]   @relation("QuoteMapWinnerSupplier")
 
   @@index([code])
   @@index([isActive])
@@ -853,11 +983,20 @@ model PurchaseOrder {
   id                String   @id @default(cuid())
   orderNumber       String   @unique // Número da OC (ex: OC-2025-001)
   materialRequestId String?  // SC que originou (opcional)
+  quoteMapId        String?  // Mapa de cotação que gerou esta OC (opcional)
   supplierId        String   // Fornecedor
-  status            PurchaseOrderStatus @default(DRAFT)
+  status            PurchaseOrderStatus @default(PENDING)
   orderDate         DateTime @default(now())
   expectedDelivery  DateTime? // Data prevista de entrega
   deliveryAddress   String?  // Endereço de entrega
+  /// AVISTA | BOLETO
+  paymentType       String?
+  /// AVISTA | BOLETO_30 | BOLETO_28 (rótulos: à vista, boleto 30 dias, boleto 28 dias)
+  paymentCondition  String?
+  paymentDetails    String?  @db.Text // Dados do pagamento (texto livre)
+  boletoAttachmentUrl  String? // Caminho público ex.: /uploads/purchase-orders/...
+  boletoAttachmentName String? // Nome original do arquivo
+  amountToPay       Decimal? @db.Decimal(15, 2) // Valor a ser pago
   notes             String?
   createdBy         String   // Usuário que criou
   approvedBy        String?  // Usuário que aprovou
@@ -866,6 +1005,7 @@ model PurchaseOrder {
   updatedAt         DateTime @updatedAt
 
   materialRequest   MaterialRequest? @relation(fields: [materialRequestId], references: [id], onDelete: SetNull)
+  quoteMap          QuoteMap? @relation(fields: [quoteMapId], references: [id], onDelete: SetNull)
   supplier          Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   creator           User @relation("PurchaseOrderCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   approver          User? @relation("PurchaseOrderApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
@@ -873,6 +1013,7 @@ model PurchaseOrder {
 
   @@index([orderNumber])
   @@index([materialRequestId])
+  @@index([quoteMapId])
   @@index([supplierId])
   @@index([status])
   @@index([orderDate])
@@ -881,11 +1022,15 @@ model PurchaseOrder {
 
 enum PurchaseOrderStatus {
   DRAFT       // Rascunho
-  PENDING     // Pendente de aprovação
-  APPROVED    // Aprovada
+  PENDING_COMPRAS // OC - Aprovação Compras (0ª fase)
+  PENDING     // OC - Aprovação Gestor (1ª fase)
+  PENDING_DIRETORIA // OC - Aprovação Diretoria (2ª fase)
+  IN_REVIEW   // CORREÇÃO OC - aguardando ajuste de quem criou
+  APPROVED    // Aprovada (após diretoria)
   SENT        // Enviada ao fornecedor
   PARTIALLY_RECEIVED  // Parcialmente recebida
   RECEIVED    // Totalmente recebida
+  REJECTED    // Reprovada
   CANCELLED   // Cancelada
 }
 
@@ -912,6 +1057,107 @@ model PurchaseOrderItem {
   @@index([materialRequestItemId])
   @@index([materialId])
   @@map("purchase_order_items")
+}
+
+// Modelo de Mapa de Cotação (comparação de fornecedores por item)
+model QuoteMap {
+  id                String   @id @default(cuid())
+  materialRequestId String
+  createdBy         String
+  status            QuoteMapStatus @default(DRAFT)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relacionamentos
+  materialRequest   MaterialRequest @relation("QuoteMapMaterialRequest", fields: [materialRequestId], references: [id], onDelete: Cascade)
+  creator           User @relation("QuoteMapCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  purchaseOrders    PurchaseOrder[]
+  suppliers         QuoteMapSupplier[]
+  winners           QuoteMapWinnerItem[]
+  supplierItems     QuoteMapSupplierItem[]
+
+  @@index([materialRequestId])
+  @@index([createdBy])
+  @@map("quote_maps")
+}
+
+enum QuoteMapStatus {
+  DRAFT // Rascunho
+}
+
+// Frete por fornecedor dentro do mapa + campos de pagamento quando for gerar OC
+model QuoteMapSupplier {
+  id          String   @id @default(cuid())
+  quoteMapId  String
+  supplierId  String
+  freight     Decimal? @db.Decimal(12, 2)
+
+  // Campos de pagamento (usados na geração de OC) - opcionais
+  paymentType       String?
+  paymentCondition  String?
+  paymentDetails    String? @db.Text
+  observations      String?
+  amountToPay       Decimal? @db.Decimal(15, 2)
+  boletoAttachmentUrl  String?
+  boletoAttachmentName String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relacionamentos
+  quoteMap    QuoteMap @relation(fields: [quoteMapId], references: [id], onDelete: Cascade)
+  supplier    Supplier @relation("QuoteMapSupplierSupplier", fields: [supplierId], references: [id], onDelete: Restrict)
+  items       QuoteMapSupplierItem[]
+
+  @@unique([quoteMapId, supplierId])
+  @@index([quoteMapId])
+  @@map("quote_map_suppliers")
+}
+
+// Preço unitário cotado por item da SC e fornecedor
+model QuoteMapSupplierItem {
+  id                   String   @id @default(cuid())
+  quoteMapId            String
+  supplierId            String
+  materialRequestItemId String
+  unitPrice            Decimal @db.Decimal(12, 2)
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  quoteMap  QuoteMap @relation(fields: [quoteMapId], references: [id], onDelete: Cascade)
+  supplier  Supplier @relation("QuoteMapSupplierItemSupplier", fields: [supplierId], references: [id], onDelete: Restrict)
+  materialRequestItem MaterialRequestItem @relation(fields: [materialRequestItemId], references: [id], onDelete: Cascade)
+  quoteMapSupplier QuoteMapSupplier @relation(fields: [quoteMapId, supplierId], references: [quoteMapId, supplierId], onDelete: Cascade)
+
+  @@unique([quoteMapId, supplierId, materialRequestItemId])
+  @@index([quoteMapId])
+  @@index([materialRequestItemId])
+  @@map("quote_map_supplier_items")
+}
+
+// Vencedor calculado por item (menor (unitPrice * quantidade) + frete)
+model QuoteMapWinnerItem {
+  id                   String   @id @default(cuid())
+  quoteMapId            String
+  materialRequestItemId String
+  winnerSupplierId     String
+
+  winnerScore      Decimal @db.Decimal(15, 2)
+  winnerUnitPrice  Decimal @db.Decimal(12, 2)
+  freight           Decimal @db.Decimal(12, 2)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  quoteMap    QuoteMap @relation(fields: [quoteMapId], references: [id], onDelete: Cascade)
+  materialRequestItem MaterialRequestItem @relation(fields: [materialRequestItemId], references: [id], onDelete: Cascade)
+  winnerSupplier Supplier @relation("QuoteMapWinnerSupplier", fields: [winnerSupplierId], references: [id], onDelete: Restrict)
+
+  @@unique([quoteMapId, materialRequestItemId])
+  @@index([quoteMapId])
+  @@index([winnerSupplierId])
+  @@map("quote_map_winner_items")
 }
 
 // Modelo de Categoria de Material
