@@ -162,10 +162,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: true
           },
           {
-            name: 'Conversas WhatsApp',
+            name: 'Central de Atendimentos',
             href: '/ponto/conversas-whatsapp',
             icon: MessageSquare,
-            description: 'Conversas do chatbot WhatsApp para o pessoal ver',
+            description: 'Fila de atendimento humano do WhatsApp',
             permission: isAdministrator || isDepartmentPessoal
           }
         ]

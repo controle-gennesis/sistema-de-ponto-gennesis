@@ -35,6 +35,9 @@ const DEPARTMENTS = [
   { value: 'Financeiro', label: 'Financeiro' },
 ];
 
+/** `false` = esconde só o botão flutuante na tela; modal e lógica continuam no código. Para voltar a exibir, use `true`. */
+const SHOW_CHAT_FLOAT_BUTTON = false;
+
 interface Chat {
   id: string;
   initiatorId: string;
@@ -554,26 +557,29 @@ export function ChatWidget() {
 
   return (
     <>
-      {/* Botão Flutuante */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 w-14 h-14 bg-red-600 text-white rounded-full shadow-2xl hover:bg-red-700 hover:scale-110 transition-all duration-300 z-50 flex items-center justify-center group"
-        style={{ 
-          boxShadow: '0 8px 24px rgba(220, 38, 38, 0.4)',
-        }}
-      >
-        <MessageCircle className="w-6 h-6 transition-transform" />
-        {totalNotifications > 0 && (
-          <span 
-            className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-bounce shadow-lg"
-            style={{
-              animation: 'bounce 1s infinite',
-            }}
-          >
-            {totalNotifications > 9 ? '9+' : totalNotifications}
-          </span>
-        )}
-      </button>
+      {/* Botão Flutuante — visível só se SHOW_CHAT_FLOAT_BUTTON */}
+      {SHOW_CHAT_FLOAT_BUTTON && (
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="fixed bottom-6 right-6 w-14 h-14 bg-red-600 text-white rounded-full shadow-2xl hover:bg-red-700 hover:scale-110 transition-all duration-300 z-50 flex items-center justify-center group"
+          style={{
+            boxShadow: '0 8px 24px rgba(220, 38, 38, 0.4)',
+          }}
+        >
+          <MessageCircle className="w-6 h-6 transition-transform" />
+          {totalNotifications > 0 && (
+            <span
+              className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-bounce shadow-lg"
+              style={{
+                animation: 'bounce 1s infinite',
+              }}
+            >
+              {totalNotifications > 9 ? '9+' : totalNotifications}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* Modal de Chat */}
       {isOpen && (
