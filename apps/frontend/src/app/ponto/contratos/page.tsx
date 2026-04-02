@@ -33,8 +33,13 @@ interface Contract {
 
 function formatDate(dateStr: string) {
   if (!dateStr) return '-';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('pt-BR');
+  const raw = String(dateStr).trim();
+  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = only
+    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
+    : new Date(raw);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 function formatCurrency(value: number) {
@@ -60,8 +65,14 @@ function parseCurrencyInput(value: string): number {
 
 function getYearsBetween(startDate: string, endDate: string): number {
   if (!startDate || !endDate) return 0;
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+  const startMatch = String(startDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const endMatch = String(endDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const start = startMatch
+    ? new Date(`${startMatch[1]}-${startMatch[2]}-${startMatch[3]}T12:00:00`)
+    : new Date(startDate);
+  const end = endMatch
+    ? new Date(`${endMatch[1]}-${endMatch[2]}-${endMatch[3]}T12:00:00`)
+    : new Date(endDate);
   if (end <= start) return 0;
   // Conta anos completos de vigência (ex: 01/03/2026 a 01/03/2028 = 2 anos)
   const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
@@ -124,6 +135,7 @@ export default function ContratosPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] });
+      queryClient.invalidateQueries({ queryKey: ['permission-contracts-list'] });
       setShowForm(false);
       resetForm();
       toast.success('Contrato criado com sucesso!');
@@ -140,6 +152,7 @@ export default function ContratosPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] });
+      queryClient.invalidateQueries({ queryKey: ['permission-contracts-list'] });
       setShowForm(false);
       setEditingContract(null);
       resetForm();
@@ -157,6 +170,7 @@ export default function ContratosPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] });
+      queryClient.invalidateQueries({ queryKey: ['permission-contracts-list'] });
       setShowDeleteModal(null);
       toast.success('Contrato excluído com sucesso!');
     },

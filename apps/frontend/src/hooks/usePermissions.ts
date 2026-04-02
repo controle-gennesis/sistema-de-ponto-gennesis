@@ -1,63 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
+import {
+  pathToModuleKey,
+  PERMISSION_ACCESS_ACTION,
+} from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
-import { CARGOS_LIST } from '@/constants/cargos';
 
-// Função para gerar permissões baseadas na lista de cargos
-const generatePositionPermissions = () => {
-  const permissions: Record<string, any> = {};
-  
-  // Permissões para Administrador - Acesso total
-  permissions['Administrador'] = {
-    canAccessPayroll: true,
-    canManageEmployees: true,
-    canViewReports: true,
-    canManageVacations: true,
-    canManageAbsences: true,
-    canManageBankHours: true,
-    canViewBirthdays: true,
-    canRegisterTime: true,
-    canViewDashboard: true,
-  };
-  
-  CARGOS_LIST.forEach(cargo => {
-    // Pular Administrador pois já foi definido acima
-    if (cargo === 'Administrador') return;
-    // Definir permissões baseadas no cargo
-    if (cargo === 'Diretor') {
-      // DIREÇÃO - Acesso total
-      permissions[cargo] = {
-        canAccessPayroll: true,
-        canManageEmployees: true,
-        canViewReports: true,
-        canManageVacations: true,
-        canManageAbsences: true,
-        canManageBankHours: true,
-        canViewBirthdays: true,
-        canRegisterTime: true,
-        canViewDashboard: true,
-      };
-    } else {
-      // TODOS OS OUTROS CARGOS (Gerente, Coordenador, Supervisor, Encarregado, Mestre de Obras, Engenheiro, Orçamentista, etc.)
-      // Permissões básicas: Registrar Ponto, Registrar Ausência, Correção de Ponto, Solicitar Férias
-      permissions[cargo] = {
-        canAccessPayroll: false,
-        canManageEmployees: false,
-        canViewReports: false,
-        canManageVacations: false, // Não pode gerenciar férias de outros, mas pode solicitar suas próprias
-        canManageAbsences: false, // Não pode gerenciar ausências de outros, mas pode registrar suas próprias
-        canManageBankHours: false,
-        canViewBirthdays: false,
-        canRegisterTime: true, // Pode registrar ponto
-        canViewDashboard: false,
-      };
-    }
-  });
-  
-  return permissions;
-};
+type PermissionItem = { module: string; action: string };
 
-// Definição das permissões por cargo - Gerada dinamicamente
-const POSITION_PERMISSIONS = generatePositionPermissions();
+const pk = pathToModuleKey;
 
 export function usePermissions() {
   const { data: userData, isLoading } = useQuery({
@@ -71,54 +21,79 @@ export function usePermissions() {
   const user = userData?.data;
   const userPosition = user?.employee?.position;
   const userDepartment = user?.employee?.department;
+  const isAdministrator = userPosition === 'Administrador';
 
-  const getPermissions = () => {
-    if (!userPosition) {
-      return POSITION_PERMISSIONS['Analista'];
+  const { data: permissionData } = useQuery({
+    queryKey: ['me-permissions'],
+    queryFn: async () => {
+      const res = await api.get('/permissions/me');
+      return res.data?.data;
+    },
+    enabled: !!user,
+  });
+
+  const allowedSet = new Set<string>(
+    ((permissionData?.permissions || []) as PermissionItem[])
+      .filter((p) => p.action === PERMISSION_ACCESS_ACTION)
+      .map((p) => p.module)
+  );
+
+  const allowedContractIds: string[] = permissionData?.allowedContractIds ?? [];
+  const allowedContractIdSet = new Set(allowedContractIds);
+
+  /** Acesso total ao submenu (módulo) identificado pela chave do registro central. */
+  const can = (moduleKey: string) => {
+    if (isAdministrator || permissionData?.isAdmin) {
+      return true;
     }
-    
-    // Se for Administrador, retornar permissões de acesso total
-    if (userPosition === 'Administrador') {
-      return POSITION_PERMISSIONS['Administrador'];
-    }
-    
-    const permissions = POSITION_PERMISSIONS[userPosition as keyof typeof POSITION_PERMISSIONS] || POSITION_PERMISSIONS['Analista'];
-    return permissions;
+    return allowedSet.has(moduleKey);
   };
 
-  const permissions = getPermissions();
+  /** Acesso a um contrato específico (requer módulo Contratos + autorização explícita). */
+  const canAccessContract = (contractId: string) => {
+    if (isAdministrator || permissionData?.isAdmin) return true;
+    if (!can(pk('/ponto/contratos'))) return false;
+    return allowedContractIdSet.has(contractId);
+  };
 
-  // Verificar se o usuário é do Departamento Pessoal
   const isDepartmentPessoal = userDepartment?.toLowerCase().includes('departamento pessoal') || 
                                userDepartment?.toLowerCase().includes('pessoal');
 
-  // Verificar se o usuário é do setor Projetos
   const isDepartmentProjetos = userDepartment?.toLowerCase().includes('projetos');
 
-  // Verificar se o usuário é do setor Financeiro
   const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
 
-  // Se for Departamento Pessoal, tem acesso total (exceto gerenciar solicitações)
-  const finalPermissions = isDepartmentPessoal ? {
-    canAccessPayroll: true,
-    canManageEmployees: true,
-    canViewReports: true,
-    canManageVacations: true,
-    canManageAbsences: true,
-    canManageBankHours: true,
+  const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
+
+  const finalPermissions = {
+    canAccessPayroll: can(pk('/ponto/folha-pagamento')) || can(pk('/relatorios/alocacao')),
+    canManageEmployees: can(pk('/ponto/funcionarios')),
+    canViewReports: can(pk('/ponto/dashboard')),
+    canManageVacations:
+      can(pk('/ponto/gerenciar-ferias')) ||
+      can(pk('/ponto/ferias')) ||
+      can(pk('/ponto/gerenciar-feriados')),
+    canManageAbsences:
+      can(pk('/ponto/atestados')) || can(pk('/ponto/gerenciar-atestados')),
+    canManageBankHours: can(pk('/ponto/banco-horas')),
     canViewBirthdays: true,
     canRegisterTime: true,
-    canViewDashboard: true,
-  } : permissions;
+    canViewDashboard: can(pk('/ponto/dashboard')),
+  };
 
   return {
     user,
     userPosition,
     userDepartment,
+    isAdministrator,
     isDepartmentPessoal,
     isDepartmentProjetos,
     isDepartmentFinanceiro,
+    isDepartmentCompras,
     permissions: finalPermissions,
+    can,
+    allowedContractIds,
+    canAccessContract,
     isLoading,
     canAccessPayroll: finalPermissions.canAccessPayroll,
     canManageEmployees: finalPermissions.canManageEmployees,
@@ -132,34 +107,61 @@ export function usePermissions() {
   };
 }
 
-// Hook para verificar permissão de rota específica
 export function useRoutePermission(route: string) {
-  const { permissions, isLoading, isDepartmentPessoal, isDepartmentProjetos, isDepartmentFinanceiro, userPosition } = usePermissions();
+  const {
+    permissions,
+    isLoading,
+    isDepartmentPessoal,
+    isDepartmentProjetos,
+    isDepartmentFinanceiro,
+    isDepartmentCompras,
+    userPosition,
+    can,
+  } = usePermissions();
 
   if (isLoading) {
     return { hasAccess: false, isLoading: true };
   }
 
-  // Se for Administrador, tem acesso a todas as rotas
   const isAdministrator = userPosition === 'Administrador';
-  
+
   const routePermissions: Record<string, boolean> = {
     '/ponto': isAdministrator || isDepartmentPessoal || permissions.canRegisterTime,
     '/ponto/dashboard': isAdministrator || isDepartmentPessoal || permissions.canViewDashboard,
     '/ponto/funcionarios': isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
-    '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal, // Administrador ou Departamento Pessoal
-    '/ponto/atestados': true, // Todos podem registrar suas próprias ausências
-    '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal, // Administrador ou Departamento Pessoal
-    '/ponto/solicitacoes': true, // Todos podem ver suas próprias solicitações
-    '/ponto/gerenciar-solicitacoes': isAdministrator || isDepartmentProjetos, // Administrador ou setor Projetos (DEPARTAMENTO PESSOAL NÃO TEM ACESSO)
-    '/ponto/ferias': true, // Todos podem solicitar suas próprias férias
+    '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal || can(pk('/ponto/aniversariantes')),
+    '/ponto/atestados': isAdministrator || can(pk('/ponto/atestados')),
+    '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados')),
+    '/ponto/solicitacoes': isAdministrator || can(pk('/ponto/solicitacoes')),
+    '/ponto/gerenciar-solicitacoes': isAdministrator || isDepartmentProjetos || can(pk('/ponto/gerenciar-solicitacoes')),
+    '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
+    '/ponto/gerenciar-feriados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-feriados')),
     '/ponto/banco-horas': isAdministrator || isDepartmentPessoal || permissions.canManageBankHours,
     '/ponto/folha-pagamento': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
     '/relatorios/alocacao': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
-    '/ponto/centros-custo': isAdministrator || isDepartmentPessoal, // Apenas Administrador ou Departamento Pessoal
-    '/ponto/materiais-construcao': isAdministrator || isDepartmentPessoal, // Apenas Administrador ou Departamento Pessoal
-    '/ponto/andamento-da-os': true, // Engenharia — andamento das OS (mesmo acesso dos demais itens da área)
+    '/ponto/centros-custo': isAdministrator || isDepartmentPessoal || can(pk('/ponto/centros-custo')),
+    '/ponto/materiais-construcao': isAdministrator || isDepartmentPessoal || can(pk('/ponto/materiais-construcao')),
+    '/ponto/andamento-da-os': isAdministrator || can(pk('/ponto/andamento-da-os')),
+    '/ponto/permissoes': isAdministrator,
+    '/ponto/chatgpt': isAdministrator || can(pk('/ponto/chatgpt')),
+    '/ponto/bi': isAdministrator || can(pk('/ponto/bi')),
+    '/ponto/conversas-whatsapp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp')),
+    '/ponto/financeiro': isAdministrator || can(pk('/ponto/financeiro')),
+    '/ponto/financeiro/analise': isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise')),
+    '/ponto/financeiro/analise-extrato':
+      isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato')),
+    '/ponto/orcamento': isAdministrator || can(pk('/ponto/orcamento')),
+    '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
+    '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
+    '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
+    '/ponto/solicitar-materiais': isAdministrator || can(pk('/ponto/solicitar-materiais')),
+    '/ponto/gerenciar-materiais': isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais')),
+    '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),
+    '/ponto/ordem-de-compra': isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra')),
+    '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
+    '/ponto/natureza-orcamentaria':
+      isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria')),
   };
 
   return {

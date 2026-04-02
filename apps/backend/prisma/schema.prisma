@@ -48,6 +48,10 @@ model User {
   purchaseOrdersCreated     PurchaseOrder[]        @relation("PurchaseOrderCreator")
   purchaseOrdersApproved    PurchaseOrder[]        @relation("PurchaseOrderApprover")
   quoteMapsCreated          QuoteMap[]             @relation("QuoteMapCreator")
+  userPermissions           UserPermission[]       @relation("UserPermissionUser")
+  updatedPermissions        UserPermission[]       @relation("UserPermissionUpdatedBy")
+  userContractPermissions   UserContractPermission[] @relation("UserContractPermissionUser")
+  updatedContractPermissions UserContractPermission[] @relation("UserContractPermissionUpdatedBy")
 
   @@map("users")
 }
@@ -721,6 +725,7 @@ model Contract {
   annualValues ContractAnnualValue[]
   pleitos      Pleito[]
   weeklyProductions ContractWeeklyProduction[]
+  userPermissions   UserContractPermission[]
 
   @@index([costCenterId])
   @@index([number])
@@ -1328,6 +1333,44 @@ model PasswordResetToken {
   @@index([token])
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+model UserPermission {
+  id        String   @id @default(cuid())
+  userId    String
+  module    String
+  action    String
+  allowed   Boolean  @default(true)
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation("UserPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  updater   User?    @relation("UserPermissionUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, module, action])
+  @@index([userId])
+  @@index([module, action])
+  @@map("user_permissions")
+}
+
+/// Contratos que um usuário não-admin pode acessar (além da permissão de módulo "Contratos").
+model UserContractPermission {
+  id         String   @id @default(cuid())
+  userId     String
+  contractId String
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation("UserContractPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  updater  User?    @relation("UserContractPermissionUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, contractId])
+  @@index([userId])
+  @@index([contractId])
+  @@map("user_contract_permissions")
 }
 
 // Conversas do chatbot WhatsApp (Meta Cloud API)

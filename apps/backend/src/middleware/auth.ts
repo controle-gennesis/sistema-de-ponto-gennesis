@@ -8,6 +8,7 @@ export interface AuthRequest extends Request {
     id: string;
     email: string;
     role: string;
+    isAdmin: boolean;
   };
 }
 
@@ -53,6 +54,11 @@ export const authenticate = async (
         email: true,
         role: true,
         isActive: true,
+        employee: {
+          select: {
+            position: true,
+          },
+        },
       },
     });
 
@@ -68,6 +74,7 @@ export const authenticate = async (
       id: user.id,
       email: user.email,
       role: user.role,
+      isAdmin: (user.employee?.position || '').toLowerCase() === 'administrador',
     };
 
     next();
@@ -86,9 +93,32 @@ export const authorize = (...roles: string[]) => {
       return next(createError('Usuário não autenticado', 401));
     }
 
-    // Como só temos funcionários agora, sempre permitir acesso
+    if (req.user.isAdmin) {
+      return next();
+    }
+
+    if (roles.length > 0 && !roles.includes(req.user.role)) {
+      return next(createError('Acesso negado', 403));
+    }
+
     next();
   };
+};
+
+export const requireAdministrator = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user) {
+    return next(createError('Usuário não autenticado', 401));
+  }
+
+  if (!req.user.isAdmin) {
+    return next(createError('Acesso permitido apenas para Administrador', 403));
+  }
+
+  return next();
 };
 
 export const optionalAuth = async (
@@ -109,6 +139,11 @@ export const optionalAuth = async (
           email: true,
           role: true,
           isActive: true,
+          employee: {
+            select: {
+              position: true,
+            },
+          },
         },
       });
 
@@ -117,6 +152,7 @@ export const optionalAuth = async (
           id: user.id,
           email: user.email,
           role: user.role,
+          isAdmin: (user.employee?.position || '').toLowerCase() === 'administrador',
         };
       }
     }
@@ -166,6 +202,11 @@ export const authenticateForRefresh = async (
         email: true,
         role: true,
         isActive: true,
+        employee: {
+          select: {
+            position: true,
+          },
+        },
       },
     });
 
@@ -177,6 +218,7 @@ export const authenticateForRefresh = async (
       id: user.id,
       email: user.email,
       role: user.role,
+      isAdmin: (user.employee?.position || '').toLowerCase() === 'administrador',
     };
 
     next();

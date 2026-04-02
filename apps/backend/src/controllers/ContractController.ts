@@ -2,6 +2,31 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { parseDateInput } from '../utils/dateInput';
+import { assertContractAccess, getContractAccessForUser } from '../lib/contractAccess';
+
+/** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
+const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
+
+/** Valor orçado da OS: último R04…R01 preenchido; senão campo budget (texto). */
+function valorOrcadoFromPleito(p: {
+  budget: string | null;
+  budgetAmount1: unknown;
+  budgetAmount2: unknown;
+  budgetAmount3: unknown;
+  budgetAmount4: unknown;
+}): number {
+  const amounts = [p.budgetAmount4, p.budgetAmount3, p.budgetAmount2, p.budgetAmount1];
+  for (const v of amounts) {
+    if (v != null && Number(v) !== 0) return Number(v);
+  }
+  if (p.budget?.trim()) {
+    const s = String(p.budget).replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
 
 export class ContractController {
   /**
@@ -9,14 +34,24 @@ export class ContractController {
    */
   async getAllContracts(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw createError('Não autenticado', 401);
+      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none') {
+        throw createError('Sem permissão para acessar contratos', 403);
+      }
+
       const { search, page = 1, limit = 20 } = req.query;
 
       const where: any = {};
 
+      if (access.filter === 'ids') {
+        where.id = { in: access.ids };
+      }
+
       if (search) {
         where.OR = [
           { name: { contains: search as string, mode: 'insensitive' } },
-          { number: { contains: search as string, mode: 'insensitive' } }
+          { number: { contains: search as string, mode: 'insensitive' } },
         ];
       }
 
@@ -65,6 +100,8 @@ export class ContractController {
   async getContractById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+
+      await assertContractAccess(req, id);
 
       const contract = await prisma.contract.findUnique({
         where: { id },
@@ -132,8 +169,8 @@ export class ContractController {
       }
 
       const value = Number(valuePlusAddenda) || 0;
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseDateInput(startDate);
+      const end = parseDateInput(endDate);
 
       if (end < start) {
         throw createError('Data de fim da vigência deve ser posterior à data de início', 400);
@@ -174,6 +211,8 @@ export class ContractController {
   async updateContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      await assertContractAccess(req, id);
+
       const { name, number, startDate, endDate, costCenterId, valuePlusAddenda } = req.body;
 
       const existing = await prisma.contract.findUnique({
@@ -205,8 +244,8 @@ export class ContractController {
       const updateData: any = {};
       if (name !== undefined) updateData.name = name.trim();
       if (number !== undefined) updateData.number = String(number).trim();
-      if (startDate !== undefined) updateData.startDate = new Date(startDate);
-      if (endDate !== undefined) updateData.endDate = new Date(endDate);
+      if (startDate !== undefined) updateData.startDate = parseDateInput(startDate);
+      if (endDate !== undefined) updateData.endDate = parseDateInput(endDate);
       if (costCenterId !== undefined) updateData.costCenterId = costCenterId;
       if (valuePlusAddenda !== undefined) updateData.valuePlusAddenda = Number(valuePlusAddenda) || 0;
 
@@ -243,28 +282,40 @@ export class ContractController {
    */
   async getOverview(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw createError('Não autenticado', 401);
+      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none') {
+        throw createError('Sem permissão para acessar contratos', 403);
+      }
+
       const { year } = req.query;
       const filterYear = year ? Number(year) : new Date().getFullYear();
 
-      const contracts = await prisma.contract.findMany({
-        where: {},
+      const overviewWhere =
+        access.filter === 'ids' ? { id: { in: access.ids } } : {};
+
+      const [contracts, allBillingsDates, allProductionsDates] = await Promise.all([
+        prisma.contract.findMany({
+        where: overviewWhere,
         orderBy: { name: 'asc' },
         include: {
           costCenter: {
             select: { id: true, code: true, name: true }
           },
           billings: {
-            where: year
-              ? {
-                  issueDate: {
-                    gte: new Date(filterYear, 0, 1),
-                    lt: new Date(filterYear + 1, 0, 1)
-                  }
-                }
-              : undefined,
-            select: { grossValue: true, netValue: true }
+            select: { grossValue: true, issueDate: true }
           },
-          pleitos: true,
+          pleitos: {
+            select: {
+              creationYear: true,
+              budget: true,
+              budgetAmount1: true,
+              budgetAmount2: true,
+              budgetAmount3: true,
+              budgetAmount4: true,
+              reportsBilling: true
+            }
+          },
           weeklyProductions: {
             where: year
               ? {
@@ -277,18 +328,43 @@ export class ContractController {
             select: { weeklyProductionValue: true }
           }
         }
-      });
+      }),
+        prisma.contractBilling.findMany({ select: { issueDate: true } }),
+        prisma.contractWeeklyProduction.findMany({ select: { fillingDate: true } })
+      ]);
+
+      const yearParam = year != null && String(year).trim() !== '' ? Number(year) : null;
+      const yearValid = yearParam != null && Number.isFinite(yearParam);
 
       const overview = contracts.map((c) => {
-        const totalBruto =
-          c.billings?.reduce((s, b) => s + Number(b.grossValue || 0), 0) ?? 0;
-        const totalLiquido =
-          c.billings?.reduce((s, b) => s + Number(b.netValue || 0), 0) ?? 0;
+        const billings = c.billings ?? [];
+        /** Faturamento acumulado (bruto), todos os anos. */
+        const faturamentoAcumulado = billings.reduce(
+          (s, b) => s + Number(b.grossValue || 0),
+          0
+        );
+        /** Faturamento anual (bruto), apenas no ano do filtro. */
+        const faturamentoAnual = yearValid
+          ? billings
+              .filter((b) => new Date(b.issueDate).getFullYear() === yearParam)
+              .reduce((s, b) => s + Number(b.grossValue || 0), 0)
+          : 0;
         const totalProducao =
           c.weeklyProductions?.reduce(
             (s, p) => s + Number(p.weeklyProductionValue || 0),
             0
           ) ?? 0;
+        const pleitosAll =
+          c.pleitos?.filter(
+            (p) => (p.reportsBilling || '').trim() !== PLEITO_HISTORICO_MARKER
+          ) ?? [];
+        const pleitosNoAno = yearValid
+          ? pleitosAll.filter((p) => p.creationYear === yearParam)
+          : pleitosAll;
+        const valorOrcado = pleitosNoAno.reduce((s, p) => s + valorOrcadoFromPleito(p), 0);
+        /** Pendente acompanha o mesmo escopo temporal do filtro de ano. */
+        const baseFaturamento = yearValid ? faturamentoAnual : faturamentoAcumulado;
+        const pendenteFaturamento = valorOrcado - baseFaturamento;
         return {
           id: c.id,
           name: c.name,
@@ -297,19 +373,32 @@ export class ContractController {
           endDate: c.endDate,
           costCenter: c.costCenter,
           valuePlusAddenda: c.valuePlusAddenda ? Number(c.valuePlusAddenda) : 0,
-          qtdOrdensServico: c.pleitos?.length ?? 0,
-          qtdFaturamentos: c.billings?.length ?? 0,
-          totalFaturamentoBruto: totalBruto,
-          totalFaturamentoLiquido: totalLiquido,
-          qtdProducoesSemanais: c.weeklyProductions?.length ?? 0,
-          totalProducaoSemanal: totalProducao
+          faturamentoAcumulado,
+          faturamentoAnual,
+          /** Indica se o faturamento anual aplica ao ano (quando não há ano no filtro, a UI pode exibir "—"). */
+          faturamentoAnualAplica: yearValid,
+          totalProducaoSemanal: totalProducao,
+          valorOrcado,
+          pendenteFaturamento
         };
       });
+
+      const availableYears = Array.from(
+        new Set<number>([
+          ...allBillingsDates.map((b) => new Date(b.issueDate).getFullYear()),
+          ...allProductionsDates.map((p) => new Date(p.fillingDate).getFullYear()),
+          new Date().getFullYear(),
+          ...(yearValid ? [yearParam] : [])
+        ])
+      )
+        .filter((y) => Number.isFinite(y))
+        .sort((a, b) => b - a);
 
       res.json({
         success: true,
         data: overview,
-        filterYear: year ? filterYear : null
+        filterYear: year ? filterYear : null,
+        availableYears
       });
     } catch (error) {
       next(error);
@@ -322,6 +411,8 @@ export class ContractController {
   async deleteContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+
+      await assertContractAccess(req, id);
 
       const existing = await prisma.contract.findUnique({
         where: { id }

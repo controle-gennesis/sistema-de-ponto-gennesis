@@ -24,7 +24,7 @@ const ADMIN_DATA = {
   name: 'Administrador',
   email: 'admin@gennesis.com.br',
   cpf: '000.000.000-00',
-  password: 'Admin@123456',
+  password: 'admin123',
   employeeId: 'ADM001',
   department: 'Administrativo',
   position: 'Administrador',

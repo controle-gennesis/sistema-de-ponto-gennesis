@@ -2,6 +2,8 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { parseDateInput } from '../utils/dateInput';
+import { assertContractAccess } from '../lib/contractAccess';
 
 export class ContractBillingController {
   /**
@@ -10,6 +12,8 @@ export class ContractBillingController {
   async getBillingsByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
+
+      await assertContractAccess(req, contractId);
 
       const contract = await prisma.contract.findUnique({
         where: { id: contractId }
@@ -44,6 +48,8 @@ export class ContractBillingController {
   async createBilling(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
+      await assertContractAccess(req, contractId);
+
       const { issueDate, invoiceNumber, serviceOrder, grossValue, netValue } = req.body;
 
       if (!issueDate) {
@@ -69,12 +75,12 @@ export class ContractBillingController {
       const billing = await prisma.contractBilling.create({
         data: {
           contractId,
-          issueDate: new Date(issueDate),
+          issueDate: parseDateInput(issueDate),
           invoiceNumber: String(invoiceNumber).trim(),
           serviceOrder: String(serviceOrder).trim(),
           grossValue: Number(grossValue) || 0,
           netValue: netValue === undefined || netValue === null || netValue === ''
-            ? Number(grossValue) || 0
+            ? 0
             : Number(netValue) || 0
         }
       });
@@ -99,6 +105,8 @@ export class ContractBillingController {
   async updateBilling(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId, id } = req.params;
+      await assertContractAccess(req, contractId);
+
       const { issueDate, invoiceNumber, serviceOrder, grossValue, netValue } = req.body;
 
       const existing = await prisma.contractBilling.findFirst({
@@ -109,15 +117,15 @@ export class ContractBillingController {
       }
 
       const updateData: any = {};
-      if (issueDate !== undefined) updateData.issueDate = new Date(issueDate);
+      if (issueDate !== undefined) updateData.issueDate = parseDateInput(issueDate);
       if (invoiceNumber !== undefined) updateData.invoiceNumber = String(invoiceNumber).trim();
       if (serviceOrder !== undefined) updateData.serviceOrder = String(serviceOrder).trim();
       if (grossValue !== undefined) updateData.grossValue = Number(grossValue) || 0;
       if (netValue !== undefined) {
         updateData.netValue = Number(netValue) || 0;
       } else if (grossValue !== undefined) {
-        // Enquanto o módulo usa apenas valor bruto, manter líquido igual ao bruto.
-        updateData.netValue = Number(grossValue) || 0;
+        // Quando o usuário não informa líquido, manter como "não preenchido".
+        updateData.netValue = 0;
       }
 
       const billing = await prisma.contractBilling.update({
@@ -145,6 +153,7 @@ export class ContractBillingController {
   async deleteBilling(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId, id } = req.params;
+      await assertContractAccess(req, contractId);
 
       const existing = await prisma.contractBilling.findFirst({
         where: { id, contractId }

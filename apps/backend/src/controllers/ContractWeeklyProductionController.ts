@@ -2,11 +2,15 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { parseDateInput } from '../utils/dateInput';
+import { assertContractAccess } from '../lib/contractAccess';
 
 export class ContractWeeklyProductionController {
   async getProductionsByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
+      await assertContractAccess(req, contractId);
+
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
 
@@ -29,6 +33,8 @@ export class ContractWeeklyProductionController {
   async createProduction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
+      await assertContractAccess(req, contractId);
+
       const { divSe, weeklyProductionValue, responsiblePerson, fillingDate } = req.body;
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
@@ -38,7 +44,7 @@ export class ContractWeeklyProductionController {
       const value = Number(weeklyProductionValue);
       if (isNaN(value) || value < 0) throw createError('Valor da produção semanal inválido', 400);
 
-      const fillingDateValue = fillingDate ? new Date(fillingDate) : new Date();
+      const fillingDateValue = fillingDate ? parseDateInput(fillingDate) : new Date();
       const row = await prisma.contractWeeklyProduction.create({
         data: {
           contractId,
@@ -62,6 +68,8 @@ export class ContractWeeklyProductionController {
   async updateProduction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId, id } = req.params;
+      await assertContractAccess(req, contractId);
+
       const { divSe, weeklyProductionValue, responsiblePerson, fillingDate } = req.body;
 
       const existing = await prisma.contractWeeklyProduction.findFirst({
@@ -72,7 +80,7 @@ export class ContractWeeklyProductionController {
       const data: { divSe?: string; weeklyProductionValue?: number; responsiblePerson?: string; fillingDate?: Date } = {};
       if (divSe !== undefined) data.divSe = divSe.trim();
       if (responsiblePerson !== undefined) data.responsiblePerson = responsiblePerson.trim();
-      if (fillingDate !== undefined) data.fillingDate = new Date(fillingDate);
+      if (fillingDate !== undefined) data.fillingDate = parseDateInput(fillingDate);
       if (weeklyProductionValue !== undefined) {
         const value = Number(weeklyProductionValue);
         if (isNaN(value) || value < 0) throw createError('Valor da produção semanal inválido', 400);
@@ -97,6 +105,7 @@ export class ContractWeeklyProductionController {
   async deleteProduction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId, id } = req.params;
+      await assertContractAccess(req, contractId);
 
       const existing = await prisma.contractWeeklyProduction.findFirst({
         where: { id, contractId }

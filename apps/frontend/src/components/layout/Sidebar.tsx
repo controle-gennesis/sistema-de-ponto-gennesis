@@ -43,9 +43,13 @@ import {
   Cake,
   Calculator,
   ClipboardList,
-  FileCheck
+  FileCheck,
+  SlidersHorizontal
 } from 'lucide-react';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
+
+const pk = pathToModuleKey;
 import { useTheme } from '@/context/ThemeContext';
 
 interface SidebarProps {
@@ -72,7 +76,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { permissions, isLoading, userPosition, user, isDepartmentPessoal, isDepartmentProjetos, userDepartment } = usePermissions();
+  const { permissions, isLoading, userPosition, user, isDepartmentPessoal, isDepartmentProjetos, userDepartment, can } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -152,21 +156,35 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/chatgpt',
             icon: Bot,
             description: 'Tire suas dúvidas com o ChatGPT',
-            permission: true // Todos os usuários podem usar
+            permission: isAdministrator || can(pk('/ponto/chatgpt'))
           },
           {
             name: 'Solicitações Fluig',
             href: '/ponto/bi',
             icon: BarChart3,
             description: 'Dashboard com dados dos datasets do Fluig',
-            permission: true
+            permission: isAdministrator || can(pk('/ponto/bi'))
           },
           {
             name: 'Central de Atendimentos',
             href: '/ponto/conversas-whatsapp',
             icon: MessageSquare,
-            description: 'Fila de atendimento humano do WhatsApp',
-            permission: isAdministrator || isDepartmentPessoal
+            description: 'Conversas do chatbot WhatsApp para o pessoal ver',
+            permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp'))
+          }
+        ]
+      },
+      {
+        id: 'painel-controle',
+        name: 'Painel de Controle',
+        icon: SlidersHorizontal,
+        items: [
+          {
+            name: 'Permissões',
+            href: '/ponto/permissoes',
+            icon: Settings,
+            description: 'Gerenciar permissões de usuários',
+            permission: isAdministrator
           }
         ]
       },
@@ -194,35 +212,35 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/atestados',
             icon: CalendarX2,
             description: 'Registrar e gerenciar ausências',
-            permission: true // Todos podem registrar suas próprias ausências
+            permission: isAdministrator || can(pk('/ponto/atestados'))
           },
           {
             name: 'Gerenciar Ausências',
             href: '/ponto/gerenciar-atestados',
             icon: BookText,
             description: 'Gerenciar todas as ausências',
-            permission: isAdministrator || isDepartmentPessoal
+            permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados'))
           },
           {
             name: 'Solicitações',
             href: '/ponto/solicitacoes',
             icon: MailPlus,
             description: 'Minhas solicitações de correção',
-            permission: true // Todos podem ver suas próprias solicitações
+            permission: isAdministrator || can(pk('/ponto/solicitacoes'))
           },
           {
             name: 'Gerenciar Solicitações',
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
             description: 'Aprovar solicitações de correção',
-            permission: isAdministrator || isDepartmentProjetos // Administrador ou setor Projetos
+            permission: isAdministrator || isDepartmentProjetos || can(pk('/ponto/gerenciar-solicitacoes'))
           },
           {
             name: 'Férias',
             href: '/ponto/ferias',
             icon: ImagePlus,
             description: 'Solicitar e acompanhar férias',
-            permission: true // Todos podem solicitar suas próprias férias
+            permission: isAdministrator || can(pk('/ponto/ferias'))
           },
           {
             name: 'Gerenciar Férias',
@@ -257,7 +275,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/aniversariantes',
             icon: Cake,
             description: 'Ver aniversariantes do mês',
-            permission: true // Todos podem ver aniversariantes
+            permission: isAdministrator || can(pk('/ponto/aniversariantes'))
           }
         ]
       },
@@ -271,14 +289,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/financeiro',
             icon: DollarSign,
             description: 'Gerar borderô e CNAB400 para pagamentos',
-            permission: isAdministrator // Apenas administrador
+            permission: isAdministrator || can(pk('/ponto/financeiro'))
           },
           {
             name: 'Análise Financeira',
             href: '/ponto/financeiro/analise',
             icon: BarChart3,
             description: 'Importar planilha e gerar relatórios de análise financeira',
-            permission: isAdministrator || isDepartmentFinanceiro // Administrador ou Financeiro
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise'))
           }
           ,
           {
@@ -286,7 +304,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/financeiro/analise-extrato',
             icon: BarChart3,
             description: 'Importar e validar extratos bancários',
-            permission: isAdministrator || isDepartmentFinanceiro // Administrador ou Financeiro
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           }
         ]
       },
@@ -300,35 +318,35 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/orcamento',
             icon: Calculator,
             description: 'Criar orçamentos com composições e serviços padrão',
-            permission: true
+            permission: isAdministrator || can(pk('/ponto/orcamento'))
           },
           {
             name: 'Contratos',
             href: '/ponto/contratos',
             icon: FileText,
             description: 'Cadastro de contratos da engenharia',
-            permission: true
+            permission: isAdministrator || can(pk('/ponto/contratos'))
           },
           {
             name: 'Controle Geral de Contratos',
             href: '/ponto/contratos/controle-geral',
             icon: LayoutDashboard,
             description: 'Visão consolidada de todos os contratos',
-            permission: true
+            permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
           },
           {
             name: 'Ordem de Serviço',
             href: '/ponto/andamento-da-os',
             icon: ClipboardList,
             description: 'Acompanhamento e controle das ordens de serviço',
-            permission: true
+            permission: isAdministrator || can(pk('/ponto/andamento-da-os'))
           },
           {
             name: 'Pleitos Gerados',
             href: '/ponto/pleitos-gerados',
             icon: FileCheck,
             description: 'Visualizar todos os pleitos com valor pleiteado',
-            permission: true
+            permission: isAdministrator || can(pk('/ponto/pleitos-gerados'))
           }
         ]
       },
@@ -342,28 +360,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/solicitar-materiais',
             icon: ShoppingCart,
             description: 'Solicitar materiais para compra (SC)',
-            permission: true
+            permission: isAdministrator || can(pk('/ponto/solicitar-materiais'))
           },
           {
             name: 'Requisições de Materiais',
             href: '/ponto/gerenciar-materiais',
             icon: Package,
             description: 'Aprovar SC e criar OC',
-            permission: isAdministrator || isDepartmentCompras
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais'))
           },
           {
             name: 'Mapa de Cotação',
             href: '/ponto/mapa-cotacao',
             icon: FileSpreadsheet,
             description: 'Comparar cotações entre fornecedores e gerar OC por vencedor',
-            permission: isAdministrator || isDepartmentCompras
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao'))
           },
           {
             name: 'Ordens de Compra',
             href: '/ponto/ordem-de-compra',
             icon: FileText,
             description: 'Listar e gerenciar ordens de compra',
-            permission: isAdministrator || isDepartmentCompras
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra'))
           }
         ]
       },
@@ -377,21 +395,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/centros-custo',
             icon: Building2,
             description: 'Gerenciar centros de custo',
-            permission: isAdministrator || isDepartmentPessoal // Apenas Administrador ou Departamento Pessoal
+            permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/centros-custo'))
           },
           {
             name: 'Materiais de Construção',
             href: '/ponto/materiais-construcao',
             icon: Package,
             description: 'Gerenciar materiais de construção civil',
-            permission: isAdministrator || isDepartmentPessoal // Apenas Administrador ou Departamento Pessoal
+            permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/materiais-construcao'))
           },
           {
             name: 'Fornecedores',
             href: '/ponto/fornecedores',
             icon: Building2,
             description: 'Cadastro de fornecedores',
-            permission: isAdministrator || isDepartmentCompras
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores'))
           }
               ,
               {
@@ -399,7 +417,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 href: '/ponto/natureza-orcamentaria',
                 icon: BookPlus,
                 description: 'Cadastrar naturezas orçamentárias',
-                permission: isAdministrator || isDepartmentFinanceiro
+                permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria'))
               }
         ]
       },
@@ -632,7 +650,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const hasActiveItem = category.items.some(item => isActive(item.href));
             const isExpanded = isMenuExpanded(category.id);
             const visibleItems = category.items.filter(item => item.permission);
-            const forceAsGroup = category.id === 'engenharia';
+            const forceAsGroup = category.id === 'engenharia' || category.id === 'painel-controle';
             const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
