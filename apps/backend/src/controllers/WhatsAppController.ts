@@ -58,6 +58,15 @@ export class WhatsAppController {
         const changes = Array.isArray(entry.changes) ? entry.changes : [];
         for (const change of changes) {
           const value = change.value || {};
+          const contacts = Array.isArray(value.contacts) ? value.contacts : [];
+          const profileByWaDigits = new Map<string, string>();
+          for (const c of contacts) {
+            const waId = String((c as { wa_id?: string }).wa_id || '').replace(/\D/g, '');
+            const pname = (c as { profile?: { name?: string } }).profile?.name;
+            if (waId && typeof pname === 'string' && pname.trim()) {
+              profileByWaDigits.set(waId, pname.trim().slice(0, 120));
+            }
+          }
           const messages = Array.isArray(value.messages) ? value.messages : [];
           for (const msg of messages) {
             const phone = String(msg.from || '').trim();
@@ -65,6 +74,8 @@ export class WhatsAppController {
               console.warn('[WhatsApp Webhook] Mensagem sem from:', JSON.stringify(msg).slice(0, 200));
               continue;
             }
+            const phoneDigits = phone.replace(/\D/g, '');
+            const whatsappProfileName = profileByWaDigits.get(phoneDigits);
 
             let text = '';
             let hasMedia = false;
@@ -118,9 +129,13 @@ export class WhatsAppController {
               hasMedia ? ', hasMedia' : ''
             );
             const mediaInfo = hasMedia && mediaId ? { mediaId, mimeType: mediaMimeType, filename: mediaFilename } : undefined;
-            whatsAppBot.processMessage(phone, text || ' ', hasMedia, mediaInfo).catch((err) => {
-              console.error('[WhatsApp Webhook] Erro ao processar:', err);
-            });
+            whatsAppBot
+              .processMessage(phone, text || ' ', hasMedia, mediaInfo, {
+                whatsappProfileName: whatsappProfileName || undefined
+              })
+              .catch((err) => {
+                console.error('[WhatsApp Webhook] Erro ao processar:', err);
+              });
           }
         }
       }
@@ -139,6 +154,8 @@ export class WhatsAppController {
           _count: {
             select: { messages: true, submissions: true }
           },
+          // O payload pode conter indicadores como escalonamento para atendente.
+          // Usamos o payload na camada de mapeamento abaixo.
           messages: {
             orderBy: { createdAt: 'desc' },
             take: 1
@@ -149,9 +166,16 @@ export class WhatsAppController {
       const data = conversations.map((c) => ({
         id: c.id,
         phone: c.phone,
+        name:
+          ((c.payload as any)?.name ??
+            (c.payload as any)?.requesterName ??
+            (c.payload as any)?.waProfileName) ||
+          null,
         flowStatus: c.flowStatus,
         currentStep: c.currentStep,
         status: c.status,
+        attendantRequested: !!(c.payload as any)?.attendantRequested,
+        attendantInProgress: !!(c.payload as any)?.attendantInProgress,
         updatedAt: c.updatedAt,
         createdAt: c.createdAt,
         messageCount: c._count.messages,
@@ -310,17 +334,92 @@ export class WhatsAppController {
       });
 
       // Marca como pendente se for uma conversa já concluída/cancelada (evita “travamento” visual)
+      const currentPayload = (conversation.payload as any) ?? {};
+      const shouldTransitionToInProgress = !!currentPayload?.attendantRequested;
       await prisma.whatsAppConversation.update({
         where: { id: conversation.id },
         data: {
           status: 'PENDING' as any,
+          payload: {
+            ...currentPayload,
+            attendantRequested: shouldTransitionToInProgress ? false : currentPayload?.attendantRequested,
+            attendantInProgress: shouldTransitionToInProgress ? true : currentPayload?.attendantInProgress,
+            attendantInProgressAt: shouldTransitionToInProgress
+              ? new Date().toISOString()
+              : currentPayload?.attendantInProgressAt ?? null
+          } as any,
           updatedAt: new Date()
         } as any
       });
 
+      // Garante encerramento automático caso a pessoa não responda.
+      whatsAppBot.scheduleInactivityTimeoutForConversation(conversation.id, conversation.phone);
+
       res.json({
         success: true,
         message: 'Mensagem enviada com sucesso'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Encerrar conversa manualmente (admin/atendente).
+   * Marca status como CANCELLED, limpa payload e envia mensagem de encerramento.
+   */
+  async endConversation(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      const conversation = await prisma.whatsAppConversation.findUnique({
+        where: { id }
+      });
+
+      if (!conversation) {
+        throw createError('Conversa não encontrada', 404);
+      }
+
+      const endText = 'Atendimento encerrado 😊\nSempre que precisar, é só me chamar por aqui!';
+
+      // Para conversas que estavam em timer, evitamos disparos posteriores.
+      whatsAppBot.clearInactivityTimeoutsForConversation(conversation.id);
+
+      const prevPayload = (conversation.payload as Record<string, unknown>) || {};
+      const keptContact: Record<string, string> = {};
+      const n = prevPayload.name;
+      const r = prevPayload.requesterName;
+      const w = prevPayload.waProfileName;
+      if (typeof n === 'string' && n.trim()) keptContact.name = n.trim().slice(0, 120);
+      if (typeof r === 'string' && r.trim()) keptContact.requesterName = r.trim().slice(0, 120);
+      if (typeof w === 'string' && w.trim()) keptContact.waProfileName = w.trim().slice(0, 120);
+
+      await prisma.whatsAppConversation.update({
+        where: { id: conversation.id },
+        data: {
+          status: 'CANCELLED' as any,
+          flowStatus: 'MENU',
+          currentStep: 'MENU',
+          // Mantém nome para a lista / detalhe não voltarem a mostrar só o telefone após encerrar.
+          payload: Object.keys(keptContact).length ? (keptContact as any) : ({} as any),
+          updatedAt: new Date()
+        } as any
+      });
+
+      await prisma.whatsAppMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: endText
+        }
+      });
+
+      // Envia aviso ao usuário no WhatsApp.
+      await metaWhatsApp.sendText(conversation.phone, endText);
+
+      res.json({
+        success: true,
+        message: 'Conversa encerrada com sucesso'
       });
     } catch (error) {
       next(error);
