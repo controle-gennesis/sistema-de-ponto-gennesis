@@ -56,6 +56,8 @@ import pleitoRoutes from './routes/pleitos';
 import fluigRoutes from './routes/fluig';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
+import permissionRoutes from './routes/permissions';
+import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -248,6 +250,7 @@ app.use('/api/orcamento', orcamentoRoutes);
 app.use('/api/pleitos', pleitoRoutes);
 app.use('/api/fluig', fluigRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/permissions', permissionRoutes);
 
 // Middleware de erro 404
 app.use(notFound);
@@ -261,6 +264,17 @@ process.env.TZ = 'America/Sao_Paulo';
 // Iniciar servidor
 try {
   app.listen(PORT, '0.0.0.0', () => {
+    void (async () => {
+      try {
+        const { removed } = await removeOrphanUserPermissions();
+        if (removed > 0) {
+          console.log(`🧹 Permissões de módulos removidos do registro: ${removed} registro(s) limpo(s).`);
+        }
+      } catch (e) {
+        console.error('Erro ao sincronizar permissões com o registro de módulos:', e);
+      }
+    })();
+
     console.log('');
     console.log('🎉 SERVIDOR INICIADO COM SUCESSO!');
     console.log('═══════════════════════════════════════');

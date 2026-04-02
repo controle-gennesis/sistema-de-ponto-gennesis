@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { assertContractAccess } from '../lib/contractAccess';
 
 export class ContractAnnualValueController {
   /**
@@ -10,6 +11,7 @@ export class ContractAnnualValueController {
   async getAnnualValues(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
+      await assertContractAccess(req, contractId);
 
       const contract = await prisma.contract.findUnique({
         where: { id: contractId }
@@ -43,6 +45,8 @@ export class ContractAnnualValueController {
   async setAnnualValue(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId, year } = req.params;
+      await assertContractAccess(req, contractId);
+
       const { value } = req.body;
 
       const yearNum = parseInt(year, 10);

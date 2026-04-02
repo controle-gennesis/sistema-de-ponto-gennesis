@@ -8,8 +8,6 @@ import {
   ArrowLeft,
   FileText,
   LayoutDashboard,
-  ClipboardList,
-  Receipt,
   BarChart3,
   Search,
   ExternalLink
@@ -19,7 +17,6 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
-import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 
 interface ContractOverview {
   id: string;
@@ -29,18 +26,27 @@ interface ContractOverview {
   endDate: string;
   costCenter?: { id: string; code: string; name: string };
   valuePlusAddenda: number;
-  qtdOrdensServico: number;
-  qtdFaturamentos: number;
-  totalFaturamentoBruto: number;
-  totalFaturamentoLiquido: number;
-  qtdProducoesSemanais: number;
+  qtdProducoesSemanais?: number;
+  /** Valor bruto (NFs), todos os anos */
+  faturamentoAcumulado: number;
+  /** Valor bruto no ano do filtro (0 se filtro "Todos") */
+  faturamentoAnual: number;
+  /** Se false, a coluna anual deve exibir "—" */
+  faturamentoAnualAplica?: boolean;
   totalProducaoSemanal: number;
+  valorOrcado: number;
+  pendenteFaturamento: number;
 }
 
 function formatDate(dateStr: string) {
   if (!dateStr) return '-';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('pt-BR');
+  const raw = String(dateStr).trim();
+  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = only
+    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
+    : new Date(raw);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 function formatCurrency(value: number) {
@@ -100,28 +106,30 @@ export default function ControleGeralContratosPage() {
   const totals = useMemo(() => {
     return filteredContracts.reduce(
       (acc, c) => ({
-        qtdOrdensServico: acc.qtdOrdensServico + c.qtdOrdensServico,
-        qtdFaturamentos: acc.qtdFaturamentos + c.qtdFaturamentos,
-        totalFaturamentoBruto: acc.totalFaturamentoBruto + c.totalFaturamentoBruto,
-        totalFaturamentoLiquido: acc.totalFaturamentoLiquido + c.totalFaturamentoLiquido,
-        qtdProducoesSemanais: acc.qtdProducoesSemanais + c.qtdProducoesSemanais,
-        totalProducaoSemanal: acc.totalProducaoSemanal + c.totalProducaoSemanal
+        faturamentoAcumulado: acc.faturamentoAcumulado + c.faturamentoAcumulado,
+        faturamentoAnual: acc.faturamentoAnual + c.faturamentoAnual,
+        totalProducaoSemanal: acc.totalProducaoSemanal + c.totalProducaoSemanal,
+        valorOrcado: acc.valorOrcado + c.valorOrcado,
+        pendenteFaturamento: acc.pendenteFaturamento + c.pendenteFaturamento
       }),
       {
-        qtdOrdensServico: 0,
-        qtdFaturamentos: 0,
-        totalFaturamentoBruto: 0,
-        totalFaturamentoLiquido: 0,
-        qtdProducoesSemanais: 0,
-        totalProducaoSemanal: 0
+        faturamentoAcumulado: 0,
+        faturamentoAnual: 0,
+        totalProducaoSemanal: 0,
+        valorOrcado: 0,
+        pendenteFaturamento: 0
       }
     );
   }, [filteredContracts]);
 
-  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
-  const availableYears = [2026, 2025, 2024, 2023, 2022];
 
-  useContractTableColumnCustomizer(containerRef, 'contracts:controle-geral', filteredContracts);
+  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+  const availableYears = ((overviewData?.availableYears as number[] | undefined) || []).filter((y) =>
+    Number.isFinite(y)
+  );
+
+  // Ordem fixa solicitada para este módulo:
+  // CONTRATO, CENTRO DE CUSTO, FATURAMENTO ACUMULADO, FATURAMENTO ANUAL, PRODUÇÃO, VALOR ORÇADO, PENDENTE FATURAMENTO.
 
   if (loadingUser) {
     return (
@@ -191,11 +199,18 @@ export default function ControleGeralContratosPage() {
             </div>
           </div>
 
-          {filterYear && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Filtro aplicado: faturamento e produção semanal do ano {filterYear}
-            </p>
-          )}
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            <span className="font-medium">Faturamento acumulado</span>: soma do valor bruto (NFs) em todos os anos.
+            {filterYear != null ? (
+              <>
+                {' '}
+                <span className="font-medium">Faturamento anual</span>: NFs com emissão em {filterYear}. Produção
+                semanal: ano {filterYear}.
+              </>
+            ) : (
+              <> Faturamento anual: selecione um ano no filtro. Produção semanal: todos os períodos.</>
+            )}
+          </p>
 
           {loadingOverview ? (
             <Card>
@@ -224,17 +239,25 @@ export default function ControleGeralContratosPage() {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                           Centro de Custo
                         </th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                          OS
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">
+                          Faturamento acumulado
                         </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                          Faturamento Bruto
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                          Faturamento Líquido
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">
+                          Faturamento anual
+                          {filterYear != null ? (
+                            <span className="block font-normal normal-case text-[10px] text-gray-400 mt-0.5">
+                              ({filterYear})
+                            </span>
+                          ) : null}
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                           Produção
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">
+                          Valor orçado
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">
+                          Pendente faturamento
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-16">
                           Ações
@@ -260,23 +283,27 @@ export default function ControleGeralContratosPage() {
                           <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
                             {c.costCenter?.name || c.costCenter?.code || '-'}
                           </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className="inline-flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
-                              <ClipboardList className="w-4 h-4 text-blue-500" />
-                              {c.qtdOrdensServico}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {formatCurrency(c.totalFaturamentoBruto)}
-                          </td>
                           <td className="px-4 py-3 text-right text-sm font-medium text-green-600 dark:text-green-400">
-                            {formatCurrency(c.totalFaturamentoLiquido)}
+                            {formatCurrency(c.faturamentoAcumulado)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-medium text-emerald-500/90 dark:text-emerald-400/90">
+                            {c.faturamentoAnualAplica === false ? (
+                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                            ) : (
+                              formatCurrency(c.faturamentoAnual)
+                            )}
                           </td>
                           <td className="px-4 py-3 text-center">
                             <span className="inline-flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
                               <BarChart3 className="w-4 h-4 text-amber-500" />
                               {formatCurrency(c.totalProducaoSemanal)}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-gray-100">
+                            {formatCurrency(c.valorOrcado)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-medium text-amber-700 dark:text-amber-400">
+                            {formatCurrency(c.pendenteFaturamento)}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <Link
@@ -300,17 +327,24 @@ export default function ControleGeralContratosPage() {
                           Total ({filteredContracts.length}{' '}
                           {filteredContracts.length === 1 ? 'contrato' : 'contratos'})
                         </td>
-                        <td className="px-4 py-3 text-center text-gray-900 dark:text-gray-100">
-                          {totals.qtdOrdensServico}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
-                          {formatCurrency(totals.totalFaturamentoBruto)}
-                        </td>
                         <td className="px-4 py-3 text-right text-green-600 dark:text-green-400">
-                          {formatCurrency(totals.totalFaturamentoLiquido)}
+                          {formatCurrency(totals.faturamentoAcumulado)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-emerald-500/90 dark:text-emerald-400/90">
+                          {filterYear == null ? (
+                            <span className="text-gray-400 dark:text-gray-500">—</span>
+                          ) : (
+                            formatCurrency(totals.faturamentoAnual)
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center text-gray-900 dark:text-gray-100">
                           {formatCurrency(totals.totalProducaoSemanal)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                          {formatCurrency(totals.valorOrcado)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-amber-700 dark:text-amber-400">
+                          {formatCurrency(totals.pendenteFaturamento)}
                         </td>
                         <td className="px-4 py-3"></td>
                       </tr>

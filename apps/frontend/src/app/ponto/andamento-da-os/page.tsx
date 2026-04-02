@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ClipboardList, Plus, Edit, Trash2, Search, X, AlertCircle } from 'lucide-react';
+import { ClipboardList, Edit, Trash2, Search, X, AlertCircle, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -39,6 +39,9 @@ const STATUS_ORCAMENTO_OPCOES = [
 ];
 const OUTRO_STATUS = '__OUTRO__';
 
+const ANO_ATUAL = new Date().getFullYear();
+const ANOS_FILTRO = Array.from({ length: 16 }, (_, i) => ANO_ATUAL - 6 + i);
+
 const MESES = [
   { value: '01', label: 'Janeiro' },
   { value: '02', label: 'Fevereiro' },
@@ -64,6 +67,7 @@ function getCurrentMonthYear() {
 
 export interface Pleito {
   id: string;
+  updatedContract?: { id: string; name: string; number: string } | null;
   creationMonth: string | null;
   creationYear: number | null;
   startDate: string | null;
@@ -296,6 +300,12 @@ export default function AndamentoDaOsPage() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [filterContractId, setFilterContractId] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
+  const [filterYear, setFilterYear] = useState('');
+  const [filterLot, setFilterLot] = useState('');
+  const [filterBudgetStatus, setFilterBudgetStatus] = useState('');
+  const [filterPendingBilling, setFilterPendingBilling] = useState<'sim' | 'nao' | ''>('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Pleito | null>(null);
   const [form, setForm] = useState(emptyForm());
@@ -315,25 +325,42 @@ export default function AndamentoDaOsPage() {
     }
   });
 
-  const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ['pleitos', searchTerm, currentPage],
+  const { data: contractsListData } = useQuery({
+    queryKey: ['contracts-list-os-filters'],
     queryFn: async () => {
-      const res = await api.get('/pleitos', {
-        params: { search: searchTerm || undefined, page: currentPage, limit: 20 }
-      });
+      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
       return res.data;
     }
   });
 
-  const createMut = useMutation({
-    mutationFn: (data: unknown) => api.post('/pleitos', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pleitos'] });
-      setShowForm(false);
-      setForm(emptyForm());
-      toast.success('Registro de Ordem de Serviço criado!');
-    },
-    onError: (e: any) => toast.error(e.response?.data?.message || 'Erro ao salvar')
+  const { data: listData, isLoading: loadingList } = useQuery({
+    queryKey: [
+      'pleitos',
+      searchTerm,
+      currentPage,
+      filterContractId,
+      filterMonth,
+      filterYear,
+      filterLot,
+      filterBudgetStatus,
+      filterPendingBilling
+    ],
+    queryFn: async () => {
+      const res = await api.get('/pleitos', {
+        params: {
+          search: searchTerm || undefined,
+          page: currentPage,
+          limit: 20,
+          contractId: filterContractId || undefined,
+          creationMonth: filterMonth || undefined,
+          creationYear: filterYear || undefined,
+          lot: filterLot.trim() || undefined,
+          budgetStatus: filterBudgetStatus || undefined,
+          pendingBilling: filterPendingBilling || undefined
+        }
+      });
+      return res.data;
+    }
   });
 
   const updateMut = useMutation({
@@ -360,12 +387,7 @@ export default function AndamentoDaOsPage() {
 
   const rows = (listData?.data || []) as Pleito[];
   const pagination = listData?.pagination || { page: 1, limit: 20, total: 0, totalPages: 1 };
-
-  const openNew = () => {
-    setEditing(null);
-    setForm(emptyForm());
-    setShowForm(true);
-  };
+  const contractsForFilter = (contractsListData?.data || []) as Array<{ id: string; name: string; number: string }>;
 
   const openEdit = (p: Pleito) => {
     setEditing(p);
@@ -379,9 +401,12 @@ export default function AndamentoDaOsPage() {
       toast.error('Descrição do serviço é obrigatória');
       return;
     }
+    if (!editing) {
+      toast.error('Abra um registro pela lista para editar.');
+      return;
+    }
     const payload = formToPayload(form);
-    if (editing) updateMut.mutate({ id: editing.id, data: payload });
-    else createMut.mutate(payload);
+    updateMut.mutate({ id: editing.id, data: payload });
   };
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
@@ -403,36 +428,149 @@ export default function AndamentoDaOsPage() {
           </div>
 
           <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="relative flex-1 max-w-md">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Buscar descrição, pasta, nota, local..."
-                    value={searchTerm}
+            <CardHeader className="border-b-0 space-y-4">
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar descrição, pasta, nota, local, contrato..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div className="flex flex-wrap items-end gap-2 gap-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mr-1">
+                  <Filter className="w-3.5 h-3.5 shrink-0" />
+                  Filtros
+                </div>
+                <div className="min-w-[160px] flex-1 sm:flex-initial">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Contrato</label>
+                  <select
+                    value={filterContractId}
                     onChange={(e) => {
-                      setSearchTerm(e.target.value);
+                      setFilterContractId(e.target.value);
                       setCurrentPage(1);
                     }}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="">Todos</option>
+                    {contractsForFilter.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.number ? `${c.number} — ${c.name}` : c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-[120px]">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Mês</label>
+                  <select
+                    value={filterMonth}
+                    onChange={(e) => {
+                      setFilterMonth(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="">Todos</option>
+                    {MESES.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-[100px]">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Ano</label>
+                  <select
+                    value={filterYear}
+                    onChange={(e) => {
+                      setFilterYear(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="">Todos</option>
+                    {ANOS_FILTRO.map((y) => (
+                      <option key={y} value={String(y)}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[100px] flex-1 sm:flex-initial sm:max-w-[140px]">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Lote</label>
+                  <input
+                    type="text"
+                    value={filterLot}
+                    onChange={(e) => {
+                      setFilterLot(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    placeholder="Contém..."
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                   />
                 </div>
+                <div className="min-w-[150px] flex-1 sm:flex-initial">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Status orçamento</label>
+                  <select
+                    value={filterBudgetStatus}
+                    onChange={(e) => {
+                      setFilterBudgetStatus(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="">Todos</option>
+                    {STATUS_ORCAMENTO_OPCOES.map((op) => (
+                      <option key={op} value={op}>
+                        {op}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[160px] flex-1 sm:flex-initial">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Pendente faturamento</label>
+                  <select
+                    value={filterPendingBilling}
+                    onChange={(e) => {
+                      setFilterPendingBilling((e.target.value as 'sim' | 'nao' | '') || '');
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="">Todos</option>
+                    <option value="sim">Com valor pendente</option>
+                    <option value="nao">Sem pendência</option>
+                  </select>
+                </div>
                 <button
-                  onClick={openNew}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
+                  type="button"
+                  onClick={() => {
+                    setFilterContractId('');
+                    setFilterMonth('');
+                    setFilterYear('');
+                    setFilterLot('');
+                    setFilterBudgetStatus('');
+                    setFilterPendingBilling('');
+                    setCurrentPage(1);
+                  }}
+                  className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
-                  <Plus className="w-4 h-4" />
-                  Novo registro
+                  Limpar filtros
                 </button>
               </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[2800px]">
+                <table className="w-full text-xs min-w-[2950px]">
                   <thead className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80">
                     <tr>
                       {[
+                        'Contrato',
                         'Mês/Ano criação',
                         'Data início',
                         'Data término',
@@ -471,19 +609,31 @@ export default function AndamentoDaOsPage() {
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {loadingList ? (
                       <tr>
-                        <td colSpan={25} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={26} className="px-4 py-8 text-center text-gray-500">
                           Carregando...
                         </td>
                       </tr>
                     ) : rows.length === 0 ? (
                       <tr>
-                        <td colSpan={25} className="px-4 py-8 text-center text-gray-500">
-                          Nenhum registro. Clique em Novo registro.
+                        <td colSpan={26} className="px-4 py-8 text-center text-gray-500">
+                          Nenhum registro encontrado com os filtros atuais.
                         </td>
                       </tr>
                     ) : (
                       rows.map((p) => (
                         <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                          <td className="px-2 py-2 max-w-[200px] truncate" title={p.updatedContract ? `${p.updatedContract.number} ${p.updatedContract.name}` : ''}>
+                            {p.updatedContract ? (
+                              <span className="text-gray-900 dark:text-gray-100">
+                                {p.updatedContract.name}
+                                {p.updatedContract.number ? (
+                                  <span className="text-gray-500 dark:text-gray-400"> ({p.updatedContract.number})</span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
                           <td className="px-2 py-2 whitespace-nowrap">{formatCreationMonthYear(p.creationMonth, p.creationYear)}</td>
                           <td className="px-2 py-2 whitespace-nowrap">{formatDate(p.startDate)}</td>
                           <td className="px-2 py-2 whitespace-nowrap">{formatDate(p.endDate)}</td>
@@ -574,9 +724,7 @@ export default function AndamentoDaOsPage() {
             <div className="absolute inset-0" onClick={() => setShowForm(false)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-5xl max-h-[95vh] overflow-y-auto">
               <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b bg-white dark:bg-gray-800">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {editing ? 'Editar Ordem de Serviço' : 'Novo registro'}
-                </h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Editar Ordem de Serviço</h3>
                 <button onClick={() => setShowForm(false)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
                   <X className="w-5 h-5" />
                 </button>
@@ -770,10 +918,10 @@ export default function AndamentoDaOsPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={createMut.isPending || updateMut.isPending}
+                    disabled={updateMut.isPending}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm disabled:opacity-50"
                   >
-                    {createMut.isPending || updateMut.isPending ? 'Salvando...' : 'Salvar'}
+                    {updateMut.isPending ? 'Salvando...' : 'Salvar'}
                   </button>
                 </div>
               </form>

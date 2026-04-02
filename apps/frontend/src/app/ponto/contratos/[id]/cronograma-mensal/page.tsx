@@ -60,9 +60,13 @@ const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
 
 function formatDate(dateStr: string | null | undefined) {
   if (!dateStr) return '—';
-  const d = new Date(dateStr);
+  const raw = String(dateStr).trim();
+  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = only
+    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
+    : new Date(raw);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('pt-BR');
+  return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 function formatCurrency(value: number) {
@@ -76,14 +80,19 @@ function formatCurrency(value: number) {
 
 function formatDateTime(dateStr: string | null | undefined) {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
+  const raw = String(dateStr).trim();
+  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = only
+    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
+    : new Date(raw);
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 }
 
@@ -353,7 +362,7 @@ export default function CronogramaMensalPage() {
 
   if (loadingContract || !contractId) {
     return (
-      <ProtectedRoute route="/ponto/contratos">
+      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Loading />
         </MainLayout>
@@ -362,7 +371,7 @@ export default function CronogramaMensalPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/contratos">
+    <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Link

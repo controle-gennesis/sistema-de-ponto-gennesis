@@ -3,6 +3,7 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
+import { parseDateInput } from '../utils/dateInput';
 
 function toDec(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
@@ -26,22 +27,81 @@ function serializePleito(p: any) {
 export class PleitoController {
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { search, page = 1, limit = 20, gerados } = req.query;
-      const where: Prisma.PleitoWhereInput = {};
+      const {
+        search,
+        page = 1,
+        limit = 20,
+        gerados,
+        contractId,
+        creationMonth,
+        creationYear,
+        lot,
+        budgetStatus,
+        pendingBilling
+      } = req.query;
+
+      const andParts: Prisma.PleitoWhereInput[] = [];
 
       if (search) {
         const s = search as string;
-        where.OR = [
-          { serviceDescription: { contains: s, mode: 'insensitive' } },
-          { folderNumber: { contains: s, mode: 'insensitive' } },
-          { location: { contains: s, mode: 'insensitive' } },
-          { engineer: { contains: s, mode: 'insensitive' } }
-        ];
+        andParts.push({
+          OR: [
+            { serviceDescription: { contains: s, mode: 'insensitive' } },
+            { folderNumber: { contains: s, mode: 'insensitive' } },
+            { location: { contains: s, mode: 'insensitive' } },
+            { engineer: { contains: s, mode: 'insensitive' } },
+            { divSe: { contains: s, mode: 'insensitive' } },
+            { invoiceNumber: { contains: s, mode: 'insensitive' } },
+            { updatedContract: { is: { name: { contains: s, mode: 'insensitive' } } } },
+            { updatedContract: { is: { number: { contains: s, mode: 'insensitive' } } } }
+          ]
+        });
+      }
+
+      if (contractId && typeof contractId === 'string' && contractId.trim()) {
+        andParts.push({ updatedContractId: contractId.trim() });
+      }
+
+      if (creationMonth && typeof creationMonth === 'string' && creationMonth.trim()) {
+        const raw = creationMonth.trim().padStart(2, '0');
+        const n = parseInt(raw, 10);
+        if (n >= 1 && n <= 12) {
+          const unpadded = String(n);
+          andParts.push({
+            OR: [{ creationMonth: raw }, { creationMonth: unpadded }]
+          });
+        }
+      }
+
+      if (creationYear !== undefined && creationYear !== null && String(creationYear).trim() !== '') {
+        const y = Number(creationYear);
+        if (Number.isFinite(y)) {
+          andParts.push({ creationYear: y });
+        }
+      }
+
+      if (lot && typeof lot === 'string' && lot.trim()) {
+        andParts.push({ lot: { contains: lot.trim(), mode: 'insensitive' } });
+      }
+
+      if (budgetStatus && typeof budgetStatus === 'string' && budgetStatus.trim()) {
+        andParts.push({ budgetStatus: budgetStatus.trim() });
+      }
+
+      if (pendingBilling === 'sim') {
+        andParts.push({ billingRequest: { gt: 0 } });
+      } else if (pendingBilling === 'nao') {
+        andParts.push({
+          OR: [{ billingRequest: null }, { billingRequest: { lte: 0 } }]
+        });
       }
 
       if (gerados === '1' || gerados === 'true') {
-        where.billingRequest = { gt: 0 };
+        andParts.push({ billingRequest: { gt: 0 } });
       }
+
+      const where: Prisma.PleitoWhereInput =
+        andParts.length === 0 ? {} : andParts.length === 1 ? andParts[0]! : { AND: andParts };
 
       const limitNum = Math.min(Number(limit) || 20, 200);
       const skip = (Number(page) - 1) * limitNum;
@@ -52,7 +112,7 @@ export class PleitoController {
           skip,
           take: limitNum,
           orderBy: { createdAt: 'desc' },
-          include: gerados === '1' || gerados === 'true' ? { updatedContract: { select: { id: true, name: true, number: true } } } : undefined
+          include: { updatedContract: { select: { id: true, name: true, number: true } } }
         }),
         prisma.pleito.count({ where })
       ]);
@@ -109,8 +169,8 @@ export class PleitoController {
       const data: Prisma.PleitoCreateInput = {
         creationMonth: b.creationMonth?.trim() || null,
         creationYear: Number.isInteger(creationYear) ? creationYear : null,
-        startDate: b.startDate ? new Date(b.startDate) : null,
-        endDate: b.endDate ? new Date(b.endDate) : null,
+        startDate: b.startDate ? parseDateInput(b.startDate) : null,
+        endDate: b.endDate ? parseDateInput(b.endDate) : null,
         budgetStatus: b.budgetStatus?.trim() || null,
         folderNumber: b.folderNumber?.trim() || null,
         lot: b.lot?.trim() || null,
@@ -161,8 +221,8 @@ export class PleitoController {
         const vy = b.creationYear != null && b.creationYear !== '' ? Number(b.creationYear) : null;
         data.creationYear = Number.isInteger(vy) ? vy : null;
       }
-      if (b.startDate !== undefined) data.startDate = b.startDate ? new Date(b.startDate) : null;
-      if (b.endDate !== undefined) data.endDate = b.endDate ? new Date(b.endDate) : null;
+      if (b.startDate !== undefined) data.startDate = b.startDate ? parseDateInput(b.startDate) : null;
+      if (b.endDate !== undefined) data.endDate = b.endDate ? parseDateInput(b.endDate) : null;
       if (b.budgetStatus !== undefined) data.budgetStatus = b.budgetStatus?.trim() || null;
       if (b.folderNumber !== undefined) data.folderNumber = b.folderNumber?.trim() || null;
       if (b.lot !== undefined) data.lot = b.lot?.trim() || null;

@@ -32,6 +32,7 @@ interface ContractBilling {
   grossValue: number;
   netValue: number;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 interface ContractPleito {
@@ -106,27 +107,89 @@ const MESES_FILTRO = [
   { value: 12, label: 'Dezembro' }
 ];
 
+const TIMEZONE_BRASILIA = 'America/Sao_Paulo';
+
+/** Apenas calendário (YYYY-MM-DD) sem hora — evita deslocar o dia. */
+function parseDateOnlyLocal(dateStr: string): Date | null {
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  return new Date(y, mo, day, 12, 0, 0, 0);
+}
+
+function parseDateSafe(dateStr: string | Date | null | undefined): Date | null {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date) return dateStr;
+  const raw = String(dateStr).trim();
+  const dateOnly = parseDateOnlyLocal(raw);
+  if (dateOnly) return dateOnly;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function getCalendarPartsBrasilia(d: Date) {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: TIMEZONE_BRASILIA,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(d);
+}
+
+function getDateYear(dateStr: string | null | undefined): number | null {
+  const d = parseDateSafe(dateStr);
+  if (!d) return null;
+  const y = getCalendarPartsBrasilia(d).find((p) => p.type === 'year')?.value;
+  return y != null ? Number(y) : null;
+}
+
+function getDateMonth(dateStr: string | null | undefined): number | null {
+  const d = parseDateSafe(dateStr);
+  if (!d) return null;
+  const m = getCalendarPartsBrasilia(d).find((p) => p.type === 'month')?.value;
+  return m != null ? Number(m) : null;
+}
+
 function formatDate(dateStr: string) {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('pt-BR');
+  const d = parseDateSafe(dateStr);
+  if (!d) return '-';
+  return d.toLocaleDateString('pt-BR', { timeZone: TIMEZONE_BRASILIA });
 }
 
 function formatDateTime(dateStr: string) {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
+  const d = parseDateSafe(dateStr);
+  if (!d) return '-';
   return d.toLocaleString('pt-BR', {
+    timeZone: TIMEZONE_BRASILIA,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 }
 
 function toInputDate(dateStr: string | Date): string {
-  const d = dateStr ? new Date(dateStr) : new Date();
-  return d.toISOString().split('T')[0];
+  if (typeof dateStr === 'string') {
+    const t = dateStr.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+      return t;
+    }
+  }
+  const d = parseDateSafe(dateStr) || new Date();
+  const parts = getCalendarPartsBrasilia(d);
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  if (y && m && day) {
+    return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
 function formatCurrency(value: number) {
@@ -140,8 +203,9 @@ function formatCurrency(value: number) {
 
 function getYearsBetween(startDate: string, endDate: string): number {
   if (!startDate || !endDate) return 0;
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+  const start = parseDateSafe(startDate);
+  const end = parseDateSafe(endDate);
+  if (!start || !end) return 0;
   if (end <= start) return 0;
   // Conta anos completos de vigência (ex: 01/03/2026 a 01/03/2028 = 2 anos)
   const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
@@ -159,6 +223,28 @@ function parseCurrencyInput(value: string): number {
   const cleaned = value.replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
+}
+
+function isNetValueMissing(b: ContractBilling): boolean {
+  const net = Number(b.netValue || 0);
+  if (net === 0) return true;
+  const gross = Number(b.grossValue || 0);
+  if (net !== gross) return false;
+  if (!b.createdAt || !b.updatedAt) return true;
+  return new Date(b.updatedAt).getTime() === new Date(b.createdAt).getTime();
+}
+
+function parseBudgetToNumberSafe(v: string | null | undefined): number {
+  if (!v) return 0;
+  const s = String(v).replace(/[R$\s]/g, '').trim();
+  if (!s) return 0;
+  if (s.includes(',')) {
+    const cleaned = s.replace(/\./g, '').replace(',', '.');
+    const n = parseFloat(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
 }
 
 /** Opção da lista OS/SE (API `/pleitos/divse-list`): valor salvo = apenas `divSe`. */
@@ -258,7 +344,16 @@ export default function ContractDetailPage() {
   const [valorAnualEdit, setValorAnualEdit] = useState('');
   const [selectedBilling, setSelectedBilling] = useState<ContractBilling | null>(null);
   const [editingBilling, setEditingBilling] = useState(false);
-  const [billingEditForm, setBillingEditForm] = useState({ issueDate: '', invoiceNumber: '', serviceOrder: '', grossValue: '' });
+  const [filterBillingOsSe, setFilterBillingOsSe] = useState('');
+  const [filterBillingInvoice, setFilterBillingInvoice] = useState('');
+  const [filterBillingGross, setFilterBillingGross] = useState('');
+  const [billingEditForm, setBillingEditForm] = useState({
+    issueDate: '',
+    invoiceNumber: '',
+    serviceOrder: '',
+    grossValue: '',
+    netValue: ''
+  });
   const [osSeEditDropdownOpen, setOsSeEditDropdownOpen] = useState(false);
   const [selectedPleitoId, setSelectedPleitoId] = useState<string | null>(null);
   const [pleitoToEdit, setPleitoToEdit] = useState<(PleitoFormData & { id: string }) | null>(null);
@@ -497,8 +592,8 @@ export default function ContractDetailPage() {
 
   const availableYears = useMemo(() => {
     if (!contract) return [];
-    const start = new Date(contract.startDate).getFullYear();
-    const end = new Date(contract.endDate).getFullYear();
+    const start = getDateYear(contract.startDate) ?? new Date().getFullYear();
+    const end = getDateYear(contract.endDate) ?? start;
     const years: number[] = [];
     for (let y = start; y <= end; y++) {
       years.push(y);
@@ -518,8 +613,8 @@ export default function ContractDetailPage() {
   const filteredProductions = useMemo(() => {
     return productions.filter((p) => {
       if (!p.fillingDate) return isAllYears && selectedMonth === 0;
-      const d = new Date(p.fillingDate);
-      if (Number.isNaN(d.getTime())) return isAllYears && selectedMonth === 0;
+      const d = parseDateSafe(p.fillingDate);
+      if (!d) return isAllYears && selectedMonth === 0;
 
       if (!isAllYears && d.getFullYear() !== selectedYear) return false;
       if (selectedMonth === 0) return true;
@@ -546,7 +641,8 @@ export default function ContractDetailPage() {
     const porMes: number[] = new Array(12).fill(0);
     const year = safeSelectedYear;
     billings.forEach((b) => {
-      const d = new Date(b.issueDate);
+      const d = parseDateSafe(b.issueDate);
+      if (!d) return;
       if (d.getFullYear() === year) {
         const mes = d.getMonth(); // 0-11
         porMes[mes] += b.grossValue;
@@ -560,7 +656,8 @@ export default function ContractDetailPage() {
     const porMes: number[] = new Array(12).fill(0);
     const year = safeSelectedYear;
     productions.forEach((p) => {
-      const d = new Date(p.fillingDate);
+      const d = parseDateSafe(p.fillingDate);
+      if (!d) return;
       if (d.getFullYear() === year) {
         const mes = d.getMonth(); // 0-11
         porMes[mes] += p.weeklyProductionValue;
@@ -576,16 +673,48 @@ export default function ContractDetailPage() {
     allPleitos.forEach((p) => {
       const vp = p.billingRequest ?? 0;
       if (vp <= 0) return;
-      const pYear = p.creationYear ?? (p.startDate ? new Date(p.startDate).getFullYear() : null);
+      const pYear = p.creationYear ?? getDateYear(p.startDate);
       if (pYear !== year) return;
       const monthNum = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
-      const mesIdx = monthNum != null && monthNum >= 1 && monthNum <= 12 ? monthNum - 1 : (p.startDate ? new Date(p.startDate).getMonth() : null);
+      const startMonth = getDateMonth(p.startDate);
+      const mesIdx = monthNum != null && monthNum >= 1 && monthNum <= 12 ? monthNum - 1 : (startMonth ? startMonth - 1 : null);
       if (mesIdx != null && mesIdx >= 0 && mesIdx < 12) {
         porMes[mesIdx] += vp;
       }
     });
     return porMes;
   }, [allPleitos, safeSelectedYear]);
+
+  // Soma do valor orçado por mês no ano selecionado
+  const valorOrcadoPorMes = useMemo(() => {
+    const porMes: number[] = new Array(12).fill(0);
+    const year = safeSelectedYear;
+    pleitos.forEach((p) => {
+      // Regra solicitada: usar somente a coluna "ORÇAMENTO" da OS.
+      const valorOrcado = parseBudgetToNumberSafe(p.budget);
+      if (valorOrcado <= 0) return;
+      const pYear = p.creationYear ?? getDateYear(p.startDate);
+      if (pYear !== year) return;
+      const monthNum = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
+      const mesIdx =
+        monthNum != null && monthNum >= 1 && monthNum <= 12
+          ? monthNum - 1
+          : (() => {
+              const m = getDateMonth(p.startDate);
+              return m ? m - 1 : null;
+            })();
+      if (mesIdx != null && mesIdx >= 0 && mesIdx < 12) {
+        porMes[mesIdx] += valorOrcado;
+      }
+    });
+    return porMes;
+  }, [pleitos, safeSelectedYear]);
+
+  // Pendente mensal = valor orçado mensal - faturamento mensal
+  const pendenteFaturamentoPorMes = useMemo(
+    () => valorOrcadoPorMes.map((v, i) => v - (faturamentoPorMes[i] || 0)),
+    [valorOrcadoPorMes, faturamentoPorMes]
+  );
 
   // Soma dos pleitos por ano (para Metas Anuais)
   const pleitosPorAno = useMemo(() => {
@@ -595,7 +724,7 @@ export default function ContractDetailPage() {
         .filter((p) => {
           const vp = p.billingRequest ?? 0;
           if (vp <= 0) return false;
-          const pYear = p.creationYear ?? (p.startDate ? new Date(p.startDate).getFullYear() : null);
+          const pYear = p.creationYear ?? getDateYear(p.startDate);
           return pYear === year;
         })
         .reduce((acc, p) => acc + (p.billingRequest ?? 0), 0);
@@ -640,32 +769,78 @@ export default function ContractDetailPage() {
     const result: Record<number, number> = {};
     availableYears.forEach((year) => {
       result[year] = billings
-        .filter((b) => new Date(b.issueDate).getFullYear() === year)
+        .filter((b) => getDateYear(b.issueDate) === year)
         .reduce((acc, b) => acc + b.grossValue, 0);
     });
     return result;
   }, [availableYears, billings]);
 
+  const producaoPorAno = useMemo(() => {
+    const result: Record<number, number> = {};
+    availableYears.forEach((year) => {
+      result[year] = productions
+        .filter((p) => getDateYear(p.fillingDate) === year)
+        .reduce((acc, p) => acc + p.weeklyProductionValue, 0);
+    });
+    return result;
+  }, [availableYears, productions]);
+
+  const valorOrcadoPorAno = useMemo(() => {
+    const result: Record<number, number> = {};
+    availableYears.forEach((year) => {
+      result[year] = pleitos
+        .filter((p) => {
+          const pYear = p.creationYear ?? getDateYear(p.startDate);
+          return pYear === year;
+        })
+        .reduce((acc, p) => acc + parseBudgetToNumberSafe(p.budget), 0);
+    });
+    return result;
+  }, [availableYears, pleitos]);
+
+  const pendenteFaturamentoPorAno = useMemo(() => {
+    const result: Record<number, number> = {};
+    availableYears.forEach((year) => {
+      result[year] = (valorOrcadoPorAno[year] || 0) - (faturamentoPorAno[year] || 0);
+    });
+    return result;
+  }, [availableYears, valorOrcadoPorAno, faturamentoPorAno]);
+
   // Faturamento filtrado por ano e mês (para exibição nas tabelas)
   const filteredBillings = useMemo(() => {
     return billings.filter((b) => {
-      const d = new Date(b.issueDate);
+      const d = parseDateSafe(b.issueDate);
+      if (!d) return false;
       if (!isAllYears && d.getFullYear() !== selectedYear) return false;
-      if (selectedMonth === 0) return true;
-      return d.getMonth() + 1 === selectedMonth; // JS month 0-11
+      if (selectedMonth !== 0 && d.getMonth() + 1 !== selectedMonth) return false; // JS month 0-11
+
+      const osTerm = filterBillingOsSe.trim().toLowerCase();
+      if (osTerm && !(b.serviceOrder || '').toLowerCase().includes(osTerm)) return false;
+
+      const nfTerm = filterBillingInvoice.trim().toLowerCase();
+      if (nfTerm && !(b.invoiceNumber || '').toLowerCase().includes(nfTerm)) return false;
+
+      const grossTerm = filterBillingGross.trim();
+      if (grossTerm) {
+        const grossFormatted = formatCurrencyInput(b.grossValue).toLowerCase();
+        const grossNumericTerm = parseCurrencyInput(grossTerm);
+        const matchesFormatted = grossFormatted.includes(grossTerm.toLowerCase().replace('r$', '').trim());
+        const matchesNumeric = grossNumericTerm > 0 && Math.abs(b.grossValue - grossNumericTerm) < 0.009;
+        if (!matchesFormatted && !matchesNumeric) return false;
+      }
+
+      return true;
     });
-  }, [billings, isAllYears, selectedYear, selectedMonth]);
+  }, [billings, isAllYears, selectedYear, selectedMonth, filterBillingOsSe, filterBillingInvoice, filterBillingGross]);
 
   // Pleitos filtrados por ano, mês e filtros de status
   const filteredPleitos = useMemo(() => {
     let result = pleitos.filter((p) => {
-      const year = p.creationYear ?? (p.startDate ? new Date(p.startDate).getFullYear() : null);
+      const year = p.creationYear ?? getDateYear(p.startDate);
       if (!isAllYears && (year === null || year !== selectedYear)) return false;
       if (selectedMonth === 0) return true;
       const monthNum = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
-      if (monthNum === null && p.startDate) {
-        return new Date(p.startDate).getMonth() + 1 === selectedMonth;
-      }
+      if (monthNum === null && p.startDate) return getDateMonth(p.startDate) === selectedMonth;
       return monthNum === selectedMonth;
     });
 
@@ -756,6 +931,8 @@ export default function ContractDetailPage() {
     e.preventDefault();
     if (!selectedBilling) return;
     const gross = parseCurrencyInput(billingEditForm.grossValue);
+    const netRaw = (billingEditForm.netValue || '').trim();
+    const netParsed = netRaw ? parseCurrencyInput(netRaw) : null;
     if (!billingEditForm.issueDate || !billingEditForm.invoiceNumber.trim() || !billingEditForm.serviceOrder.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
@@ -764,13 +941,18 @@ export default function ContractDetailPage() {
       toast.error('Valor bruto é obrigatório');
       return;
     }
+    if (netParsed !== null && netParsed < 0) {
+      toast.error('Valor líquido inválido');
+      return;
+    }
     updateBillingMutation.mutate({
       id: selectedBilling.id,
       data: {
         issueDate: billingEditForm.issueDate,
         invoiceNumber: billingEditForm.invoiceNumber.trim(),
         serviceOrder: billingEditForm.serviceOrder.trim(),
-        grossValue: gross
+        grossValue: gross,
+        ...(netParsed !== null ? { netValue: netParsed } : {})
       }
     });
   };
@@ -876,6 +1058,41 @@ export default function ContractDetailPage() {
       toast.error(err.response?.data?.message || 'Erro ao gerar pleito');
     }
   });
+
+  const deletePleitosSelecionadosMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => api.delete(`/pleitos/${id}`)));
+    },
+    onSuccess: (_data, ids) => {
+      queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
+      queryClient.invalidateQueries({ queryKey: ['pleitos'] });
+      queryClient.invalidateQueries({ queryKey: ['pleitos-divse-list'] });
+      setSelectedForPleito(new Set());
+      setSelectedPleitoId((prev) => (prev && ids.includes(prev) ? null : prev));
+      toast.success(
+        ids.length === 1 ? 'Ordem de serviço excluída.' : `${ids.length} ordens de serviço excluídas.`
+      );
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message || 'Erro ao excluir ordens de serviço');
+    }
+  });
+
+  const handleExcluirPleitosSelecionados = () => {
+    const ids = Array.from(selectedForPleito).filter((id) => pleitos.some((p) => p.id === id));
+    if (ids.length === 0) {
+      toast.error('Selecione ao menos uma ordem de serviço.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Excluir ${ids.length} ordem(ns) de serviço selecionada(s)? Esta ação não pode ser desfeita.`
+      )
+    ) {
+      return;
+    }
+    deletePleitosSelecionadosMutation.mutate(ids);
+  };
 
   const handleGerarPleito = () => {
     const ids = Array.from(selectedForPleito);
@@ -1015,7 +1232,7 @@ export default function ContractDetailPage() {
   const historicoYears = useMemo(() => {
     const years = new Set<number>();
     generatedPleitos.forEach((p) => {
-      const y = p.creationYear ?? (p.createdAt ? new Date(p.createdAt).getFullYear() : null);
+      const y = p.creationYear ?? getDateYear(p.createdAt as unknown as string);
       if (y) years.add(y);
     });
     return Array.from(years).sort((a, b) => b - a);
@@ -1025,9 +1242,9 @@ export default function ContractDetailPage() {
     const pastaQuery = histPastaFilter.trim().toLowerCase();
     const descricaoQuery = histDescricaoFilter.trim().toLowerCase();
     return generatedPleitos.filter((p) => {
-      const year = p.creationYear ?? (p.createdAt ? new Date(p.createdAt).getFullYear() : null);
+      const year = p.creationYear ?? getDateYear(p.createdAt as unknown as string);
       const monthRaw = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
-      const month = monthRaw && monthRaw > 0 ? monthRaw : (p.createdAt ? new Date(p.createdAt).getMonth() + 1 : null);
+      const month = monthRaw && monthRaw > 0 ? monthRaw : getDateMonth(p.createdAt as unknown as string);
 
       if (histYearFilter !== 'all' && year !== Number(histYearFilter)) return false;
       if (histMonthFilter !== 'all' && month !== Number(histMonthFilter)) return false;
@@ -1228,7 +1445,7 @@ export default function ContractDetailPage() {
 
   if (loadingContract || !contract) {
     return (
-      <ProtectedRoute route="/ponto/contratos">
+      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <div className="flex items-center justify-center min-h-[400px]">
             {loadingContract ? (
@@ -1252,7 +1469,7 @@ export default function ContractDetailPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/contratos">
+    <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div ref={containerRef} className="space-y-6">
           {/* Header */}
@@ -1311,13 +1528,6 @@ export default function ContractDetailPage() {
 
             {/* Barra de ações */}
             <div className="flex flex-wrap items-center gap-3 p-4 sm:p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setShowBillingModal(true)}
-                className="h-10 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-              >
-                <Plus className="w-4 h-4 shrink-0" />
-                Cadastrar Faturamento
-              </button>
               <button
                 onClick={() => setShowPleitoModal(true)}
                 className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
@@ -1446,10 +1656,10 @@ export default function ContractDetailPage() {
               {isAllYears ? (
                 <>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Metas Anuais
+                    Acumulado Anual
                   </h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Valor anual e faturamento por ano
+                    Indicadores anuais por ano
                   </p>
                 </>
               ) : (
@@ -1496,6 +1706,19 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-amber-50/50 dark:bg-amber-900/10">
+                        <td className="px-4 py-4 text-sm font-medium text-amber-700 dark:text-amber-400 bg-gray-50 dark:bg-gray-800/50">
+                          Produção
+                        </td>
+                        {availableYears.map((year) => (
+                          <td
+                            key={year}
+                            className="px-3 py-4 text-center text-sm font-medium text-amber-700 dark:text-amber-400"
+                          >
+                            {producaoPorAno[year] > 0 ? formatCurrency(producaoPorAno[year]) : '-'}
+                          </td>
+                        ))}
+                      </tr>
                       <tr className="divide-x divide-gray-200 dark:divide-gray-700">
                         <td className="px-4 py-4 text-sm font-medium text-red-600 dark:text-red-400 bg-gray-50 dark:bg-gray-800/50">
                           Pleitos
@@ -1519,6 +1742,32 @@ export default function ContractDetailPage() {
                             className="px-3 py-4 text-center text-sm font-medium text-green-700 dark:text-green-400"
                           >
                             {faturamentoPorAno[year] > 0 ? formatCurrency(faturamentoPorAno[year]) : '-'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-sky-50/50 dark:bg-sky-900/10">
+                        <td className="px-4 py-4 text-sm font-medium text-sky-700 dark:text-sky-400 bg-gray-50 dark:bg-gray-800/50">
+                          Valor Orçado
+                        </td>
+                        {availableYears.map((year) => (
+                          <td
+                            key={year}
+                            className="px-3 py-4 text-center text-sm font-medium text-sky-700 dark:text-sky-400"
+                          >
+                            {valorOrcadoPorAno[year] > 0 ? formatCurrency(valorOrcadoPorAno[year]) : '-'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-orange-50/50 dark:bg-orange-900/10">
+                        <td className="px-4 py-4 text-sm font-medium text-orange-700 dark:text-orange-400 bg-gray-50 dark:bg-gray-800/50">
+                          Pendente Faturamento
+                        </td>
+                        {availableYears.map((year) => (
+                          <td
+                            key={year}
+                            className="px-3 py-4 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
+                          >
+                            {pendenteFaturamentoPorAno[year] !== 0 ? formatCurrency(pendenteFaturamentoPorAno[year]) : '-'}
                           </td>
                         ))}
                       </tr>
@@ -1594,6 +1843,32 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-sky-50/50 dark:bg-sky-900/10">
+                        <td className="px-4 py-4 text-sm font-medium text-sky-700 dark:text-sky-400 bg-gray-50 dark:bg-gray-800/50">
+                          Valor Orçado
+                        </td>
+                        {MESES.map((mes, i) => (
+                          <td
+                            key={mes}
+                            className="px-3 py-4 text-center text-sm font-medium text-sky-700 dark:text-sky-400"
+                          >
+                            {valorOrcadoPorMes[i] > 0 ? formatCurrency(valorOrcadoPorMes[i]) : '-'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-orange-50/50 dark:bg-orange-900/10">
+                        <td className="px-4 py-4 text-sm font-medium text-orange-700 dark:text-orange-400 bg-gray-50 dark:bg-gray-800/50">
+                          Pendente Faturamento
+                        </td>
+                        {MESES.map((mes, i) => (
+                          <td
+                            key={mes}
+                            className="px-3 py-4 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
+                          >
+                            {pendenteFaturamentoPorMes[i] !== 0 ? formatCurrency(pendenteFaturamentoPorMes[i]) : '-'}
+                          </td>
+                        ))}
+                      </tr>
                     </tbody>
                   </table>
                 )}
@@ -1640,6 +1915,16 @@ export default function ContractDetailPage() {
                             className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
                           >
                             Gerar cronograma mensal
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleExcluirPleitosSelecionados}
+                            disabled={deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+                            title="Excluir as ordens de serviço marcadas na tabela"
+                          >
+                            <Trash2 className="w-4 h-4 shrink-0" />
+                            {deletePleitosSelecionadosMutation.isPending ? 'Excluindo...' : 'Excluir selecionadas'}
                           </button>
                         </>
                       )}
@@ -2011,6 +2296,31 @@ export default function ContractDetailPage() {
                 {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
                 {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
               </p>
+              {!loadingBillings && billings.length > 0 && (
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    value={filterBillingOsSe}
+                    onChange={(e) => setFilterBillingOsSe(e.target.value)}
+                    placeholder="Filtrar OS / SE"
+                    className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  />
+                  <input
+                    type="text"
+                    value={filterBillingInvoice}
+                    onChange={(e) => setFilterBillingInvoice(e.target.value)}
+                    placeholder="Filtrar Nº nota fiscal"
+                    className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  />
+                  <input
+                    type="text"
+                    value={filterBillingGross}
+                    onChange={(e) => setFilterBillingGross(e.target.value)}
+                    placeholder="Filtrar valor bruto"
+                    className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  />
+                </div>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               {loadingBillings ? (
@@ -2059,7 +2369,16 @@ export default function ContractDetailPage() {
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
                             {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(pleitos, b.serviceOrder))}
                           </td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">{formatCurrency(b.grossValue)}</td>
+                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">
+                            <div className="flex flex-col items-end gap-1">
+                              <span>{formatCurrency(b.grossValue)}</span>
+                              {isNetValueMissing(b) && (
+                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                  FAT. LIQUIDO NAO PREENCHIDO
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(b.createdAt || '')}</td>
                           {isAdministrator && (
                             <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
@@ -2808,7 +3127,8 @@ export default function ContractDetailPage() {
                             issueDate: selectedBilling.issueDate.split('T')[0],
                             invoiceNumber: selectedBilling.invoiceNumber,
                             serviceOrder: selectedBilling.serviceOrder,
-                            grossValue: formatCurrencyInput(selectedBilling.grossValue)
+                            grossValue: formatCurrencyInput(selectedBilling.grossValue),
+                            netValue: isNetValueMissing(selectedBilling) ? '' : formatCurrencyInput(selectedBilling.netValue)
                           });
                           setEditingBilling(true);
                         }}
@@ -2902,6 +3222,28 @@ export default function ContractDetailPage() {
                         />
                       </div>
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Valor Líquido</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">R$</span>
+                        <input
+                          type="text"
+                          value={billingEditForm.netValue}
+                          onChange={(e) => {
+                            const v = e.target.value.replace(/\D/g, '');
+                            const formatted = v
+                              ? (Number(v) / 100).toLocaleString('pt-BR', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2
+                                })
+                              : '';
+                            setBillingEditForm({ ...billingEditForm, netValue: formatted });
+                          }}
+                          className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                          placeholder="Se vazio, será 0,00"
+                        />
+                      </div>
+                    </div>
                     <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                       <button
                         type="button"
@@ -2944,6 +3286,12 @@ export default function ContractDetailPage() {
                     <div>
                       <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor Bruto</p>
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mt-0.5">{formatCurrency(selectedBilling.grossValue)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor Líquido</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mt-0.5">
+                        {isNetValueMissing(selectedBilling) ? formatCurrency(0) : formatCurrency(selectedBilling.netValue)}
+                      </p>
                     </div>
                   </div>
                 )}

@@ -112,19 +112,30 @@ function getTargetPctForCategoria(cat: FaturamentoCategoria): number {
 
 function formatDate(dateStr: string) {
   if (!dateStr) return '-';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('pt-BR');
+  const raw = String(dateStr).trim();
+  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = only
+    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
+    : new Date(raw);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 function formatDateTime(dateStr: string) {
   if (!dateStr) return '-';
-  const d = new Date(dateStr);
+  const raw = String(dateStr).trim();
+  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = only
+    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
+    : new Date(raw);
+  if (Number.isNaN(d.getTime())) return '-';
   return d.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 }
 
@@ -777,7 +788,7 @@ export default function AndamentoListPage() {
 
   if (loadingContract || !contractId) {
     return (
-      <ProtectedRoute route="/ponto/contratos">
+      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Loading />
         </MainLayout>
@@ -786,7 +797,7 @@ export default function AndamentoListPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/contratos">
+    <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Link

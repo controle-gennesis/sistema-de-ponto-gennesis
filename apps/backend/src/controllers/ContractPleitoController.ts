@@ -3,6 +3,8 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
+import { parseDateInput } from '../utils/dateInput';
+import { assertContractAccess } from '../lib/contractAccess';
 const toDec = (v: unknown): number | null => {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -26,6 +28,8 @@ export class ContractPleitoController {
   async getPleitosByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
+      await assertContractAccess(req, contractId);
+
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
 
@@ -43,6 +47,8 @@ export class ContractPleitoController {
   async createPleito(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
+      await assertContractAccess(req, contractId);
+
       const b = req.body;
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
@@ -53,8 +59,8 @@ export class ContractPleitoController {
       const data: Prisma.PleitoCreateInput = {
         creationMonth: b.creationMonth?.trim() || null,
         creationYear: Number.isInteger(creationYear) ? creationYear : null,
-        startDate: b.startDate ? new Date(b.startDate) : null,
-        endDate: b.endDate ? new Date(b.endDate) : null,
+        startDate: b.startDate ? parseDateInput(b.startDate) : null,
+        endDate: b.endDate ? parseDateInput(b.endDate) : null,
         budgetStatus: b.budgetStatus?.trim() || null,
         folderNumber: b.folderNumber?.trim() || null,
         lot: b.lot?.trim() || null,
