@@ -128,6 +128,32 @@ function normalizarNomeServicoOrcamento(nome: string): string {
   return nome.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** Marca subtítulo sem composições na seleção do dropdown (valor sintético da chave). */
+const DROPDOWN_BLOCO_SEM_ITENS = '__bloco_sem_itens__';
+
+function buildItemKeyOrcamento(blocoKey: string, chave: string) {
+  return `${blocoKey}|${chave}`;
+}
+
+/** Parse `servicoId|subtituloId|chave` (chave pode conter `|` em teoria; ids vêm de UUID). */
+function parseItemKeyOrcamento(itemKey: string): { blocoKey: string; chave: string } | null {
+  const parts = itemKey.split('|');
+  if (parts.length < 3) return null;
+  const chave = parts[parts.length - 1]!;
+  const subtituloId = parts[parts.length - 2]!;
+  const servicoId = parts.slice(0, -2).join('|');
+  return { blocoKey: `${servicoId}|${subtituloId}`, chave };
+}
+
+function findSubtituloPorBlocoKey(list: ServicoPadrao[], blocoKey: string): Subtitulo | null {
+  for (const s of list) {
+    for (const sub of s.subtitulos) {
+      if (`${s.id}|${sub.id}` === blocoKey) return sub;
+    }
+  }
+  return null;
+}
+
 /** Parse número no formato brasileiro (ex.: 1.416,00) para campos da planilha analítica. */
 function parsePlanilhaPtBr(raw: string): number | null {
   const t = raw.trim();
@@ -173,6 +199,11 @@ interface SessaoOrcamentoPersist {
   planilhaValorUnitCompraReal: Record<string, number>;
   showDetalhesFinanceiros: boolean;
   meta?: OrcamentoMeta;
+  /**
+   * Chaves `servicoId|subtituloId|chave` ocultas na montagem (removidas pelo usuário).
+   * Não apagamos do catálogo `servicos` para poder restaurar sem reimportar.
+   */
+  itensOcultosNoOrcamento?: string[];
 }
 
 function sessaoVazia(): SessaoOrcamentoPersist {
@@ -183,6 +214,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     planilhaQuantidadeCompra: {},
     planilhaValorUnitCompraReal: {},
     showDetalhesFinanceiros: false,
+    itensOcultosNoOrcamento: [],
     meta: {
       osNumeroPasta: '',
       dataAbertura: '',
@@ -229,6 +261,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           ? p.planilhaValorUnitCompraReal
           : {},
       showDetalhesFinanceiros: Boolean(p.showDetalhesFinanceiros),
+      itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
       meta
     };
   } catch {
@@ -351,6 +384,7 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
                 ? so.planilhaValorUnitCompraReal
                 : {},
             showDetalhesFinanceiros: Boolean(so.showDetalhesFinanceiros),
+            itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
             meta
           }
         : null;
@@ -641,6 +675,73 @@ function gerarAnaliticoComposicaoUnit(materialTotal: number, maoTotal: number, s
   return { total, linhas };
 }
 
+/** Checkbox do dropdown de serviços: caixa 20px, tema vermelho, suporta indeterminado. */
+function ServicosDropdownCheckbox({
+  id,
+  checked,
+  indeterminate,
+  disabled,
+  onChange,
+  children,
+  compact
+}: {
+  id?: string;
+  checked: boolean;
+  indeterminate?: boolean;
+  disabled?: boolean;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  children?: React.ReactNode;
+  /** Linhas aninhadas (composições): padding menor */
+  compact?: boolean;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
+  }, [indeterminate]);
+
+  const filled = checked || Boolean(indeterminate);
+
+  return (
+    <label
+      className={`group flex items-start gap-3 rounded-lg cursor-pointer transition-colors ${
+        compact ? 'py-2 min-h-[2.5rem] px-2 -mx-2' : 'py-2.5 px-2 -mx-2'
+      } hover:bg-gray-100/95 dark:hover:bg-gray-600/50 ${
+        disabled ? 'opacity-45 cursor-not-allowed hover:bg-transparent' : ''
+      }`}
+    >
+      <input
+        ref={ref}
+        id={id}
+        type="checkbox"
+        className="sr-only"
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+      />
+      <span
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-all shadow-sm outline-none group-focus-within:ring-2 group-focus-within:ring-red-500/80 group-focus-within:ring-offset-2 ring-offset-white dark:ring-offset-gray-800 ${
+          filled
+            ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+            : 'border-gray-300 bg-white group-hover:border-red-400 dark:border-gray-500 dark:bg-gray-800 dark:group-hover:border-red-400/70'
+        }`}
+        aria-hidden
+      >
+        {checked && !indeterminate && (
+          <svg className="h-3 w-3 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+        {indeterminate && (
+          <svg className="h-3 w-3 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 12h14" />
+          </svg>
+        )}
+      </span>
+      {children}
+    </label>
+  );
+}
+
 export default function OrcamentoPage() {
   const router = useRouter();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
@@ -651,8 +752,10 @@ export default function OrcamentoPage() {
   const [imports, setImports] = useState<ImportRecord[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [searchComposicao, setSearchComposicao] = useState('');
-  const [subtitulosSelecionados, setSubtitulosSelecionados] = useState<Set<string>>(new Set());
+  /** Chaves `servicoId|subtituloId|chave` (ou `…|${DROPDOWN_BLOCO_SEM_ITENS}`) escolhidas no dropdown. */
+  const [linhasSelecionadasDropdown, setLinhasSelecionadasDropdown] = useState<Set<string>>(new Set());
   const [subtitulosNoOrcamento, setSubtitulosNoOrcamento] = useState<string[]>([]);
+  const [itensOcultosNoOrcamento, setItensOcultosNoOrcamento] = useState<string[]>([]);
   const [quantidadesPorItem, setQuantidadesPorItem] = useState<Record<string, number>>({});
   const [dimensoesPorItem, setDimensoesPorItem] = useState<Record<string, DimensoesItem>>({});
   const [planilhaQuantidadeCompra, setPlanilhaQuantidadeCompra] = useState<Record<string, number>>({});
@@ -828,7 +931,8 @@ export default function OrcamentoPage() {
     setServicos([]);
     setImports([]);
     setSubtitulosNoOrcamento([]);
-    setSubtitulosSelecionados(new Set());
+    setItensOcultosNoOrcamento([]);
+    setLinhasSelecionadasDropdown(new Set());
     setQuantidadesPorItem({});
     setDimensoesPorItem({});
     setPlanilhaQuantidadeCompra({});
@@ -839,6 +943,9 @@ export default function OrcamentoPage() {
     const aplicarSessao = (s: SessaoOrcamentoPersist | null) => {
       if (!s) return;
       setSubtitulosNoOrcamento(s.subtitulosNoOrcamento);
+      setItensOcultosNoOrcamento(
+        Array.isArray(s.itensOcultosNoOrcamento) ? s.itensOcultosNoOrcamento : []
+      );
       setQuantidadesPorItem(s.quantidadesPorItem);
       setDimensoesPorItem(s.dimensoesPorItem);
       setPlanilhaQuantidadeCompra(s.planilhaQuantidadeCompra ?? {});
@@ -903,7 +1010,8 @@ export default function OrcamentoPage() {
       planilhaQuantidadeCompra,
       planilhaValorUnitCompraReal,
       showDetalhesFinanceiros,
-      meta
+      meta,
+      itensOcultosNoOrcamento
     };
     servicosImportsRef.current = { servicos, imports };
     if (centroCustoId && orcamentoAtivoId) {
@@ -923,6 +1031,7 @@ export default function OrcamentoPage() {
     planilhaValorUnitCompraReal,
     showDetalhesFinanceiros,
     meta,
+    itensOcultosNoOrcamento,
     servicos,
     imports
   ]);
@@ -960,6 +1069,7 @@ export default function OrcamentoPage() {
     planilhaValorUnitCompraReal,
     showDetalhesFinanceiros,
     meta,
+    itensOcultosNoOrcamento,
     servicos,
     imports
   ]);
@@ -1008,6 +1118,27 @@ export default function OrcamentoPage() {
       imports: i,
       sessaoOrcamento: sessao
     }).catch(err => console.warn('Erro ao salvar orçamento no servidor:', err));
+  };
+
+  /** Remove um registro do histórico de importações (lista de documentos do contrato). */
+  const removerImportDoHistorico = (importId: string) => {
+    if (!centroCustoId) return;
+    if (!confirm('Remover este documento da lista de importações?')) return;
+    const next = imports.filter(i => i.id !== importId);
+    setImports(next);
+    try {
+      localStorage.setItem(storageKey(centroCustoId, 'imports'), JSON.stringify(next));
+    } catch {
+      /* quota */
+    }
+    if (orcamentoAtivoId) {
+      persistToApi(servicos, next);
+    } else {
+      void saveServicosPadraoToApi(centroCustoId, { servicos, imports: next }).catch(() => {
+        toast.error('Não foi possível salvar no servidor.');
+      });
+    }
+    toast.success('Documento removido da lista.');
   };
 
   const voltarParaListaOrcamentos = () => {
@@ -1156,27 +1287,6 @@ export default function OrcamentoPage() {
     } catch {
       toast.error('Não foi possível atualizar os dados.');
     }
-  };
-
-  /** Copia serviços + histórico de imports de outro orçamento do mesmo contrato (equivale a repetir o orçamento perfeito já importado lá). */
-  const apagarOrcamento = () => {
-    if (!centroCustoId || !orcamentoAtivoId) return;
-    if (!confirm('Tem certeza que deseja apagar este orçamento? Esta ação não pode ser desfeita.')) return;
-    void (async () => {
-      try {
-        await excluirOrcamentoApi(centroCustoId, orcamentoAtivoId);
-        const oid = orcamentoAtivoId;
-        localStorage.removeItem(storageKey(centroCustoId, 'sessao', oid));
-        setListaOrcamentos(prev => prev.filter(o => o.id !== oid));
-        setOrcamentoAtivoId(null);
-        setNomeOrcamentoRascunho('');
-        setServicos([]);
-        setImports([]);
-        toast.success('Orçamento apagado.');
-      } catch {
-        toast.error('Não foi possível apagar no servidor.');
-      }
-    })();
   };
 
   const handleLogout = () => {
@@ -1381,7 +1491,7 @@ export default function OrcamentoPage() {
     }
     const prefix = id + '|';
     setSubtitulosNoOrcamento(prev => prev.filter(k => !k.startsWith(prefix)));
-    setSubtitulosSelecionados(prev => new Set(Array.from(prev).filter(k => !k.startsWith(prefix))));
+    setLinhasSelecionadasDropdown(prev => new Set(Array.from(prev).filter(k => !k.startsWith(prefix))));
     setQuantidadesPorItem(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(k => { if (k.startsWith(prefix)) delete next[k]; });
@@ -1588,21 +1698,21 @@ export default function OrcamentoPage() {
 
   const removeItemFromServico = (servicoId: string, subtituloId: string, chave: string) => {
     const itemKey = `${servicoId}|${subtituloId}|${chave}`;
-    setQuantidadesPorItem(prev => { const next = { ...prev }; delete next[itemKey]; return next; });
-    setDimensoesPorItem(prev => { const next = { ...prev }; delete next[itemKey]; return next; });
-    const updated = servicos.map(s => {
-      if (s.id !== servicoId) return s;
-      return {
-        ...s,
-        subtitulos: s.subtitulos.map(sub =>
-          sub.id === subtituloId ? { ...sub, itens: sub.itens.filter(i => i.chave !== chave) } : sub
-        )
-      };
+    setQuantidadesPorItem(prev => {
+      const next = { ...prev };
+      delete next[itemKey];
+      return next;
     });
-    setServicos(updated);
+    setDimensoesPorItem(prev => {
+      const next = { ...prev };
+      delete next[itemKey];
+      return next;
+    });
+    setItensOcultosNoOrcamento(prev => (prev.includes(itemKey) ? prev : [...prev, itemKey]));
+    const baseOcultos = sessaoRef.current.itensOcultosNoOrcamento ?? [];
+    const nextOcultos = baseOcultos.includes(itemKey) ? baseOcultos : [...baseOcultos, itemKey];
     if (centroCustoId && orcamentoAtivoId) {
-      saveServicos(centroCustoId, updated);
-      persistToApi(updated, imports);
+      persistToApi(servicos, imports, { ...sessaoRef.current, itensOcultosNoOrcamento: nextOcultos });
     }
     toast.success('Item removido');
   };
@@ -1633,45 +1743,160 @@ export default function OrcamentoPage() {
   }, [subtitulosNoOrcamento, servicos]);
 
   const todosSubtitulos = useMemo(() => {
-    const list: { key: string; servicoNome: string; subtituloNome: string }[] = [];
+    const list: { key: string; servicoNome: string; subtituloNome: string; itens: ItemServico[] }[] = [];
     servicos.forEach(s =>
       s.subtitulos.forEach(sub =>
-        list.push({ key: `${s.id}|${sub.id}`, servicoNome: s.nome, subtituloNome: sub.nome })
+        list.push({
+          key: `${s.id}|${sub.id}`,
+          servicoNome: s.nome,
+          subtituloNome: sub.nome,
+          itens: sub.itens
+        })
       )
     );
     return list;
   }, [servicos]);
 
-  const toggleSubtituloSelecionado = (key: string) => {
-    setSubtitulosSelecionados(prev => {
+  const linhasDisponiveisDropdown = useMemo(() => {
+    const keys = new Set<string>();
+    const ocultosSet = new Set(itensOcultosNoOrcamento);
+    for (const t of todosSubtitulos) {
+      const blocoJa = subtitulosNoOrcamento.includes(t.key);
+      if (!blocoJa) {
+        if (t.itens.length === 0) {
+          keys.add(buildItemKeyOrcamento(t.key, DROPDOWN_BLOCO_SEM_ITENS));
+        } else {
+          for (const i of t.itens) {
+            keys.add(buildItemKeyOrcamento(t.key, i.chave));
+          }
+        }
+      } else {
+        for (const i of t.itens) {
+          const ik = buildItemKeyOrcamento(t.key, i.chave);
+          if (ocultosSet.has(ik)) keys.add(ik);
+        }
+      }
+    }
+    return keys;
+  }, [todosSubtitulos, subtitulosNoOrcamento, itensOcultosNoOrcamento]);
+
+  const toggleLinhaDropdown = (itemKey: string) => {
+    setLinhasSelecionadasDropdown(prev => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(itemKey)) next.delete(itemKey);
+      else next.add(itemKey);
+      return next;
+    });
+  };
+
+  /** Marca/desmarca todas as linhas ainda selecionáveis (novo bloco ou linhas ocultas de bloco já no orçamento). */
+  const toggleSubtituloTodasLinhas = (t: { key: string; itens: ItemServico[] }) => {
+    const blocoJa = subtitulosNoOrcamento.includes(t.key);
+    const keys =
+      t.itens.length === 0
+        ? blocoJa
+          ? []
+          : [buildItemKeyOrcamento(t.key, DROPDOWN_BLOCO_SEM_ITENS)]
+        : blocoJa
+          ? t.itens
+              .filter(i => itensOcultosNoOrcamento.includes(buildItemKeyOrcamento(t.key, i.chave)))
+              .map(i => buildItemKeyOrcamento(t.key, i.chave))
+          : t.itens.map(i => buildItemKeyOrcamento(t.key, i.chave));
+    if (keys.length === 0) return;
+    setLinhasSelecionadasDropdown(prev => {
+      const next = new Set(prev);
+      const allOn = keys.every(k => next.has(k));
+      if (allOn) {
+        keys.forEach(k => next.delete(k));
+      } else {
+        keys.forEach(k => next.add(k));
+      }
       return next;
     });
   };
 
   const selecionarTodosSubtitulos = () => {
-    setSubtitulosSelecionados(new Set(todosSubtitulos.map(t => t.key)));
+    setLinhasSelecionadasDropdown(new Set(Array.from(linhasDisponiveisDropdown)));
   };
 
   const desmarcarTodosSubtitulos = () => {
-    setSubtitulosSelecionados(new Set());
+    setLinhasSelecionadasDropdown(new Set());
   };
 
   const addSubtitulosSelecionadosAoOrcamento = () => {
-    const paraAdicionar = Array.from(subtitulosSelecionados).filter(k => !subtitulosNoOrcamento.includes(k));
-    if (paraAdicionar.length === 0) {
-      toast.error('Nenhum subtítulo selecionado ou todos já estão no orçamento');
+    const selected = Array.from(linhasSelecionadasDropdown);
+    if (selected.length === 0) {
+      toast.error('Selecione ao menos uma linha ou um serviço.');
       return;
     }
-    setSubtitulosNoOrcamento(prev => [...prev, ...paraAdicionar]);
-    setSubtitulosSelecionados(new Set());
-    toast.success(`${paraAdicionar.length} serviço(s) adicionado(s) ao orçamento`);
+    const restaurarKeys = selected.filter(ik => {
+      const p = parseItemKeyOrcamento(ik);
+      if (!p) return false;
+      return subtitulosNoOrcamento.includes(p.blocoKey) && itensOcultosNoOrcamento.includes(ik);
+    });
+    const porBlocoNovo = new Map<string, Set<string>>();
+    for (const ik of selected) {
+      const p = parseItemKeyOrcamento(ik);
+      if (!p) continue;
+      const { blocoKey, chave } = p;
+      if (subtitulosNoOrcamento.includes(blocoKey)) continue;
+      if (!porBlocoNovo.has(blocoKey)) porBlocoNovo.set(blocoKey, new Set());
+      porBlocoNovo.get(blocoKey)!.add(chave);
+    }
+    const novosBlocos = Array.from(porBlocoNovo.keys()).filter(bk => !subtitulosNoOrcamento.includes(bk));
+    if (restaurarKeys.length === 0 && novosBlocos.length === 0) {
+      toast.error('Nada para aplicar. Selecione linhas disponíveis ou linhas removidas que possam voltar.');
+      return;
+    }
+    setItensOcultosNoOrcamento(prev => {
+      let next = prev.filter(k => !restaurarKeys.includes(k));
+      for (const blocoKey of novosBlocos) {
+        const chavesSel = porBlocoNovo.get(blocoKey);
+        const sub = findSubtituloPorBlocoKey(servicos, blocoKey);
+        next = next.filter(k => !k.startsWith(`${blocoKey}|`));
+        if (!sub || sub.itens.length === 0) continue;
+        if (chavesSel?.has(DROPDOWN_BLOCO_SEM_ITENS)) continue;
+        for (const i of sub.itens) {
+          const full = buildItemKeyOrcamento(blocoKey, i.chave);
+          if (!chavesSel?.has(i.chave) && !next.includes(full)) next.push(full);
+        }
+      }
+      return next;
+    });
+    if (novosBlocos.length > 0) {
+      setSubtitulosNoOrcamento(prev => [...prev, ...novosBlocos]);
+    }
+    const nextOcultosPersist = (() => {
+      let n = [...(sessaoRef.current.itensOcultosNoOrcamento ?? [])];
+      n = n.filter(k => !restaurarKeys.includes(k));
+      for (const blocoKey of novosBlocos) {
+        const chavesSel = porBlocoNovo.get(blocoKey);
+        const sub = findSubtituloPorBlocoKey(servicos, blocoKey);
+        n = n.filter(k => !k.startsWith(`${blocoKey}|`));
+        if (!sub || sub.itens.length === 0) continue;
+        if (chavesSel?.has(DROPDOWN_BLOCO_SEM_ITENS)) continue;
+        for (const i of sub.itens) {
+          const full = buildItemKeyOrcamento(blocoKey, i.chave);
+          if (!chavesSel?.has(i.chave) && !n.includes(full)) n.push(full);
+        }
+      }
+      return n;
+    })();
+    if (centroCustoId && orcamentoAtivoId) {
+      persistToApi(servicos, imports, { ...sessaoRef.current, itensOcultosNoOrcamento: nextOcultosPersist });
+    }
+    setLinhasSelecionadasDropdown(new Set());
+    const msgs: string[] = [];
+    if (restaurarKeys.length === 1) msgs.push('1 linha readicionada ao orçamento');
+    else if (restaurarKeys.length > 1) msgs.push(`${restaurarKeys.length} linhas readicionadas ao orçamento`);
+    if (novosBlocos.length === 1) msgs.push('1 serviço adicionado (linhas selecionadas)');
+    else if (novosBlocos.length > 1) msgs.push(`${novosBlocos.length} serviços adicionados (linhas selecionadas)`);
+    if (msgs.length > 0) toast.success(msgs.join('. ') + '.');
   };
 
   const removeSubtituloDoOrcamento = (key: string) => {
     setSubtitulosNoOrcamento(prev => prev.filter(k => k !== key));
+    setItensOcultosNoOrcamento(prev => prev.filter(k => !k.startsWith(`${key}|`)));
     setQuantidadesPorItem(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(k => { if (k.startsWith(key + '|')) delete next[k]; });
@@ -1714,9 +1939,11 @@ export default function OrcamentoPage() {
       tipoUnidade: TipoUnidadeFormula;
       unidadeComposicao?: string;
     }[] = [];
+    const ocultosSet = new Set(itensOcultosNoOrcamento);
     for (const bloco of subtitulosAdicionados) {
       for (const i of bloco.itens) {
         const itemKey = `${bloco.key}|${i.chave}`;
+        if (ocultosSet.has(itemKey)) continue;
         const chaves = chavesParaBusca(i.codigo, i.banco, i.chave);
         let composicao: ComposicaoItem | null = null;
         for (const k of chaves) {
@@ -1792,7 +2019,13 @@ export default function OrcamentoPage() {
 
     const soma = listaComCacamba.reduce((acc, x) => acc + x.total, 0);
     return { itensCalculados: listaComCacamba, total: soma };
-  }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaComposicoes]);
+  }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaComposicoes, itensOcultosNoOrcamento]);
+
+  /** Itens com medição dimensional (não UN) — memória de cálculo e exportação. */
+  const itensMemoriaMedicao = useMemo(
+    () => itensCalculados.filter(r => r.tipoUnidade !== 'un'),
+    [itensCalculados]
+  );
 
   const linhasAnaliticoOrcamento = useMemo(() => {
     type Linha =
@@ -2431,8 +2664,10 @@ export default function OrcamentoPage() {
   };
 
   const exportarMemoriaCalculo = () => {
-    if (itensCalculados.length === 0) {
-      toast.error('Não há itens no orçamento para gerar a memória de cálculo.');
+    if (itensMemoriaMedicao.length === 0) {
+      toast.error(
+        'Não há itens com medição (m², m³ ou m) para exportar. Quantidades em peça/unidade são alteradas na aba Orçamento.'
+      );
       return;
     }
     const nomeContrato = costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name || costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code || centroCustoId || 'Contrato';
@@ -2455,10 +2690,11 @@ export default function OrcamentoPage() {
     ];
 
     const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
+    const totalMemoriaExport = itensMemoriaMedicao.reduce((acc, r) => acc + r.total, 0);
     let idxServico = 0;
     const formulaCells: { cell: string; formula: string }[] = [];
 
-    for (const row of itensCalculados) {
+    for (const row of itensMemoriaMedicao) {
       const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
       const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
       const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(row.dimensoes?.linhas);
@@ -2516,7 +2752,7 @@ export default function OrcamentoPage() {
     }
 
     rows.push(['']);
-    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL GERAL', '', '', total]);
+    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL (itens com medição)', '', '', totalMemoriaExport]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
     formulaCells.forEach(({ cell, formula }) => {
@@ -2740,15 +2976,15 @@ export default function OrcamentoPage() {
 
   useEffect(() => {
     if (orcamentoViewTab !== 'memorial') return;
-    if (itensCalculados.length === 0) {
+    if (itensMemoriaMedicao.length === 0) {
       setMemorialItemKey(null);
       return;
     }
-    const existe = memorialItemKey && itensCalculados.some(r => r.key === memorialItemKey);
+    const existe = memorialItemKey && itensMemoriaMedicao.some(r => r.key === memorialItemKey);
     if (!existe) {
-      setMemorialItemKey(itensCalculados[0].key);
+      setMemorialItemKey(itensMemoriaMedicao[0].key);
     }
-  }, [orcamentoViewTab, itensCalculados, memorialItemKey]);
+  }, [orcamentoViewTab, itensMemoriaMedicao, memorialItemKey]);
 
   useEffect(() => {
     if (orcamentoViewTab !== 'memorial' || !memorialItemKey) return;
@@ -2947,29 +3183,33 @@ export default function OrcamentoPage() {
 
                 {centroCustoId && orcamentoAtivoId && (
                   <div className="xl:col-span-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/40 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                        <FileDown className="w-4 h-4 inline mr-1.5" />
-                        {loadingFromApi ? 'Carregando do S3...' : `Documentos deste orçamento (${imports.length})`}
-                      </p>
-                      {(servicos.length > 0 || composicoes.length > 0) && (
-                        <button
-                          type="button"
-                          onClick={apagarOrcamento}
-                          className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Apagar
-                        </button>
-                      )}
-                    </div>
+                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      <FileDown className="w-4 h-4 inline mr-1.5" />
+                      {loadingFromApi ? 'Carregando do S3...' : `Documentos deste orçamento (${imports.length})`}
+                    </p>
                     {imports.length > 0 ? (
-                      <div className="mt-2 max-h-24 overflow-y-auto text-xs text-gray-500 dark:text-gray-400 space-y-1">
-                        {imports.slice(0, 5).map(imp => (
-                          <div key={imp.id} className="truncate">
-                            {imp.fileName} — {imp.tipo} — {imp.date ? new Date(imp.date).toLocaleString('pt-BR') : ''}
-                            {imp.servicosCount != null && ` (${imp.servicosCount} serviços)`}
-                            {imp.itensCount != null && ` (${imp.itensCount} itens)`}
+                      <div className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-500 dark:text-gray-400 space-y-1.5">
+                        {imports.map(imp => (
+                          <div
+                            key={imp.id}
+                            className="flex items-start gap-2 rounded-md border border-transparent hover:border-gray-200 dark:hover:border-gray-600 hover:bg-white/60 dark:hover:bg-gray-900/30 pr-1"
+                          >
+                            <div className="min-w-0 flex-1 min-h-[1.25rem] leading-snug">
+                              <span className="block break-words">
+                                {imp.fileName} — {imp.tipo} —{' '}
+                                {imp.date ? new Date(imp.date).toLocaleString('pt-BR') : ''}
+                                {imp.servicosCount != null && ` (${imp.servicosCount} serviços)`}
+                                {imp.itensCount != null && ` (${imp.itensCount} itens)`}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removerImportDoHistorico(imp.id)}
+                              className="shrink-0 rounded p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                              title="Remover este documento da lista"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -4124,56 +4364,62 @@ export default function OrcamentoPage() {
                 )}
 
                 {orcamentoViewTab === 'memorial' && (
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     {itensCalculados.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 px-4 py-6 text-center">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 rounded-xl border border-dashed border-gray-300/90 dark:border-gray-600/80 bg-gray-50/60 dark:bg-gray-900/30 px-5 py-8 text-center leading-relaxed">
                         Adicione itens ao orçamento na aba Orçamento para editar medições e exportar a memória.
                       </p>
+                    ) : itensMemoriaMedicao.length === 0 ? (
+                      <p className="text-sm text-gray-600 dark:text-gray-300 rounded-xl border border-gray-200/90 dark:border-gray-700/80 bg-white/50 dark:bg-gray-900/40 px-5 py-8 text-center leading-relaxed shadow-sm">
+                        Nenhum serviço com medição por dimensão neste orçamento. Ajuste quantidades e preços na aba{' '}
+                        <span className="font-medium text-gray-900 dark:text-gray-100">Orçamento</span>.
+                      </p>
                     ) : (
-                      <div className="space-y-10">
-                        {itensCalculados.map(row => (
+                      <div className="space-y-8">
+                        {itensMemoriaMedicao.map(row => (
                           <section
                             key={row.key}
                             id={`memorial-medicoes-${row.key}`}
-                            className="space-y-3 scroll-mt-6"
+                            className="scroll-mt-6 rounded-2xl border border-gray-200/90 dark:border-gray-700/70 bg-slate-50 dark:bg-gray-900 p-5 sm:p-6 shadow-sm"
                           >
-                            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-2">
-                              <span className="font-mono tabular-nums">{row.item.codigo}</span>{' '}
-                              <span className="text-gray-500 dark:text-gray-400">{row.item.banco}</span>
-                              {' — '}
-                              <span className="font-normal">{row.item.descricao}</span>
-                            </div>
-                            {row.tipoUnidade === 'un' ? (
-                              <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Unitário (UN): ajuste a quantidade na aba Orçamento.
+                            <div className="mb-4 pb-3 border-b border-gray-200/80 dark:border-gray-700/60">
+                              <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                                Serviço
                               </p>
-                            ) : (
-                              <div className="space-y-2 max-w-full">
-                                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                                  Medições e quantitativos
-                                </h3>
-                                <OrcamentoMedicaoPainel
-                                  rowKey={row.key}
-                                  tipoUnidade={row.tipoUnidade}
-                                  itemCodigo={row.item.codigo}
-                                  itemBanco={row.item.banco}
-                                  itemDescricao={row.item.descricao || ''}
-                                  dim={
-                                    dimensoesPorItem[row.key] ?? {
-                                      tipoUnidade: row.tipoUnidade,
-                                      linhas: []
-                                    }
+                              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-50 leading-snug">
+                                <span className="font-mono tabular-nums text-gray-700 dark:text-gray-300">
+                                  {row.item.codigo}
+                                </span>{' '}
+                                <span className="text-gray-500 dark:text-gray-400 font-normal">{row.item.banco}</span>
+                                <span className="text-gray-400 dark:text-gray-500"> — </span>
+                                <span className="font-normal">{row.item.descricao}</span>
+                              </h2>
+                            </div>
+                            <div className="space-y-3 max-w-full">
+                              <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
+                                Medições e quantitativos
+                              </h3>
+                              <OrcamentoMedicaoPainel
+                                rowKey={row.key}
+                                tipoUnidade={row.tipoUnidade}
+                                itemCodigo={row.item.codigo}
+                                itemBanco={row.item.banco}
+                                itemDescricao={row.item.descricao || ''}
+                                dim={
+                                  dimensoesPorItem[row.key] ?? {
+                                    tipoUnidade: row.tipoUnidade,
+                                    linhas: []
                                   }
-                                  ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
-                                  draftCalc={draftCalc}
-                                  setDraftCalc={setDraftCalc}
-                                  handleCalcBlur={handleCalcBlur}
-                                  updateLinhaMedicao={updateLinhaMedicao}
-                                  addLinhaMedicao={addLinhaMedicao}
-                                  removeLinhaMedicao={removeLinhaMedicao}
-                                />
-                              </div>
-                            )}
+                                }
+                                ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
+                                draftCalc={draftCalc}
+                                setDraftCalc={setDraftCalc}
+                                handleCalcBlur={handleCalcBlur}
+                                updateLinhaMedicao={updateLinhaMedicao}
+                                addLinhaMedicao={addLinhaMedicao}
+                                removeLinhaMedicao={removeLinhaMedicao}
+                              />
+                            </div>
                           </section>
                         ))}
                       </div>
@@ -4208,51 +4454,44 @@ export default function OrcamentoPage() {
                     >
                       <ListPlus className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                       <span className="block pr-6 truncate">
-                        {subtitulosSelecionados.size === 0
-                          ? (todosSubtitulos.length === 0 ? 'Nenhum serviço disponível' : 'Selecione os serviços')
-                          : subtitulosSelecionados.size === todosSubtitulos.filter(t => !subtitulosNoOrcamento.includes(t.key)).length
-                            ? 'Todos selecionados'
-                            : `${subtitulosSelecionados.size} selecionado(s)`}
+                        {linhasSelecionadasDropdown.size === 0
+                          ? (todosSubtitulos.length === 0 ? 'Nenhum serviço disponível' : 'Selecione linhas ou serviços')
+                          : linhasDisponiveisDropdown.size > 0 &&
+                              Array.from(linhasDisponiveisDropdown).every(k => linhasSelecionadasDropdown.has(k))
+                            ? 'Todas as linhas disponíveis selecionadas'
+                            : `${linhasSelecionadasDropdown.size} linha(s) selecionada(s)`}
                       </span>
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
                         {showServicosDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </span>
                     </button>
                   {showServicosDropdown && (
-                    <div className="absolute left-0 right-0 top-full z-[201] mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3 max-h-[min(24rem,70vh)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                    <div className="absolute left-0 right-0 top-full z-[201] mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-xl ring-1 ring-black/5 dark:ring-white/10 p-2 sm:p-3 max-h-[min(28rem,75vh)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="text"
                         placeholder="Pesquisar..."
                         value={servicosSearch}
                         onChange={(e) => setServicosSearch(e.target.value)}
-                        className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                        className="mb-3 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500/80 dark:focus:ring-red-400/80"
                       />
-                      <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="mb-2 pb-2 border-b border-gray-200 dark:border-gray-600/80">
                         {(() => {
-                          const disp = todosSubtitulos.filter(t => !subtitulosNoOrcamento.includes(t.key));
-                          const allChecked = disp.length > 0 && disp.every(t => subtitulosSelecionados.has(t.key));
+                          const allKeys = Array.from(linhasDisponiveisDropdown);
+                          const allChecked =
+                            allKeys.length > 0 && allKeys.every(k => linhasSelecionadasDropdown.has(k));
+                          const someChecked = allKeys.some(k => linhasSelecionadasDropdown.has(k));
+                          const partial = someChecked && !allChecked;
                           return (
-                            <label className="flex items-center gap-3 cursor-pointer group" htmlFor="select-all-servicos">
-                              <div className="relative">
-                                <input
-                                  id="select-all-servicos"
-                                  type="checkbox"
-                                  checked={allChecked}
-                                  onChange={(e) => e.target.checked ? selecionarTodosSubtitulos() : desmarcarTodosSubtitulos()}
-                                  className="sr-only"
-                                />
-                                <div className={`w-5 h-5 rounded border-2 transition-all flex items-center justify-center ${
-                                  allChecked ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                }`}>
-                                  {allChecked && (
-                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                  )}
-                                </div>
-                              </div>
-                              <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
-                            </label>
+                            <ServicosDropdownCheckbox
+                              id="select-all-servicos"
+                              checked={allChecked}
+                              indeterminate={partial}
+                              onChange={e => (e.target.checked ? selecionarTodosSubtitulos() : desmarcarTodosSubtitulos())}
+                            >
+                              <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 pt-0.5">
+                                Selecionar tudo
+                              </span>
+                            </ServicosDropdownCheckbox>
                           );
                         })()}
                       </div>
@@ -4264,36 +4503,114 @@ export default function OrcamentoPage() {
                         ) : (
                           todosSubtitulos
                             .filter(t => {
+                              const q = servicosSearch.trim().toLowerCase();
                               const label = `${t.servicoNome} › ${t.subtituloNome}`.toLowerCase();
-                              return label.includes(servicosSearch.trim().toLowerCase());
+                              if (!q) return true;
+                              if (label.includes(q)) return true;
+                              return t.itens.some(
+                                i =>
+                                  (i.codigo || '').toLowerCase().includes(q) ||
+                                  (i.descricao || '').toLowerCase().includes(q)
+                              );
                             })
                             .map(t => {
-                              const jaNoOrcamento = subtitulosNoOrcamento.includes(t.key);
-                              const checked = subtitulosSelecionados.has(t.key);
+                              const blocoJaNoOrcamento = subtitulosNoOrcamento.includes(t.key);
+                              const q = servicosSearch.trim().toLowerCase();
+                              const label = `${t.servicoNome} › ${t.subtituloNome}`.toLowerCase();
+                              const parentMatches = !q || label.includes(q);
+                              const itensVisiveis =
+                                !q || parentMatches
+                                  ? t.itens
+                                  : t.itens.filter(
+                                      i =>
+                                        (i.codigo || '').toLowerCase().includes(q) ||
+                                        (i.descricao || '').toLowerCase().includes(q)
+                                    );
+                              const keysSelecionaveis =
+                                t.itens.length === 0
+                                  ? blocoJaNoOrcamento
+                                    ? []
+                                    : [buildItemKeyOrcamento(t.key, DROPDOWN_BLOCO_SEM_ITENS)]
+                                  : blocoJaNoOrcamento
+                                    ? t.itens
+                                        .filter(i =>
+                                          itensOcultosNoOrcamento.includes(
+                                            buildItemKeyOrcamento(t.key, i.chave)
+                                          )
+                                        )
+                                        .map(i => buildItemKeyOrcamento(t.key, i.chave))
+                                    : t.itens.map(i => buildItemKeyOrcamento(t.key, i.chave));
+                              const allOn =
+                                keysSelecionaveis.length > 0 &&
+                                keysSelecionaveis.every(k => linhasSelecionadasDropdown.has(k));
+                              const someOn = keysSelecionaveis.some(k => linhasSelecionadasDropdown.has(k));
+                              const partialPai = someOn && !allOn;
+                              const paiDesabilitado = keysSelecionaveis.length === 0;
                               return (
-                                <label
+                                <div
                                   key={t.key}
-                                  className={`flex items-center gap-3 py-1.5 cursor-pointer group ${jaNoOrcamento ? 'opacity-50' : ''}`}
+                                  className="border-b border-gray-200/90 dark:border-gray-600/80 pb-3 mb-3 last:border-0 last:pb-0 last:mb-0"
                                 >
-                                  <div className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${checked ? 'bg-red-600 dark:bg-red-500 border-red-600' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500'}`}>
-                                    {checked && (
-                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    )}
-                                  </div>
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleSubtituloSelecionado(t.key)}
-                                    disabled={jaNoOrcamento}
-                                    className="sr-only"
-                                  />
-                                  <span className="text-sm text-gray-900 dark:text-gray-100">
-                                    {t.servicoNome} › {t.subtituloNome}
-                                    {jaNoOrcamento && ' (já no orçamento)'}
-                                  </span>
-                                </label>
+                                  <ServicosDropdownCheckbox
+                                    checked={allOn}
+                                    indeterminate={Boolean(!paiDesabilitado && partialPai && !allOn)}
+                                    disabled={paiDesabilitado}
+                                    onChange={() => {
+                                      if (!paiDesabilitado) toggleSubtituloTodasLinhas(t);
+                                    }}
+                                  >
+                                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 leading-snug">
+                                      {t.servicoNome} › {t.subtituloNome}
+                                      {blocoJaNoOrcamento && (
+                                        <span className="font-normal text-gray-500 dark:text-gray-400">
+                                          {' '}
+                                          (grupo no orçamento)
+                                        </span>
+                                      )}
+                                    </span>
+                                  </ServicosDropdownCheckbox>
+                                  {t.itens.length > 0 && (
+                                    <div className="mt-2 ml-2 pl-3 border-l-2 border-red-500/35 dark:border-red-400/30 space-y-1">
+                                      {itensVisiveis.map(i => {
+                                        const ik = buildItemKeyOrcamento(t.key, i.chave);
+                                        const linhaJaNoOrcamento =
+                                          blocoJaNoOrcamento && !itensOcultosNoOrcamento.includes(ik);
+                                        return (
+                                          <ServicosDropdownCheckbox
+                                            key={ik}
+                                            compact
+                                            checked={
+                                              linhaJaNoOrcamento ? true : linhasSelecionadasDropdown.has(ik)
+                                            }
+                                            disabled={linhaJaNoOrcamento}
+                                            onChange={() => {
+                                              if (!linhaJaNoOrcamento) toggleLinhaDropdown(ik);
+                                            }}
+                                          >
+                                            <span
+                                              className={`text-xs leading-snug pt-0.5 ${
+                                                linhaJaNoOrcamento
+                                                  ? 'text-gray-500 dark:text-gray-400'
+                                                  : 'text-gray-700 dark:text-gray-300'
+                                              }`}
+                                            >
+                                              <span className="font-mono text-[11px] text-gray-500 dark:text-gray-400">
+                                                {i.codigo}
+                                              </span>
+                                              <span className="text-gray-400 dark:text-gray-500"> · </span>
+                                              <span className="text-[13px]">{i.descricao}</span>
+                                              {linhaJaNoOrcamento && (
+                                                <span className="ml-1.5 text-[10px] font-medium text-gray-400 dark:text-gray-500">
+                                                  (já no orçamento)
+                                                </span>
+                                              )}
+                                            </span>
+                                          </ServicosDropdownCheckbox>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
                               );
                             })
                         )}
@@ -4307,13 +4624,14 @@ export default function OrcamentoPage() {
                     className="h-10 px-4 bg-red-600 text-white rounded-md hover:bg-red-700 inline-flex items-center gap-2 font-medium"
                   >
                     <Plus className="w-4 h-4" />
-                    Adicionar ({subtitulosSelecionados.size})
+                    Adicionar ({linhasSelecionadasDropdown.size})
                   </button>
                 </div>
 
-                {subtitulosSelecionados.size > 0 && subtitulosAdicionados.length === 0 && (
+                {linhasSelecionadasDropdown.size > 0 && subtitulosAdicionados.length === 0 && (
                   <p className="text-sm text-gray-500 dark:text-gray-400 py-2">
-                    {subtitulosSelecionados.size} serviço(s) selecionado(s). Clique em <strong>Adicionar</strong> para incluí-los no orçamento.
+                    {linhasSelecionadasDropdown.size} linha(s) selecionada(s). Use o checkbox do grupo para marcar todas
+                    as composições ou escolha linhas específicas. Depois clique em <strong>Adicionar</strong>.
                   </p>
                 )}
 
@@ -4417,7 +4735,6 @@ export default function OrcamentoPage() {
                                     const usaDimensoes = !!row.dimensoes?.linhas?.length;
                                     const dim = dimensoesPorItem[row.key] || { tipoUnidade: 'm3' as const, linhas: [] };
                                     const tipoAuto = inferirTipoUnidadePorDimensao(dim.linhas);
-                                    const ehCargaEntulho = ehComposicaoCargaEntulho(row.item.descricao);
                                     const ehCacamba4m3 = ehComposicaoCacamba4m3(row.item.descricao);
                                     const pesoPctOrcamento = total > 0 ? (row.total / total) * 100 : 0;
                                     return (
