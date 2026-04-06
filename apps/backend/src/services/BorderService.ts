@@ -313,12 +313,25 @@ export class BorderService {
   }
 
   /**
-   * Gera arquivo CNAB400 (formato Itaú) para transferências bancárias
+   * Gera arquivo CNAB400 (formato Itaú) para transferências bancárias (folha)
    */
   async generateCNAB400(filters: PayrollFilters): Promise<string> {
     const borderData = await this.generateBorderData(filters);
-    
-    // Buscar configurações da empresa
+    const paymentDate = moment({ year: filters.year, month: filters.month - 1 }).endOf('month');
+    return this.buildCnab400RemessaContent(borderData, paymentDate);
+  }
+
+  /**
+   * Mesmo layout CNAB400 do borderô (financeiro), para favorecidos arbitrários (ex.: OCs).
+   */
+  async generateCNAB400FromBorderData(borderData: BorderData[]): Promise<string> {
+    return this.buildCnab400RemessaContent(borderData, moment().add(1, 'day'));
+  }
+
+  private async buildCnab400RemessaContent(
+    borderData: BorderData[],
+    paymentDate: moment.Moment
+  ): Promise<string> {
     const companySettings = await prisma.companySettings.findUnique({
       where: { id: 'default' }
     });
@@ -329,7 +342,6 @@ export class BorderService {
 
     const lines: string[] = [];
     const currentDate = moment();
-    const paymentDate = moment({ year: filters.year, month: filters.month - 1 }).endOf('month');
     
     // Formatar valores para CNAB400 - garantir tamanho exato
     const formatNumber = (value: number, length: number, decimals: number = 2): string => {
@@ -465,6 +477,13 @@ export class BorderService {
       lines.push(detail);
       sequence++;
     });
+
+    if (lines.length < 2) {
+      throw createError(
+        'Nenhum pagamento com dados bancários completos (banco, agência e conta) para gerar o arquivo.',
+        400
+      );
+    }
 
     // Trailer do arquivo (Registro 9) - 400 caracteres
     const totalRecords = lines.length + 1; // +1 para incluir o trailer

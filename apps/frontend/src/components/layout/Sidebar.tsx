@@ -44,7 +44,8 @@ import {
   Calculator,
   ClipboardList,
   FileCheck,
-  SlidersHorizontal
+  SlidersHorizontal,
+  CreditCard
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -410,15 +411,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: Building2,
             description: 'Cadastro de fornecedores',
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores'))
+          },
+          {
+            name: 'Condições de Pagamento',
+            href: '/ponto/condicoes-pagamento',
+            icon: CreditCard,
+            description: 'Condições para ordens de compra',
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento'))
+          },
+          {
+            name: 'Natureza Orçamentária',
+            href: '/ponto/natureza-orcamentaria',
+            icon: BookPlus,
+            description: 'Cadastrar naturezas orçamentárias',
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria'))
           }
-              ,
-              {
-                name: 'Natureza Orçamentária',
-                href: '/ponto/natureza-orcamentaria',
-                icon: BookPlus,
-                description: 'Cadastrar naturezas orçamentárias',
-                permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria'))
-              }
         ]
       },
       {

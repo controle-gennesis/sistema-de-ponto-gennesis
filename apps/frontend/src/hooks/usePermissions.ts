@@ -160,6 +160,8 @@ export function useRoutePermission(route: string) {
     '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),
     '/ponto/ordem-de-compra': isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra')),
     '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
+    '/ponto/condicoes-pagamento':
+      isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),
     '/ponto/natureza-orcamentaria':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria')),
   };

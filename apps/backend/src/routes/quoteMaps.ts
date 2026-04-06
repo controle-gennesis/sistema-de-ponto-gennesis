@@ -27,10 +27,11 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
 router.put('/:id/quotes', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { supplierIds, freightBySupplier, unitPrices } = req.body as {
+    const { supplierIds, freightBySupplier, unitPrices, itemQuantities } = req.body as {
       supplierIds?: string[];
       freightBySupplier?: Record<string, number>;
       unitPrices?: Array<{ supplierId: string; materialRequestItemId: string; unitPrice: number }>;
+      itemQuantities?: Record<string, number>;
     };
 
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
@@ -47,7 +48,8 @@ router.put('/:id/quotes', async (req: AuthRequest, res: Response, next: NextFunc
     const result = await service.saveQuotes(id, req.user.id, {
       supplierIds,
       freightBySupplier,
-      unitPrices
+      unitPrices,
+      itemQuantities
     });
 
     res.json({ success: true, data: result });
@@ -60,8 +62,9 @@ router.put('/:id/quotes', async (req: AuthRequest, res: Response, next: NextFunc
 router.post('/:id/generate', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { generateSupplierIds, paymentBySupplier } = req.body as {
+    const { generateSupplierIds, paymentBySupplier, itemQuantities } = req.body as {
       generateSupplierIds?: string[];
+      itemQuantities?: Record<string, number>;
       paymentBySupplier?: Array<{
         supplierId: string;
         paymentType: string;
@@ -84,7 +87,8 @@ router.post('/:id/generate', async (req: AuthRequest, res: Response, next: NextF
 
     const result = await service.generatePurchaseOrders(id, req.user.id, {
       generateSupplierIds,
-      paymentBySupplier
+      paymentBySupplier,
+      itemQuantities
     });
 
     res.json({ success: true, data: result });

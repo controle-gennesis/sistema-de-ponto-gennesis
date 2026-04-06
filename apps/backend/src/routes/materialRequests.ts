@@ -7,7 +7,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middleware/auth';
 import { AuthRequest } from '../middleware/auth';
 import { MaterialRequestService } from '../services/MaterialRequestService';
-import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import { backendUploadsRoot } from '../lib/uploads';
 
@@ -54,70 +53,12 @@ const itemAttachmentUpload = multer({
 // Todas as rotas requerem autenticação
 router.use(authenticate);
 
-// Endpoint auxiliar para listar materiais (deve vir antes de /:id)
-// Prioriza Materiais de Construção - garante que cada um tenha correspondente em EngineeringMaterial
-router.get('/materials', async (req: AuthRequest, res: Response, next: NextFunction) => {
+// Endpoint auxiliar para listar materiais da RM (deve vir antes de /:id)
+// Somente Materiais de Construção (cadastro em /ponto/materiais-construcao); cada um tem espelho em EngineeringMaterial (sinapiCode CM-*)
+router.get('/materials', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const constructionMaterials = await prisma.constructionMaterial.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' }
-    });
-
-    const mappedMaterials: { id: string; code: string; sinapiCode?: string; name: string; description: string; unit: string; medianPrice: number | null }[] = [];
-
-    for (const cm of constructionMaterials) {
-      const sinapiCode = `CM-${cm.id}`;
-      let eng = await prisma.engineeringMaterial.findUnique({
-        where: { sinapiCode }
-      });
-      if (!eng) {
-        eng = await prisma.engineeringMaterial.create({
-          data: {
-            sinapiCode,
-            name: cm.name,
-            description: cm.description || cm.name,
-            unit: cm.unit,
-            isActive: cm.isActive
-          }
-        });
-      }
-      mappedMaterials.push({
-        id: eng.id,
-        code: cm.name,
-        sinapiCode: eng.sinapiCode,
-        name: cm.description || cm.name || eng.description || eng.name || '',
-        description: cm.description || eng.description || '',
-        unit: eng.unit,
-        medianPrice: eng.medianPrice ? Number(eng.medianPrice) : null
-      });
-    }
-
-    // Incluir também EngineeringMaterials que não vêm de ConstructionMaterial (ex: importados SINAPI)
-    const engMaterials = await prisma.engineeringMaterial.findMany({
-      where: {
-        isActive: true,
-        sinapiCode: { not: { startsWith: 'CM-' } }
-      },
-      orderBy: { name: 'asc' }
-    });
-    for (const m of engMaterials) {
-      if (!mappedMaterials.some((x) => x.id === m.id)) {
-        mappedMaterials.push({
-          id: m.id,
-          code: m.sinapiCode,
-          name: m.name || m.description,
-          description: m.description,
-          unit: m.unit,
-          medianPrice: m.medianPrice ? Number(m.medianPrice) : null
-        });
-      }
-    }
-    mappedMaterials.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-    res.json({
-      success: true,
-      data: mappedMaterials
-    });
+    const data = await materialRequestService.listConstructionMaterialsForRmDropdown();
+    res.json({ success: true, data });
   } catch (error) {
     next(error);
   }
@@ -159,15 +100,18 @@ router.post("/upload-item-attachment", (req: AuthRequest, res: Response, next: N
 // Listar requisições
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { 
-      status, 
-      costCenterId, 
-      projectId, 
-      requestedBy, 
+    const {
+      status,
+      costCenterId,
+      projectId,
+      requestedBy,
       priority,
       page = '1',
-      limit = '20'
+      limit = '500'
     } = req.query;
+
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.min(Math.max(parseInt(String(limit), 10) || 500, 1), 500);
 
     const result = await materialRequestService.listMaterialRequests({
       status: status as string,
@@ -175,8 +119,8 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       projectId: projectId as string,
       requestedBy: requestedBy as string,
       priority: priority as string,
-      page: parseInt(page as string),
-      limit: parseInt(limit as string)
+      page: pageNum,
+      limit: limitNum
     });
 
     res.json({
@@ -196,7 +140,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       throw createError('Usuário não autenticado', 401);
     }
 
-    const { costCenterId, projectId, serviceOrder, description, priority, items } = req.body;
+    const { costCenterId, projectId, serviceOrder, obra, description, priority, items } = req.body;
 
     if (!costCenterId || !items || !Array.isArray(items) || items.length === 0) {
       throw createError('Centro de custo e itens são obrigatórios', 400);
@@ -207,6 +151,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       costCenterId,
       projectId,
       serviceOrder,
+      obra,
       description,
       priority: priority || 'MEDIUM',
       items: items.map((item: any) => ({
@@ -255,7 +200,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction)
   try {
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const { id } = req.params;
-    const { costCenterId, projectId, serviceOrder, description, priority, items, submitForApproval } = req.body;
+    const { costCenterId, projectId, serviceOrder, obra, description, priority, items, submitForApproval } = req.body;
 
     if (!costCenterId || !items || !Array.isArray(items) || items.length === 0) {
       throw createError('Centro de custo e itens são obrigatórios', 400);
@@ -265,6 +210,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction)
       costCenterId,
       projectId,
       serviceOrder,
+      obra,
       description,
       priority:
         priority === undefined || priority === null
