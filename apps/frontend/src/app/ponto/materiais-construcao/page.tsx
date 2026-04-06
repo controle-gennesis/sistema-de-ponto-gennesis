@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 
 interface ConstructionMaterial {
   id: string;
-  sinapiCode: string;
+  sinapiCode?: string;
   description: string;
   unit: string;
   medianPrice?: number | string;
@@ -36,7 +36,6 @@ export default function MateriaisConstrucaoPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<ConstructionMaterial | null>(null);
   const [formData, setFormData] = useState({
-    sinapiCode: '',
     description: '',
     unit: '',
     medianPrice: '',
@@ -154,7 +153,6 @@ export default function MateriaisConstrucaoPage() {
 
   const resetForm = () => {
     setFormData({
-      sinapiCode: '',
       description: '',
       unit: '',
       medianPrice: '',
@@ -171,7 +169,6 @@ export default function MateriaisConstrucaoPage() {
   const handleEdit = (material: ConstructionMaterial) => {
     setEditingMaterial(material);
     setFormData({
-      sinapiCode: material.sinapiCode || '',
       description: material.description || '',
       unit: material.unit,
       medianPrice: material.medianPrice?.toString() || '',
@@ -189,15 +186,18 @@ export default function MateriaisConstrucaoPage() {
     e.preventDefault();
     
     // Validação básica
-    if (!formData.sinapiCode.trim() || !formData.description.trim() || !formData.unit.trim()) {
-      toast.error('Por favor, preencha todos os campos obrigatórios (Código SINAPI, Descrição e Unidade)');
+    if (!formData.description.trim() || !formData.unit.trim()) {
+      toast.error('Por favor, preencha descrição e unidade de medida');
       return;
     }
-    
+
+    const desc = formData.description.trim();
+    const name = desc.slice(0, 255);
+
     // Limpar dados: remover campos vazios e manter apenas os necessários
     const dataToSend: any = {
-      sinapiCode: formData.sinapiCode.trim(),
-      description: formData.description.trim(),
+      name,
+      description: desc,
       unit: formData.unit.trim(),
       isActive: formData.isActive
     };
@@ -255,7 +255,9 @@ export default function MateriaisConstrucaoPage() {
             const values = lines[i].split(',').map(v => v.trim());
             const material: any = {};
             headers.forEach((header, index) => {
-              if (header === 'codigo' || header === 'code' || header === 'sinapicode') {
+              if (header === 'nome' || header === 'name') {
+                material.name = values[index];
+              } else if (header === 'codigo' || header === 'code' || header === 'sinapicode') {
                 material.sinapiCode = values[index];
               } else if (header === 'descrição' || header === 'description' || header === 'descricao') {
                 material.description = values[index];
@@ -265,8 +267,15 @@ export default function MateriaisConstrucaoPage() {
                 material.isActive = values[index]?.toLowerCase() === 'true' || values[index] === '1';
               }
             });
-            if (material.sinapiCode && material.description && material.unit) {
-              materials.push(material);
+            if (material.description && material.unit) {
+              const desc = String(material.description).trim();
+              const nameFromLegacy =
+                (material.name || material.sinapiCode || desc).toString().trim().slice(0, 255);
+              materials.push({
+                ...material,
+                name: nameFromLegacy,
+                description: desc
+              });
             }
           }
         }
@@ -404,7 +413,7 @@ export default function MateriaisConstrucaoPage() {
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
-                      placeholder="Buscar por código SINAPI, descrição ou unidade..."
+                      placeholder="Buscar por descrição, nome ou unidade..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -484,9 +493,6 @@ export default function MateriaisConstrucaoPage() {
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Código SINAPI
-                      </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Descrição
                       </th>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -503,7 +509,7 @@ export default function MateriaisConstrucaoPage() {
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {loadingMaterials ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center">
+                        <td colSpan={4} className="px-6 py-8 text-center">
                           <div className="flex items-center justify-center">
                             <div className="loading-spinner w-6 h-6 mr-2" />
                             <span className="text-gray-600 dark:text-gray-400">Carregando materiais...</span>
@@ -512,7 +518,7 @@ export default function MateriaisConstrucaoPage() {
                       </tr>
                     ) : filteredMaterials.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center">
+                        <td colSpan={4} className="px-6 py-8 text-center">
                           <div className="text-gray-500 dark:text-gray-400">
                             <p>Nenhum material encontrado.</p>
                             <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
@@ -525,11 +531,6 @@ export default function MateriaisConstrucaoPage() {
                           key={material.id}
                           className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">
-                              {material.sinapiCode}
-                            </span>
-                          </td>
                           <td className="px-3 sm:px-6 py-4">
                             <span className="text-sm text-gray-600 dark:text-gray-400">
                               {material.description || '-'}
@@ -710,10 +711,10 @@ export default function MateriaisConstrucaoPage() {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Formato CSV: nome,descrição,unidade,ativo (com cabeçalho na primeira linha)
+                    Formato CSV: descrição,unidade,ativo (com cabeçalho na primeira linha; colunas nome/código são opcionais)
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Formato JSON: Array de objetos com campos: name, description, unit, isActive
+                    Formato JSON: Array de objetos com campos: description, unit, isActive (name opcional)
                   </p>
                 </div>
                 <div>
@@ -725,7 +726,7 @@ export default function MateriaisConstrucaoPage() {
                     onChange={(e) => setImportData(e.target.value)}
                     rows={10}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono text-sm"
-                    placeholder='[{"sinapiCode": "12345", "description": "Cimento Portland", "unit": "kg", "isActive": true}]'
+                    placeholder='[{"description": "Cimento Portland", "unit": "kg", "isActive": true}]'
                   />
                 </div>
                 <div className="flex justify-end gap-3">
@@ -770,7 +771,6 @@ function MaterialFormModal({
   onClose: () => void;
   editingMaterial: ConstructionMaterial | null;
   formData: {
-    sinapiCode: string;
     description: string;
     unit: string;
     medianPrice: string;
@@ -782,7 +782,6 @@ function MaterialFormModal({
     isActive: boolean;
   };
   setFormData: React.Dispatch<React.SetStateAction<{
-    sinapiCode: string;
     description: string;
     unit: string;
     medianPrice: string;
@@ -818,20 +817,6 @@ function MaterialFormModal({
 
         <div className="p-6">
           <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Código SINAPI *
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.sinapiCode}
-                onChange={(e) => setFormData({ ...formData, sinapiCode: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Ex: 12345"
-              />
-            </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Descrição *

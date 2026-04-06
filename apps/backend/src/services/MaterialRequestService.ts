@@ -1,10 +1,22 @@
 import { prisma } from '../lib/prisma';
+import type { EngineeringMaterial } from '@prisma/client';
+
+export interface RmDropdownMaterial {
+  id: string;
+  code: string;
+  sinapiCode?: string;
+  name: string;
+  description: string;
+  unit: string;
+  medianPrice: number | null;
+}
 
 export interface CreateMaterialRequestData {
   requestedBy: string;
   costCenterId: string;
   projectId?: string;
   serviceOrder?: string;
+  obra?: string;
   description?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   items: {
@@ -27,6 +39,7 @@ export interface UpdateMaterialRequestCorrectionData {
   costCenterId: string;
   projectId?: string;
   serviceOrder?: string;
+  obra?: string;
   description?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   items: {
@@ -41,6 +54,61 @@ export interface UpdateMaterialRequestCorrectionData {
 }
 
 export class MaterialRequestService {
+  /**
+   * Materiais do combo da RM: só cadastro de Construção, com espelho em EngineeringMaterial (sinapiCode CM-*).
+   * Uma consulta em lote aos eng. existentes e criação apenas dos faltantes.
+   */
+  async listConstructionMaterialsForRmDropdown(): Promise<RmDropdownMaterial[]> {
+    const constructionMaterials = await prisma.constructionMaterial.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' }
+    });
+
+    if (constructionMaterials.length === 0) {
+      return [];
+    }
+
+    const sinapiCodes = constructionMaterials.map((cm) => `CM-${cm.id}`);
+    const existingEng = await prisma.engineeringMaterial.findMany({
+      where: { sinapiCode: { in: sinapiCodes } }
+    });
+    const engByCode = new Map<string, EngineeringMaterial>(
+      existingEng.map((e) => [e.sinapiCode, e])
+    );
+
+    for (const cm of constructionMaterials) {
+      const sinapiCode = `CM-${cm.id}`;
+      if (engByCode.has(sinapiCode)) continue;
+      const eng = await prisma.engineeringMaterial.create({
+        data: {
+          sinapiCode,
+          name: cm.name,
+          description: cm.description || cm.name,
+          unit: cm.unit,
+          isActive: cm.isActive
+        }
+      });
+      engByCode.set(sinapiCode, eng);
+    }
+
+    const mapped: RmDropdownMaterial[] = constructionMaterials.map((cm) => {
+      const sinapiCode = `CM-${cm.id}`;
+      const eng = engByCode.get(sinapiCode)!;
+      return {
+        id: eng.id,
+        code: cm.name,
+        sinapiCode: eng.sinapiCode,
+        name: cm.description || cm.name || eng.description || eng.name || '',
+        description: cm.description || eng.description || '',
+        unit: eng.unit,
+        medianPrice: eng.medianPrice ? Number(eng.medianPrice) : null
+      };
+    });
+
+    mapped.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    return mapped;
+  }
+
   /**
    * Gera número único para requisição (formato: REQ-YYYY-NNN)
    */
@@ -144,6 +212,8 @@ export class MaterialRequestService {
         ? data.projectId.trim()
         : undefined);
 
+    const obra = (data.obra || '').trim() || undefined;
+
     // Criar requisição com itens
     const request = await prisma.materialRequest.create({
       data: {
@@ -152,6 +222,7 @@ export class MaterialRequestService {
         costCenterId: data.costCenterId,
         projectId,
         serviceOrder,
+        obra,
         description: data.description,
         priority: data.priority || 'MEDIUM',
         status: 'PENDING',
@@ -212,8 +283,9 @@ export class MaterialRequestService {
     page?: number;
     limit?: number;
   }) {
-    const page = filters.page || 1;
-    const limit = filters.limit || 20;
+    const page = Math.max(1, filters.page || 1);
+    const rawLimit = filters.limit ?? 20;
+    const limit = Math.min(Math.max(rawLimit, 1), 500);
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -267,6 +339,14 @@ export class MaterialRequestService {
             include: {
               material: true
             }
+          },
+          purchaseOrders: {
+            select: {
+              id: true,
+              status: true,
+              orderNumber: true
+            },
+            orderBy: { createdAt: 'asc' }
           }
         }
       }),
@@ -328,6 +408,15 @@ export class MaterialRequestService {
               }
             }
           }
+        },
+        purchaseOrders: {
+          select: {
+            id: true,
+            status: true,
+            orderNumber: true,
+            createdAt: true
+          },
+          orderBy: { createdAt: 'asc' }
         }
       }
     });
@@ -493,6 +582,8 @@ export class MaterialRequestService {
         ? data.projectId.trim()
         : null);
 
+    const obra = (data.obra || '').trim() || null;
+
     const itemCreates = data.items.map((item) => {
       const material = materialMap.get(item.materialId)!;
       const qty = Number(item.quantity);
@@ -520,6 +611,7 @@ export class MaterialRequestService {
         costCenterId: data.costCenterId,
         projectId,
         serviceOrder,
+        obra,
         description: data.description ?? null,
         priority: data.priority || existing.priority,
         ...(data.submitForApproval ? { status: 'PENDING' } : {}),

@@ -49,6 +49,7 @@ import borderRoutes from './routes/border';
 import materialRequestRoutes from './routes/materialRequests';
 import financialAnalysisRoutes from './routes/financialAnalysis';
 import supplierRoutes from './routes/suppliers';
+import paymentConditionRoutes from './routes/paymentConditions';
 import purchaseOrderRoutes from './routes/purchaseOrders';
 import budgetNatureRoutes from './routes/budgetNatures';
 import orcamentoRoutes from './routes/orcamento';
@@ -106,7 +107,7 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Skipped-Order-Numbers'],
   optionsSuccessStatus: 204,
   preflightContinue: false
 };
@@ -243,6 +244,7 @@ app.use('/api/border', borderRoutes);
 app.use('/api/material-requests', materialRequestRoutes);
 app.use('/api/financial-analysis', financialAnalysisRoutes);
 app.use('/api/suppliers', supplierRoutes);
+app.use('/api/payment-conditions', paymentConditionRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/quote-maps', quoteMapRoutes);
 app.use('/api/budget-natures', budgetNatureRoutes);

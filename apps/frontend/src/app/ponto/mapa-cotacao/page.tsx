@@ -10,6 +10,8 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
+import { materialItemLabel, materialItemSubtitle } from '../gerenciar-materiais/_lib/display';
 
 type MaterialRequestItem = {
   id: string;
@@ -145,6 +147,9 @@ export default function MapaCotacaoPage() {
 
   const [generateSupplierIds, setGenerateSupplierIds] = useState<Set<string>>(new Set());
 
+  /** Quantidade a comprar na OC por item da SC (≤ solicitado na SC). Afeta totais e vencedor. */
+  const [ocItemQtyByItemId, setOcItemQtyByItemId] = useState<Record<string, number>>({});
+
   const [paymentDraftBySupplier, setPaymentDraftBySupplier] = useState<
     Record<
       string,
@@ -154,7 +159,6 @@ export default function MapaCotacaoPage() {
         paymentDetails: string;
         observations: string;
         amountToPayStr: string;
-        boletoFile: File | null;
       }
     >
   >({});
@@ -170,7 +174,7 @@ export default function MapaCotacaoPage() {
   const { data: requestsData, isLoading: loadingRequests } = useQuery({
     queryKey: ['material-requests-approved-map'],
     queryFn: async () => {
-      const res = await api.get('/material-requests', { params: { status: 'APPROVED', limit: 200 } });
+      const res = await api.get('/material-requests', { params: { status: 'APPROVED', limit: 500 } });
       return res.data;
     }
   });
@@ -248,6 +252,16 @@ export default function MapaCotacaoPage() {
     setQuoteMapId('');
   }, [selectedRequestId]);
 
+  useEffect(() => {
+    if (!selectedRequest) {
+      setOcItemQtyByItemId({});
+      return;
+    }
+    setOcItemQtyByItemId(
+      Object.fromEntries(selectedRequest.items.map((i) => [i.id, Number(i.quantity)]))
+    );
+  }, [selectedRequest?.id]);
+
   // Só ao trocar a requisição (não incluir `suppliers` aqui: o array era recriado a cada render e limpava a seleção a cada clique).
   useEffect(() => {
     if (!selectedRequestId) return;
@@ -320,11 +334,12 @@ export default function MapaCotacaoPage() {
         unitPrice: number;
       } | null = null;
 
+      const quantity = ocItemQtyByItemId[item.id] ?? Number(item.quantity);
+
       for (const supplierId of Array.from(selectedSupplierIds)) {
         const key = `${supplierId}:${item.id}`;
         const unitPrice = parseCurrencyBR(unitPriceBySupplierItem[key] ?? '');
         const freight = parseCurrencyBR(freightBySupplier[supplierId] ?? '') ?? 0;
-        const quantity = Number(item.quantity);
 
         const itemTotal = unitPrice == null ? null : unitPrice * quantity;
         const score = unitPrice == null ? null : scoreItem({ unitPrice, quantity, freight });
@@ -368,13 +383,13 @@ export default function MapaCotacaoPage() {
         winnerUnitPrice: best.unitPrice,
         technicalTie,
         itemUnit: item.unit,
-        itemQuantity: Number(item.quantity),
+        itemQuantity: quantity,
         perSupplier
       });
     }
 
     return list;
-  }, [selectedRequest, selectedSupplierIds, freightBySupplier, unitPriceBySupplierItem]);
+  }, [selectedRequest, selectedSupplierIds, freightBySupplier, unitPriceBySupplierItem, ocItemQtyByItemId]);
 
   useEffect(() => {
     // quando winners mudarem, a seleção de geração "default" acompanha (apenas se ainda estiver vazia)
@@ -412,12 +427,13 @@ export default function MapaCotacaoPage() {
         const key = `${supplierId}:${item.id}`;
         const unitPrice = parseCurrencyBR(unitPriceBySupplierItem[key] ?? '');
         if (unitPrice == null) continue;
-        itemsTotal += unitPrice * Number(item.quantity);
+        const q = ocItemQtyByItemId[item.id] ?? Number(item.quantity);
+        itemsTotal += unitPrice * q;
       }
       out[supplierId] = { itemsTotal, freight, amountToPay: itemsTotal + freight };
     }
     return out;
-  }, [selectedSupplierIds, wonItemsBySupplier, freightBySupplier, unitPriceBySupplierItem]);
+  }, [selectedSupplierIds, wonItemsBySupplier, freightBySupplier, unitPriceBySupplierItem, ocItemQtyByItemId]);
 
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -465,10 +481,18 @@ export default function MapaCotacaoPage() {
           }
         }
 
+        const itemQuantitiesForSave: Record<string, number> = {};
+        for (const it of selectedRequest.items) {
+          const maxQ = Number(it.quantity);
+          const q = ocItemQtyByItemId[it.id] ?? maxQ;
+          itemQuantitiesForSave[it.id] = Math.min(Math.max(q, 0.0001), maxQ);
+        }
+
         await api.put(`/quote-maps/${mapId}/quotes`, {
           supplierIds: selectedSupplierIdsArr,
           freightBySupplier: freightBySupplierPayload,
-          unitPrices: unitPricesPayload
+          unitPrices: unitPricesPayload,
+          itemQuantities: itemQuantitiesForSave
         });
 
         // 3) Preparar pagamento somente para fornecedores marcados para gerar OC
@@ -479,8 +503,6 @@ export default function MapaCotacaoPage() {
           paymentDetails?: string;
           observations?: string;
           amountToPay?: number;
-          boletoAttachmentUrl?: string;
-          boletoAttachmentName?: string;
         }> = [];
 
         for (const supplierId of Array.from(generateSupplierIds)) {
@@ -490,24 +512,12 @@ export default function MapaCotacaoPage() {
             paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
             paymentDetails: '',
             observations: '',
-            amountToPayStr: totals ? String(totals.amountToPay) : '',
-            boletoFile: null as File | null
+            amountToPayStr: totals ? String(totals.amountToPay) : ''
           };
 
           const draft = paymentDraftBySupplier[supplierId] ?? fallbackDraft;
           const paymentType = draft.paymentType ?? OC_TYPE_AVISTA;
           const paymentCondition = draft.paymentCondition ?? paymentConditionDefault(paymentType);
-
-          let boletoAttachmentUrl: string | undefined;
-          let boletoAttachmentName: string | undefined;
-          if (paymentType === OC_TYPE_BOLETO) {
-            if (!draft.boletoFile) throw new Error('Anexo do boleto é obrigatório para boleto.');
-            const fd = new FormData();
-            fd.append('boleto', draft.boletoFile);
-            const up = await api.post('/purchase-orders/upload-boleto', fd);
-            boletoAttachmentUrl = up.data?.data?.url;
-            boletoAttachmentName = up.data?.data?.originalName;
-          }
 
           paymentBySupplierPayload.push({
             supplierId,
@@ -515,16 +525,15 @@ export default function MapaCotacaoPage() {
             paymentCondition,
             paymentDetails: draft.paymentDetails?.trim() || undefined,
             observations: draft.observations?.trim() || undefined,
-            amountToPay: totals?.amountToPay,
-            boletoAttachmentUrl,
-            boletoAttachmentName
+            amountToPay: totals?.amountToPay
           });
         }
 
         // 4) Gerar as OCs no backend
         const result = await api.post(`/quote-maps/${mapId}/generate`, {
           generateSupplierIds: Array.from(generateSupplierIds),
-          paymentBySupplier: paymentBySupplierPayload
+          paymentBySupplier: paymentBySupplierPayload,
+          itemQuantities: itemQuantitiesForSave
         });
 
         return result.data;
@@ -739,7 +748,7 @@ export default function MapaCotacaoPage() {
                     <div>
                       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Cotações por item</h2>
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Informe o preço unitário por fornecedor. A quantidade já vem da SC. O total e o vencedor são calculados automaticamente.
+                        Informe o preço unitário por fornecedor. Ajuste a quantidade a comprar por item (não pode exceder o solicitado na SC). O total e o vencedor são recalculados automaticamente.
                       </p>
                     </div>
                   </div>
@@ -790,16 +799,44 @@ export default function MapaCotacaoPage() {
                               const winnerSupplier = suppliers.find((s) => s.id === winner?.winnerSupplierId);
 
                               const unitLabel = item.unit || '-';
-                              const qty = Number(item.quantity);
+                              const maxQty = Number(item.quantity);
+                              const qty = ocItemQtyByItemId[item.id] ?? maxQty;
+                              const matSub = materialItemSubtitle(item);
 
                               return (
                                 <tr key={item.id} className="align-top">
                                   <td className="p-2 min-w-[260px]">
                                     <div className="font-medium text-gray-900 dark:text-gray-100">
-                                      {item.material?.description || item.material?.name || item.material?.sinapiCode || '-'}
+                                      {materialItemLabel(item)}
                                     </div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                      Qtd: {qty} {unitLabel}
+                                    {matSub ? (
+                                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
+                                        {matSub}
+                                      </div>
+                                    ) : null}
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                      <span>
+                                        Solicitado na SC: {maxQty} {unitLabel}
+                                      </span>
+                                      <span className="text-gray-500">|</span>
+                                      <label className="inline-flex items-center gap-1">
+                                        <span className="whitespace-nowrap">Qtd. na OC:</span>
+                                        <input
+                                          type="number"
+                                          min={0.0001}
+                                          step="any"
+                                          max={maxQty}
+                                          value={qty}
+                                          onChange={(e) => {
+                                            const n = parseFloat(e.target.value);
+                                            if (Number.isNaN(n)) return;
+                                            const q = Math.min(Math.max(n, 0.0001), maxQty);
+                                            setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }));
+                                          }}
+                                          className="w-20 px-1.5 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                                        />
+                                        <span>{unitLabel}</span>
+                                      </label>
                                     </div>
                                   </td>
 
@@ -915,17 +952,86 @@ export default function MapaCotacaoPage() {
 
                                   <div className="mt-3">
                                     <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                      Venceu nos itens:
+                                      Itens da SC (nesta OC):
                                     </p>
-                                    <div className="flex flex-wrap gap-2">
-                                      {itemsWon.map((item) => (
-                                        <span
-                                          key={item.id}
-                                          className="inline-flex items-center px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs"
-                                        >
-                                          {item.material?.description || item.material?.name || item.material?.sinapiCode || 'Material'}
-                                        </span>
-                                      ))}
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                                      Mesmo formato da criação manual de OC: quantidade e valor unitário valem também na
+                                      tabela acima.
+                                    </p>
+                                    <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                                      <ul className="divide-y divide-gray-200 dark:divide-gray-600">
+                                        {itemsWon.map((item) => {
+                                          const unitLabel = item.unit || '-';
+                                          const maxQty = Number(item.quantity);
+                                          const qty = ocItemQtyByItemId[item.id] ?? maxQty;
+                                          const priceKey = `${sid}:${item.id}`;
+                                          const unitPriceStr = unitPriceBySupplierItem[priceKey] ?? '';
+                                          const sub = materialItemSubtitle(item);
+                                          return (
+                                            <li key={item.id} className="px-3 py-2 flex items-start gap-3">
+                                              <div className="min-w-0 flex-1">
+                                                <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
+                                                  {materialItemLabel(item)}
+                                                </p>
+                                                {sub ? (
+                                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
+                                                    {sub}
+                                                  </p>
+                                                ) : null}
+                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+                                                  <span>
+                                                    Solicitado na SC: {maxQty} {unitLabel}
+                                                  </span>
+                                                  <span className="text-gray-400">|</span>
+                                                  <label className="inline-flex items-center gap-1.5">
+                                                    <span className="whitespace-nowrap">Qtd. na OC:</span>
+                                                    <input
+                                                      type="number"
+                                                      min={0.0001}
+                                                      step="any"
+                                                      max={maxQty}
+                                                      value={qty}
+                                                      onChange={(e) => {
+                                                        const n = parseFloat(e.target.value);
+                                                        if (Number.isNaN(n)) return;
+                                                        const q = Math.min(Math.max(n, 0.0001), maxQty);
+                                                        setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }));
+                                                      }}
+                                                      className="w-24 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                                                    />
+                                                    <span>{unitLabel}</span>
+                                                  </label>
+                                                  <span className="text-gray-400">|</span>
+                                                  <label className="inline-flex items-center gap-1.5">
+                                                    <span className="whitespace-nowrap">Valor unit. (R$):</span>
+                                                    <input
+                                                      type="text"
+                                                      inputMode="decimal"
+                                                      placeholder="0,00"
+                                                      value={unitPriceStr}
+                                                      onChange={(e) => {
+                                                        setUnitPriceBySupplierItem((prev) => ({
+                                                          ...prev,
+                                                          [priceKey]: e.target.value
+                                                        }));
+                                                      }}
+                                                      onBlur={() => {
+                                                        const raw = unitPriceBySupplierItem[priceKey] ?? '';
+                                                        const formatted = formatCurrencyInputValue(raw);
+                                                        setUnitPriceBySupplierItem((prev) => ({
+                                                          ...prev,
+                                                          [priceKey]: formatted
+                                                        }));
+                                                      }}
+                                                      className="w-28 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                                                    />
+                                                  </label>
+                                                </div>
+                                              </div>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
                                     </div>
                                   </div>
 
@@ -976,11 +1082,18 @@ export default function MapaCotacaoPage() {
 
                                         <div>
                                           <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Condição</p>
-                                          <select
-                                            value={paymentDraftBySupplier[sid]?.paymentCondition ?? paymentConditionDefault(OC_TYPE_AVISTA)}
-                                            disabled={(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_AVISTA}
-                                            onChange={(e) => {
-                                              const v = e.target.value;
+                                          <PaymentConditionSelect
+                                            key={`pc-${sid}-${paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA}`}
+                                            paymentType={
+                                              (paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_AVISTA
+                                                ? 'AVISTA'
+                                                : 'BOLETO'
+                                            }
+                                            value={
+                                              paymentDraftBySupplier[sid]?.paymentCondition ??
+                                              paymentConditionDefault(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA)
+                                            }
+                                            onChange={(v) => {
                                               setPaymentDraftBySupplier((prev) => ({
                                                 ...prev,
                                                 [sid]: {
@@ -989,24 +1102,14 @@ export default function MapaCotacaoPage() {
                                                     paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
                                                     paymentDetails: '',
                                                     observations: '',
-                                                    amountToPayStr: '',
-                                                    boletoFile: null
+                                                    amountToPayStr: ''
                                                   }),
                                                   paymentCondition: v
                                                 }
                                               }));
                                             }}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                                          >
-                                            {(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_AVISTA ? (
-                                              <option value="AVISTA">À vista</option>
-                                            ) : (
-                                              <>
-                                                <option value="BOLETO_30">Boleto 30 dias</option>
-                                                <option value="BOLETO_28">Boleto 28 dias</option>
-                                              </>
-                                            )}
-                                          </select>
+                                            disabled={(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_AVISTA}
+                                          />
                                         </div>
                                       </div>
 
@@ -1031,8 +1134,7 @@ export default function MapaCotacaoPage() {
                                                   paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
                                                   paymentDetails: '',
                                                   observations: '',
-                                                  amountToPayStr: '',
-                                                  boletoFile: null
+                                                  amountToPayStr: ''
                                                 }),
                                                 amountToPayStr: v
                                               }
@@ -1049,8 +1151,7 @@ export default function MapaCotacaoPage() {
                                                   paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
                                                   paymentDetails: '',
                                                   observations: '',
-                                                  amountToPayStr: '',
-                                                  boletoFile: null
+                                                  amountToPayStr: ''
                                                 }),
                                                 amountToPayStr: formatted
                                               }
@@ -1077,8 +1178,7 @@ export default function MapaCotacaoPage() {
                                                   paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
                                                   paymentDetails: '',
                                                   observations: '',
-                                                  amountToPayStr: '',
-                                                  boletoFile: null
+                                                  amountToPayStr: ''
                                                 }),
                                                 paymentDetails: v
                                               }
@@ -1106,8 +1206,7 @@ export default function MapaCotacaoPage() {
                                                   paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
                                                   paymentDetails: '',
                                                   observations: '',
-                                                  amountToPayStr: '',
-                                                  boletoFile: null
+                                                  amountToPayStr: ''
                                                 }),
                                                 observations: v
                                               }
@@ -1118,36 +1217,6 @@ export default function MapaCotacaoPage() {
                                           placeholder="Observações gerais da OC"
                                         />
                                       </div>
-
-                                      {paymentDraftBySupplier[sid]?.paymentType === OC_TYPE_BOLETO && (
-                                        <div>
-                                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            Anexo do boleto
-                                          </p>
-                                          <input
-                                            type="file"
-                                            accept=".pdf,image/*"
-                                            onChange={(e) => {
-                                              const f = e.target.files?.[0] ?? null;
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? {
-                                                    paymentType: OC_TYPE_BOLETO,
-                                                    paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO),
-                                                    paymentDetails: '',
-                                                    observations: '',
-                                                    amountToPayStr: '',
-                                                    boletoFile: null
-                                                  }),
-                                                  boletoFile: f
-                                                }
-                                              }));
-                                            }}
-                                            className="block w-full text-sm text-gray-600 dark:text-gray-400"
-                                          />
-                                        </div>
-                                      )}
                                     </div>
                                   )}
                                 </div>

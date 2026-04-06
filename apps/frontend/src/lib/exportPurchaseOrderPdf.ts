@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import api from '@/lib/api';
+import { formatPaymentConditionDisplay, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 
 const PAYMENT_TYPE: Record<string, string> = {
   AVISTA: 'À vista',
@@ -11,6 +12,20 @@ const PAYMENT_CONDITION: Record<string, string> = {
   BOLETO_30: 'Boleto 30 dias',
   BOLETO_28: 'Boleto 28 dias'
 };
+
+async function paymentConditionLabelsMerged(): Promise<Record<string, string>> {
+  try {
+    const res = await api.get('/payment-conditions', { params: { activeOnly: 'false' } });
+    const rows = (res.data?.data || []) as PaymentConditionRow[];
+    const m = { ...PAYMENT_CONDITION };
+    for (const r of rows) {
+      if (r.code && r.label) m[r.code] = formatPaymentConditionDisplay(r);
+    }
+    return m;
+  } catch {
+    return PAYMENT_CONDITION;
+  }
+}
 
 /** Emitente da OC no PDF (sobrescreva com NEXT_PUBLIC_OC_PDF_* no .env do frontend). */
 function companyHeader() {
@@ -130,6 +145,7 @@ type PoDetail = {
   paymentType?: string | null;
   paymentCondition?: string | null;
   paymentDetails?: string | null;
+  freightAmount?: unknown;
   amountToPay?: unknown;
   notes?: string | null;
   supplier: {
@@ -169,6 +185,8 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   const res = await api.get(`/purchase-orders/${orderId}`);
   const order = (res.data as { data?: PoDetail }).data;
   if (!order) throw new Error('Ordem de compra não encontrada');
+
+  const condLabels = await paymentConditionLabelsMerged();
 
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pageW = pdf.internal.pageSize.getWidth();
@@ -297,7 +315,7 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(8);
   const payCond =
-    [PAYMENT_CONDITION[order.paymentCondition || ''] || order.paymentCondition, PAYMENT_TYPE[order.paymentType || ''] || order.paymentType]
+    [condLabels[order.paymentCondition || ''] || order.paymentCondition, PAYMENT_TYPE[order.paymentType || ''] || order.paymentType]
       .filter(Boolean)
       .join(' — ') || '—';
   pdf.text(`Data de entrega prevista: ${formatDate(order.expectedDelivery)}`, margin, y);
@@ -323,10 +341,6 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
       pdf.text(ln, margin, y);
       y += 3.8;
     });
-  }
-  if (order.amountToPay != null && order.amountToPay !== '') {
-    pdf.text(`Valor a pagar: ${formatCurrency(Number(order.amountToPay))}`, margin, y);
-    y += 4;
   }
   if (order.creator?.name) {
     pdf.text(`Comprador: ${order.creator.name}`, margin, y);
@@ -405,9 +419,26 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
     }
   });
 
+  const freightNum =
+    order.freightAmount != null && order.freightAmount !== '' && Number.isFinite(Number(order.freightAmount))
+      ? Number(order.freightAmount)
+      : order.amountToPay != null && order.amountToPay !== '' && Number.isFinite(Number(order.amountToPay))
+        ? Math.max(0, Number(order.amountToPay) - total)
+        : 0;
+  const grandTotal =
+    order.amountToPay != null && order.amountToPay !== '' && Number.isFinite(Number(order.amountToPay))
+      ? Number(order.amountToPay)
+      : total + freightNum;
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(8);
+  pdf.text(`Valor itens: ${formatCurrency(total)}`, margin + cw - 1, y, { align: 'right' });
+  y += 4;
+  pdf.text(`Frete: ${formatCurrency(freightNum)}`, margin + cw - 1, y, { align: 'right' });
+  y += 4;
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(9);
-  pdf.text(`TOTAL DA COMPRA: ${formatCurrency(total)}`, margin + cw - 1, y, { align: 'right' });
+  pdf.text(`Total a pagar: ${formatCurrency(grandTotal)}`, margin + cw - 1, y, { align: 'right' });
   y += 10;
 
   if (order.notes?.trim()) {

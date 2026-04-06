@@ -1,17 +1,18 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { API_BASE_URL } from './apiBaseUrl';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+export { API_BASE_URL } from './apiBaseUrl';
 
 // Configurar axios
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE_URL,
   timeout: 10000,
   // Removendo Content-Type fixo para permitir multipart/form-data
 });
 
 // Instância separada do axios para refresh (sem interceptors que causam loop)
 const refreshApi = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE_URL,
   timeout: 10000,
 });
 

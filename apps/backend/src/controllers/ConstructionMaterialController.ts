@@ -99,26 +99,28 @@ export class ConstructionMaterialController {
       
       const { name, sinapiCode, description, unit, isActive } = req.body;
 
-      // Aceitar tanto 'name' quanto 'sinapiCode' (sinapiCode será usado como name)
-      const materialName = (name || sinapiCode)?.trim();
+      // Nome no banco: name, sinapiCode (legado) ou descrição
+      const descTrim = description?.trim() || '';
+      const materialName =
+        (name || sinapiCode)?.trim() || (descTrim ? descTrim.slice(0, 255) : '');
 
       // Validar campos obrigatórios
       if (!materialName) {
-        throw createError('Código SINAPI (ou nome) é obrigatório', 400);
+        throw createError('Descrição é obrigatória', 400);
       }
 
       if (!unit || !unit.trim()) {
         throw createError('Unidade de medida é obrigatória', 400);
       }
 
-      if (!description || !description.trim()) {
+      if (!descTrim) {
         throw createError('Descrição é obrigatória', 400);
       }
 
       // Preparar dados para criação
       const materialData: any = {
         name: materialName,
-        description: description.trim(),
+        description: descTrim,
         unit: unit.trim(),
         isActive: isActive !== undefined ? Boolean(isActive) : true
       };
@@ -176,7 +178,7 @@ export class ConstructionMaterialController {
       
       // Se for erro de chave única (material já existe)
       if (error.code === 'P2002') {
-        return next(createError('Já existe um material com este código SINAPI', 409));
+        return next(createError('Já existe um material com este nome', 409));
       }
       
       next(error);
@@ -200,14 +202,15 @@ export class ConstructionMaterialController {
         throw createError('Material não encontrado', 404);
       }
 
-      // Aceitar tanto 'name' quanto 'sinapiCode' (sinapiCode será usado como name)
-      const materialName = name || sinapiCode;
+      const materialName = (name || sinapiCode)?.trim();
 
       const material = await prisma.constructionMaterial.update({
         where: { id },
         data: {
           ...(materialName && { name: materialName }),
-          ...(description !== undefined && { description }),
+          ...(description !== undefined && {
+            description: typeof description === 'string' ? description.trim() : description
+          }),
           ...(unit && { unit }),
           ...(isActive !== undefined && { isActive })
         }

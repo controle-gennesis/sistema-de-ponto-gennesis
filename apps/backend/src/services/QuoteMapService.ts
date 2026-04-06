@@ -239,6 +239,8 @@ export class QuoteMapService {
         materialRequestItemId: string;
         unitPrice: number;
       }>;
+      /** Quantidade a considerar no cálculo do vencedor (≤ SC). Se omitido, usa a quantidade solicitada. */
+      itemQuantities?: Record<string, number>;
     }
   ) {
     const map = await this.db.quoteMap.findUnique({ where: { id: quoteMapId }, select: { id: true, createdBy: true } });
@@ -301,18 +303,29 @@ export class QuoteMapService {
     // score = unitPrice * quantidade + frete
     const winnersToCreate: any[] = [];
 
+    const qtyOverrides = data.itemQuantities ?? {};
+
     for (const item of rm.items) {
       let bestSupplierId: string | null = null;
       let bestScore: Decimal | null = null;
       let bestUnitPrice: Decimal | null = null;
       let bestFreight: Decimal | null = null;
 
+      const requestedQty = new Decimal(item.quantity);
+      const rawQ = qtyOverrides[item.id];
+      const lineQty =
+        rawQ != null && Number.isFinite(Number(rawQ)) ? new Decimal(Number(rawQ)) : requestedQty;
+      if (lineQty.lte(0)) throw new Error('Quantidade inválida no mapa de cotação');
+      if (lineQty.gt(requestedQty)) {
+        throw new Error('Quantidade não pode exceder a solicitada na SC');
+      }
+
       for (const supplierId of supplierIds) {
         const unit = unitPriceMap.get(`${supplierId}:${item.id}`);
         if (!unit) continue;
 
         const freight = new Decimal(data.freightBySupplier[supplierId] ?? 0);
-        const score = unit.mul(new Decimal(item.quantity)).add(freight);
+        const score = unit.mul(lineQty).add(freight);
 
         if (!bestScore || score.lt(bestScore)) {
           bestSupplierId = supplierId;
@@ -357,6 +370,8 @@ export class QuoteMapService {
     userId: string,
     data: {
       generateSupplierIds: string[];
+      /** Quantidade a comprar por item da SC (materialRequestItemId). Se omitido, usa a quantidade solicitada. */
+      itemQuantities?: Record<string, number>;
       paymentBySupplier: Array<{
         supplierId: string;
         paymentType: string;
@@ -407,6 +422,8 @@ export class QuoteMapService {
       data.paymentBySupplier.map((p) => [p.supplierId, p])
     );
 
+    const qtyOverrides = data.itemQuantities ?? {};
+
     const winners = await this.db.quoteMapWinnerItem.findMany({
       where: { quoteMapId, winnerSupplierId: { in: supplierIds } },
       include: { materialRequestItem: true }
@@ -449,7 +466,16 @@ export class QuoteMapService {
       const items = (winnerItems as any[]).map((w: any) => {
         const unit = unitPriceBySupplierItem.get(`${supplierId}:${w.materialRequestItemId}`);
         if (!unit) throw new Error('Preço unitário cotado não encontrado para um vencedor');
-        const quantity = new Decimal(w.materialRequestItem.quantity);
+        const requestedQty = new Decimal(w.materialRequestItem.quantity);
+        const raw = qtyOverrides[w.materialRequestItemId];
+        const quantity =
+          raw != null && Number.isFinite(Number(raw))
+            ? new Decimal(Number(raw))
+            : requestedQty;
+        if (quantity.lte(0)) throw new Error('Quantidade inválida na OC');
+        if (quantity.gt(requestedQty)) {
+          throw new Error('Quantidade da OC não pode exceder a solicitada na SC');
+        }
         itemsTotal = itemsTotal.add(unit.mul(quantity));
         return {
           materialRequestItemId: w.materialRequestItemId,
@@ -460,8 +486,6 @@ export class QuoteMapService {
           notes: null
         };
       });
-
-      const amountToPay = itemsTotal.add(freight);
 
       const created = await this.purchaseOrderService.create(
         {
@@ -474,7 +498,7 @@ export class QuoteMapService {
           paymentDetails: pay.paymentDetails ?? null,
           boletoAttachmentUrl: pay.boletoAttachmentUrl,
           boletoAttachmentName: pay.boletoAttachmentName,
-          amountToPay: Number(amountToPay),
+          freightAmount: Number(freight),
           notes: pay.observations ?? null
         } as any,
         userId

@@ -868,6 +868,7 @@ model MaterialRequest {
   costCenterId String  // Centro de custo
   projectId    String? // Obra/Projeto (opcional)
   serviceOrder String? // Ordem de serviço (texto livre)
+  obra         String? // Obra (texto livre)
   description  String? // Descrição/observações da requisição
   status       MaterialRequestStatus @default(PENDING) // Status da requisição
   priority     MaterialRequestPriority @default(MEDIUM) // Prioridade
@@ -968,6 +969,11 @@ model Supplier {
   state       String?  // UF
   zipCode     String?
   contactName String?  // Nome do contato
+  /// Dados para remessa CNAB400 (pagamento a fornecedores) — opcionais
+  bank         String?  // Nome ou identificação do banco (ex.: ITAÚ, 341)
+  agency       String?  // Agência do favorecido
+  account      String?  // Conta (sem dígito)
+  accountDigit String?  // Dígito da conta
   notes       String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -981,6 +987,26 @@ model Supplier {
   @@index([code])
   @@index([isActive])
   @@map("suppliers")
+}
+
+/// Condições de pagamento para OC (valores gravados em PurchaseOrder.paymentCondition)
+model PaymentCondition {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  label       String
+  paymentType String   // AVISTA | BOLETO
+  /// Quantidade de parcelas (ex.: 3 boletos)
+  parcelCount Int      @default(1)
+  /// Prazo em dias para cada parcela, na ordem — ex.: [30, 60, 90]
+  parcelDueDays Json
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([paymentType, isActive])
+  @@map("payment_conditions")
 }
 
 // Modelo de Ordem de Compra (OC - estilo TOTVS RM)
@@ -1001,7 +1027,21 @@ model PurchaseOrder {
   paymentDetails    String?  @db.Text // Dados do pagamento (texto livre)
   boletoAttachmentUrl  String? // Caminho público ex.: /uploads/purchase-orders/...
   boletoAttachmentName String? // Nome original do arquivo
-  amountToPay       Decimal? @db.Decimal(15, 2) // Valor a ser pago
+  /// Boleto para pagamento (financeiro), após OC aprovada — distinto do anexo na criação da OC
+  paymentBoletoUrl     String?
+  paymentBoletoName    String?
+  /// Parcelas de boleto: [{ amount, dueDate, boletoUrl, boletoName }, ...] alinhado à condição de pagamento
+  paymentBoletoInstallments Json?
+  /// Após anexar boleto(s), o financeiro confirma com botão para exibir a OC na fase Pagamento (comprovante/CNAB)
+  paymentBoletoPhaseReleased Boolean @default(false)
+  /// Comprovante de pagamento anexado na fase Pagamento
+  paymentProofUrl      String?
+  paymentProofName     String?
+  /// Notas fiscais anexadas após validação do comprovante: [{ url, name, uploadedAt }]
+  nfAttachments     Json?
+  /// Frete informado na criação (ou edição em correção). Total a pagar = soma dos itens + frete.
+  freightAmount     Decimal  @default(0) @db.Decimal(15, 2)
+  amountToPay       Decimal? @db.Decimal(15, 2) // Itens + frete (recalculado ao salvar itens/frete)
   notes             String?
   createdBy         String   // Usuário que criou
   approvedBy        String?  // Usuário que aprovou
@@ -1032,7 +1072,11 @@ enum PurchaseOrderStatus {
   PENDING_DIRETORIA // OC - Aprovação Diretoria (2ª fase)
   IN_REVIEW   // CORREÇÃO OC - aguardando ajuste de quem criou
   APPROVED    // Aprovada (após diretoria)
-  SENT        // Enviada ao fornecedor
+  PENDING_PROOF_VALIDATION // Aguardando validação do comprovante de pagamento
+  PENDING_PROOF_CORRECTION // Comprovante reprovado na validação — comprador substitui e reenvia
+  PENDING_NF_ATTACHMENT // Após comprovante validado — anexar NF(s)
+  SENT        // Enviada ao fornecedor (legado; fluxo completo atual usa FINALIZED)
+  FINALIZED   // Fluxo completo concluído (NF anexada — arquivo)
   PARTIALLY_RECEIVED  // Parcialmente recebida
   RECEIVED    // Totalmente recebida
   REJECTED    // Reprovada

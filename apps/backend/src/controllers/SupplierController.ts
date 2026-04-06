@@ -21,7 +21,7 @@ async function generateSupplierCode(): Promise<string> {
 export class SupplierController {
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { search, isActive, page = 1, limit = 20 } = req.query;
+      const { search, isActive, page = 1, limit = 500 } = req.query;
       const where: any = {};
       if (search) {
         where.OR = [
@@ -31,8 +31,9 @@ export class SupplierController {
         ];
       }
       if (isActive !== undefined) where.isActive = isActive === 'true';
-      const limitNum = Math.min(Number(limit), 100);
-      const skip = (Number(page) - 1) * limitNum;
+      const limitNum = Math.min(Math.max(Number(limit) || 500, 1), 500);
+      const pageNum = Math.max(1, Number(page) || 1);
+      const skip = (pageNum - 1) * limitNum;
       const [suppliers, total] = await Promise.all([
         prisma.supplier.findMany({ where, skip, take: limitNum, orderBy: { name: 'asc' } }),
         prisma.supplier.count({ where })
@@ -40,7 +41,7 @@ export class SupplierController {
       res.json({
         success: true,
         data: suppliers,
-        pagination: { page: Number(page), limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
+        pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
       });
     } catch (error) {
       next(error);
@@ -60,7 +61,23 @@ export class SupplierController {
 
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { code, name, cnpj, email, phone, address, city, state, zipCode, contactName, notes } = req.body;
+      const {
+        code,
+        name,
+        cnpj,
+        email,
+        phone,
+        address,
+        city,
+        state,
+        zipCode,
+        contactName,
+        notes,
+        bank,
+        agency,
+        account,
+        accountDigit
+      } = req.body;
       if (!name) throw createError('Nome é obrigatório', 400);
       const finalCode = code || await generateSupplierCode();
       const existingCode = await prisma.supplier.findUnique({ where: { code: finalCode } });
@@ -81,7 +98,11 @@ export class SupplierController {
           state: state || null,
           zipCode: zipCode || null,
           contactName: contactName || null,
-          notes: notes || null
+          notes: notes || null,
+          bank: bank || null,
+          agency: agency || null,
+          account: account || null,
+          accountDigit: accountDigit || null
         }
       });
       res.status(201).json({ success: true, data: supplier, message: 'Fornecedor criado com sucesso' });
@@ -93,7 +114,24 @@ export class SupplierController {
   async update(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { code, name, cnpj, email, phone, address, city, state, zipCode, contactName, notes, isActive } = req.body;
+      const {
+        code,
+        name,
+        cnpj,
+        email,
+        phone,
+        address,
+        city,
+        state,
+        zipCode,
+        contactName,
+        notes,
+        isActive,
+        bank,
+        agency,
+        account,
+        accountDigit
+      } = req.body;
       const supplier = await prisma.supplier.findUnique({ where: { id } });
       if (!supplier) throw createError('Fornecedor não encontrado', 404);
       const data: any = {};
@@ -109,6 +147,10 @@ export class SupplierController {
       if (contactName !== undefined) data.contactName = contactName || null;
       if (notes !== undefined) data.notes = notes || null;
       if (isActive !== undefined) data.isActive = isActive;
+      if (bank !== undefined) data.bank = bank || null;
+      if (agency !== undefined) data.agency = agency || null;
+      if (account !== undefined) data.account = account || null;
+      if (accountDigit !== undefined) data.accountDigit = accountDigit || null;
       const updated = await prisma.supplier.update({ where: { id }, data });
       res.json({ success: true, data: updated, message: 'Fornecedor atualizado com sucesso' });
     } catch (error) {

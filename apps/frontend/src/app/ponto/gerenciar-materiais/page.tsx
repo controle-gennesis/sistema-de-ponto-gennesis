@@ -4,215 +4,29 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
-  Eye,
-  Search,
-  FileText,
-  Wrench,
-  Ban,
-  Pencil
-} from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Pencil } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
+import { OcPurchaseOrdersPanel, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
+import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
+import type { FluxTab, MaterialRequest } from './_lib/types';
+import { fluxTabToOcTab, orderNeedsFinanceBoleto } from './_lib/flux';
+import { getStatusInfo, materialItemLabel, materialItemSubtitle, rmSolicitante } from './_lib/display';
 import {
-  OcPurchaseOrdersPanel,
-  type OcTab,
-  type PurchaseOrder
-} from '@/components/oc/OcPurchaseOrdersPanel';
-
-/** Fases SC/RM e OC na mesma barra de navegação */
-type FluxTab =
-  | 'rm_all'
-  | 'rm_PENDING'
-  | 'rm_IN_REVIEW'
-  | 'rm_APPROVED'
-  | 'rm_CANCELLED'
-  | 'oc_compras'
-  | 'oc_gestor'
-  | 'oc_diretoria'
-  | 'oc_IN_REVIEW'
-  | 'oc_APPROVED';
-
-function fluxTabToOcTab(f: FluxTab): OcTab {
-  switch (f) {
-    case 'oc_compras':
-      return 'compras';
-    case 'oc_gestor':
-      return 'gestor';
-    case 'oc_diretoria':
-      return 'diretoria';
-    case 'oc_IN_REVIEW':
-      return 'IN_REVIEW';
-    case 'oc_APPROVED':
-      return 'APPROVED';
-    default:
-      return 'gestor';
-  }
-}
-
-interface MaterialRequest {
-  id: string;
-  requestNumber?: string;
-  serviceOrder?: string | null;
-  description: string;
-  status: 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
-  createdAt: string;
-  /**
-   * Em alguns endpoints vem como string (id do usuário) + `requester` populado.
-   * Em outros pode vir como objeto.
-   */
-  requestedBy?:
-    | string
-    | {
-        id: string;
-        name: string;
-        email: string;
-      };
-  /** Nome retornado pela API (Prisma) na listagem/detalhe */
-  requester?: {
-    id: string;
-    name: string;
-    email: string;
-  };
-  costCenter: {
-    id: string;
-    name: string;
-  };
-  project?: {
-    id: string;
-    name: string;
-  };
-  items: Array<{
-    id: string;
-    quantity: number;
-    unit: string;
-    observation?: string;
-    notes?: string;
-    attachmentUrl?: string;
-    attachmentName?: string;
-    unitPrice?: number;
-    material: {
-      id: string;
-      name?: string | null;
-      code?: string;
-      sinapiCode?: string;
-      description?: string;
-      medianPrice?: number;
-    };
-  }>;
-  approvedBy?: {
-    id: string;
-    name: string;
-  };
-  rejectedBy?: {
-    id: string;
-    name: string;
-  };
-  rejectionReason?: string;
-}
-
-const getStatusInfo = (status: string) => {
-  switch (status) {
-    case 'PENDING':
-      return { label: 'Pendente', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400', icon: AlertCircle };
-    case 'IN_REVIEW':
-      return { label: 'Correção RM', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400', icon: Wrench };
-    case 'APPROVED':
-      return { label: 'Aprovada', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400', icon: CheckCircle };
-    case 'CANCELLED':
-      return { label: 'Cancelada', color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400', icon: XCircle };
-    default:
-      return { label: 'Desconhecido', color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400', icon: AlertCircle };
-  }
-};
-
-const getPriorityInfo = (priority: string) => {
-  switch (priority) {
-    case 'URGENT':
-      return { label: 'Urgente', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' };
-    case 'HIGH':
-      return { label: 'Alta', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' };
-    case 'MEDIUM':
-      return { label: 'Média', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' };
-    case 'LOW':
-      return { label: 'Baixa', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' };
-    default:
-      return { label: 'Média', color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400' };
-  }
-};
-
-const rmSolicitante = (r: MaterialRequest) => {
-  const rb = r.requestedBy as unknown;
-  if (rb && typeof rb === 'object' && 'name' in (rb as any)) {
-    return rb as { id: string; name: string; email: string };
-  }
-  return r.requester;
-};
-
-const rmTitulo = (r: MaterialRequest) => {
-  const os = (r.serviceOrder || '').trim();
-  if (os) return `OS ${os}`;
-  if (r.requestNumber) return `OS ${r.requestNumber}`;
-  return `OS #${r.id.slice(0, 8)}`;
-};
-
-/** Rótulo do material na SC (API usa sinapiCode/description; name pode vir vazio) */
-function materialItemLabel(item: MaterialRequest['items'][number]): string {
-  const m = item.material;
-  const name = m.name?.trim();
-  if (name) return name;
-  const desc = m.description?.trim();
-  if (desc) return desc;
-  if (m.sinapiCode) return m.sinapiCode;
-  if (m.code) return m.code;
-  return 'Material';
-}
-
-const API_UPLOAD_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
-
-function absoluteUploadUrl(relative: string) {
-  if (!relative) return '';
-  if (relative.startsWith('http')) return relative;
-  return `${API_UPLOAD_ORIGIN}${relative.startsWith('/') ? '' : '/'}${relative}`;
-}
-
-function parseCurrencyBR(input: string): number | null {
-  const t = input.trim().replace(/\s/g, '');
-  if (!t) return null;
-  const normalized = t.replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(normalized);
-  return Number.isFinite(n) ? n : null;
-}
-
-const OC_TYPE_AVISTA = 'AVISTA';
-const OC_TYPE_BOLETO = 'BOLETO';
-
-const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-};
-
-/** Lista em pt-BR: "A", "A e B", "A, B e C" */
-function joinOrderNumbersPt(labels: string[]): string {
-  const t = labels.filter(Boolean);
-  if (t.length === 0) return '';
-  if (t.length === 1) return t[0];
-  if (t.length === 2) return `${t[0]} e ${t[1]}`;
-  return `${t.slice(0, -1).join(', ')} e ${t[t.length - 1]}`;
-}
+  formatCurrencyBR,
+  numericUnitPriceFromInput,
+  OC_TYPE_AVISTA,
+  OC_TYPE_BOLETO,
+  parseCurrencyBR
+} from './_lib/ocAmounts';
+import { GerenciarMateriaisStats } from './_components/GerenciarMateriaisStats';
+import { MaterialsSearchFilter } from './_components/MaterialsSearchFilter';
+import { FluxTabsNav } from './_components/FluxTabsNav';
+import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
 
 export default function GerenciarMateriaisPage() {
   const router = useRouter();
@@ -229,9 +43,12 @@ export default function GerenciarMateriaisPage() {
   const [ocPaymentCondition, setOcPaymentCondition] = useState<string>('AVISTA');
   const [ocPaymentDetails, setOcPaymentDetails] = useState('');
   const [ocObservations, setOcObservations] = useState('');
-  const [ocAmountStr, setOcAmountStr] = useState('');
-  const [ocBoletoFile, setOcBoletoFile] = useState<File | null>(null);
+  const [ocFreteStr, setOcFreteStr] = useState('');
   const [ocSelectedItemIds, setOcSelectedItemIds] = useState<Set<string>>(new Set());
+  /** Quantidade a comprar na OC por item da SC (≤ quantidade solicitada). */
+  const [ocQuantityByItemId, setOcQuantityByItemId] = useState<Record<string, number>>({});
+  /** Valor unitário na OC por item (texto livre: pode ficar vazio enquanto digita). */
+  const [ocUnitPriceStrByItemId, setOcUnitPriceStrByItemId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (ocPaymentType === OC_TYPE_AVISTA) {
@@ -247,20 +64,47 @@ export default function GerenciarMateriaisPage() {
     setOcPaymentCondition('AVISTA');
     setOcPaymentDetails('');
     setOcObservations('');
-    setOcAmountStr('');
-    setOcBoletoFile(null);
+    setOcFreteStr('');
     setOcSelectedItemIds(new Set());
+    setOcQuantityByItemId({});
+    setOcUnitPriceStrByItemId({});
   };
 
   // Quando abrir o modal de OC, preenche com TODOS os itens da SC (o comprador pode desmarcar).
   useEffect(() => {
     if (showCreateOCModal && selectedRequest) {
       setOcSelectedItemIds(new Set(selectedRequest.items.map((i) => i.id)));
+      setOcQuantityByItemId(
+        Object.fromEntries(selectedRequest.items.map((i) => [i.id, Number(i.quantity)]))
+      );
+      setOcUnitPriceStrByItemId(
+        Object.fromEntries(selectedRequest.items.map((i) => [i.id, '0']))
+      );
     }
   }, [showCreateOCModal, selectedRequest]);
 
   const ocSelectedItems =
     selectedRequest?.items.filter((i) => ocSelectedItemIds.has(i.id)) ?? [];
+
+  const ocSubtotalItens = useMemo(() => {
+    if (!selectedRequest) return 0;
+    let s = 0;
+    for (const item of selectedRequest.items) {
+      if (!ocSelectedItemIds.has(item.id)) continue;
+      const q = ocQuantityByItemId[item.id] ?? Number(item.quantity);
+      const unit = numericUnitPriceFromInput(ocUnitPriceStrByItemId[item.id] ?? '');
+      s += q * unit;
+    }
+    return Math.round(s * 100) / 100;
+  }, [selectedRequest, ocSelectedItemIds, ocQuantityByItemId, ocUnitPriceStrByItemId]);
+
+  const ocFreteParsed =
+    ocFreteStr.trim() === '' ? 0 : parseCurrencyBR(ocFreteStr);
+  const ocFreteInvalid = ocFreteStr.trim() !== '' && ocFreteParsed === null;
+  const ocAmountToPayComputed =
+    ocFreteInvalid || ocFreteParsed === null
+      ? null
+      : Math.round((ocSubtotalItens + ocFreteParsed) * 100) / 100;
 
   const toggleOcItem = (itemId: string) => {
     setOcSelectedItemIds((prev) => {
@@ -274,6 +118,20 @@ export default function GerenciarMateriaisPage() {
   const selectAllOcItems = () => {
     if (!selectedRequest) return;
     setOcSelectedItemIds(new Set(selectedRequest.items.map((i) => i.id)));
+    setOcQuantityByItemId((prev) => {
+      const next = { ...prev };
+      for (const it of selectedRequest.items) {
+        if (next[it.id] === undefined) next[it.id] = Number(it.quantity);
+      }
+      return next;
+    });
+    setOcUnitPriceStrByItemId((prev) => {
+      const next = { ...prev };
+      for (const it of selectedRequest.items) {
+        if (next[it.id] === undefined) next[it.id] = '0';
+      }
+      return next;
+    });
   };
 
   const clearOcItems = () => {
@@ -302,7 +160,7 @@ export default function GerenciarMateriaisPage() {
   const { data: requestsData, isLoading: loadingRequests, refetch } = useQuery({
     queryKey: ['material-requests-manage'],
     queryFn: async () => {
-      const res = await api.get('/material-requests');
+      const res = await api.get('/material-requests', { params: { limit: 500 } });
       return res.data;
     }
   });
@@ -338,7 +196,7 @@ export default function GerenciarMateriaisPage() {
   const { data: suppliersData } = useQuery({
     queryKey: ['suppliers'],
     queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { limit: 200 } });
+      const res = await api.get('/suppliers', { params: { limit: 500 } });
       return res.data;
     },
     enabled: showCreateOCModal
@@ -353,9 +211,10 @@ export default function GerenciarMateriaisPage() {
       paymentCondition,
       paymentDetails,
       observations,
-      amountToPay,
-      boletoFile,
-      selectedItemIds
+      freightAmount,
+      selectedItemIds,
+      quantityByItemId,
+      unitPriceByItemId
     }: {
       request: MaterialRequest;
       supplierId: string;
@@ -363,34 +222,34 @@ export default function GerenciarMateriaisPage() {
       paymentCondition: string;
       paymentDetails: string;
       observations: string;
-      amountToPay: number;
-      boletoFile: File | null;
+      freightAmount: number;
       selectedItemIds: string[];
+      quantityByItemId: Record<string, number>;
+      unitPriceByItemId: Record<string, number>;
     }) => {
-      let boletoAttachmentUrl: string | undefined;
-      let boletoAttachmentName: string | undefined;
-      if (boletoFile) {
-        const fd = new FormData();
-        fd.append('boleto', boletoFile);
-        const up = await api.post('/purchase-orders/upload-boleto', fd);
-        boletoAttachmentUrl = up.data?.data?.url;
-        boletoAttachmentName = up.data?.data?.originalName;
-      }
-
       const selectedSet = new Set(selectedItemIds);
       const selectedItems = request.items.filter((it) => selectedSet.has(it.id));
       if (!selectedItems.length) {
         throw new Error('Selecione pelo menos 1 item para a OC');
       }
 
-      const items = selectedItems.map((item) => ({
-        materialRequestItemId: item.id,
-        materialId: item.material.id,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitPrice: Number(item.material.medianPrice) || Number(item.unitPrice) || 0,
-        notes: item.observation ?? item.notes
-      }));
+      const items = selectedItems.map((item) => {
+        const maxQ = Number(item.quantity);
+        const q = quantityByItemId[item.id] ?? maxQ;
+        if (!(q > 0) || q > maxQ) {
+          throw new Error(
+            `Quantidade inválida para "${item.material?.description || item.material?.name || 'item'}". Use entre 0 e ${maxQ}.`
+          );
+        }
+        return {
+          materialRequestItemId: item.id,
+          materialId: item.material.id,
+          quantity: q,
+          unit: item.unit,
+          unitPrice: unitPriceByItemId[item.id] ?? 0,
+          notes: item.observation ?? item.notes
+        };
+      });
       const res = await api.post('/purchase-orders', {
         materialRequestId: request.id,
         supplierId,
@@ -399,9 +258,7 @@ export default function GerenciarMateriaisPage() {
         paymentCondition,
         paymentDetails: paymentDetails.trim() || undefined,
         notes: observations.trim() || undefined,
-        amountToPay,
-        boletoAttachmentUrl,
-        boletoAttachmentName
+        freightAmount
       });
       return res.data;
     },
@@ -414,7 +271,11 @@ export default function GerenciarMateriaisPage() {
       toast.success('Ordem de compra criada com sucesso!');
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao criar OC');
+      toast.error(
+        (typeof error?.message === 'string' && error.message) ||
+          error.response?.data?.message ||
+          'Erro ao criar OC'
+      );
     }
   });
 
@@ -502,22 +363,34 @@ export default function GerenciarMateriaisPage() {
     const gestor = allOrders.filter((o) => o.status === 'PENDING').length;
     const diretoria = allOrders.filter((o) => o.status === 'PENDING_DIRETORIA').length;
     const emCorrecao = allOrders.filter((o) => o.status === 'IN_REVIEW').length;
-    const aprovadas = allOrders.filter((o) => o.status === 'APPROVED').length;
+    const attachBoleto = allOrders.filter((o) => orderNeedsFinanceBoleto(o)).length;
+    const aprovadas = allOrders.filter(
+      (o) => o.status === 'APPROVED' && !orderNeedsFinanceBoleto(o)
+    ).length;
+    const proofValidation = allOrders.filter((o) => o.status === 'PENDING_PROOF_VALIDATION').length;
+    const proofCorrection = allOrders.filter((o) => o.status === 'PENDING_PROOF_CORRECTION').length;
+    const attachNf = allOrders.filter((o) => o.status === 'PENDING_NF_ATTACHMENT').length;
+    const finalizadas = allOrders.filter((o) => o.status === 'FINALIZED' || o.status === 'SENT').length;
     return {
       compras,
       gestor,
       diretoria,
       IN_REVIEW: emCorrecao,
-      APPROVED: aprovadas
+      APPROVED: aprovadas,
+      ATTACH_BOLETO: attachBoleto,
+      PROOF_VALIDATION: proofValidation,
+      PROOF_CORRECTION: proofCorrection,
+      ATTACH_NF: attachNf,
+      FINALIZADAS: finalizadas
     };
   }, [allOrders]);
 
   // Filtrar requisições (somente quando uma fase SC/RM está ativa)
   const filteredRequests = useMemo(() => {
     if (!fluxTab.startsWith('rm_')) return [];
-    const rmKey = fluxTab.replace(/^rm_/, '') as 'all' | MaterialRequest['status'];
+    const rmKey = fluxTab.replace(/^rm_/, '') as MaterialRequest['status'];
     return normalizedRequests.filter((request: MaterialRequest) => {
-      if (rmKey !== 'all' && request.status !== rmKey) return false;
+      if (request.status !== rmKey) return false;
 
       if (
         rmKey === 'APPROVED' &&
@@ -576,10 +449,6 @@ export default function GerenciarMateriaisPage() {
     }
   };
 
-  const handleReject = () => {
-    return;
-  };
-
   return (
     <ProtectedRoute route="/ponto/gerenciar-materiais">
       <MainLayout 
@@ -599,302 +468,45 @@ export default function GerenciarMateriaisPage() {
             </p>
           </div>
 
-          {/* Estatísticas */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Total</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.total}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Pendentes</p>
-                <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm text-gray-600 dark:text-gray-400">RMs aprovadas</p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.approved}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Correção RM</p>
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.inReview}</p>
-              </CardContent>
-            </Card>
-          </div>
+          <GerenciarMateriaisStats stats={stats} />
 
-          {/* Filtros */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex flex-col md:flex-row gap-4">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por nome, descrição ou centro de custo..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <MaterialsSearchFilter searchTerm={searchTerm} onSearchChange={setSearchTerm} />
 
-          {/* Fases SC/RM + OC (barra única, centralizada) */}
-          <div id="secao-fluxo-tabs" className="scroll-mt-4">
-            <p className="text-center text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-              Requisições de materiais e fases de OC
-            </p>
-            <div className="border-b border-gray-200 dark:border-gray-700 rounded-t-lg bg-gray-50/80 dark:bg-gray-900/40 px-2">
-              <nav className="-mb-px flex flex-wrap justify-center gap-x-1 gap-y-2 sm:gap-x-2 overflow-x-auto py-3">
-                {(
-                  [
-                    { id: 'rm_all' as const, label: 'Todas', count: stats.total },
-                    { id: 'rm_PENDING' as const, label: 'Pendentes', count: stats.pending },
-                    { id: 'rm_IN_REVIEW' as const, label: 'Correção RM', count: stats.inReview },
-                    { id: 'rm_APPROVED' as const, label: 'RMs aprovadas', count: stats.approved }
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setFluxTab(tab.id)}
-                    className={`flex items-center gap-2 py-2 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap rounded-t-lg transition-colors ${
-                      fluxTab === tab.id
-                        ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
-                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    {tab.label}
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs ${
-                        fluxTab === tab.id
-                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  </button>
-                ))}
-                <span
-                  className="hidden sm:inline-flex w-px min-h-[2rem] bg-gray-300 dark:bg-gray-600 self-center mx-1 shrink-0"
-                  aria-hidden
-                />
-                {(
-                  [
-                    { id: 'oc_compras' as const, label: 'OC - Aprovação Compras', count: ocTabCounts.compras },
-                    { id: 'oc_gestor' as const, label: 'OC - Aprovação Gestor', count: ocTabCounts.gestor },
-                    { id: 'oc_diretoria' as const, label: 'OC - Aprovação Diretoria', count: ocTabCounts.diretoria },
-                    { id: 'oc_IN_REVIEW' as const, label: 'Correção OC', count: ocTabCounts.IN_REVIEW },
-                    { id: 'oc_APPROVED' as const, label: 'OC aprovadas', count: ocTabCounts.APPROVED }
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setFluxTab(tab.id)}
-                    className={`flex items-center gap-2 py-2 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap rounded-t-lg transition-colors ${
-                      fluxTab === tab.id
-                        ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
-                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    {tab.label}
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs ${
-                        fluxTab === tab.id
-                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  </button>
-                ))}
-                <span
-                  className="hidden sm:inline-flex w-px min-h-[2rem] bg-gray-300 dark:bg-gray-600 self-center mx-1 shrink-0"
-                  aria-hidden
-                />
-                <button
-                  type="button"
-                  onClick={() => setFluxTab('rm_CANCELLED')}
-                  className={`flex items-center gap-2 py-2 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap rounded-t-lg transition-colors ${
-                    fluxTab === 'rm_CANCELLED'
-                      ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
-                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                  }`}
-                >
-                  Canceladas
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs ${
-                      fluxTab === 'rm_CANCELLED'
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                    }`}
-                  >
-                    {stats.cancelled}
-                  </span>
-                </button>
-              </nav>
-            </div>
-          </div>
+          <FluxTabsNav
+            fluxTab={fluxTab}
+            onFluxTab={setFluxTab}
+            stats={stats}
+            ocTabCounts={ocTabCounts}
+          />
 
-          {/* Lista de Requisições */}
           {fluxTab.startsWith('rm_') && (
-          <Card>
-            <CardContent className="p-6">
-              {loadingRequests ? (
-                <div className="text-center py-8">
-                  <Loading message="Carregando requisições..." />
-                </div>
-              ) : filteredRequests.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500 dark:text-gray-400">Nenhuma requisição encontrada</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {filteredRequests.map((request: MaterialRequest) => {
-                    const statusInfo = getStatusInfo(request.status);
-                    const priorityInfo = getPriorityInfo(request.priority);
-                    const StatusIcon = statusInfo.icon;
-
-                    return (
-                      <div
-                        key={request.id}
-                        className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 transition-colors"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <span className={`px-2 py-1 rounded text-xs font-medium ${statusInfo.color}`}>
-                                {statusInfo.label}
-                              </span>
-                              <span className={`px-2 py-1 rounded text-xs font-medium ${priorityInfo.color}`}>
-                                {priorityInfo.label}
-                              </span>
-                            </div>
-                            <p className="font-medium text-gray-900 dark:text-gray-100 mb-1">
-                              {rmTitulo(request)}
-                            </p>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                              {request.description || 'Sem descrição'}
-                            </p>
-                            {(() => {
-                              const ocs = ordersByMaterialRequestId.get(request.id) ?? [];
-                              const nums = ocs.map((o) => o.orderNumber).filter(Boolean);
-                              if (nums.length === 0) return null;
-                              return (
-                                <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
-                                  <span className="font-medium text-gray-700 dark:text-gray-300">Gerou:</span>{' '}
-                                  {joinOrderNumbersPt(nums)}
-                                </p>
-                              );
-                            })()}
-                            <div className="flex flex-wrap gap-4 text-xs text-gray-500 dark:text-gray-400">
-                              <span>Solicitante: {rmSolicitante(request)?.name || '—'}</span>
-                              <span>Centro de Custo: {request.costCenter.name}</span>
-                              {request.project && <span>Projeto: {request.project.name}</span>}
-                              <span>Itens: {request.items.length}</span>
-                              <span>Criado em: {formatDate(request.createdAt)}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 ml-4">
-                            {request.status === 'APPROVED' && (
-                              <button
-                                onClick={() => {
-                                  setSelectedRequest(request);
-                                  resetOcForm();
-                                  setShowCreateOCModal(true);
-                                }}
-                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                title="Criar Ordem de Compra"
-                              >
-                                <FileText className="w-5 h-5" />
-                              </button>
-                            )}
-                            {request.status === 'PENDING' && (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    setSelectedRequest(request);
-                                    setShowApprovalModal(true);
-                                  }}
-                                  className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
-                                  title="Aprovar"
-                                >
-                                  <CheckCircle className="w-5 h-5" />
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setSelectedRequest(request);
-                                    setShowCorrectionModal(true);
-                                  }}
-                                  className="p-2 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"
-                                  title="Enviar para Correção RM"
-                                >
-                                  <Wrench className="w-5 h-5" />
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setSelectedRequest(request);
-                                    setShowCancelModal(true);
-                                  }}
-                                  className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                  title="Cancelar requisição"
-                                >
-                                  <Ban className="w-5 h-5" />
-                                </button>
-                              </>
-                            )}
-                            {request.status === 'IN_REVIEW' &&
-                              userData?.data?.id === rmSolicitante(request)?.id && (
-                                <Link
-                                  href={`/ponto/solicitar-materiais?editRm=${request.id}`}
-                                  className="p-2 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors inline-flex"
-                                  title="Editar RM"
-                                >
-                                  <Pencil className="w-5 h-5" />
-                                </Link>
-                              )}
-                            {request.status === 'IN_REVIEW' && (
-                              <button
-                                onClick={() => {
-                                  setSelectedRequest(request);
-                                  setShowCancelModal(true);
-                                }}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                title="Cancelar requisição"
-                              >
-                                <Ban className="w-5 h-5" />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                setSelectedRequest(request);
-                                setShowDetailsModal(true);
-                              }}
-                              className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                              title="Ver detalhes"
-                            >
-                              <Eye className="w-5 h-5" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            <MaterialRequestsRmList
+              loadingRequests={loadingRequests}
+              filteredRequests={filteredRequests}
+              ordersByMaterialRequestId={ordersByMaterialRequestId}
+              currentUserId={userData?.data?.id}
+              onCreateOc={(request) => {
+                setSelectedRequest(request);
+                resetOcForm();
+                setShowCreateOCModal(true);
+              }}
+              onApprove={(request) => {
+                setSelectedRequest(request);
+                setShowApprovalModal(true);
+              }}
+              onCorrection={(request) => {
+                setSelectedRequest(request);
+                setShowCorrectionModal(true);
+              }}
+              onCancel={(request) => {
+                setSelectedRequest(request);
+                setShowCancelModal(true);
+              }}
+              onDetails={(request) => {
+                setSelectedRequest(request);
+                setShowDetailsModal(true);
+              }}
+            />
           )}
           </div>
 
@@ -1084,7 +696,9 @@ export default function GerenciarMateriaisPage() {
 
                 <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
                   <ul className="divide-y divide-gray-200 dark:divide-gray-600">
-                    {selectedRequest.items.map((item) => (
+                    {selectedRequest.items.map((item) => {
+                      const materialSubtitle = materialItemSubtitle(item);
+                      return (
                       <li key={item.id} className="px-3 py-2 flex items-start gap-3">
                         <input
                           type="checkbox"
@@ -1096,9 +710,55 @@ export default function GerenciarMateriaisPage() {
                           <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
                             {materialItemLabel(item)}
                           </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Qtd: {item.quantity} {item.unit}
-                          </p>
+                          {materialSubtitle ? (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
+                              {materialSubtitle}
+                            </p>
+                          ) : null}
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+                            <span>
+                              Solicitado na SC: {item.quantity} {item.unit}
+                            </span>
+                            <span className="text-gray-400">|</span>
+                            <label className="inline-flex items-center gap-1.5">
+                              <span className="whitespace-nowrap">Qtd. na OC:</span>
+                              <input
+                                type="number"
+                                min={0.0001}
+                                step="any"
+                                max={Number(item.quantity)}
+                                disabled={!ocSelectedItemIds.has(item.id)}
+                                value={ocQuantityByItemId[item.id] ?? Number(item.quantity)}
+                                onChange={(e) => {
+                                  const n = parseFloat(e.target.value);
+                                  if (Number.isNaN(n)) return;
+                                  const max = Number(item.quantity);
+                                  const q = Math.min(Math.max(n, 0.0001), max);
+                                  setOcQuantityByItemId((prev) => ({ ...prev, [item.id]: q }));
+                                }}
+                                className="w-24 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                              />
+                              <span>{item.unit}</span>
+                            </label>
+                            <span className="text-gray-400">|</span>
+                            <label className="inline-flex items-center gap-1.5">
+                              <span className="whitespace-nowrap">Valor unit. (R$):</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0,00"
+                                disabled={!ocSelectedItemIds.has(item.id)}
+                                value={ocUnitPriceStrByItemId[item.id] ?? ''}
+                                onChange={(e) => {
+                                  setOcUnitPriceStrByItemId((prev) => ({
+                                    ...prev,
+                                    [item.id]: e.target.value
+                                  }));
+                                }}
+                                className="w-28 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                              />
+                            </label>
+                          </div>
                           {item.attachmentUrl && (
                             <a
                               href={absoluteUploadUrl(item.attachmentUrl)}
@@ -1111,7 +771,8 @@ export default function GerenciarMateriaisPage() {
                           )}
                         </div>
                       </li>
-                    ))}
+                    );
+                    })}
                   </ul>
                 </div>
 
@@ -1173,38 +834,49 @@ export default function GerenciarMateriaisPage() {
                   <label htmlFor="ocPaymentCondition" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Condição de pagamento *
                   </label>
-                  <select
+                  <PaymentConditionSelect
                     id="ocPaymentCondition"
+                    paymentType={ocPaymentType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
                     value={ocPaymentCondition}
-                    onChange={(e) => setOcPaymentCondition(e.target.value)}
+                    onChange={setOcPaymentCondition}
                     disabled={ocPaymentType === OC_TYPE_AVISTA}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                  >
-                    {ocPaymentType === OC_TYPE_AVISTA ? (
-                      <option value="AVISTA">À vista</option>
-                    ) : (
-                      <>
-                        <option value="BOLETO_30">Boleto 30 dias</option>
-                        <option value="BOLETO_28">Boleto 28 dias</option>
-                      </>
-                    )}
-                  </select>
+                  />
                 </div>
               </div>
 
               <div className="mb-4">
-                <label htmlFor="ocAmount" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Valor a ser pago (R$) *
+                <label htmlFor="ocFrete" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Frete (R$)
                 </label>
                 <input
-                  id="ocAmount"
+                  id="ocFrete"
                   type="text"
                   inputMode="decimal"
                   placeholder="0,00"
-                  value={ocAmountStr}
-                  onChange={(e) => setOcAmountStr(e.target.value)}
+                  value={ocFreteStr}
+                  onChange={(e) => setOcFreteStr(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {ocFreteInvalid && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">Informe um valor de frete válido ou deixe em branco.</p>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Valor a ser pago (R$) *
+                </span>
+                <div
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-gray-100"
+                  aria-live="polite"
+                >
+                  {ocAmountToPayComputed !== null
+                    ? `R$ ${formatCurrencyBR(ocAmountToPayComputed)}`
+                    : '—'}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Soma dos itens (quantidade × valor unitário) + frete.
+                </p>
               </div>
 
               <div className="mb-4">
@@ -1219,22 +891,6 @@ export default function GerenciarMateriaisPage() {
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Conta, PIX, agência, favorecido, etc."
                 />
-              </div>
-
-              <div className="mb-4">
-                <label htmlFor="ocBoleto" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Anexo do boleto
-                </label>
-                <input
-                  id="ocBoleto"
-                  type="file"
-                  accept=".pdf,image/*"
-                  onChange={(e) => setOcBoletoFile(e.target.files?.[0] ?? null)}
-                  className="block w-full text-sm text-gray-600 dark:text-gray-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-800 dark:file:bg-gray-700 dark:file:text-gray-200"
-                />
-                {ocBoletoFile && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{ocBoletoFile.name}</p>
-                )}
               </div>
 
               <div className="mb-4">
@@ -1265,11 +921,20 @@ export default function GerenciarMateriaisPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    const amountToPay = parseCurrencyBR(ocAmountStr);
-                    if (!selectedRequest || !ocSupplierId || amountToPay === null || amountToPay < 0) {
-                      toast.error('Preencha fornecedor e um valor válido (≥ 0).');
+                    if (!selectedRequest || !ocSupplierId) {
+                      toast.error('Selecione o fornecedor.');
                       return;
                     }
+                    if (ocAmountToPayComputed === null || ocAmountToPayComputed < 0) {
+                      toast.error('Corrija o frete ou os valores unitários para obter um total válido.');
+                      return;
+                    }
+                    const unitPriceByItemId = Object.fromEntries(
+                      Array.from(ocSelectedItemIds).map((id) => [
+                        id,
+                        numericUnitPriceFromInput(ocUnitPriceStrByItemId[id] ?? '')
+                      ])
+                    );
                     createOCMutation.mutate({
                       request: selectedRequest,
                       supplierId: ocSupplierId,
@@ -1277,17 +942,18 @@ export default function GerenciarMateriaisPage() {
                       paymentCondition: ocPaymentCondition,
                       paymentDetails: ocPaymentDetails,
                       observations: ocObservations,
-                      amountToPay,
-                      boletoFile: ocBoletoFile,
-                      selectedItemIds: Array.from(ocSelectedItemIds)
+                      freightAmount: ocFreteParsed ?? 0,
+                      selectedItemIds: Array.from(ocSelectedItemIds),
+                      quantityByItemId: ocQuantityByItemId,
+                      unitPriceByItemId
                     });
                   }}
                   disabled={
                     !ocSupplierId ||
                     createOCMutation.isPending ||
                     ocSelectedItems.length === 0 ||
-                    parseCurrencyBR(ocAmountStr) === null ||
-                    (parseCurrencyBR(ocAmountStr) ?? -1) < 0
+                    ocAmountToPayComputed === null ||
+                    ocAmountToPayComputed < 0
                   }
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >

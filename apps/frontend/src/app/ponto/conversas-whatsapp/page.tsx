@@ -28,6 +28,7 @@ import {
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -102,15 +103,9 @@ function formatPhone(phone: string) {
   return phone;
 }
 
-/** Resolve URL do arquivo: se for relativa, usa a base da API (backend) */
 function getFileHref(url: string | null | undefined): string {
   if (!url) return '#';
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  const base = (typeof window !== 'undefined'
-    ? process.env.NEXT_PUBLIC_API_URL
-    : process.env.NEXT_PUBLIC_API_URL
-  )?.replace(/\/api\/?$/, '') || '';
-  return base ? `${base}${url.startsWith('/') ? url : '/' + url}` : url;
+  return absoluteUploadUrl(url) || '#';
 }
 
 type TabFiltro = 'todas' | 'atestados' | 'duvidas' | 'outros';

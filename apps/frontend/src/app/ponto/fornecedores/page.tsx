@@ -22,6 +22,11 @@ interface Supplier {
   city?: string;
   state?: string;
   contactName?: string;
+  notes?: string | null;
+  bank?: string | null;
+  agency?: string | null;
+  account?: string | null;
+  accountDigit?: string | null;
   isActive: boolean;
 }
 
@@ -41,6 +46,10 @@ export default function FornecedoresPage() {
     state: '',
     contactName: '',
     notes: '',
+    bank: '',
+    agency: '',
+    account: '',
+    accountDigit: '',
     isActive: true
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
@@ -59,11 +68,11 @@ export default function FornecedoresPage() {
     }
   });
 
-  const { data: suppliersData, isLoading } = useQuery({
+  const { data: suppliersData, isLoading, isError, error } = useQuery({
     queryKey: ['suppliers', searchTerm],
     queryFn: async () => {
       const res = await api.get('/suppliers', {
-        params: { search: searchTerm || undefined, limit: 100 }
+        params: { search: searchTerm || undefined, limit: 500 }
       });
       return res.data;
     }
@@ -128,6 +137,10 @@ export default function FornecedoresPage() {
       state: '',
       contactName: '',
       notes: '',
+      bank: '',
+      agency: '',
+      account: '',
+      accountDigit: '',
       isActive: true
     });
   };
@@ -143,7 +156,11 @@ export default function FornecedoresPage() {
       city: s.city || '',
       state: s.state || '',
       contactName: s.contactName || '',
-      notes: '',
+      notes: s.notes || '',
+      bank: s.bank || '',
+      agency: s.agency || '',
+      account: s.account || '',
+      accountDigit: s.accountDigit || '',
       isActive: s.isActive
     });
     setShowForm(true);
@@ -162,7 +179,14 @@ export default function FornecedoresPage() {
     }
   };
 
-  const suppliers = suppliersData?.data || [];
+  const suppliers: Supplier[] = Array.isArray(suppliersData?.data)
+    ? suppliersData.data
+    : [];
+  const suppliersLoadError =
+    isError &&
+    ((error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+      (error as Error)?.message ||
+      'Não foi possível carregar os fornecedores.');
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
   if (loadingUser) {
@@ -190,7 +214,9 @@ export default function FornecedoresPage() {
                   <div className="ml-3 sm:ml-4 min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Fornecedores</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {suppliers.length} {suppliers.length === 1 ? 'fornecedor' : 'fornecedores'} cadastrado(s)
+                      {isError
+                        ? 'Erro ao carregar a lista'
+                        : `${suppliers.length} ${suppliers.length === 1 ? 'fornecedor' : 'fornecedores'} cadastrado(s)`}
                     </p>
                   </div>
                 </div>
@@ -219,6 +245,14 @@ export default function FornecedoresPage() {
               {isLoading ? (
                 <div className="px-6 py-12 text-center">
                   <Loading message="Carregando fornecedores..." />
+                </div>
+              ) : isError ? (
+                <div className="px-6 py-10 flex flex-col items-center gap-3 text-center">
+                  <AlertCircle className="w-10 h-10 text-red-500" />
+                  <p className="text-sm text-gray-700 dark:text-gray-300 max-w-md">{suppliersLoadError}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Se o problema persistir, confira se o backend está no ar e se as migrações do banco foram aplicadas (<code className="text-xs">npx prisma migrate deploy</code>).
+                  </p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -257,7 +291,7 @@ export default function FornecedoresPage() {
                       ))}
                     </tbody>
                   </table>
-                  {suppliers.length === 0 && !isLoading && (
+                  {suppliers.length === 0 && !isLoading && !isError && (
                     <div className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
                       Nenhum fornecedor cadastrado. Clique em &quot;Novo Fornecedor&quot; para começar.
                     </div>
@@ -361,6 +395,51 @@ export default function FornecedoresPage() {
                       placeholder="DF"
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
+                  </div>
+                </div>
+                <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
+                    Dados bancários (remessa CNAB400 / pagamento fornecedor)
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Banco</label>
+                      <input
+                        type="text"
+                        value={formData.bank}
+                        onChange={(e) => setFormData({ ...formData, bank: e.target.value })}
+                        placeholder="Ex.: ITAÚ ou 341"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Agência</label>
+                      <input
+                        type="text"
+                        value={formData.agency}
+                        onChange={(e) => setFormData({ ...formData, agency: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Conta</label>
+                      <input
+                        type="text"
+                        value={formData.account}
+                        onChange={(e) => setFormData({ ...formData, account: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Dígito da conta</label>
+                      <input
+                        type="text"
+                        value={formData.accountDigit}
+                        onChange={(e) => setFormData({ ...formData, accountDigit: e.target.value })}
+                        maxLength={2}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
                   </div>
                 </div>
                 {editingSupplier && (
