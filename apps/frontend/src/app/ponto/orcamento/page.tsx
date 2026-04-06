@@ -18,6 +18,8 @@ import {
   Building2,
   FileDown,
   FileText,
+  Table2,
+  ClipboardList,
   Pencil,
   ArrowLeft,
   ListPlus
@@ -26,6 +28,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import toast from 'react-hot-toast';
+import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
@@ -580,6 +583,40 @@ function formatarBRLExport(n: number) {
 
 function formatarPesoPctExport(n: number) {
   return `${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+/** Estado vazio das abas derivadas do orçamento (sem itens na montagem). */
+function OrcamentoSecaoVazia({
+  titulo,
+  texto,
+  Icon,
+  onIrOrcamento
+}: {
+  titulo: string;
+  texto: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  onIrOrcamento: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300/90 dark:border-gray-600/70 bg-gray-50 dark:bg-gray-900 px-5 py-12 sm:py-14 text-center"
+    >
+      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-600/[0.12] dark:bg-red-500/15 ring-1 ring-red-600/20 dark:ring-red-500/25">
+        <Icon className="h-7 w-7 text-red-600 dark:text-red-400" aria-hidden />
+      </div>
+      <h3 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-50">{titulo}</h3>
+      <p className="mt-2 max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">{texto}</p>
+      <button
+        type="button"
+        onClick={onIrOrcamento}
+        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-red-900/15 transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
+      >
+        <ListPlus className="h-4 w-4 shrink-0" aria-hidden />
+        Ir para a aba Orçamento
+      </button>
+    </div>
+  );
 }
 
 /** Colunas em R$: símbolo à esquerda e valor numérico à direita na mesma célula. */
@@ -2597,7 +2634,7 @@ export default function OrcamentoPage() {
       ...prev,
       [itemKey]: {
         ...atual,
-        linhas: [...atual.linhas, { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 0 }]
+        linhas: [...atual.linhas, { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 }]
       }
     }));
   };
@@ -2664,10 +2701,8 @@ export default function OrcamentoPage() {
   };
 
   const exportarMemoriaCalculo = () => {
-    if (itensMemoriaMedicao.length === 0) {
-      toast.error(
-        'Não há itens com medição (m², m³ ou m) para exportar. Quantidades em peça/unidade são alteradas na aba Orçamento.'
-      );
+    if (itensCalculados.length === 0) {
+      toast.error('Não há itens no orçamento para exportar.');
       return;
     }
     const nomeContrato = costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name || costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code || centroCustoId || 'Contrato';
@@ -2683,35 +2718,54 @@ export default function OrcamentoPage() {
       [''],
       ['MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS'],
       [''],
-      ['LEGENDA: C= Comprimento | L= Largura | H= Altura | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro'],
+      [
+        'LEGENDA: C= Comprimento | L= Largura | H= Altura | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro | UN= quantidade nas colunas N e Subtotal'
+      ],
       [''],
       ['DISCRIMINAÇÃO DOS SERVIÇOS'],
-      ['CÓDIGO', 'DESCRIÇÃO', 'UN', 'C', 'L', 'H', '% EMPOL.', 'N', 'A', 'V', 'SUBTOTAL', 'Preço Unit.', 'TOTAL (R$)']
+      ['CÓDIGO', 'DESCRIÇÃO', 'UN', 'C', 'L', 'H', '%', 'N', 'A', 'V', 'SUBTOTAL']
     ];
 
     const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
-    const totalMemoriaExport = itensMemoriaMedicao.reduce((acc, r) => acc + r.total, 0);
+    const totalMemoriaExport = itensCalculados.reduce((acc, r) => acc + r.total, 0);
     let idxServico = 0;
     const formulaCells: { cell: string; formula: string }[] = [];
 
-    for (const row of itensMemoriaMedicao) {
+    for (const row of itensCalculados) {
       const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
       const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
       const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(row.dimensoes?.linhas);
       const un = row.unidadeComposicao?.trim() || unidadeLabel(tipoAuto);
-      const preco = row.precoUnitario;
-      const totalItem = row.total;
+      /** Itens em unidade (peça/UN): mesma ordem do orçamento; quantidade em N e Subtotal. */
+      if (row.tipoUnidade === 'un') {
+        rows.push([
+          codigo,
+          descricaoBase,
+          un,
+          '',
+          '',
+          '',
+          '',
+          row.quantidade,
+          '',
+          '',
+          row.quantidade
+        ]);
+        idxServico++;
+        continue;
+      }
 
       if (row.dimensoes?.linhas?.length) {
+        /** Linha só do nome da composição: medidas (C…Subtotal) em branco. */
+        rows.push([codigo, descricaoBase, un, '', '', '', '', '', '', '', '']);
         for (let i = 0; i < row.dimensoes.linhas.length; i++) {
           const ln = row.dimensoes.linhas[i];
-          const descLinha = ln.descricao?.trim() || (i === 0 ? descricaoBase : '');
-          const descCol = i === 0 ? descricaoBase : descLinha;
+          const descLinha = ln.descricao?.trim() || `Medição ${i + 1}`;
           const empolRaw = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 0);
           const empol = (empolRaw != null && empolRaw > 0) ? empolRaw : 1;
           rows.push([
-            i === 0 ? codigo : '',
-            descCol,
+            '',
+            descLinha,
             un,
             ln.C ?? '',
             ln.L ?? '',
@@ -2720,9 +2774,7 @@ export default function OrcamentoPage() {
             ln.N ?? 1,
             '',
             '',
-            '',
-            i === 0 ? preco : '',
-            i === 0 ? totalItem : ''
+            ''
           ]);
           const r = rows.length;
           const col = (c: number) => String.fromCharCode(64 + c);
@@ -2746,13 +2798,13 @@ export default function OrcamentoPage() {
           }
         }
       } else {
-        rows.push([codigo, descricaoBase, un, '', '', '', '', '', row.quantidade, row.quantidade, row.quantidade, preco, totalItem]);
+        rows.push([codigo, descricaoBase, un, '', '', '', '', '', row.quantidade, row.quantidade, row.quantidade]);
       }
       idxServico++;
     }
 
     rows.push(['']);
-    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL (itens com medição)', '', '', totalMemoriaExport]);
+    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL GERAL', totalMemoriaExport]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
     formulaCells.forEach(({ cell, formula }) => {
@@ -2764,7 +2816,7 @@ export default function OrcamentoPage() {
     });
     ws['!cols'] = [
       { wch: 8 }, { wch: 50 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 6 },
-      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }
+      { wch: 10 }, { wch: 10 }, { wch: 12 }
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Memória de Cálculo');
@@ -3072,6 +3124,490 @@ export default function OrcamentoPage() {
     const nomeArquivo = `Analitico_Composicoes_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, nomeArquivo);
     toast.success('Analítico exportado com sucesso.');
+  };
+
+  const nomeContratoExport = () =>
+    costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name ||
+    costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code ||
+    centroCustoId ||
+    'Contrato';
+
+  /** Exporta a grade da aba Orçamento analítico (mesmas colunas da tela). */
+  const exportarOrcamentoAnaliticoTabela = () => {
+    if (linhasAnaliticoOrcamento.length === 0) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['ORÇAMENTO ANALÍTICO'],
+      ['CONTRATO', nomeContrato],
+      ['DATA', dataEmissao],
+      [''],
+      [
+        'Item',
+        'Tipo',
+        'Código',
+        'Banco',
+        'Descrição',
+        'Und',
+        'Quant.',
+        'Quantidade real',
+        'Quantidade orçada',
+        'Valor unit.',
+        'Total'
+      ]
+    ];
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind === 'tituloServico') {
+        rows.push([l.main, '', '', '', l.servicoNome, '', '', '', '', '', '']);
+        continue;
+      }
+      if (l.kind === 'subtituloBloco') {
+        rows.push([`${l.main}.${l.subIdx}`, '', '', '', l.texto, '', '', '', '', '', '']);
+        continue;
+      }
+      if (l.kind === 'composicao') {
+        rows.push([
+          l.item,
+          l.tipo,
+          l.codigo,
+          l.banco,
+          l.descricao,
+          l.und,
+          l.quant,
+          l.quantidadeReal,
+          l.quantidadeOrcada,
+          l.valorUnit,
+          l.total
+        ]);
+        continue;
+      }
+      rows.push([
+        l.item,
+        l.tipo,
+        l.codigo || '—',
+        l.banco || '—',
+        l.descricao,
+        l.und,
+        l.quant,
+        l.quantidadeReal,
+        l.quantidadeOrcada,
+        l.valorUnit,
+        l.total
+      ]);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 48 },
+      { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Analítico');
+    const nomeArquivo = `Orcamento_Analitico_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Orçamento analítico exportado com sucesso.');
+  };
+
+  /** Planilha analítica (compras e custos) — alinhado à grade da aba. */
+  const exportarPlanilhaAnalitica = () => {
+    if (linhasAnaliticoOrcamento.length === 0) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['PLANILHA ANALÍTICA'],
+      ['CONTRATO', nomeContrato],
+      ['DATA', dataEmissao],
+      [''],
+      [
+        'Item',
+        'Código',
+        'Banco',
+        'Serviço',
+        'UN',
+        'Quantidade',
+        'Valor unit. orçamento',
+        'Total orçamento',
+        'Quantidade compra',
+        'Custo estimado',
+        'Valor unit. compra real',
+        'Custo compra real',
+        'Tipo'
+      ]
+    ];
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind === 'tituloServico') {
+        rows.push([l.main, '', '', l.servicoNome, '', '', '', '', '', '', '', '', '']);
+        continue;
+      }
+      if (l.kind === 'subtituloBloco') {
+        rows.push([`${l.main}.${l.subIdx}`, '', '', l.texto, '', '', '', '', '', '', '', '', '']);
+        continue;
+      }
+      if (l.kind === 'composicao') {
+        const filhos = insumosPlanilhaPorComposicao.get(l.key) ?? [];
+        let sumQtdCompra = 0;
+        let sumCustoEst = 0;
+        let sumCustoReal = 0;
+        let sumQtdCompraComVlReal = 0;
+        let temQtdCompra = false;
+        let somaVlUnitCompraRealInsumos = 0;
+        let temAlgumVlUnitCompraReal = false;
+        for (const ins of filhos) {
+          const qC = planilhaQuantidadeCompra[ins.key];
+          const vReal = planilhaValorUnitCompraReal[ins.key];
+          const vOrc = ins.valorUnit;
+          if (vReal !== undefined && Number.isFinite(vReal)) {
+            somaVlUnitCompraRealInsumos += vReal;
+            temAlgumVlUnitCompraReal = true;
+          }
+          if (qC !== undefined && Number.isFinite(qC)) {
+            temQtdCompra = true;
+            sumQtdCompra += qC;
+            sumCustoEst += qC * vOrc;
+            if (vReal !== undefined && Number.isFinite(vReal)) {
+              sumCustoReal += qC * vReal;
+              sumQtdCompraComVlReal += qC;
+            }
+          }
+        }
+        const vlUnitCompraRealAgreg = temAlgumVlUnitCompraReal ? somaVlUnitCompraRealInsumos : null;
+        rows.push([
+          l.item,
+          l.codigo,
+          l.banco,
+          l.descricao,
+          l.und,
+          l.quant,
+          l.valorUnit,
+          l.total,
+          temQtdCompra ? sumQtdCompra : '',
+          temQtdCompra ? roundTo(sumCustoEst, 2) : '',
+          vlUnitCompraRealAgreg !== null ? roundTo(vlUnitCompraRealAgreg, 2) : '',
+          sumQtdCompraComVlReal > 0 ? roundTo(sumCustoReal, 2) : '',
+          ''
+        ]);
+        continue;
+      }
+      const qC = planilhaQuantidadeCompra[l.key];
+      const vReal = planilhaValorUnitCompraReal[l.key];
+      const vOrc = l.valorUnit;
+      const custoEst = qC !== undefined && Number.isFinite(qC) ? qC * vOrc : null;
+      const custoCompraR =
+        qC !== undefined && vReal !== undefined && Number.isFinite(qC) && Number.isFinite(vReal)
+          ? qC * vReal
+          : null;
+      rows.push([
+        l.item,
+        l.codigo || '—',
+        l.banco || '—',
+        l.descricao,
+        l.und || '—',
+        l.quant,
+        l.valorUnit,
+        l.total,
+        qC !== undefined && Number.isFinite(qC) ? qC : '',
+        custoEst !== null ? roundTo(custoEst, 2) : '',
+        vReal !== undefined && Number.isFinite(vReal) ? roundTo(vReal, 2) : '',
+        custoCompraR !== null ? roundTo(custoCompraR, 2) : '',
+        tipoPlanilhaInsumo(l.categoria || '')
+      ]);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 44 }, { wch: 6 },
+      { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 6 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Planilha analítica');
+    const nomeArquivo = `Planilha_Analitica_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Planilha analítica exportada com sucesso.');
+  };
+
+  const exportarFichaDemandaExcel = () => {
+    if (linhasFichaDemanda.length === 0) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['FICHA DE DEMANDA'],
+      ['CONTRATO', nomeContrato],
+      ['DATA', dataEmissao],
+      [''],
+      [
+        'Item',
+        'Código',
+        'Banco',
+        'Serviço',
+        'UN',
+        'Levantamento',
+        'Preço unitário',
+        'Faturamento',
+        'Quantidade do orçamento',
+        'Quantidade compra',
+        'Sobra',
+        'Custo unitário orçamento',
+        'Custo unitário de compra real',
+        'Valor total orçamento',
+        'Preço compra estimado (60%)',
+        'Preço de compra real',
+        '% Custo / valor pago',
+        'Tipo'
+      ]
+    ];
+    for (const r of linhasFichaDemanda) {
+      const ehComp = r.kind === 'composicao';
+      const qCompraOk =
+        !ehComp && r.quantidadeCompra !== undefined && Number.isFinite(r.quantidadeCompra);
+      const sobra =
+        qCompraOk ? r.quantidadeOrcamento - r.quantidadeCompra! : null;
+      rows.push([
+        r.item,
+        r.codigo,
+        r.banco,
+        r.servico,
+        r.un,
+        ehComp
+          ? r.quantidadeOrcamento
+          : r.levantamentoPct !== undefined && Number.isFinite(r.levantamentoPct)
+            ? `${r.levantamentoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+            : '',
+        ehComp
+          ? r.custoUnitarioOrcamento
+          : r.precoUnitarioRelPct !== undefined && Number.isFinite(r.precoUnitarioRelPct)
+            ? `${r.precoUnitarioRelPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+            : '',
+        ehComp
+          ? Number.isFinite(r.quantidadeOrcamento) && Number.isFinite(r.custoUnitarioOrcamento)
+            ? r.quantidadeOrcamento * r.custoUnitarioOrcamento
+            : ''
+          : r.faturamentoPct !== undefined && Number.isFinite(r.faturamentoPct)
+            ? `${r.faturamentoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+            : '',
+        ehComp ? '' : r.quantidadeOrcamento,
+        ehComp ? '' : r.quantidadeCompra ?? '',
+        ehComp ? '' : sobra !== null ? roundTo(sobra, 4) : '',
+        ehComp ? '' : r.custoUnitarioOrcamento,
+        ehComp ? '' : r.custoUnitarioCompraReal ?? '',
+        r.valorTotalOrcamento ?? '',
+        r.precoCompraEstimado60 ?? '',
+        r.precoCompraReal ?? '',
+        r.pctCustoValorPago !== undefined && Number.isFinite(r.pctCustoValorPago)
+          ? `${r.pctCustoValorPago.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+          : '',
+        r.tipo
+      ]);
+    }
+    rows.push(['']);
+    rows.push(['Resumo — Preço compra MA', resumoRodapeFichaDemanda.precoMa ?? '']);
+    rows.push(['Resumo — Preço compra MO', resumoRodapeFichaDemanda.precoMo ?? '']);
+    rows.push(['Resumo — Preço compra LO', resumoRodapeFichaDemanda.precoLo ?? '']);
+    rows.push(['Relação preço estimado × orçamento (%)', resumoRodapeFichaDemanda.relacaoEstimadoOrcamentoPct ?? '']);
+    rows.push(['Relação preço real × orçamento (%)', resumoRodapeFichaDemanda.relacaoRealOrcamentoPct ?? '']);
+    rows.push(['Total faturado (mat/MO/loc)', resumoRodapeFichaDemanda.totalFaturadoMatMoLoc]);
+    rows.push(['Preço de compra estimado', resumoRodapeFichaDemanda.precoCompraEstimadoTotal ?? '']);
+    rows.push(['Preço de compra real', resumoRodapeFichaDemanda.precoCompraRealTotal ?? '']);
+    rows.push(['Valor total do orçamento', resumoRodapeFichaDemanda.valorTotalOrcamentoFinal]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = Array(18).fill({ wch: 14 });
+    ws['!cols'][3] = { wch: 40 };
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ficha de demanda');
+    const nomeArquivo = `Ficha_Demanda_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Ficha de demanda exportada (Excel).');
+  };
+
+  const exportarFichaDemandaPdf = () => {
+    if (linhasFichaDemanda.length === 0) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
+    const pdf = new jsPDF('l', 'mm', 'a4');
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    let y = margin;
+    const trunc = (s: string, n: number) => {
+      const t = String(s ?? '');
+      return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+    };
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('Ficha de demanda', margin, y);
+    y += 5;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.text(`Contrato: ${trunc(nomeContrato, 100)}`, margin, y);
+    y += 4;
+    pdf.text(
+      `Emitido em: ${new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+      margin,
+      y
+    );
+    y += 7;
+
+    const headers = [
+      'Item',
+      'Cod.',
+      'Banco',
+      'Servico',
+      'UN',
+      'Lev.',
+      'P.unit',
+      'Fat.',
+      'Q.orc',
+      'Q.comp',
+      'Sobra',
+      'CU orc',
+      'CU real',
+      'V.tot',
+      'Est.60%',
+      'P.real',
+      '%C/V',
+      'Tipo'
+    ];
+    const colW = [11, 10, 10, 34, 7, 9, 9, 9, 9, 9, 9, 11, 11, 11, 11, 11, 9, 8];
+    const sumW = colW.reduce((a, b) => a + b, 0);
+    const scale = (pageW - 2 * margin) / sumW;
+    const cw = colW.map(w => w * scale);
+    const rowH = 4.2;
+    pdf.setFontSize(5.5);
+    pdf.setFont('helvetica', 'bold');
+    let x = margin;
+    headers.forEach((h, i) => {
+      pdf.text(trunc(h, 18), x + 0.5, y + 3);
+      x += cw[i];
+    });
+    y += rowH;
+    pdf.setDrawColor(200, 200, 200);
+    pdf.line(margin, y - 1, pageW - margin, y - 1);
+    pdf.setFont('helvetica', 'normal');
+
+    const fmtPct = (n: number | undefined) =>
+      n !== undefined && Number.isFinite(n) ? `${n.toFixed(2)}%` : '—';
+    const fmtN = (n: number | undefined) =>
+      n !== undefined && Number.isFinite(n) ? n.toLocaleString('pt-BR', { maximumFractionDigits: 4 }) : '—';
+    const fmtBRL = (n: number | undefined) =>
+      n !== undefined && Number.isFinite(n)
+        ? n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : '—';
+
+    const drawRow = (cells: string[]) => {
+      if (y + rowH > pageH - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+      x = margin;
+      cells.forEach((cell, i) => {
+        pdf.text(trunc(cell, 26), x + 0.5, y + 3);
+        x += cw[i];
+      });
+      y += rowH;
+    };
+
+    for (const r of linhasFichaDemanda) {
+      const ehComp = r.kind === 'composicao';
+      const qCompraOk =
+        !ehComp && r.quantidadeCompra !== undefined && Number.isFinite(r.quantidadeCompra);
+      const sobra =
+        qCompraOk ? r.quantidadeOrcamento - r.quantidadeCompra! : null;
+      const levantStr = ehComp
+        ? fmtN(r.quantidadeOrcamento)
+        : r.levantamentoPct !== undefined && Number.isFinite(r.levantamentoPct)
+          ? fmtPct(r.levantamentoPct)
+          : '—';
+      const pUnitStr = ehComp
+        ? fmtBRL(r.custoUnitarioOrcamento)
+        : r.precoUnitarioRelPct !== undefined && Number.isFinite(r.precoUnitarioRelPct)
+          ? fmtPct(r.precoUnitarioRelPct)
+          : '—';
+      const fatStr = ehComp
+        ? fmtBRL(
+            Number.isFinite(r.quantidadeOrcamento) && Number.isFinite(r.custoUnitarioOrcamento)
+              ? r.quantidadeOrcamento * r.custoUnitarioOrcamento
+              : undefined
+          )
+        : r.faturamentoPct !== undefined && Number.isFinite(r.faturamentoPct)
+          ? fmtPct(r.faturamentoPct)
+          : '—';
+
+      drawRow([
+        trunc(r.item, 20),
+        trunc(String(r.codigo), 12),
+        trunc(String(r.banco), 12),
+        trunc(r.servico, 40),
+        trunc(r.un, 6),
+        levantStr,
+        pUnitStr,
+        fatStr,
+        ehComp ? '—' : fmtN(r.quantidadeOrcamento),
+        ehComp ? '—' : fmtN(r.quantidadeCompra),
+        ehComp ? '—' : sobra !== null ? fmtN(sobra) : '—',
+        ehComp ? '—' : fmtBRL(r.custoUnitarioOrcamento),
+        ehComp ? '—' : fmtBRL(r.custoUnitarioCompraReal),
+        fmtBRL(r.valorTotalOrcamento),
+        fmtBRL(r.precoCompraEstimado60),
+        fmtBRL(r.precoCompraReal),
+        r.pctCustoValorPago !== undefined && Number.isFinite(r.pctCustoValorPago)
+          ? fmtPct(r.pctCustoValorPago)
+          : '—',
+        trunc(r.tipo || '—', 8)
+      ]);
+    }
+
+    y += 4;
+    if (y + 24 > pageH - margin) {
+      pdf.addPage();
+      y = margin;
+    }
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7);
+    pdf.text('Resumos', margin, y);
+    y += 5;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(6.5);
+    const resumoLinhas = [
+      ['Preço compra MA', resumoRodapeFichaDemanda.precoMa],
+      ['Preço compra MO', resumoRodapeFichaDemanda.precoMo],
+      ['Preço compra LO', resumoRodapeFichaDemanda.precoLo],
+      ['Relação estimado × orçamento', resumoRodapeFichaDemanda.relacaoEstimadoOrcamentoPct],
+      ['Relação real × orçamento', resumoRodapeFichaDemanda.relacaoRealOrcamentoPct],
+      ['Total faturado', resumoRodapeFichaDemanda.totalFaturadoMatMoLoc],
+      ['Preço de compra estimado', resumoRodapeFichaDemanda.precoCompraEstimadoTotal],
+      ['Preço de compra real', resumoRodapeFichaDemanda.precoCompraRealTotal],
+      ['Valor total do orçamento', resumoRodapeFichaDemanda.valorTotalOrcamentoFinal]
+    ];
+    for (const [lab, val] of resumoLinhas) {
+      const label = String(lab);
+      let v: string;
+      if (val === null || val === undefined) {
+        v = '—';
+      } else if (typeof val === 'number') {
+        const br = val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        v = label.includes('Relação') ? `${br}%` : `R$ ${br}`;
+      } else {
+        v = String(val);
+      }
+      pdf.text(`${label}: ${v}`, margin, y);
+      y += 4;
+    }
+
+    const nomeArquivo = `Ficha_Demanda_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
+    pdf.save(nomeArquivo);
+    toast.success('Ficha de demanda exportada (PDF).');
   };
 
   return (
@@ -3503,6 +4039,15 @@ export default function OrcamentoPage() {
               <CardContent className="space-y-4">
                 {orcamentoViewTab === 'analitico' && (
                   <div className="space-y-3">
+                    {linhasAnaliticoOrcamento.length === 0 ? (
+                      <OrcamentoSecaoVazia
+                        titulo="Orçamento analítico vazio"
+                        texto="Monte serviços e itens na aba Orçamento para visualizar composições, insumos e quantidades com valores."
+                        Icon={Table2}
+                        onIrOrcamento={() => setOrcamentoViewTab('montagem')}
+                      />
+                    ) : (
+                    <>
                     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
                       <table className="min-w-full border-collapse">
                         <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
@@ -3609,16 +4154,33 @@ export default function OrcamentoPage() {
                         </tbody>
                       </table>
                     </div>
+                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={exportarOrcamentoAnaliticoTabela}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
+                        title="Exporta a grade do orçamento analítico em Excel"
+                      >
+                        <FileSpreadsheet className="w-5 h-5 shrink-0" />
+                        Exportar orçamento analítico (.xlsx)
+                      </button>
+                    </div>
+                    </>
+                    )}
                   </div>
                 )}
 
                 {orcamentoViewTab === 'planilhaAnalitica' && (
                   <div className="space-y-3">
                     {linhasAnaliticoOrcamento.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 px-4 py-6 text-center">
-                        Adicione itens ao orçamento na aba Orçamento para preencher a planilha.
-                      </p>
+                      <OrcamentoSecaoVazia
+                        titulo="Planilha analítica vazia"
+                        texto="Adicione itens na aba Orçamento para acompanhar custos estimados, compras e valores unitários."
+                        Icon={FileSpreadsheet}
+                        onIrOrcamento={() => setOrcamentoViewTab('montagem')}
+                      />
                     ) : (
+                        <>
                         <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
                           <table className="min-w-full border-collapse">
                             <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
@@ -3860,6 +4422,18 @@ export default function OrcamentoPage() {
                             </tbody>
                           </table>
                         </div>
+                        <div className="flex flex-wrap items-center gap-3 pt-1">
+                          <button
+                            type="button"
+                            onClick={exportarPlanilhaAnalitica}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
+                            title="Exporta a planilha analítica (orçamento e compras) em Excel"
+                          >
+                            <FileSpreadsheet className="w-5 h-5 shrink-0" />
+                            Exportar planilha analítica (.xlsx)
+                          </button>
+                        </div>
+                        </>
                     )}
                   </div>
                 )}
@@ -3867,9 +4441,12 @@ export default function OrcamentoPage() {
                 {orcamentoViewTab === 'fichaDemanda' && (
                   <div className="space-y-3">
                     {linhasFichaDemanda.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 px-4 py-6 text-center">
-                        Adicione itens ao orçamento na aba Orçamento para preencher a ficha de demanda.
-                      </p>
+                      <OrcamentoSecaoVazia
+                        titulo="Ficha de demanda vazia"
+                        texto="Inclua composições e insumos no orçamento para gerar levantamentos, totais e indicadores da ficha."
+                        Icon={ClipboardList}
+                        onIrOrcamento={() => setOrcamentoViewTab('montagem')}
+                      />
                     ) : (
                       <div className="space-y-6">
                       <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -4358,6 +4935,26 @@ export default function OrcamentoPage() {
                           </div>
                         </div>
                       </div>
+                      <div className="flex flex-wrap items-center gap-3 pt-1">
+                        <button
+                          type="button"
+                          onClick={exportarFichaDemandaExcel}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
+                          title="Exporta a ficha de demanda em Excel"
+                        >
+                          <FileSpreadsheet className="w-5 h-5 shrink-0" />
+                          Exportar ficha de demanda (.xlsx)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={exportarFichaDemandaPdf}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
+                          title="Exporta a ficha de demanda em PDF"
+                        >
+                          <FileDown className="w-5 h-5 shrink-0" />
+                          Exportar ficha de demanda (.pdf)
+                        </button>
+                      </div>
                       </div>
                     )}
                   </div>
@@ -4366,9 +4963,12 @@ export default function OrcamentoPage() {
                 {orcamentoViewTab === 'memorial' && (
                   <div className="space-y-5">
                     {itensCalculados.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 rounded-xl border border-dashed border-gray-300/90 dark:border-gray-600/80 bg-gray-50/60 dark:bg-gray-900/30 px-5 py-8 text-center leading-relaxed">
-                        Adicione itens ao orçamento na aba Orçamento para editar medições e exportar a memória.
-                      </p>
+                      <OrcamentoSecaoVazia
+                        titulo="Memória de cálculo vazia"
+                        texto="Adicione itens na aba Orçamento para editar medições por dimensão e exportar a memória em planilha."
+                        Icon={Calculator}
+                        onIrOrcamento={() => setOrcamentoViewTab('montagem')}
+                      />
                     ) : itensMemoriaMedicao.length === 0 ? (
                       <p className="text-sm text-gray-600 dark:text-gray-300 rounded-xl border border-gray-200/90 dark:border-gray-700/80 bg-white/50 dark:bg-gray-900/40 px-5 py-8 text-center leading-relaxed shadow-sm">
                         Nenhum serviço com medição por dimensão neste orçamento. Ajuste quantidades e preços na aba{' '}
@@ -4424,17 +5024,19 @@ export default function OrcamentoPage() {
                         ))}
                       </div>
                     )}
+                    {itensCalculados.length > 0 && (
                     <div className="flex flex-wrap items-center gap-3 pt-1">
                       <button
                         type="button"
                         onClick={exportarMemoriaCalculo}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
-                        title="Gera a planilha de memória de quantitativos"
+                        title="Exporta medições dimensionais e itens em unidade (UN), na ordem do orçamento"
                       >
                         <FileSpreadsheet className="w-5 h-5 shrink-0" />
                         Exportar memória de cálculo (.xlsx)
                       </button>
                     </div>
+                    )}
                   </div>
                 )}
 
@@ -4858,10 +5460,10 @@ export default function OrcamentoPage() {
                       <button
                         type="button"
                         onClick={exportarOrcamentoDetalhado}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-medium transition-colors"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
                         title="Exporta o orçamento"
                       >
-                        <FileSpreadsheet className="w-5 h-5" />
+                        <FileSpreadsheet className="w-5 h-5 shrink-0" />
                         Exportar Orçamento
                       </button>
                     </div>

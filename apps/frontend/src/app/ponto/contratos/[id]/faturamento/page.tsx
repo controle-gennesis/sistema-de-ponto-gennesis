@@ -82,12 +82,14 @@ function formatCurrency(value: number) {
 export default function FaturamentoListPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const contractId = params.id as string;
+  const idParam = params?.id;
+  const contractId =
+    typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const yearParam = searchParams.get('year');
-  const monthParam = searchParams.get('month');
+  const yearParam = searchParams?.get('year') ?? null;
+  const monthParam = searchParams?.get('month') ?? null;
 
   const [selectedYear, setSelectedYear] = useState(() => (yearParam ? parseInt(yearParam, 10) : new Date().getFullYear()));
   const [selectedMonth, setSelectedMonth] = useState(() => (monthParam ? parseInt(monthParam, 10) : 0));

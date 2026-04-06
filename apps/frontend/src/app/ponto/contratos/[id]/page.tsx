@@ -323,7 +323,9 @@ export default function ContractDetailPage() {
   const router = useRouter();
   const params = useParams();
   const queryClient = useQueryClient();
-  const contractId = params.id as string;
+  const idParam = params?.id;
+  const contractId =
+    typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 

@@ -170,7 +170,9 @@ export default function CronogramaMensalPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const contractId = params.id as string;
+  const idParam = params?.id;
+  const contractId =
+    typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -181,7 +183,7 @@ export default function CronogramaMensalPage() {
   });
 
   const selectedIds = useMemo(() => {
-    const raw = searchParams.get('selectedIds');
+    const raw = searchParams?.get('selectedIds');
     if (!raw) return new Set<string>();
     return new Set(
       raw

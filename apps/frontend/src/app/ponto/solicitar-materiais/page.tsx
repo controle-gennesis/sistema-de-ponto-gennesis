@@ -185,7 +185,7 @@ function SolicitarMateriaisPage() {
   const requests = requestsData?.data?.requests || requestsData?.data || [];
 
   useEffect(() => {
-    const id = searchParams.get('editRm');
+    const id = searchParams?.get('editRm') ?? null;
     if (!id) return;
     setCorrectionEditId(id);
     setActiveTab('list');
