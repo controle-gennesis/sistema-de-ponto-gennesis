@@ -27,7 +27,6 @@ import {
   BarChart3,
   FileText,
   Search,
-  MoreVertical,
   LayoutDashboard,
   CalendarX2,
   MailPlus,
@@ -314,13 +313,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         name: 'Engenharia',
         icon: Calculator,
         items: [
-          {
-            name: 'Orçamento',
-            href: '/ponto/orcamento',
-            icon: Calculator,
-            description: 'Criar orçamentos com composições e serviços padrão',
-            permission: isAdministrator || can(pk('/ponto/orcamento'))
-          },
           {
             name: 'Contratos',
             href: '/ponto/contratos',
@@ -824,14 +816,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             <div className="bg-white dark:bg-gray-900">
               <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
                 {isCollapsed ? (
-                  /* Quando colapsada: apenas os 3 pontos */
+                  /* Quando colapsada: ícone de expandir (setas cima/baixo) */
                   <div className="flex justify-center">
                     <button
+                      type="button"
                       onClick={() => setShowUserMenu(!showUserMenu)}
                       className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                      title="Menu do usuário"
+                      title={showUserMenu ? 'Fechar menu (descer)' : 'Abrir menu (subir)'}
+                      aria-expanded={showUserMenu}
+                      aria-label={showUserMenu ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
                     >
-                      <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      {showUserMenu ? (
+                        <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      ) : (
+                        <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      )}
                     </button>
                   </div>
                 ) : (
@@ -866,14 +865,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       )}
                     </div>
                     
-                    {/* Botão de menu (3 pontos) */}
+                    {/* Botão de menu (setas cima/baixo — indica expandir/recolher) */}
                     <div className="relative">
                       <button
+                        type="button"
                         onClick={() => setShowUserMenu(!showUserMenu)}
                         className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        title="Menu do usuário"
+                        title={showUserMenu ? 'Fechar menu (descer)' : 'Abrir menu (subir)'}
+                        aria-expanded={showUserMenu}
+                        aria-label={showUserMenu ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
                       >
-                        <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        {showUserMenu ? (
+                          <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        ) : (
+                          <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        )}
                       </button>
                     </div>
                   </div>

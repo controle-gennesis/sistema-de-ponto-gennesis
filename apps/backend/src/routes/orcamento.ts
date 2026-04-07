@@ -24,6 +24,9 @@ router.delete('/:centroCustoId/orcamentos/:orcamentoId', (req, res, next) =>
   controller.deleteOrcamento(req as any, res, next)
 );
 
+router.get('/:centroCustoId/servicos-padrao', (req, res, next) =>
+  controller.getServicosPadrao(req as any, res, next)
+);
 router.put('/:centroCustoId/servicos-padrao', (req, res, next) =>
   controller.saveServicosPadrao(req as any, res, next)
 );

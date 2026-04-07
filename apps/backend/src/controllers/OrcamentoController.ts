@@ -5,6 +5,20 @@ import { AuthRequest } from '../middleware/auth';
 const orcamentoService = new OrcamentoService();
 
 export class OrcamentoController {
+  /** Lê serviços padrão + imports do contrato (sem orçamento aberto). */
+  async getServicosPadrao(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const centroCustoId = req.params.centroCustoId;
+      if (!centroCustoId) {
+        return res.status(400).json({ message: 'centroCustoId é obrigatório' });
+      }
+      const data = await orcamentoService.getServicosPadrao(centroCustoId);
+      return res.json({ data });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
   /** Lista metadados dos orçamentos do contrato. */
   /** Salva só serviços padrão + imports do contrato (sem precisar de orçamento aberto). */
   async saveServicosPadrao(req: AuthRequest, res: Response, next: NextFunction) {

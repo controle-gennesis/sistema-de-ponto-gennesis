@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
-import { ArrowLeft, FileText, Plus, Receipt, X, Edit2, ClipboardList, FileDown, ExternalLink, BarChart3, Trash2 } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Receipt, X, Edit2, ClipboardList, FileDown, ExternalLink, BarChart3, Trash2, Calculator } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -1547,6 +1547,13 @@ export default function ContractDetailPage() {
                 <BarChart3 className="w-4 h-4 shrink-0" />
                 Produção Semanal
               </button>
+              <Link
+                href={`/ponto/contratos/${contractId}/orcamento`}
+                className="h-10 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+              >
+                <Calculator className="w-4 h-4 shrink-0" />
+                Orçamento
+              </Link>
             </div>
           </div>
 
