@@ -37,6 +37,9 @@ export function usePermissions() {
       .filter((p) => p.action === PERMISSION_ACCESS_ACTION)
       .map((p) => p.module)
   );
+  const allowedActionSet = new Set<string>(
+    ((permissionData?.permissions || []) as PermissionItem[]).map((p) => `${p.module}:${p.action}`)
+  );
 
   const allowedContractIds: string[] = permissionData?.allowedContractIds ?? [];
   const allowedContractIdSet = new Set(allowedContractIds);
@@ -47,6 +50,10 @@ export function usePermissions() {
       return true;
     }
     return allowedSet.has(moduleKey);
+  };
+  const canAction = (moduleKey: string, action: string) => {
+    if (isAdministrator || permissionData?.isAdmin) return true;
+    return allowedActionSet.has(`${moduleKey}:${action}`);
   };
 
   /** Acesso a um contrato específico (requer módulo Contratos + autorização explícita). */
@@ -79,6 +86,9 @@ export function usePermissions() {
     canViewBirthdays: true,
     canRegisterTime: true,
     canViewDashboard: can(pk('/ponto/dashboard')),
+    canCreateContracts: canAction(pk('/ponto/contratos'), 'criar'),
+    canEditContracts: canAction(pk('/ponto/contratos'), 'editar'),
+    canDeleteContracts: canAction(pk('/ponto/contratos'), 'excluir'),
   };
 
   return {
@@ -92,6 +102,7 @@ export function usePermissions() {
     isDepartmentCompras,
     permissions: finalPermissions,
     can,
+    canAction,
     allowedContractIds,
     canAccessContract,
     isLoading,
@@ -104,6 +115,9 @@ export function usePermissions() {
     canViewBirthdays: finalPermissions.canViewBirthdays,
     canRegisterTime: finalPermissions.canRegisterTime,
     canViewDashboard: finalPermissions.canViewDashboard,
+    canCreateContracts: finalPermissions.canCreateContracts,
+    canEditContracts: finalPermissions.canEditContracts,
+    canDeleteContracts: finalPermissions.canDeleteContracts,
   };
 }
 
@@ -133,7 +147,7 @@ export function useRoutePermission(route: string) {
     '/ponto/atestados': isAdministrator || can(pk('/ponto/atestados')),
     '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados')),
     '/ponto/solicitacoes': isAdministrator || can(pk('/ponto/solicitacoes')),
-    '/ponto/gerenciar-solicitacoes': isAdministrator || isDepartmentProjetos || can(pk('/ponto/gerenciar-solicitacoes')),
+    '/ponto/gerenciar-solicitacoes': isAdministrator || can(pk('/ponto/gerenciar-solicitacoes')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-feriados')),

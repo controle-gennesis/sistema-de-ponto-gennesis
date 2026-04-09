@@ -16,6 +16,7 @@ type Props = {
   ehCargaEntulho: boolean;
   draftCalc: Record<string, string>;
   setDraftCalc: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  handleCalcChange: (draftKey: string, raw: string, onCommit: (n: number) => void) => void;
   handleCalcBlur: (draftKey: string, raw: string, onCommit: (n: number) => void) => void;
   updateLinhaMedicao: (itemKey: string, idx: number, campo: keyof LinhaMedicao, valor: number | string) => void;
   addLinhaMedicao: (itemKey: string) => void;
@@ -32,6 +33,7 @@ export function OrcamentoMedicaoPainel({
   ehCargaEntulho,
   draftCalc,
   setDraftCalc,
+  handleCalcChange,
   handleCalcBlur,
   updateLinhaMedicao,
   addLinhaMedicao,
@@ -188,7 +190,10 @@ export function OrcamentoMedicaoPainel({
               inputMode="decimal"
               placeholder="0"
               value={draftCalc[`${rowKey}|${idx}|C`] ?? ((ln.C || 0) === 0 ? '' : String(ln.C))}
-              onChange={e => (ehCargaEntulho ? podeEditarCNaCarga : true) && setDraftCalc(p => ({ ...p, [`${rowKey}|${idx}|C`]: e.target.value }))}
+              onChange={e =>
+                (ehCargaEntulho ? podeEditarCNaCarga : true) &&
+                handleCalcChange(`${rowKey}|${idx}|C`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'C', n))
+              }
               onBlur={e =>
                 (ehCargaEntulho ? podeEditarCNaCarga : true) &&
                 handleCalcBlur(`${rowKey}|${idx}|C`, draftCalc[`${rowKey}|${idx}|C`] ?? e.target.value, n => updateLinhaMedicao(rowKey, idx, 'C', n))
@@ -212,7 +217,10 @@ export function OrcamentoMedicaoPainel({
               inputMode="decimal"
               placeholder="0"
               value={draftCalc[`${rowKey}|${idx}|L`] ?? ((ln.L || 0) === 0 ? '' : String(ln.L))}
-              onChange={e => (ehCargaEntulho ? podeEditarLNaCarga : true) && setDraftCalc(p => ({ ...p, [`${rowKey}|${idx}|L`]: e.target.value }))}
+              onChange={e =>
+                (ehCargaEntulho ? podeEditarLNaCarga : true) &&
+                handleCalcChange(`${rowKey}|${idx}|L`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'L', n))
+              }
               onBlur={e =>
                 (ehCargaEntulho ? podeEditarLNaCarga : true) &&
                 handleCalcBlur(`${rowKey}|${idx}|L`, draftCalc[`${rowKey}|${idx}|L`] ?? e.target.value, n => updateLinhaMedicao(rowKey, idx, 'L', n))
@@ -236,7 +244,10 @@ export function OrcamentoMedicaoPainel({
               inputMode="decimal"
               placeholder="0"
               value={draftCalc[`${rowKey}|${idx}|H`] ?? ((ln.H || 0) === 0 ? '' : String(ln.H))}
-              onChange={e => (ehCargaEntulho ? podeEditarHNaCarga : true) && setDraftCalc(p => ({ ...p, [`${rowKey}|${idx}|H`]: e.target.value }))}
+              onChange={e =>
+                (ehCargaEntulho ? podeEditarHNaCarga : true) &&
+                handleCalcChange(`${rowKey}|${idx}|H`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'H', n))
+              }
               onBlur={e =>
                 (ehCargaEntulho ? podeEditarHNaCarga : true) &&
                 handleCalcBlur(`${rowKey}|${idx}|H`, draftCalc[`${rowKey}|${idx}|H`] ?? e.target.value, n => updateLinhaMedicao(rowKey, idx, 'H', n))
@@ -258,7 +269,10 @@ export function OrcamentoMedicaoPainel({
               inputMode="decimal"
               placeholder="1"
               value={draftCalc[`${rowKey}|${idx}|N`] ?? String(ln.N ?? 1)}
-              onChange={e => !bloquearN && setDraftCalc(p => ({ ...p, [`${rowKey}|${idx}|N`]: e.target.value }))}
+              onChange={e =>
+                !bloquearN &&
+                handleCalcChange(`${rowKey}|${idx}|N`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'N', Math.max(1, n)))
+              }
               onBlur={e =>
                 !bloquearN && handleCalcBlur(`${rowKey}|${idx}|N`, draftCalc[`${rowKey}|${idx}|N`] ?? e.target.value, n => updateLinhaMedicao(rowKey, idx, 'N', Math.max(1, n)))
               }
@@ -278,7 +292,11 @@ export function OrcamentoMedicaoPainel({
             inputMode="decimal"
             placeholder="1"
             value={draftCalc[`${rowKey}|${idx}|empol`] ?? (empolVal === 0 ? '0' : empolVal === 1 ? '1' : String(empolVal))}
-            onChange={e => setDraftCalc(p => ({ ...p, [`${rowKey}|${idx}|empol`]: e.target.value }))}
+            onChange={e =>
+              handleCalcChange(`${rowKey}|${idx}|empol`, e.target.value, n =>
+                updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n))
+              )
+            }
             onBlur={e =>
               handleCalcBlur(`${rowKey}|${idx}|empol`, draftCalc[`${rowKey}|${idx}|empol`] ?? e.target.value, n => updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n)))
             }
@@ -296,7 +314,10 @@ export function OrcamentoMedicaoPainel({
                 inputMode="decimal"
                 placeholder="0"
                 value={draftCalc[`${rowKey}|${idx}|A`] ?? (ln.valorManual == null || ln.valorManual === 0 ? '' : String(ln.valorManual))}
-                onChange={e => !ehCargaEntulho && setDraftCalc(p => ({ ...p, [`${rowKey}|${idx}|A`]: e.target.value }))}
+                onChange={e =>
+                  !ehCargaEntulho &&
+                  handleCalcChange(`${rowKey}|${idx}|A`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'valorManual', n))
+                }
                 onBlur={e =>
                   !ehCargaEntulho && handleCalcBlur(`${rowKey}|${idx}|A`, draftCalc[`${rowKey}|${idx}|A`] ?? e.target.value, n => updateLinhaMedicao(rowKey, idx, 'valorManual', n))
                 }
@@ -324,7 +345,10 @@ export function OrcamentoMedicaoPainel({
                 inputMode="decimal"
                 placeholder="0"
                 value={draftCalc[`${rowKey}|${idx}|V`] ?? (ln.valorManual == null || ln.valorManual === 0 ? '' : String(ln.valorManual))}
-                onChange={e => !ehCargaEntulho && setDraftCalc(p => ({ ...p, [`${rowKey}|${idx}|V`]: e.target.value }))}
+                onChange={e =>
+                  !ehCargaEntulho &&
+                  handleCalcChange(`${rowKey}|${idx}|V`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'valorManual', n))
+                }
                 onBlur={e =>
                   !ehCargaEntulho && handleCalcBlur(`${rowKey}|${idx}|V`, draftCalc[`${rowKey}|${idx}|V`] ?? e.target.value, n => updateLinhaMedicao(rowKey, idx, 'valorManual', n))
                 }

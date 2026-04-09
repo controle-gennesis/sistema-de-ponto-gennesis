@@ -721,7 +721,7 @@ router.get('/modules', authorize('EMPLOYEE'), async (req: AuthRequest, res, next
       },
       {
         id: 'employees',
-        name: 'Gerenciar Funcionários',
+        name: 'Funcionários',
         description: 'Cadastrar, editar e gerenciar funcionários',
         icon: 'Users',
         href: '/ponto/funcionarios',

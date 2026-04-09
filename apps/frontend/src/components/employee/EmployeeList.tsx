@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
@@ -22,9 +23,14 @@ import { DiscountsList } from './DiscountsList';
 import { DiscountForm } from './DiscountForm';
 import { EditEmployeeForm } from './EditEmployeeForm';
 import { usePermissions } from '@/hooks/usePermissions';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
 import { SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData, SalaryDiscount, CreateDiscountData, UpdateDiscountData } from '@/types';
 import toast from 'react-hot-toast';
+
+const EMPLOYEE_ACTION_MENU_WIDTH_PX = 224; // w-56
+
+const pk = pathToModuleKey;
 
 interface Employee {
   id: string;
@@ -33,6 +39,7 @@ interface Employee {
   cpf: string;
   role: string;
   isActive: boolean;
+  createdAt?: string;
   employee?: {
     id: string;
     employeeId: string;
@@ -70,12 +77,35 @@ interface Employee {
 interface EmployeeListProps {
   userRole: string;
   showDeleteButton?: boolean;
+  /** Abre o painel de permissões na página (apenas administrador). */
+  onManagePermissions?: (employee: Employee) => void;
+  /** Abre modal de importação (botão no cabeçalho da lista). */
+  onImportEmployees?: () => void;
+  /** Abre modal de novo funcionário (botão no cabeçalho da lista). */
+  onCreateEmployee?: () => void;
+  /** Quando definido, abre o modal de detalhes deste funcionário (ex.: após "Ver perfil" nas permissões). */
+  forceOpenEmployeeId?: string | null;
+  onForceOpenEmployeeConsumed?: () => void;
 }
 
-export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeListProps) {
+export function EmployeeList({
+  userRole,
+  showDeleteButton = true,
+  onManagePermissions,
+  onImportEmployees,
+  onCreateEmployee,
+  forceOpenEmployeeId,
+  onForceOpenEmployeeConsumed,
+}: EmployeeListProps) {
   const { costCentersList } = useCostCenters();
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  /** Menu flutuante: fixed + portal para não ser cortado pelo overflow-x da tabela */
+  const [employeeActionMenu, setEmployeeActionMenu] = useState<{
+    employeeId: string;
+    top: number;
+    left: number;
+  } | null>(null);
   const [reactivateConfirm, setReactivateConfirm] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(12);
@@ -103,6 +133,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   const [modalityFilter, setModalityFilter] = useState<string>('all');
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -991,7 +1022,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
     return new Date(dateString).toLocaleDateString('pt-BR');
   };
 
-  const employees = employeesData?.data || [];
+  const employees: Employee[] = employeesData?.data || [];
   // Listas com base em fontes globais
   const companies: string[] = ['Todos', ...COMPANIES_LIST];
   const polos: string[] = ['Todos', ...POLOS_LIST];
@@ -1098,7 +1129,51 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   };
 
   // Verificar se o usuário tem permissões administrativas baseadas no cargo
-  const { canManageEmployees } = usePermissions();
+  const { canManageEmployees, isAdministrator, can, canAction } = usePermissions();
+
+  /** Mesma ideia da página de contratos: matriz (Permissões / Controle), não só cargo Administrador. */
+  const canManageUserPermissions =
+    isAdministrator ||
+    can(pk('/ponto/permissoes')) ||
+    canAction(pk('/ponto/permissoes'), 'ver') ||
+    can(pk('/ponto/controle/alterar-permissoes'));
+
+  const employeeForActionMenu = useMemo(() => {
+    if (!employeeActionMenu) return null;
+    return employees.find((e) => e.id === employeeActionMenu.employeeId) ?? null;
+  }, [employeeActionMenu, employees]);
+
+  useEffect(() => {
+    if (!employeeActionMenu) return;
+    const close = () => setEmployeeActionMenu(null);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [employeeActionMenu]);
+
+  useEffect(() => {
+    if (employeeActionMenu && !employees.some((e) => e.id === employeeActionMenu.employeeId)) {
+      setEmployeeActionMenu(null);
+    }
+  }, [employeeActionMenu, employees]);
+
+  useEffect(() => {
+    if (!forceOpenEmployeeId || isLoading) return;
+    const emp = employees.find((e) => e.id === forceOpenEmployeeId);
+    if (emp) {
+      setSelectedEmployee(emp);
+      setDetailsTab('info');
+    }
+    onForceOpenEmployeeConsumed?.();
+  }, [forceOpenEmployeeId, employees, isLoading, onForceOpenEmployeeConsumed]);
 
   // Função para limpar todos os filtros
   const clearFilters = () => {
@@ -1118,7 +1193,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
   return (
     <>
       {/* Card de Filtros - fora do card de gestão (mesmo padrão das outras telas) */}
-      <Card className="mb-6">
+      <Card className="mb-6 hidden">
         <CardHeader className="border-b-0 pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1352,7 +1427,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
       </Card>
 
     <Card className="w-full">
-      <CardHeader>
+      <CardHeader className="border-b-0 pb-1">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center space-x-3">
             <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
@@ -1360,7 +1435,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {canManageEmployees ? 'Gerenciar Funcionários' : 'Lista de Funcionários'}
+                Funcionários
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 {canManageEmployees 
@@ -1370,6 +1445,49 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               </p>
             </div>
           </div>
+          {(onImportEmployees || onCreateEmployee) && (
+            <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder="Pesquisar funcionário..."
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                aria-label="Abrir filtros"
+                title="Filtros"
+              >
+                <Filter className="h-4 w-4" />
+              </button>
+              {onImportEmployees && (
+                <button
+                  type="button"
+                  onClick={onImportEmployees}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                >
+                  <Upload className="h-4 w-4 shrink-0" />
+                  <span>Importar</span>
+                </button>
+              )}
+              {onCreateEmployee && (
+                <button
+                  type="button"
+                  onClick={onCreateEmployee}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Novo Funcionário</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </CardHeader>
       <CardContent>
@@ -1496,7 +1614,7 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
         ) : (
           <>
             {/* Informações de paginação */}
-            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
               <span>
                 Mostrando {startItem} a {endItem} de {totalFiltered} funcionários
               </span>
@@ -1505,86 +1623,180 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {paginatedEmployees.map((employee: Employee) => (
-              <div
-                key={employee.id}
-                onClick={() => { setSelectedEmployee(employee); setDetailsTab('info'); }}
-                  className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-lg hover:border-gray-200 dark:hover:border-gray-600 cursor-pointer transition-all duration-300 transform hover:-translate-y-1"
-                >
-                  {/* Avatar com iniciais - Centralizado */}
-                  <div className="flex flex-col items-center text-center mb-6 relative">
-                    <div className="w-16 h-16 bg-transparent border-2 border-blue-500 dark:border-blue-400 rounded-full flex items-center justify-center mb-3">
-                      <span className="text-blue-600 dark:text-blue-400 font-bold text-lg">
-                        {employee.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                      </span>
-                    </div>
-                    {/* Status indicator no canto superior direito */}
-                    <div className={`absolute top-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 ${
-                      employee.isActive ? 'bg-green-500' : 'bg-red-500'
-                    }`} title={employee.isActive ? 'Ativo' : 'Inativo'} />
-                    <span className="text-base font-semibold text-gray-900 dark:text-gray-100">{employee.name}</span>
-                  </div>
-
-                  {/* Informações do funcionário */}
-                  {employee.employee && (
-                    <>
-                      {/* Informações organizadas */}
-                      <div className="space-y-3 text-xs bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">CPF:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{formatCPF(employee.cpf)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Cargo:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.position}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Setor:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.department}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Empresa:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.company}</span>
-                        </div>
-                        {employee.employee.polo && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-500 dark:text-gray-400 font-medium">Polo:</span>
-                            <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.polo}</span>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-gray-200 dark:border-gray-700">
+                  <tr>
+                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Funcionário
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Email
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Cargo
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Adicionado em
+                    </th>
+                    <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Ação
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  {paginatedEmployees.map((employee: Employee) => {
+                    const initials = employee.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+                    const addedAt = employee.createdAt || employee.employee?.hireDate;
+                    return (
+                      <tr
+                        key={employee.id}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <td className="px-3 sm:px-6 py-3 align-middle text-left">
+                          <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 border-2 border-blue-500 dark:border-blue-400 rounded-full flex items-center justify-center shrink-0">
+                              <span className="text-blue-600 dark:text-blue-400 font-semibold">{initials}</span>
+                            </div>
+                            <div className="min-w-0 text-left">
+                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{employee.name}</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">{formatCPF(employee.cpf) || '—'}</p>
+                            </div>
                           </div>
-                        )}
-                        {employee.employee.categoriaFinanceira && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-500 dark:text-gray-400 font-medium">Categoria Financeira:</span>
-                            <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.categoriaFinanceira}</span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{employee.email || '—'}</td>
+                        <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{employee.employee?.position || '—'}</td>
+                        <td className="px-3 sm:px-6 py-3 text-center">
+                          <span
+                            className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                              employee.isActive
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                            }`}
+                          >
+                            {employee.isActive ? 'Ativo' : 'Inativo'}
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
+                          {addedAt ? formatDate(addedAt) : '—'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 text-right">
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                setEmployeeActionMenu((prev) => {
+                                  if (prev?.employeeId === employee.id) return null;
+                                  let left = r.right - EMPLOYEE_ACTION_MENU_WIDTH_PX;
+                                  left = Math.max(
+                                    8,
+                                    Math.min(left, window.innerWidth - EMPLOYEE_ACTION_MENU_WIDTH_PX - 8)
+                                  );
+                                  return { employeeId: employee.id, top: r.bottom + 4, left };
+                                });
+                              }}
+                              className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                              aria-label="Menu de ações"
+                              aria-expanded={employeeActionMenu?.employeeId === employee.id}
+                              aria-haspopup="menu"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
                           </div>
-                        )}
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Modalidade:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.modality}</span>
-                        </div>
-                            {employee.employee.costCenter && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-500 dark:text-gray-400 font-medium">Centro de Custo:</span>
-                            <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.costCenter}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Tomador:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{employee.employee.client}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400 font-medium">Admissão:</span>
-                          <span className="text-gray-800 dark:text-gray-200 font-semibold">{formatDate(employee.employee.hireDate)}</span>
-                        </div>
-                      </div>
-                
-                      {/* Ações removidas do card da lista conforme solicitação */}
-                    </>
-                )}
-              </div>
-            ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+
+            {employeeActionMenu &&
+              employeeForActionMenu &&
+              typeof document !== 'undefined' &&
+              createPortal(
+                <>
+                  <div
+                    className="fixed inset-0 z-[200]"
+                    aria-hidden
+                    onClick={() => setEmployeeActionMenu(null)}
+                  />
+                  <div
+                    role="menu"
+                    className="fixed z-[201] w-56 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
+                    style={{
+                      top: employeeActionMenu.top,
+                      left: employeeActionMenu.left,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEmployeeActionMenu(null);
+                        setSelectedEmployee(employeeForActionMenu);
+                        setDetailsTab('info');
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span>Ver detalhes</span>
+                    </button>
+                    {canManageEmployees && showDeleteButton && employeeForActionMenu.isActive && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEmployeeActionMenu(null);
+                          setDeleteConfirm(employeeForActionMenu.id);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                      >
+                        <UserX className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+                        <span>Desligar o funcionário</span>
+                      </button>
+                    )}
+                    {canManageEmployees && showDeleteButton && !employeeForActionMenu.isActive && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEmployeeActionMenu(null);
+                          setReactivateConfirm(employeeForActionMenu.id);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                      >
+                        <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0" />
+                        <span>Reativar funcionário</span>
+                      </button>
+                    )}
+                    {canManageUserPermissions && onManagePermissions && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEmployeeActionMenu(null);
+                          onManagePermissions(employeeForActionMenu);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                      >
+                        <Shield className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
+                        <span>Gerenciar permissões</span>
+                      </button>
+                    )}
+                  </div>
+                </>,
+                document.body
+              )}
 
             {/* Botões de paginação */}
             {totalPages > 1 && (
@@ -1627,6 +1839,115 @@ export function EmployeeList({ userRole, showDeleteButton = true }: EmployeeList
               </div>
             )}
           </>
+        )}
+
+        {isFiltersModalOpen && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setIsFiltersModalOpen(false)} />
+            <div className="relative mx-4 w-full max-w-3xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                <div className="flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsFiltersModalOpen(false)}
+                  className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Fechar filtros"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
+                      <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="active">Ativos</option>
+                        <option value="inactive">Inativos</option>
+                        <option value="all">Todos</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Setor</label>
+                      <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todos</option>
+                        {departments.filter((d) => d !== 'Todos').map((dept) => (<option key={dept} value={dept}>{dept}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Cargo</label>
+                      <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todos</option>
+                        {positions.filter((p) => p !== 'Todos').map((pos) => (<option key={pos} value={pos}>{pos}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
+                      <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todas</option>
+                        {companies.filter((c) => c !== 'Todos').map((c) => (<option key={c} value={c}>{c}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Centro de Custo</label>
+                      <select value={costCenterFilter} onChange={(e) => setCostCenterFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todos</option>
+                        {costCenters.filter((cc) => cc !== 'Todos').map((center) => (<option key={center} value={center}>{center}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Tomador</label>
+                      <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todos</option>
+                        {clients.filter((c) => c !== 'Todos').map((tomador) => (<option key={tomador} value={tomador}>{tomador}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Polo</label>
+                      <select value={poloFilter} onChange={(e) => setPoloFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todos</option>
+                        {polos.filter((p) => p !== 'Todos').map((p) => (<option key={p} value={p}>{p}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Categoria Financeira</label>
+                      <select value={categoriaFinanceiraFilter} onChange={(e) => setCategoriaFinanceiraFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todas</option>
+                        {categoriasFinanceiras.filter((c) => c !== 'Todos').map((c) => (<option key={c} value={c}>{c}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Modalidade</label>
+                      <select value={modalityFilter} onChange={(e) => setModalityFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
+                        <option value="all">Todas</option>
+                        {modalities.filter((m) => m !== 'Todos').map((m) => (<option key={m} value={m}>{m}</option>))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFiltersModalOpen(false)}
+                  className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Modal de confirmação de exclusão */}

@@ -1,12 +1,17 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Users, UserPlus, Upload, Download, AlertCircle, CheckCircle, X, Loader2, Edit2, Trash2, FileSpreadsheet } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Upload, Download, AlertCircle, CheckCircle, X, Loader2, Edit2, Trash2, FileSpreadsheet, ArrowLeft } from 'lucide-react';
 import { CreateEmployeeForm } from '@/components/employee/CreateEmployeeForm';
 import { EmployeeList } from '@/components/employee/EmployeeList';
+import {
+  UserPermissionsEditor,
+  UserPermissionsTabBar,
+  type PermissionEditorTab,
+  type PermissionsTargetPreview,
+} from '@/components/permissions/UserPermissionsEditor';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
@@ -86,6 +91,15 @@ export default function FuncionariosPage() {
   const queryClient = useQueryClient();
   const [isCreateEmployeeOpen, setIsCreateEmployeeOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [permissionsTarget, setPermissionsTarget] = useState<PermissionsTargetPreview | null>(null);
+  const [permissionTab, setPermissionTab] = useState<PermissionEditorTab>('gerais');
+  const [showContractsTab, setShowContractsTab] = useState(false);
+
+  const closePermissionsEditor = () => {
+    setPermissionsTarget(null);
+    setPermissionTab('gerais');
+    setShowContractsTab(false);
+  };
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -126,6 +140,48 @@ export default function FuncionariosPage() {
     role: 'EMPLOYEE'
   };
 
+  if (permissionsTarget) {
+    return (
+      <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+        <div className="w-full space-y-6">
+          <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
+            <button
+              type="button"
+              onClick={closePermissionsEditor}
+              className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+            >
+              <ArrowLeft className="h-4 w-4 shrink-0" />
+              Voltar
+            </button>
+            <div className="w-full max-w-3xl px-14 text-center sm:px-20">
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
+                Permissões de funcionário
+              </h1>
+              <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400">
+                Defina o que este colaborador pode acessar no sistema
+              </p>
+            </div>
+          </div>
+          <UserPermissionsTabBar
+            activeTab={permissionTab}
+            onChange={setPermissionTab}
+            showContracts={showContractsTab}
+            className="w-full pb-2"
+          />
+          <UserPermissionsEditor
+            userId={permissionsTarget.id}
+            preview={permissionsTarget}
+            onBack={closePermissionsEditor}
+            hideTopNavigation
+            permissionTab={permissionTab}
+            onPermissionTabChange={setPermissionTab}
+            onContractsTabAvailabilityChange={setShowContractsTab}
+          />
+        </div>
+      </MainLayout>
+    );
+  }
+
   return (
     <MainLayout 
       userRole={user.role} 
@@ -136,49 +192,29 @@ export default function FuncionariosPage() {
         {/* Header */}
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-            Gerenciar Funcionários
+            Funcionários
           </h1>
           <p className="mt-2 text-gray-600 dark:text-gray-400">
             Cadastre e gerencie os funcionários da empresa
           </p>
         </div>
 
-        {/* Card de Ações */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Cadastrar Funcionários
-                </h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Adicionar funcionários individualmente ou em massa
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setIsImportModalOpen(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2 transition-colors"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span className="hidden sm:inline">Importar</span>
-                </button>
-                <button
-                  onClick={() => setIsCreateEmployeeOpen(true)}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2 transition-colors"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span className="hidden sm:inline">Novo Funcionário</span>
-                </button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
         {/* Lista de Funcionários */}
         <EmployeeList
           userRole={user.role}
           showDeleteButton={true}
+          onImportEmployees={() => setIsImportModalOpen(true)}
+          onCreateEmployee={() => setIsCreateEmployeeOpen(true)}
+          onManagePermissions={(emp) => {
+            setPermissionTab('gerais');
+            setShowContractsTab(false);
+            setPermissionsTarget({
+              id: emp.id,
+              name: emp.name,
+              email: emp.email || '',
+              position: emp.employee?.position,
+            });
+          }}
         />
 
         {/* Modal de Criar Funcionário */}

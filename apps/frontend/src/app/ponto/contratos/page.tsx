@@ -1,17 +1,25 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileText, Plus, Edit, Trash2, Search, X, AlertCircle } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Search, X, AlertCircle, Shield, MoreVertical, Eye } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import {
+  UserPermissionsEditor,
+  UserPermissionsTabBar,
+  type PermissionEditorTab,
+  type PermissionsTargetPreview,
+} from '@/components/permissions/UserPermissionsEditor';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useCostCenters } from '@/hooks/useCostCenters';
-import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
+import { usePermissions } from '@/hooks/usePermissions';
+import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
 
 interface CostCenter {
   id: string;
@@ -30,6 +38,28 @@ interface Contract {
   costCenter?: { id: string; code: string; name: string };
   valuePlusAddenda: number;
 }
+
+type ContractPermissionUser = {
+  id: string;
+  name: string;
+  cpf?: string;
+  email: string;
+  employee?: { position?: string; department?: string };
+  hasContractsModule: boolean;
+  hasContractAccess: boolean;
+};
+
+type UserPermissionPayload = {
+  user: { id: string; name: string; email: string; employee?: { position?: string | null } };
+  isAdmin: boolean;
+  permissions: Array<{ module: string; action: string }>;
+  allowedContractIds: string[];
+};
+
+const CONTRACT_ACTION_MENU_WIDTH_PX = 224; // w-56
+
+const pk = pathToModuleKey;
+const CONTRACTS_MODULE_KEY = pathToModuleKey('/ponto/contratos');
 
 function formatDate(dateStr: string) {
   if (!dateStr) return '-';
@@ -85,12 +115,58 @@ function getValorMaisAditivosAnual(valuePlusAddenda: number, startDate: string, 
   return valuePlusAddenda / years;
 }
 
+function ContractAccessCheckbox({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className={`inline-flex select-none items-center gap-2.5 ${disabled ? 'cursor-not-allowed opacity-50' : 'group cursor-pointer'}`}>
+      <div className="relative shrink-0">
+        <input
+          type="checkbox"
+          className="sr-only"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => !disabled && onChange(e.target.checked)}
+        />
+        <div
+          className={`flex h-[18px] w-[18px] items-center justify-center rounded border transition-colors duration-150 ${
+            checked
+              ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+              : 'border-gray-300 bg-white dark:border-gray-500 dark:bg-gray-800 group-hover:border-gray-400 dark:group-hover:border-gray-400'
+          }`}
+        >
+          {checked && (
+            <svg className="h-2.5 w-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </div>
+      </div>
+      <span className={`min-w-[1.75rem] text-sm font-medium tabular-nums ${checked ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
+        {checked ? 'Sim' : 'Não'}
+      </span>
+    </label>
+  );
+}
+
 export default function ContratosPage() {
   const router = useRouter();
+  const { isAdministrator, canAction } = usePermissions();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
+  const [contractActionMenu, setContractActionMenu] = useState<{
+    contractId: string;
+    top: number;
+    left: number;
+  } | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     number: '',
@@ -100,6 +176,22 @@ export default function ContratosPage() {
     valuePlusAddenda: ''
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
+  const [permissionsContract, setPermissionsContract] = useState<Contract | null>(null);
+  const [permissionsTarget, setPermissionsTarget] = useState<PermissionsTargetPreview | null>(null);
+  const [permissionTab, setPermissionTab] = useState<PermissionEditorTab>('gerais');
+  const [showContractsTab, setShowContractsTab] = useState(false);
+
+  const closePermissionsEditor = () => {
+    setPermissionsTarget(null);
+    setPermissionTab('gerais');
+    setShowContractsTab(false);
+  };
+  const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
+  const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
+  const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
+  const canManageUserPermissions = isAdministrator || canAction(pk('/ponto/permissoes'), 'ver');
+  const canManageContrato = canEditContrato || canDeleteContrato;
+  const showActionsColumn = canManageContrato || canManageUserPermissions;
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
   const costCentersList = (Array.isArray(costCenters) ? costCenters : []) as CostCenter[];
@@ -126,6 +218,61 @@ export default function ContratosPage() {
       });
       return res.data;
     }
+  });
+
+  const { data: contractUsers = [], isLoading: loadingContractUsers } = useQuery({
+    queryKey: ['permission-contract-users', permissionsContract?.id],
+    queryFn: async () =>
+      (await api.get('/permissions/contract-users', { params: { contractId: permissionsContract?.id } })).data
+        ?.data as ContractPermissionUser[],
+    enabled: !!permissionsContract?.id,
+    retry: false,
+  });
+
+  const toggleContractAccessMutation = useMutation({
+    mutationFn: async ({ userId, allow }: { userId: string; allow: boolean }) => {
+      if (!permissionsContract?.id) return;
+      const source = (await api.get(`/permissions/users/${userId}`)).data?.data as UserPermissionPayload;
+      if (!source || source.isAdmin) {
+        throw new Error('Usuário inválido para edição.');
+      }
+
+      const nextPermissions = Array.isArray(source.permissions) ? [...source.permissions] : [];
+      const hasContractsAccess = nextPermissions.some(
+        (p) => p.module === CONTRACTS_MODULE_KEY && p.action === PERMISSION_ACCESS_ACTION
+      );
+      if (!hasContractsAccess) {
+        nextPermissions.push({ module: CONTRACTS_MODULE_KEY, action: PERMISSION_ACCESS_ACTION });
+      }
+
+      const currentIds = new Set(source.allowedContractIds || []);
+      if (allow) currentIds.add(permissionsContract.id);
+      else currentIds.delete(permissionsContract.id);
+
+      await api.put(`/permissions/users/${userId}`, {
+        permissions: nextPermissions,
+        allowedContractIds: Array.from(currentIds),
+      });
+      return { userId, allow };
+    },
+    onSuccess: (data) => {
+      if (!data) return;
+      const { userId, allow } = data;
+      queryClient.setQueryData(['permission-contract-users', permissionsContract?.id], (prev: unknown) => {
+        if (!Array.isArray(prev)) return prev;
+        return (prev as ContractPermissionUser[]).map((u) =>
+          u.id === userId ? { ...u, hasContractAccess: allow, hasContractsModule: true } : u
+        );
+      });
+      toast.success(allow ? 'Contrato liberado para o usuário.' : 'Contrato removido para o usuário.');
+    },
+    onError: (error: unknown) => {
+      const msg =
+        error && typeof error === 'object' && 'response' in error
+          ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível atualizar acesso ao contrato.');
+    },
   });
 
   const createMutation = useMutation({
@@ -192,6 +339,10 @@ export default function ContratosPage() {
   };
 
   const handleEdit = (contract: Contract) => {
+    if (!canEditContrato) {
+      toast.error('Você não tem permissão para editar contratos.');
+      return;
+    }
     setEditingContract(contract);
     setFormData({
       name: contract.name,
@@ -206,6 +357,14 @@ export default function ContratosPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (editingContract && !canEditContrato) {
+      toast.error('Você não tem permissão para editar contratos.');
+      return;
+    }
+    if (!editingContract && !canCreateContrato) {
+      toast.error('Você não tem permissão para criar contratos.');
+      return;
+    }
     if (!formData.name.trim()) {
       toast.error('Nome do contrato é obrigatório');
       return;
@@ -249,14 +408,23 @@ export default function ContratosPage() {
   };
 
   const handleDelete = (id: string) => {
+    if (!canDeleteContrato) {
+      toast.error('Você não tem permissão para excluir contratos.');
+      return;
+    }
     deleteMutation.mutate(id);
   };
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const contracts = contractsData?.data || [];
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+  const totalFiltered = contracts.length;
+  const startItem = totalFiltered > 0 ? 1 : 0;
+  const endItem = totalFiltered;
 
-  useContractTableColumnCustomizer(containerRef, 'contracts:list', contracts);
+  const contractForActionMenu = contractActionMenu
+    ? contracts.find((c: Contract) => c.id === contractActionMenu.contractId) || null
+    : null;
+  const usersWithContractsModule = (contractUsers || []).filter((u) => u.hasContractsModule);
 
   if (loadingUser) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
@@ -265,7 +433,187 @@ export default function ContratosPage() {
   return (
     <ProtectedRoute route="/ponto/contratos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div ref={containerRef} className="space-y-6">
+        <div className="w-full space-y-6">
+          {permissionsContract ? (
+            permissionsTarget ? (
+              <div className="w-full space-y-6">
+                <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
+                  <button
+                    type="button"
+                    onClick={closePermissionsEditor}
+                    className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                  >
+                    <ArrowLeft className="h-4 w-4 shrink-0" />
+                    Voltar
+                  </button>
+                  <div className="w-full max-w-3xl px-14 text-center sm:px-20">
+                    <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
+                      Permissões de funcionário
+                    </h1>
+                    <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400">
+                      Defina o que este colaborador pode acessar no sistema
+                    </p>
+                  </div>
+                </div>
+                <UserPermissionsTabBar
+                  activeTab={permissionTab}
+                  onChange={setPermissionTab}
+                  showContracts={showContractsTab}
+                  className="w-full pb-2"
+                />
+                <UserPermissionsEditor
+                  userId={permissionsTarget.id}
+                  preview={permissionsTarget}
+                  onBack={closePermissionsEditor}
+                  hideTopNavigation
+                  permissionTab={permissionTab}
+                  onPermissionTabChange={setPermissionTab}
+                  onContractsTabAvailabilityChange={setShowContractsTab}
+                />
+              </div>
+            ) : (
+              <div className="w-full space-y-6">
+                <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
+                  <button
+                    type="button"
+                    onClick={() => setPermissionsContract(null)}
+                    className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                  >
+                    <ArrowLeft className="h-4 w-4 shrink-0" />
+                    Voltar
+                  </button>
+                  <div className="w-full max-w-3xl px-14 text-center sm:px-20">
+                    <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
+                      Permissões do contrato
+                    </h1>
+                    <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400">
+                      Defina quais usuários podem acessar o contrato selecionado
+                    </p>
+                  </div>
+                </div>
+
+                <Card
+                  className="relative w-full overflow-hidden border-gray-200/80 shadow-sm dark:border-gray-700/80"
+                  padding="none"
+                >
+                  <div className="border-b border-gray-200 bg-white px-4 py-5 dark:border-gray-700 dark:bg-gray-800 sm:px-6">
+                    <div className="flex min-w-0 items-start gap-4 sm:items-center">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-blue-500 bg-white text-sm font-bold text-blue-600 dark:border-blue-400 dark:bg-gray-800 dark:text-blue-400">
+                        {permissionsContract.name
+                          .split(' ')
+                          .map((n) => n[0])
+                          .join('')
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          {permissionsContract.name}
+                        </h2>
+                        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                          <span className="text-gray-700 dark:text-gray-300">
+                            {usersWithContractsModule.length}{' '}
+                            {usersWithContractsModule.length === 1
+                              ? 'usuário com módulo de contratos'
+                              : 'usuários com módulo de contratos'}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white px-4 pb-6 dark:bg-gray-800 sm:px-6">
+                    <div className="overflow-x-auto pt-4 first:pt-4">
+                      <table className="w-full min-w-[640px] table-fixed text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-100 align-bottom dark:border-gray-700/80">
+                            <th
+                              scope="col"
+                              className="w-[46%] pb-3 pl-1 pr-4 text-left text-lg font-bold leading-tight tracking-tight text-gray-900 dark:text-gray-100"
+                            >
+                              Usuário
+                            </th>
+                            <th
+                              scope="col"
+                              className="w-[34%] pb-3 pl-1 pr-4 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                            >
+                              Setor
+                            </th>
+                            <th
+                              scope="col"
+                              className="w-[20%] px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                            >
+                              Liberado
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                          {loadingContractUsers ? (
+                            <tr>
+                              <td colSpan={3} className="py-14 text-center text-sm text-gray-500 dark:text-gray-400">
+                                Carregando usuários...
+                              </td>
+                            </tr>
+                          ) : usersWithContractsModule.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="py-14 text-center text-sm text-gray-500 dark:text-gray-400">
+                                Nenhum usuário com módulo de contratos disponível para este contrato.
+                              </td>
+                            </tr>
+                          ) : (
+                            usersWithContractsModule.map((u) => (
+                              <tr
+                                key={u.id}
+                                onClick={() => {
+                                  setShowContractsTab(false);
+                                  setPermissionsTarget({
+                                    id: u.id,
+                                    name: u.name,
+                                    email: u.email || '',
+                                    position: u.employee?.position ?? undefined,
+                                  });
+                                  setPermissionTab('contratos');
+                                }}
+                                className="cursor-pointer transition-colors hover:bg-gray-50/90 dark:hover:bg-gray-700/25"
+                              >
+                                <td className="py-3.5 pl-1 pr-4 align-middle">
+                                  <div className="text-sm font-medium leading-snug text-gray-900 dark:text-gray-100">
+                                    {u.name}
+                                  </div>
+                                  {u.cpf ? (
+                                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">CPF: {u.cpf}</div>
+                                  ) : null}
+                                </td>
+                                <td className="py-3.5 pl-1 pr-4 text-sm text-gray-700 dark:text-gray-300">
+                                  {u.employee?.department || '-'}
+                                </td>
+                                <td
+                                  className="px-1 py-3.5 text-center align-middle"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div className="flex justify-center">
+                                    <ContractAccessCheckbox
+                                      checked={!!u.hasContractAccess}
+                                      disabled={toggleContractAccessMutation.isPending}
+                                      onChange={(next) => {
+                                        toggleContractAccessMutation.mutate({ userId: u.id, allow: next });
+                                      }}
+                                    />
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )
+          )
+          : (
+          <>
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
               Cadastro de Contratos
@@ -276,7 +624,7 @@ export default function ContratosPage() {
           </div>
 
           <Card>
-            <CardHeader className="border-b-0">
+            <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center">
                   <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
@@ -291,33 +639,45 @@ export default function ContratosPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <div className="relative flex-1 sm:flex-initial sm:min-w-[200px]">
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
                       placeholder="Buscar por nome ou número..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                   </div>
-                  <button
-                    onClick={() => {
-                      resetForm();
-                      setShowForm(true);
-                    }}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Novo Contrato
-                  </button>
+                  {canCreateContrato && (
+                    <button
+                      onClick={() => {
+                        if (!canCreateContrato) {
+                          toast.error('Você não tem permissão para criar contratos.');
+                          return;
+                        }
+                        resetForm();
+                        setShowForm(true);
+                      }}
+                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Novo Contrato
+                    </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent>
+              <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                <span>
+                  Mostrando {startItem} a {endItem} de {totalFiltered} contratos
+                </span>
+                <span>Página 1 de 1</span>
+              </div>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[240px]">
@@ -338,15 +698,17 @@ export default function ContratosPage() {
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Valor + Aditivos Anual
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Ações
-                      </th>
+                      {showActionsColumn && (
+                        <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Ação
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {loadingContracts ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-8 text-center">
+                        <td colSpan={showActionsColumn ? 7 : 6} className="px-6 py-8 text-center">
                           <div className="flex items-center justify-center">
                             <div className="loading-spinner w-6 h-6 mr-2" />
                             <span className="text-gray-600 dark:text-gray-400">
@@ -357,7 +719,7 @@ export default function ContratosPage() {
                       </tr>
                     ) : contracts.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-8 text-center">
+                        <td colSpan={showActionsColumn ? 7 : 6} className="px-6 py-8 text-center">
                           <div className="text-gray-500 dark:text-gray-400">
                             <p>Nenhum contrato encontrado.</p>
                             <p className="text-sm mt-1">
@@ -371,59 +733,136 @@ export default function ContratosPage() {
                         <tr
                           key={c.id}
                           onClick={() => router.push(`/ponto/contratos/${c.id}`)}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
-                          <td className="px-3 sm:px-6 py-4 min-w-[240px] align-top">
+                          <td className="px-3 sm:px-6 py-3 min-w-[240px] align-middle text-left">
                             <span className="text-sm text-gray-900 dark:text-gray-100 font-medium whitespace-normal">
                               {c.name}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
                             <span className="text-sm font-mono text-gray-900 dark:text-gray-100">
                               {c.number}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-400">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
                             {formatDate(c.startDate)} até {formatDate(c.endDate)}
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-400">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
                             {c.costCenter?.name || c.costCenter?.code || '-'}
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
                             {formatCurrency(c.valuePlusAddenda)}
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
                             {(() => {
                               const anual = getValorMaisAditivosAnual(c.valuePlusAddenda, c.startDate, c.endDate);
                               return anual !== null ? formatCurrency(anual) : '-';
                             })()}
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-end gap-2">
+                          {showActionsColumn && (
+                            <td className="relative px-3 sm:px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleEdit(c); }}
-                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                title="Editar"
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                  setContractActionMenu((prev) => {
+                                    if (prev?.contractId === c.id) return null;
+                                    let left = r.right - CONTRACT_ACTION_MENU_WIDTH_PX;
+                                    left = Math.max(
+                                      8,
+                                      Math.min(left, window.innerWidth - CONTRACT_ACTION_MENU_WIDTH_PX - 8)
+                                    );
+                                    return { contractId: c.id, top: r.bottom + 4, left };
+                                  });
+                                }}
+                                className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                aria-label="Abrir ações"
+                                aria-expanded={contractActionMenu?.contractId === c.id}
+                                aria-haspopup="menu"
                               >
-                                <Edit className="w-4 h-4" />
+                                <MoreVertical className="h-4 w-4" />
                               </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setShowDeleteModal(c.id); }}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+                            </td>
+                          )}
                         </tr>
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
+              {contractActionMenu &&
+                contractForActionMenu &&
+                typeof document !== 'undefined' &&
+                createPortal(
+                  <>
+                    <div
+                      className="fixed inset-0 z-[200]"
+                      aria-hidden
+                      onClick={() => setContractActionMenu(null)}
+                    />
+                    <div
+                      role="menu"
+                      className="fixed z-[201] w-56 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
+                      style={{
+                        top: contractActionMenu.top,
+                        left: contractActionMenu.left,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setContractActionMenu(null);
+                          router.push(`/ponto/contratos/${contractForActionMenu.id}`);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                        <span>Ver detalhes</span>
+                      </button>
+                      {canDeleteContrato && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setContractActionMenu(null);
+                            setShowDeleteModal(contractForActionMenu.id);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+                          <span>Excluir contrato</span>
+                        </button>
+                      )}
+                      {canManageUserPermissions && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setContractActionMenu(null);
+                            setPermissionsContract(contractForActionMenu);
+                            setPermissionsTarget(null);
+                            setPermissionTab('gerais');
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                        >
+                          <Shield className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
+                          <span>Gerenciar permissões</span>
+                        </button>
+                      )}
+                    </div>
+                  </>,
+                  document.body
+                )}
             </CardContent>
           </Card>
+          </>
+          )}
         </div>
 
         {/* Modal Criar/Editar */}

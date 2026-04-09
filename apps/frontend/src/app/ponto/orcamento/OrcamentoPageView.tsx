@@ -67,12 +67,30 @@ export interface LinhaAnaliticoComposicao {
   quantidade: number;
   precoUnitario: number;
   total: number;
+  /** Preenchidos só no analítico fixo da caçamba 4m³ */
+  codigo?: string;
+  banco?: string;
+  tipoLabel?: string;
 }
 
 export interface AnaliticoComposicao {
   total: number;
   linhas: LinhaAnaliticoComposicao[];
 }
+
+type InsumoAnaliticoManual = {
+  id: string;
+  parentKey: string;
+  tipo: string;
+  codigo: string;
+  banco: string;
+  descricao: string;
+  und: string;
+  quant: string;
+  quantidadeReal: string;
+  quantidadeOrcada: string;
+  valorUnit: string;
+};
 
 export interface ItemServico {
   chave: string;
@@ -122,8 +140,27 @@ type OrcamentoMeta = {
   responsavelOrcamento: string;
   descricao: string;
   orcamentoRealizadoPor: string;
+  descontoPercentual: string; // ex.: "25,01"
+  bdiPercentual: string; // ex.: "28,35"
+  reajustes: Array<{ nome: string; percentual: string }>; // percentual em %
   revisaoCount: number; // 0 = sem revisão; ao salvar vira 1 => R01
 };
+
+const ORCAMENTO_REAJUSTES_PADRAO: Array<{ nome: string; percentual: string }> = [
+  { nome: '1º reajuste IPCA', percentual: '3,93583' },
+  { nome: '2º reajuste IPCA', percentual: '3,92595' },
+  { nome: '3º reajuste IPCA', percentual: '5,31964' }
+];
+
+function metaNovoOrcamentoPadrao(): OrcamentoMeta {
+  return {
+    ...sessaoVazia().meta!,
+    descontoPercentual: '0',
+    bdiPercentual: '0',
+    reajustes: [],
+    dataAbertura: todayInputDate()
+  };
+}
 
 function todayInputDate(): string {
   const d = new Date();
@@ -173,10 +210,57 @@ function parsePlanilhaPtBr(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Interpreta número digitado (aceita "=8*10" e decimal com vírgula). */
+function parseCalcOrNumber(raw: string): number | null {
+  const r = evalSimpleExpr(raw);
+  if (r !== null) return r;
+  const rawSemIgual = String(raw || '').trim().replace(/^=/, '').replace(/,/g, '.');
+  if (!rawSemIgual) return null;
+  const n = Number(rawSemIgual);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Interpreta número da planilha (pt-BR), também aceitando fórmula com "=". */
+function parsePlanilhaCalcOrPtBr(raw: string): number | null {
+  const r = evalSimpleExpr(raw);
+  if (r !== null) return r;
+  return parsePlanilhaPtBr(raw);
+}
+
+/** Converte campo percentual (ex.: "25,01") para decimal (0.2501). */
+function parsePercentualMeta(raw: string | undefined): number {
+  if (!raw) return 0;
+  const limpo = String(raw).replace('%', '').trim();
+  if (!limpo) return 0;
+  const n = parsePlanilhaPtBr(limpo);
+  if (n === null || !Number.isFinite(n)) return 0;
+  return n / 100;
+}
+
 function tipoPlanilhaInsumo(categoria: string): string {
   const u = categoria.toUpperCase();
   if (u.includes('MÃO') || u.includes('OBRA')) return 'MO';
-  return 'MAT';
+  return 'MA';
+}
+
+/** Migra sessões antigas que gravavam MAT → MA. */
+function normalizarPlanilhaTipoInsumo(
+  raw: Record<string, unknown> | undefined | null
+): Record<string, 'MO' | 'MA' | 'LO'> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, 'MO' | 'MA' | 'LO'> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const s = String(v ?? '');
+    if (s === 'MAT' || s === 'MA') out[k] = 'MA';
+    else if (s === 'MO' || s === 'LO') out[k] = s;
+  }
+  return out;
+}
+
+/** Exibição na ficha/export (compatível com legado MAT). */
+function tipoFichaDemandaLabel(tipo: string | undefined): string {
+  if (!tipo) return '—';
+  return tipo === 'MAT' ? 'MA' : tipo;
 }
 
 /** Formatação condicional col. Levantamento (%): faixas amarelo e vermelho com o mesmo padrão (claro: 50 + 900; escuro: 500/15 + 200). */
@@ -189,6 +273,21 @@ function classeLevantamentoCondicional(lev: number): string {
     return 'font-medium bg-yellow-50 text-yellow-900 dark:bg-yellow-500/15 dark:text-yellow-200';
   }
   if (lev >= 80.99 && lev <= 120) {
+    return 'font-medium bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200';
+  }
+  return '';
+}
+
+/** Formatação condicional col. % Valor total. */
+function classeValorTotalCondicional(valorPct: number): string {
+  if (!Number.isFinite(valorPct)) return '';
+  if (valorPct >= 0 && valorPct <= 49) {
+    return 'bg-green-50 text-green-950 dark:bg-green-950/35 dark:text-green-100';
+  }
+  if (valorPct >= 50 && valorPct <= 60) {
+    return 'font-medium bg-yellow-50 text-yellow-900 dark:bg-yellow-500/15 dark:text-yellow-200';
+  }
+  if (valorPct >= 61 && valorPct <= 100) {
     return 'font-medium bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200';
   }
   return '';
@@ -207,6 +306,7 @@ interface SessaoOrcamentoPersist {
   /** Planilha analítica: chaves = linha analítica (composição ou insumo). */
   planilhaQuantidadeCompra: Record<string, number>;
   planilhaValorUnitCompraReal: Record<string, number>;
+  planilhaTipoInsumo: Record<string, 'MO' | 'MA' | 'LO'>;
   showDetalhesFinanceiros: boolean;
   meta?: OrcamentoMeta;
   /**
@@ -216,6 +316,13 @@ interface SessaoOrcamentoPersist {
   itensOcultosNoOrcamento?: string[];
 }
 
+interface OrcamentoRecoverySnapshot {
+  createdAt: string;
+  servicos: ServicoPadrao[];
+  imports: ImportRecord[];
+  sessaoOrcamento: SessaoOrcamentoPersist;
+}
+
 function sessaoVazia(): SessaoOrcamentoPersist {
   return {
     subtitulosNoOrcamento: [],
@@ -223,6 +330,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     dimensoesPorItem: {},
     planilhaQuantidadeCompra: {},
     planilhaValorUnitCompraReal: {},
+    planilhaTipoInsumo: {},
     showDetalhesFinanceiros: false,
     itensOcultosNoOrcamento: [],
     meta: {
@@ -233,6 +341,9 @@ function sessaoVazia(): SessaoOrcamentoPersist {
       responsavelOrcamento: '',
       descricao: '',
       orcamentoRealizadoPor: '',
+      descontoPercentual: '25,01',
+      bdiPercentual: '28,35',
+      reajustes: ORCAMENTO_REAJUSTES_PADRAO.map((r) => ({ ...r })),
       revisaoCount: 0
     }
   };
@@ -256,6 +367,17 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           responsavelOrcamento: typeof metaRaw.responsavelOrcamento === 'string' ? metaRaw.responsavelOrcamento : '',
           descricao: typeof metaRaw.descricao === 'string' ? metaRaw.descricao : '',
           orcamentoRealizadoPor: typeof metaRaw.orcamentoRealizadoPor === 'string' ? metaRaw.orcamentoRealizadoPor : '',
+          descontoPercentual:
+            typeof metaRaw.descontoPercentual === 'string' ? metaRaw.descontoPercentual : '25,01',
+          bdiPercentual: typeof metaRaw.bdiPercentual === 'string' ? metaRaw.bdiPercentual : '28,35',
+          reajustes: Array.isArray(metaRaw.reajustes)
+            ? metaRaw.reajustes.map((r: any, idx: number) => ({
+                nome: typeof r?.nome === 'string' && r.nome.trim()
+                  ? r.nome
+                  : `Reajuste ${idx + 1}`,
+                percentual: typeof r?.percentual === 'string' ? r.percentual : ''
+              }))
+            : ORCAMENTO_REAJUSTES_PADRAO.map((r) => ({ ...r })),
           revisaoCount:
             typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0
         }
@@ -270,6 +392,10 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
         p.planilhaValorUnitCompraReal && typeof p.planilhaValorUnitCompraReal === 'object'
           ? p.planilhaValorUnitCompraReal
           : {},
+      planilhaTipoInsumo:
+        p.planilhaTipoInsumo && typeof p.planilhaTipoInsumo === 'object'
+          ? normalizarPlanilhaTipoInsumo(p.planilhaTipoInsumo as Record<string, unknown>)
+          : {},
       showDetalhesFinanceiros: Boolean(p.showDetalhesFinanceiros),
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
       meta
@@ -277,6 +403,71 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
   } catch {
     return null;
   }
+}
+
+function sessaoTemDados(s: SessaoOrcamentoPersist | null | undefined): boolean {
+  if (!s) return false;
+  return (
+    s.subtitulosNoOrcamento.length > 0 ||
+    (s.itensOcultosNoOrcamento ?? []).length > 0 ||
+    Object.keys(s.quantidadesPorItem).length > 0 ||
+    Object.keys(s.dimensoesPorItem).length > 0 ||
+    Object.keys(s.planilhaQuantidadeCompra ?? {}).length > 0 ||
+    Object.keys(s.planilhaValorUnitCompraReal ?? {}).length > 0 ||
+    Object.keys(s.planilhaTipoInsumo ?? {}).length > 0
+  );
+}
+
+function loadOrcamentoSnapshots(centroCustoId: string | null, orcamentoId: string | null): OrcamentoRecoverySnapshot[] {
+  if (typeof window === 'undefined' || !centroCustoId || !orcamentoId) return [];
+  try {
+    const s = localStorage.getItem(storageKey(centroCustoId, 'snapshots', orcamentoId));
+    const parsed = s ? JSON.parse(s) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOrcamentoSnapshot(
+  centroCustoId: string | null,
+  orcamentoId: string | null,
+  payload: { servicos: ServicoPadrao[]; imports: ImportRecord[]; sessaoOrcamento: SessaoOrcamentoPersist }
+) {
+  if (typeof window === 'undefined' || !centroCustoId || !orcamentoId) return;
+  try {
+    const current = loadOrcamentoSnapshots(centroCustoId, orcamentoId);
+    const next: OrcamentoRecoverySnapshot[] = [
+      ...current,
+      {
+        createdAt: new Date().toISOString(),
+        servicos: payload.servicos,
+        imports: payload.imports,
+        sessaoOrcamento: payload.sessaoOrcamento
+      }
+    ];
+    const limited = next.slice(-12);
+    localStorage.setItem(storageKey(centroCustoId, 'snapshots', orcamentoId), JSON.stringify(limited));
+  } catch {
+    /* quota */
+  }
+}
+
+function getLatestUsefulSnapshot(
+  centroCustoId: string | null,
+  orcamentoId: string | null
+): OrcamentoRecoverySnapshot | null {
+  const snapshots = loadOrcamentoSnapshots(centroCustoId, orcamentoId);
+  for (let i = snapshots.length - 1; i >= 0; i--) {
+    const sn = snapshots[i];
+    if (!sn) continue;
+    const hasData =
+      Array.isArray(sn.servicos) && sn.servicos.length > 0 ||
+      Array.isArray(sn.imports) && sn.imports.length > 0 ||
+      sessaoTemDados(sn.sessaoOrcamento);
+    if (hasData) return sn;
+  }
+  return null;
 }
 
 function loadComposicoes(centroCustoId: string | null): ComposicaoItem[] {
@@ -373,6 +564,17 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
           responsavelOrcamento: typeof metaRaw.responsavelOrcamento === 'string' ? metaRaw.responsavelOrcamento : '',
           descricao: typeof metaRaw.descricao === 'string' ? metaRaw.descricao : '',
           orcamentoRealizadoPor: typeof metaRaw.orcamentoRealizadoPor === 'string' ? metaRaw.orcamentoRealizadoPor : '',
+          descontoPercentual:
+            typeof metaRaw.descontoPercentual === 'string' ? metaRaw.descontoPercentual : '25,01',
+          bdiPercentual: typeof metaRaw.bdiPercentual === 'string' ? metaRaw.bdiPercentual : '28,35',
+          reajustes: Array.isArray(metaRaw.reajustes)
+            ? metaRaw.reajustes.map((r: any, idx: number) => ({
+                nome: typeof r?.nome === 'string' && r.nome.trim()
+                  ? r.nome
+                  : `Reajuste ${idx + 1}`,
+                percentual: typeof r?.percentual === 'string' ? r.percentual : ''
+              }))
+            : ORCAMENTO_REAJUSTES_PADRAO.map((r) => ({ ...r })),
           revisaoCount:
             typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0
         }
@@ -392,6 +594,10 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
             planilhaValorUnitCompraReal:
               so.planilhaValorUnitCompraReal && typeof so.planilhaValorUnitCompraReal === 'object'
                 ? so.planilhaValorUnitCompraReal
+                : {},
+            planilhaTipoInsumo:
+              so.planilhaTipoInsumo && typeof so.planilhaTipoInsumo === 'object'
+                ? normalizarPlanilhaTipoInsumo(so.planilhaTipoInsumo as Record<string, unknown>)
                 : {},
             showDetalhesFinanceiros: Boolean(so.showDetalhesFinanceiros),
             itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
@@ -518,6 +724,19 @@ function grupoPrecoCompraInsumoRodape(categoria: string, descricao: string): 'MA
   return 'MA';
 }
 
+/** Agrupa preço de compra real no rodapé: prioriza o tipo escolhido na planilha (MO/MA/LO). */
+function grupoPrecoCompraInsumoPlanilha(
+  key: string,
+  categoria: string,
+  descricao: string,
+  planilhaTipo: Record<string, 'MO' | 'MA' | 'LO'>
+): 'MA' | 'MO' | 'LO' {
+  const raw = planilhaTipo[key];
+  const t = String(raw ?? '') === 'MAT' ? 'MA' : raw;
+  if (t === 'MO' || t === 'MA' || t === 'LO') return t;
+  return grupoPrecoCompraInsumoRodape(categoria, descricao);
+}
+
 function normalizarCabecalhoColuna(val: string): string {
   // Remove pontuação para casar cabeçalhos como "M. O." e "MAT."
   return normalizarTextoBusca(val).replace(/[^a-z0-9+]/g, '');
@@ -578,9 +797,188 @@ function ehComposicaoCacamba4m3(descricao: string | undefined): boolean {
   return d.includes('cacamba') && d.includes('entulho') && (d.includes('4m3') || d.includes('4m³'));
 }
 
+/** Fator (60%) aplicado ao valor unit. estimado e ao custo estimado na planilha analítica. */
+const PLANILHA_FATOR_CUSTO_ESTIMADO = 0.6;
+
+/** Textos de ajuda (title): como cada campo da planilha analítica é obtido ou calculado. */
+const PLANILHA_ANALITICA_TOOLTIP = {
+  item: 'Numeração hierárquica do item no orçamento (estrutura em níveis do serviço).',
+  codigo: 'Código do item na tabela de preços ou na composição.',
+  banco: 'Origem do banco de preços (ex.: FDE, SEINFRA).',
+  servico: 'Descrição do serviço ou do insumo.',
+  un: 'Unidade de medida do item.',
+  quantidadeComp:
+    'Quantidade da composição no orçamento (quantidade de serviço a executar / medir).',
+  quantidadeInsumo:
+    'Quantidade total no orçamento do insumo: quantidade da composição × consumo unitário do insumo na composição analítica.',
+  valorUnitOrcComp:
+    'Valor unitário médio da composição: total de orçamento da linha ÷ quantidade da composição (quando aplicável).',
+  valorUnitOrcInsumo: 'Valor unitário de referência do insumo no orçamento (composição analítica / banco).',
+  totalOrcComp: 'Total de orçamento da composição: quantidade × valor unitário (total da linha no orçamento).',
+  totalOrcInsumo: 'Total no orçamento: quantidade × valor unitário de orçamento.',
+  qtdCompraComp:
+    'Na composição, a quantidade de compra é informada por insumo nas linhas abaixo; esta célula fica vazia.',
+  qtdCompraInsumo:
+    'Quantidade comprada ou solicitada para o insumo (valor digitado e salvo por linha; base para custos e %).',
+  qtdSobraComp:
+    'Na composição, a sobra é calculada por insumo nas linhas abaixo; esta célula fica vazia.',
+  qtdSobraInsumo:
+    'Diferença entre quantidade do orçamento e quantidade comprada/solicitada (quantidade orçamento - quantidade compra).',
+  valorUnitEstComp:
+    'Na composição não há um único valor unitário estimado; o custo estimado é a soma nos insumos.',
+  valorUnitEstInsumo: `Valor unitário estimado: valor unitário orçamento × ${PLANILHA_FATOR_CUSTO_ESTIMADO * 100}% (referência de custo).`,
+  custoEstComp: `Custo estimado agregado: soma nos insumos de (quantidade compra × valor unit. orçamento × ${PLANILHA_FATOR_CUSTO_ESTIMADO * 100}%), onde houver quantidade compra.`,
+  custoEstInsumo: `Custo estimado: quantidade compra × valor unitário orçamento × ${PLANILHA_FATOR_CUSTO_ESTIMADO * 100}%.`,
+  vlCompraRealComp:
+    'Soma simples dos valores unitários de compra real informados nos insumos (referência na linha da composição).',
+  vlCompraRealInsumo: 'Valor unitário efetivo da compra (valor digitado por linha).',
+  custoCompraRealComp:
+    'Soma dos custos reais dos insumos: para cada insumo com qtd e valor unitário real, quantidade compra × valor unitário compra real.',
+  custoCompraRealInsumo: 'Custo real: quantidade compra × valor unitário compra real.',
+  pctLevComp:
+    'Composição: (Σ quantidade compra dos insumos ÷ Σ quantidade orçamento dos insumos) × 100. Indica o quanto da quantidade orçada foi coberta pela compra.',
+  pctLevInsumo: 'Insumo: (quantidade compra ÷ quantidade orçamento) × 100.',
+  pctPuComp:
+    'Composição: média ponderada — Σ(qtd compra × vl compra real) ÷ Σ(qtd compra × vl orçamento) × 100 (onde houver dados).',
+  pctPuInsumo: 'Insumo: (valor unitário compra real ÷ valor unitário orçamento) × 100.',
+  pctFatComp:
+    'Composição: (preço compra real total ÷ valor total orçamento) × 100, sendo valor total orçamento a soma dos (qtd compra × vl orçamento) nos insumos.',
+  pctFatInsumo:
+    'Insumo: (preço compra real ÷ valor total orçamento) × 100, com valor total orçamento = quantidade compra × valor unitário orçamento.',
+  pctCvpComp:
+    'Composição: (preço compra real ÷ faturamento da composição em R$) × 100, sendo faturamento = quantidade da composição × valor unitário médio.',
+  pctCvpInsumo:
+    'Insumo: (preço compra real do insumo ÷ faturamento da composição pai em R$) × 100. Mostra a participação do custo pago no faturamento da composição.',
+  tipo: 'Classificação do insumo (MA, MO, LO etc.) conforme categoria do item.',
+  tipoCompLinha:
+    'Linha de composição: não há tipo MA/MO/LO nesta linha (o tipo é exibido em cada insumo abaixo).',
+  tituloServico: 'Título do serviço no orçamento (agrupa blocos abaixo).',
+  subtituloBloco: 'Subtítulo / bloco de itens dentro do serviço.',
+  exportPlanilha: 'Exporta esta planilha para Excel com as mesmas colunas e fórmulas exibidas.',
+  theadQuantidade:
+    'Composição: quantidade do serviço no orçamento. Insumo: quantidade total = qtd. da composição × consumo unitário do insumo na composição.',
+  theadValorUnitOrc:
+    'Composição: valor unitário médio (total ÷ quantidade). Insumo: valor unitário de referência do insumo no orçamento.',
+  theadTotalOrc:
+    'Composição: total de orçamento da linha. Insumo: quantidade × valor unitário de orçamento.',
+  theadQtdCompra:
+    'Coluna à esquerda do valor unitário real. Composição: preencha a quantidade em cada insumo abaixo. Insumo: quantidade comprada ou solicitada (editável).',
+  theadSobra:
+    'Diferença entre quantidade do orçamento e quantidade compra. Valor negativo indica compra acima do orçamento.',
+  theadValorUnitEst:
+    'Composição: sem valor unitário único. Insumo: valor unitário orçamento × 60%.',
+  theadCustoEst:
+    'Composição: soma nos insumos de (qtd compra × vl orçamento × 60%). Insumo: qtd compra × vl orçamento × 60%.',
+  theadVlCompraReal:
+    'Composição: soma simples dos valores unitários reais dos insumos. Insumo: valor unitário de compra real (editável).',
+  theadCustoCompraReal:
+    'Composição: soma dos (qtd compra × vl real) dos insumos. Insumo: qtd compra × vl compra real.',
+  theadPctLev:
+    'Composição: (Σ qtd compra ÷ Σ qtd orçamento) × 100 nos insumos. Insumo: (qtd compra ÷ qtd orçamento) × 100.',
+  theadPctPu:
+    'Composição: Σ(qtd×vl real) ÷ Σ(qtd×vl orçamento) × 100. Insumo: (vl compra real ÷ vl orçamento) × 100.',
+  theadPctFat:
+    'Composição: (preço compra real total ÷ valor total orçamento) × 100. Insumo: (preço compra real ÷ valor total orçamento) × 100.',
+  theadPctCvp:
+    'Composição: (preço compra real ÷ faturamento da composição) × 100. Insumo: (preço compra real ÷ faturamento da composição pai) × 100.'
+} as const;
+
 function roundTo(n: number, decimals: number) {
   const d = Math.pow(10, decimals);
   return Math.round(n * d) / d;
+}
+
+function fmtCalcNumero(n: number, casas = 2) {
+  return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}
+
+function fmtCalcMoeda(n: number) {
+  return `R$ ${fmtCalcNumero(n, 2)}`;
+}
+
+type DetalheInsumoOrcSecao = {
+  item: string;
+  key: string;
+  qtdOrc: number;
+  valorUnitOrc: number;
+  custoOrc: number;
+  custoEst: number;
+  qtdCompra: number | undefined;
+  valorUnitReal: number | undefined;
+  custoReal: number;
+};
+
+/** Totais agregados por subtítulo (1.x) ou por composição (1.x.y) para tooltips de linha de título/subtítulo. */
+type DetalheAggSecao = {
+  item: string;
+  custoOrc: number;
+  custoEst: number;
+  custoReal: number;
+  insumoKeys: string[];
+  /** Chaves das linhas composição — realce nas colunas de custo orçamento / estimado / real (totais por linha). */
+  composicaoKeys: string[];
+};
+
+function compararChaveItemNumero(a: string, b: string): number {
+  const pa = a.split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = b.split('.').map((x) => parseInt(x, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const da = pa[i] ?? 0;
+    const db = pb[i] ?? 0;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
+
+/** Realça a célula «Custo orçamento» de cada composição (ou insumo) cujo valor entra na soma. */
+function hoverIdsAggCustoOrc(lista: DetalheAggSecao[]): string[] {
+  return lista.flatMap((a) => {
+    const keys = a.composicaoKeys.length > 0 ? a.composicaoKeys : a.insumoKeys;
+    return keys.map((k) => `custo-orc-${k}`);
+  });
+}
+
+function hoverIdsAggCustoEst(lista: DetalheAggSecao[]): string[] {
+  return lista.flatMap((a) => {
+    const keys = a.composicaoKeys.length > 0 ? a.composicaoKeys : a.insumoKeys;
+    return keys.map((k) => `custo-est-${k}`);
+  });
+}
+
+/** Mesma lógica de `hoverIdsAggCustoOrc`: realça a coluna «Custo real» de cada composição/insumo da soma. */
+function hoverIdsAggCustoReal(lista: DetalheAggSecao[]): string[] {
+  return lista.flatMap((a) => {
+    const keys = a.composicaoKeys.length > 0 ? a.composicaoKeys : a.insumoKeys;
+    return keys.map((k) => `custo-real-${k}`);
+  });
+}
+
+const CLASSE_CELULA_HOVER_FONTE =
+  'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400';
+
+/**
+ * Tooltip da linha do serviço (item 1): realça só as células de total de cada subtítulo (1.1, 1.2…),
+ * não as composições (1.1.1…) abaixo.
+ */
+function hoverIdsTituloServicoPorBloco(
+  lista: DetalheAggSecao[],
+  col: 'orc' | 'est' | 'real'
+): string[] {
+  return lista.map((a) => {
+    const partes = a.item.split('.');
+    if (partes.length >= 2) {
+      const m = partes[0];
+      const s = partes[1];
+      if (col === 'orc') return `custo-orc-bloco-${m}-${s}`;
+      if (col === 'est') return `custo-est-bloco-${m}-${s}`;
+      return `custo-real-bloco-${m}-${s}`;
+    }
+    const safe = String(a.item).replace(/\./g, '-');
+    if (col === 'orc') return `custo-orc-bloco-${safe}`;
+    if (col === 'est') return `custo-est-bloco-${safe}`;
+    return `custo-real-bloco-${safe}`;
+  });
 }
 
 /** Exibição em planilha exportada (pt-BR). */
@@ -644,6 +1042,28 @@ function MoedaCelula({
       <span className={`shrink-0 ${simboloClassName ?? ''}`}>R$</span>
       <span className={`min-w-0 text-right ${valorClassName ?? ''}`}>{formatted}</span>
     </div>
+  );
+}
+
+/** Realce de células relacionadas ao passar o mouse (sem popup de tooltip). */
+function CalcHoverBridge({
+  children,
+  hoverSourceIds,
+  onHoverSourcesChange
+}: {
+  children: React.ReactNode;
+  hoverSourceIds?: string[];
+  onHoverSourcesChange?: (ids: string[]) => void;
+}) {
+  if (!hoverSourceIds?.length || !onHoverSourcesChange) return <>{children}</>;
+  return (
+    <span
+      className="inline max-w-full"
+      onMouseEnter={() => onHoverSourcesChange(hoverSourceIds)}
+      onMouseLeave={() => onHoverSourcesChange([])}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -715,6 +1135,46 @@ function gerarAnaliticoComposicaoUnit(materialTotal: number, maoTotal: number, s
     const last = linhas[linhas.length - 1];
     if (last.quantidade > 0) last.precoUnitario = last.total / last.quantidade;
   }
+
+  return { total, linhas };
+}
+
+/**
+ * Apenas para composição caçamba 4m³ entulho: 2 insumos (servente + aluguel), com valores do próprio orçamento (MO/Material).
+ * Ordem: SERVENTE (12 h) → ALUGUEL CAÇAMBA (1 m).
+ */
+function gerarAnaliticoCacamba4m3(materialUnit: number, maoUnit: number): AnaliticoComposicao {
+  const mat = Number(materialUnit) || 0;
+  const mo = Number(maoUnit) || 0;
+  const total = mat + mo;
+  if (total <= 0) return { total: 0, linhas: [] };
+
+  const precoH = mo > 0 ? mo / 12 : 0;
+
+  const linhas: LinhaAnaliticoComposicao[] = [
+    {
+      categoria: 'MÃO DE OBRA',
+      codigo: '1.01.46',
+      banco: 'FDE',
+      tipoLabel: 'Mão de obra',
+      descricao: 'SERVENTE',
+      unidade: 'H',
+      quantidade: 12,
+      precoUnitario: precoH,
+      total: mo
+    },
+    {
+      categoria: 'MATERIAL',
+      codigo: '8.01.02',
+      banco: 'FDE',
+      tipoLabel: 'Material',
+      descricao: 'ALUGUEL CAÇAMBA 4M3',
+      unidade: 'M',
+      quantidade: 1,
+      precoUnitario: mat,
+      total: mat
+    }
+  ];
 
   return { total, linhas };
 }
@@ -806,6 +1266,7 @@ export function OrcamentoPageView({
   const [dimensoesPorItem, setDimensoesPorItem] = useState<Record<string, DimensoesItem>>({});
   const [planilhaQuantidadeCompra, setPlanilhaQuantidadeCompra] = useState<Record<string, number>>({});
   const [planilhaValorUnitCompraReal, setPlanilhaValorUnitCompraReal] = useState<Record<string, number>>({});
+  const [planilhaTipoInsumo, setPlanilhaTipoInsumo] = useState<Record<string, 'MO' | 'MA' | 'LO'>>({});
   const [planilhaCompraDraft, setPlanilhaCompraDraft] = useState<Record<string, string>>({});
   const [novoServicoNome, setNovoServicoNome] = useState('');
   const [showAddServico, setShowAddServico] = useState(false);
@@ -841,6 +1302,8 @@ export function OrcamentoPageView({
   const [analiticoCache, setAnaliticoCache] = useState<Record<string, AnaliticoComposicao>>({});
   // Draft para campos que aceitam cálculos (2+3, 10/2, etc) - avalia no blur
   const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
+  const [calcHoverSourceIds, setCalcHoverSourceIds] = useState<string[]>([]);
+  const [insumosAnaliticoManuais, setInsumosAnaliticoManuais] = useState<Record<string, InsumoAnaliticoManual[]>>({});
   const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(null);
   const [listaOrcamentos, setListaOrcamentos] = useState<{ id: string; nome: string; updatedAt: string }[]>([]);
   const [carregandoListaOrcamentos, setCarregandoListaOrcamentos] = useState(false);
@@ -859,6 +1322,11 @@ export function OrcamentoPageView({
     imports: []
   });
   const orcamentoAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveBaselineRef = useRef<{ orcamentoId: string | null; hadData: boolean }>({
+    orcamentoId: null,
+    hadData: false
+  });
+  const autosaveProtecaoAvisadaRef = useRef<string | null>(null);
 
   const filteredListaOrcamentos = useMemo(() => {
     const q = orcamentosSearch.trim().toLowerCase();
@@ -868,10 +1336,9 @@ export function OrcamentoPageView({
 
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
   const [novoOrcamentoMetaOpen, setNovoOrcamentoMetaOpen] = useState(false);
-  const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta>(() => ({
-    ...sessaoVazia().meta!,
-    dataAbertura: todayInputDate()
-  }));
+  const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta>(() =>
+    metaNovoOrcamentoPadrao()
+  );
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [loadingEmployeeOptions, setLoadingEmployeeOptions] = useState(false);
   const [currentUserName, setCurrentUserName] = useState('');
@@ -1005,6 +1472,7 @@ export function OrcamentoPageView({
     setDimensoesPorItem({});
     setPlanilhaQuantidadeCompra({});
     setPlanilhaValorUnitCompraReal({});
+    setPlanilhaTipoInsumo({});
     setPlanilhaCompraDraft({});
     setShowDetalhesFinanceiros(false);
 
@@ -1018,6 +1486,7 @@ export function OrcamentoPageView({
       setDimensoesPorItem(s.dimensoesPorItem);
       setPlanilhaQuantidadeCompra(s.planilhaQuantidadeCompra ?? {});
       setPlanilhaValorUnitCompraReal(s.planilhaValorUnitCompraReal ?? {});
+      setPlanilhaTipoInsumo(normalizarPlanilhaTipoInsumo(s.planilhaTipoInsumo as Record<string, unknown>));
       setPlanilhaCompraDraft({});
       setShowDetalhesFinanceiros(s.showDetalhesFinanceiros);
       setMeta(s.meta ? s.meta : sessaoVazia().meta!);
@@ -1029,6 +1498,7 @@ export function OrcamentoPageView({
       if (apiData) {
         const servicosDoOrcamento = Array.isArray(apiData.servicos) ? apiData.servicos : [];
         const importsDoOrcamento = Array.isArray(apiData.imports) ? apiData.imports : [];
+        const sessaoApi = apiData.sessaoOrcamento ?? loadSessaoOrcamento(centroCustoId, oid);
 
         if (servicosDoOrcamento.length > 0) {
           setServicos(servicosDoOrcamento);
@@ -1054,13 +1524,55 @@ export function OrcamentoPageView({
 
         setImports(importsDoOrcamento);
         localStorage.setItem(storageKey(centroCustoId, 'imports'), JSON.stringify(importsDoOrcamento));
-        aplicarSessao(apiData.sessaoOrcamento ?? loadSessaoOrcamento(centroCustoId, oid));
+        aplicarSessao(sessaoApi);
+        const carregadoTemDados =
+          servicosDoOrcamento.length > 0 ||
+          importsDoOrcamento.length > 0 ||
+          sessaoTemDados(sessaoApi);
+        let recuperadoDoSnapshot = false;
+        if (!carregadoTemDados) {
+          const snapshot = getLatestUsefulSnapshot(centroCustoId, oid);
+          if (snapshot) {
+            setServicos(Array.isArray(snapshot.servicos) ? snapshot.servicos : []);
+            setImports(Array.isArray(snapshot.imports) ? snapshot.imports : []);
+            aplicarSessao(snapshot.sessaoOrcamento ?? null);
+            recuperadoDoSnapshot = true;
+            toast.error(
+              `Recuperação automática aplicada a partir do backup local de ${new Date(snapshot.createdAt).toLocaleString('pt-BR')}.`
+            );
+          }
+        }
+        autosaveBaselineRef.current = {
+          orcamentoId: oid,
+          hadData: carregadoTemDados || recuperadoDoSnapshot
+        };
+        autosaveProtecaoAvisadaRef.current = null;
       } else {
         const svcs = loadServicos(centroCustoId);
+        const sessaoLocal = loadSessaoOrcamento(centroCustoId, oid);
         setServicos(svcs);
         setImports(loadImports(centroCustoId));
         if (svcs.length > 0) setServicosExpandidos(new Set([svcs[0].id]));
-        aplicarSessao(loadSessaoOrcamento(centroCustoId, oid));
+        aplicarSessao(sessaoLocal);
+        const carregadoTemDados = svcs.length > 0 || sessaoTemDados(sessaoLocal);
+        let recuperadoDoSnapshot = false;
+        if (!carregadoTemDados) {
+          const snapshot = getLatestUsefulSnapshot(centroCustoId, oid);
+          if (snapshot) {
+            setServicos(Array.isArray(snapshot.servicos) ? snapshot.servicos : []);
+            setImports(Array.isArray(snapshot.imports) ? snapshot.imports : []);
+            aplicarSessao(snapshot.sessaoOrcamento ?? null);
+            recuperadoDoSnapshot = true;
+            toast.error(
+              `Recuperação automática aplicada a partir do backup local de ${new Date(snapshot.createdAt).toLocaleString('pt-BR')}.`
+            );
+          }
+        }
+        autosaveBaselineRef.current = {
+          orcamentoId: oid,
+          hadData: carregadoTemDados || recuperadoDoSnapshot
+        };
+        autosaveProtecaoAvisadaRef.current = null;
       }
       setLoadingFromApi(false);
     });
@@ -1077,6 +1589,7 @@ export function OrcamentoPageView({
       dimensoesPorItem,
       planilhaQuantidadeCompra,
       planilhaValorUnitCompraReal,
+      planilhaTipoInsumo,
       showDetalhesFinanceiros,
       meta,
       itensOcultosNoOrcamento
@@ -1097,6 +1610,7 @@ export function OrcamentoPageView({
     dimensoesPorItem,
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
+    planilhaTipoInsumo,
     showDetalhesFinanceiros,
     meta,
     itensOcultosNoOrcamento,
@@ -1113,6 +1627,42 @@ export function OrcamentoPageView({
     orcamentoAutosaveTimerRef.current = setTimeout(() => {
       orcamentoAutosaveTimerRef.current = null;
       const { servicos: s, imports: i } = servicosImportsRef.current;
+      const sessaoAtual = sessaoRef.current;
+      const atualTemDados =
+        s.length > 0 ||
+        i.length > 0 ||
+        sessaoAtual.subtitulosNoOrcamento.length > 0 ||
+        (sessaoAtual.itensOcultosNoOrcamento ?? []).length > 0 ||
+        Object.keys(sessaoAtual.quantidadesPorItem).length > 0 ||
+        Object.keys(sessaoAtual.dimensoesPorItem).length > 0 ||
+        Object.keys(sessaoAtual.planilhaQuantidadeCompra ?? {}).length > 0 ||
+        Object.keys(sessaoAtual.planilhaValorUnitCompraReal ?? {}).length > 0;
+
+      const baseline = autosaveBaselineRef.current;
+      const bloquearSobrescritaVazia =
+        baseline.orcamentoId === orcamentoAtivoId &&
+        baseline.hadData &&
+        !atualTemDados;
+
+      if (bloquearSobrescritaVazia) {
+        if (autosaveProtecaoAvisadaRef.current !== orcamentoAtivoId) {
+          autosaveProtecaoAvisadaRef.current = orcamentoAtivoId;
+          toast.error('Proteção ativada: salvamento automático bloqueado para evitar sobrescrever orçamento com dados vazios.');
+        }
+        console.warn('Autosave bloqueado para evitar sobrescrita vazia do orçamento.', {
+          orcamentoId: orcamentoAtivoId
+        });
+        return;
+      }
+
+      if (baseline.orcamentoId === orcamentoAtivoId && atualTemDados) {
+        autosaveBaselineRef.current = { ...baseline, hadData: true };
+        saveOrcamentoSnapshot(centroCustoId, orcamentoAtivoId, {
+          servicos: s,
+          imports: i,
+          sessaoOrcamento: sessaoAtual
+        });
+      }
       saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, {
         servicos: s,
         imports: i,
@@ -1135,6 +1685,7 @@ export function OrcamentoPageView({
     dimensoesPorItem,
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
+    planilhaTipoInsumo,
     showDetalhesFinanceiros,
     meta,
     itensOcultosNoOrcamento,
@@ -1218,10 +1769,7 @@ export function OrcamentoPageView({
 
   const criarNovoOrcamento = async () => {
     if (!centroCustoId) return;
-    setNovoOrcamentoMetaDraft({
-      ...sessaoVazia().meta!,
-      dataAbertura: todayInputDate()
-    });
+    setNovoOrcamentoMetaDraft(metaNovoOrcamentoPadrao());
     setNovoOrcamentoMetaOpen(true);
   };
 
@@ -1234,6 +1782,12 @@ export function OrcamentoPageView({
       descricao: novoOrcamentoMetaDraft.descricao.trim(),
       orcamentoRealizadoPor: currentUserName || novoOrcamentoMetaDraft.orcamentoRealizadoPor.trim(),
       prazoExecucaoDias: novoOrcamentoMetaDraft.prazoExecucaoDias.trim(),
+      descontoPercentual: novoOrcamentoMetaDraft.descontoPercentual.trim(),
+      bdiPercentual: novoOrcamentoMetaDraft.bdiPercentual.trim(),
+      reajustes: (novoOrcamentoMetaDraft.reajustes ?? []).map((r, idx) => ({
+        nome: (r.nome || '').trim() || `${idx + 1}º reajuste`,
+        percentual: (r.percentual || '').trim()
+      })),
       dataAbertura: novoOrcamentoMetaDraft.dataAbertura || todayInputDate(),
       dataEnvio: ''
     };
@@ -1332,7 +1886,13 @@ export function OrcamentoPageView({
       prazoExecucaoDias: editarDadosDraft.prazoExecucaoDias.trim(),
       responsavelOrcamento: editarDadosDraft.responsavelOrcamento.trim(),
       descricao: editarDadosDraft.descricao.trim(),
-      orcamentoRealizadoPor: editarDadosDraft.orcamentoRealizadoPor.trim()
+      orcamentoRealizadoPor: editarDadosDraft.orcamentoRealizadoPor.trim(),
+      descontoPercentual: editarDadosDraft.descontoPercentual.trim(),
+      bdiPercentual: editarDadosDraft.bdiPercentual.trim(),
+      reajustes: (editarDadosDraft.reajustes ?? []).map((r, idx) => ({
+        nome: (r.nome || '').trim() || `${idx + 1}º reajuste`,
+        percentual: (r.percentual || '').trim()
+      }))
     };
 
     try {
@@ -2211,12 +2771,15 @@ export function OrcamentoPageView({
         });
 
         const seedKey = `${row.item.codigo}|${row.item.banco}|${row.item.chave || ''}`;
-        const unitAnalitico = comp?.analiticoLinhas?.length
-          ? {
-              total: comp.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0),
-              linhas: comp.analiticoLinhas
-            }
-          : gerarAnaliticoComposicaoUnit(row.materialUnitario, row.maoDeObraUnitario, seedKey);
+        const ehCacamba = ehComposicaoCacamba4m3(row.item.descricao);
+        const unitAnalitico = ehCacamba
+          ? gerarAnaliticoCacamba4m3(row.materialUnitario, row.maoDeObraUnitario)
+          : comp?.analiticoLinhas?.length
+            ? {
+                total: comp.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0),
+                linhas: comp.analiticoLinhas
+              }
+            : gerarAnaliticoComposicaoUnit(row.materialUnitario, row.maoDeObraUnitario, seedKey);
 
         for (let i = 0; i < unitAnalitico.linhas.length; i++) {
           const ln = unitAnalitico.linhas[i];
@@ -2229,9 +2792,9 @@ export function OrcamentoPageView({
             key: `${key}|insumo|${i}`,
             parentKey: key,
             item: `${itemComp}.${i + 1}`,
-            codigo: '',
-            banco: '',
-            tipo: 'Insumo',
+            codigo: ln.codigo ?? '',
+            banco: ln.banco ?? row.item.banco ?? '',
+            tipo: ln.tipoLabel || 'Insumo',
             categoria: ln.categoria,
             descricao: ln.descricao,
             und: ln.unidade,
@@ -2249,21 +2812,119 @@ export function OrcamentoPageView({
 
   /** Ficha de demanda: só composições e insumos (sem faixas de título/subtítulo). */
   const linhasFichaDemanda = useMemo(() => {
+    const composicaoPorKey = new Map(
+      linhasAnaliticoOrcamento
+        .filter((r) => r.kind === 'composicao')
+        .map((r) => [r.key, r] as const)
+    );
+    const totalInsumosBasePorComposicao = new Map<string, number>();
+    for (const row of linhasAnaliticoOrcamento) {
+      if (row.kind === 'insumo') {
+        totalInsumosBasePorComposicao.set(
+          row.parentKey,
+          (totalInsumosBasePorComposicao.get(row.parentKey) ?? 0) + 1
+        );
+      }
+    }
+    const linhasAnaliticoFicha: typeof linhasAnaliticoOrcamento = [];
+    for (let i = 0; i < linhasAnaliticoOrcamento.length; i++) {
+      const row = linhasAnaliticoOrcamento[i];
+      if (row.kind !== 'composicao' && row.kind !== 'insumo') continue;
+      linhasAnaliticoFicha.push(row);
+
+      if (row.kind === 'composicao') {
+        const prox = linhasAnaliticoOrcamento[i + 1];
+        const composicaoSemInsumoBase =
+          !prox || prox.kind !== 'insumo' || prox.parentKey !== row.key;
+        if (composicaoSemInsumoBase) {
+          const manuais = insumosAnaliticoManuais[row.key] ?? [];
+          const base = totalInsumosBasePorComposicao.get(row.key) ?? 0;
+          for (let idx = 0; idx < manuais.length; idx++) {
+            const ins = manuais[idx];
+            const quantUnit = parsePlanilhaCalcOrPtBr(ins.quant);
+            const qtdComp = Number(row.quantidadeReal) || 0;
+            const qtdReal =
+              quantUnit !== null
+                ? quantUnit * qtdComp
+                : (parsePlanilhaCalcOrPtBr(ins.quantidadeReal) ?? 0);
+            const qtdOrc = qtdReal;
+            const valorUnit = parsePlanilhaCalcOrPtBr(ins.valorUnit) ?? 0;
+            linhasAnaliticoFicha.push({
+              kind: 'insumo',
+              key: `manual|${ins.id}`,
+              parentKey: row.key,
+              item: `${row.item}.${base + idx + 1}`,
+              codigo: ins.codigo || '',
+              banco: ins.banco || '',
+              tipo: 'Insumo',
+              categoria: 'MATERIAL',
+              descricao: ins.descricao || '',
+              und: ins.und || '',
+              quant: parsePlanilhaCalcOrPtBr(ins.quant) ?? 0,
+              quantidadeReal: qtdReal,
+              quantidadeOrcada: qtdOrc,
+              valorUnit,
+              total: qtdOrc * valorUnit
+            });
+          }
+        }
+      }
+
+      if (row.kind === 'insumo') {
+        const prox = linhasAnaliticoOrcamento[i + 1];
+        const ultimoInsumoDaComposicao =
+          !prox || prox.kind !== 'insumo' || prox.parentKey !== row.parentKey;
+        if (ultimoInsumoDaComposicao) {
+          const manuais = insumosAnaliticoManuais[row.parentKey] ?? [];
+          const comp = composicaoPorKey.get(row.parentKey);
+          const base = totalInsumosBasePorComposicao.get(row.parentKey) ?? 0;
+          for (let idx = 0; idx < manuais.length; idx++) {
+            const ins = manuais[idx];
+            const quantUnit = parsePlanilhaCalcOrPtBr(ins.quant);
+            const qtdComp = comp && comp.kind === 'composicao' ? Number(comp.quantidadeReal) || 0 : 0;
+            const qtdReal =
+              quantUnit !== null
+                ? quantUnit * qtdComp
+                : (parsePlanilhaCalcOrPtBr(ins.quantidadeReal) ?? 0);
+            const qtdOrc = qtdReal;
+            const valorUnit = parsePlanilhaCalcOrPtBr(ins.valorUnit) ?? 0;
+            linhasAnaliticoFicha.push({
+              kind: 'insumo',
+              key: `manual|${ins.id}`,
+              parentKey: row.parentKey,
+              item: comp ? `${comp.item}.${base + idx + 1}` : `${base + idx + 1}`,
+              codigo: ins.codigo || '',
+              banco: ins.banco || '',
+              tipo: 'Insumo',
+              categoria: 'MATERIAL',
+              descricao: ins.descricao || '',
+              und: ins.und || '',
+              quant: parsePlanilhaCalcOrPtBr(ins.quant) ?? 0,
+              quantidadeReal: qtdReal,
+              quantidadeOrcada: qtdOrc,
+              valorUnit,
+              total: qtdOrc * valorUnit
+            });
+          }
+        }
+      }
+    }
+
     const insumosPorComposicao = new Map<
       string,
       Array<{ key: string; valorUnit: number; quantOrc: number }>
     >();
-    for (const row of linhasAnaliticoOrcamento) {
+    for (const row of linhasAnaliticoFicha) {
       if (row.kind === 'insumo') {
         const arr = insumosPorComposicao.get(row.parentKey) ?? [];
-        arr.push({ key: row.key, valorUnit: row.valorUnit, quantOrc: row.quant });
+        arr.push({ key: row.key, valorUnit: row.valorUnit, quantOrc: row.quantidadeReal });
         insumosPorComposicao.set(row.parentKey, arr);
       }
     }
 
     /** Faturamento (R$) da composição = quant × valor unit. orç. — usado no % custo/valor pago dos insumos. */
     const faturamentoMonetarioPorComposicao = new Map<string, number>();
-    for (const row of linhasAnaliticoOrcamento) {
+    for (const row of linhasAnaliticoFicha) {
       if (row.kind === 'composicao') {
         const q = Number(row.quant);
         const v = Number(row.valorUnit);
@@ -2350,9 +3011,9 @@ export function OrcamentoPageView({
       banco: string;
       servico: string;
       un: string;
-      /** Mesma coluna "Tipo" da planilha (MO/MAT); composição: vazio. */
+      /** Mesma coluna "Tipo" da planilha (MO/MA); composição: vazio. */
       tipo: string;
-      /** Mesma coluna "Quantidade" da planilha analítica (quant do analítico). */
+      /** Mesma coluna "Quantidade" da planilha analítica (quantidade total no orçamento; insumo = coef. × qtd composição). */
       quantidadeOrcamento: number;
       /** Mesma chave que na planilha: `planilhaQuantidadeCompra[key]` (só insumos costumam ter valor). */
       quantidadeCompra: number | undefined;
@@ -2375,7 +3036,7 @@ export function OrcamentoPageView({
       /** preço compra real ÷ Faturamento (R$) × 100 — insumo: Faturamento da composição pai. */
       pctCustoValorPago: number | undefined;
     }[] = [];
-    for (const l of linhasAnaliticoOrcamento) {
+    for (const l of linhasAnaliticoFicha) {
       if (l.kind !== 'composicao' && l.kind !== 'insumo') continue;
       const qCompra = planilhaQuantidadeCompra[l.key];
       const vReal =
@@ -2403,7 +3064,7 @@ export function OrcamentoPageView({
               Number.isFinite(vReal)
             ? qCompra * vReal
             : undefined;
-      const qOrcNum = Number(l.quant);
+      const qOrcNum = Number(l.quantidadeReal);
       const qCompraNum =
         qCompra !== undefined && Number.isFinite(Number(qCompra)) ? Number(qCompra) : undefined;
       const vOrcNum = Number(l.valorUnit);
@@ -2454,8 +3115,11 @@ export function OrcamentoPageView({
         banco: (l.banco && String(l.banco).trim()) || '—',
         servico: l.descricao,
         un: (l.und && String(l.und).trim()) || '—',
-        tipo: l.kind === 'insumo' ? tipoPlanilhaInsumo(l.categoria || '') : '',
-        quantidadeOrcamento: l.quant,
+        tipo:
+          l.kind === 'insumo'
+            ? planilhaTipoInsumo[l.key] ?? tipoPlanilhaInsumo(l.categoria || '')
+            : '',
+        quantidadeOrcamento: l.quantidadeReal,
         quantidadeCompra: qCompra !== undefined && Number.isFinite(qCompra) ? qCompra : undefined,
         custoUnitarioOrcamento: l.valorUnit,
         custoUnitarioCompraReal: custoCompraReal,
@@ -2469,7 +3133,277 @@ export function OrcamentoPageView({
       });
     }
     return out;
-  }, [linhasAnaliticoOrcamento, planilhaQuantidadeCompra, planilhaValorUnitCompraReal]);
+  }, [linhasAnaliticoOrcamento, insumosAnaliticoManuais, planilhaQuantidadeCompra, planilhaValorUnitCompraReal, planilhaTipoInsumo]);
+
+  const linhasAnaliticoComManuais = useMemo(() => {
+    const out: typeof linhasAnaliticoOrcamento = [];
+    const totalInsumosBasePorComposicao = new Map<string, number>();
+    for (const row of linhasAnaliticoOrcamento) {
+      if (row.kind === 'insumo') {
+        totalInsumosBasePorComposicao.set(
+          row.parentKey,
+          (totalInsumosBasePorComposicao.get(row.parentKey) ?? 0) + 1
+        );
+      }
+    }
+    for (let i = 0; i < linhasAnaliticoOrcamento.length; i++) {
+      const row = linhasAnaliticoOrcamento[i];
+      out.push(row);
+      if (row.kind === 'insumo') {
+        const prox = linhasAnaliticoOrcamento[i + 1];
+        const ultimoInsumoDaComposicao =
+          !prox || prox.kind !== 'insumo' || prox.parentKey !== row.parentKey;
+        if (ultimoInsumoDaComposicao) {
+          const manuais = insumosAnaliticoManuais[row.parentKey] ?? [];
+          const comp = linhasAnaliticoOrcamento.find(
+            (linha) => linha.kind === 'composicao' && linha.key === row.parentKey
+          );
+          const base = totalInsumosBasePorComposicao.get(row.parentKey) ?? 0;
+          for (let idx = 0; idx < manuais.length; idx++) {
+            const ins = manuais[idx];
+            const quantUnit = parsePlanilhaCalcOrPtBr(ins.quant);
+            const qtdComp = comp && comp.kind === 'composicao' ? Number(comp.quantidadeReal) || 0 : 0;
+            const qtdReal =
+              quantUnit !== null
+                ? quantUnit * qtdComp
+                : (parsePlanilhaCalcOrPtBr(ins.quantidadeReal) ?? 0);
+            const qtdOrc = qtdReal;
+            const valorUnit = parsePlanilhaCalcOrPtBr(ins.valorUnit) ?? 0;
+            out.push({
+              kind: 'insumo',
+              key: `manual|${ins.id}`,
+              parentKey: row.parentKey,
+              item: comp && comp.kind === 'composicao' ? `${comp.item}.${base + idx + 1}` : `${base + idx + 1}`,
+              codigo: ins.codigo || '',
+              banco: ins.banco || '',
+              tipo: 'Insumo',
+              categoria: 'MATERIAL',
+              descricao: ins.descricao || '',
+              und: ins.und || '',
+              quant: parsePlanilhaCalcOrPtBr(ins.quant) ?? 0,
+              quantidadeReal: qtdReal,
+              quantidadeOrcada: qtdOrc,
+              valorUnit,
+              total: qtdOrc * valorUnit
+            });
+          }
+        }
+      }
+      if (row.kind === 'composicao') {
+        const prox = linhasAnaliticoOrcamento[i + 1];
+        const composicaoSemInsumoBase =
+          !prox || prox.kind !== 'insumo' || prox.parentKey !== row.key;
+        if (composicaoSemInsumoBase) {
+          const manuais = insumosAnaliticoManuais[row.key] ?? [];
+          const base = totalInsumosBasePorComposicao.get(row.key) ?? 0;
+          for (let idx = 0; idx < manuais.length; idx++) {
+            const ins = manuais[idx];
+            const quantUnit = parsePlanilhaCalcOrPtBr(ins.quant);
+            const qtdComp = Number(row.quantidadeReal) || 0;
+            const qtdReal =
+              quantUnit !== null
+                ? quantUnit * qtdComp
+                : (parsePlanilhaCalcOrPtBr(ins.quantidadeReal) ?? 0);
+            const qtdOrc = qtdReal;
+            const valorUnit = parsePlanilhaCalcOrPtBr(ins.valorUnit) ?? 0;
+            out.push({
+              kind: 'insumo',
+              key: `manual|${ins.id}`,
+              parentKey: row.key,
+              item: `${row.item}.${base + idx + 1}`,
+              codigo: ins.codigo || '',
+              banco: ins.banco || '',
+              tipo: 'Insumo',
+              categoria: 'MATERIAL',
+              descricao: ins.descricao || '',
+              und: ins.und || '',
+              quant: parsePlanilhaCalcOrPtBr(ins.quant) ?? 0,
+              quantidadeReal: qtdReal,
+              quantidadeOrcada: qtdOrc,
+              valorUnit,
+              total: qtdOrc * valorUnit
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }, [linhasAnaliticoOrcamento, insumosAnaliticoManuais]);
+
+  const resumoSecoesFicha = useMemo(() => {
+    type AccAgg = {
+      custoOrc: number;
+      custoEst: number;
+      custoReal: number;
+      insumoKeys: Set<string>;
+      composicaoKeys: Set<string>;
+    };
+    const porTitulo = new Map<string, { custoOrc: number; custoEst: number; custoReal: number }>();
+    const porSubtitulo = new Map<string, { custoOrc: number; custoEst: number; custoReal: number }>();
+    const detalheInsPorTitulo = new Map<string, DetalheInsumoOrcSecao[]>();
+    const detalheInsPorSubtitulo = new Map<string, DetalheInsumoOrcSecao[]>();
+    /** Título (ex. 1) → cada subtítulo (1.1, 1.2…) com totais agregados dos insumos. */
+    const aggTituloPorSubtitulo = new Map<string, Map<string, AccAgg>>();
+    /** Subtítulo (ex. 1.1) → cada composição (1.1.1, 1.1.2…) com totais agregados dos insumos. */
+    const aggSubtituloPorComp = new Map<string, Map<string, AccAgg>>();
+    const bumpAgg = (
+      outer: Map<string, Map<string, AccAgg>>,
+      outerKey: string,
+      innerKey: string,
+      custoOrc: number,
+      custoEst: number,
+      custoReal: number,
+      insumoKey: string,
+      composicaoKey: string
+    ) => {
+      let inner = outer.get(outerKey);
+      if (!inner) {
+        inner = new Map();
+        outer.set(outerKey, inner);
+      }
+      let cur = inner.get(innerKey);
+      if (!cur) {
+        cur = {
+          custoOrc: 0,
+          custoEst: 0,
+          custoReal: 0,
+          insumoKeys: new Set(),
+          composicaoKeys: new Set()
+        };
+        inner.set(innerKey, cur);
+      }
+      cur.custoOrc += custoOrc;
+      cur.custoEst += custoEst;
+      cur.custoReal += custoReal;
+      cur.insumoKeys.add(insumoKey);
+      cur.composicaoKeys.add(composicaoKey);
+    };
+    const innerAggToLista = (inner: Map<string, AccAgg>): DetalheAggSecao[] =>
+      Array.from(inner.entries())
+        .map(([item, v]) => ({
+          item,
+          custoOrc: v.custoOrc,
+          custoEst: v.custoEst,
+          custoReal: v.custoReal,
+          insumoKeys: Array.from(v.insumoKeys),
+          composicaoKeys: Array.from(v.composicaoKeys)
+        }))
+        .sort((a, b) => compararChaveItemNumero(a.item, b.item));
+    for (const row of linhasAnaliticoComManuais) {
+      if (row.kind !== 'insumo') continue;
+      const partes = String(row.item || '').split('.');
+      if (partes.length < 3) continue;
+      const chaveTitulo = partes[0];
+      const chaveSubtitulo = `${partes[0]}.${partes[1]}`;
+      const chaveComp = `${partes[0]}.${partes[1]}.${partes[2]}`;
+      const custoOrc = Number(row.total) || 0;
+      const custoEst = custoOrc * PLANILHA_FATOR_CUSTO_ESTIMADO;
+      const qtdOrc = Number(row.quantidadeReal) || 0;
+      const valorUnitOrc = Number(row.valorUnit) || 0;
+      const qC = planilhaQuantidadeCompra[row.key];
+      const vReal = planilhaValorUnitCompraReal[row.key];
+      const qtdCompraNum =
+        qC !== undefined && Number.isFinite(qC) ? qC : undefined;
+      const valorUnitRealNum =
+        vReal !== undefined && Number.isFinite(vReal) ? vReal : undefined;
+      const custoReal =
+        qtdCompraNum !== undefined &&
+        valorUnitRealNum !== undefined &&
+        Number.isFinite(qtdCompraNum) &&
+        Number.isFinite(valorUnitRealNum)
+          ? qtdCompraNum * valorUnitRealNum
+          : 0;
+
+      const entry: DetalheInsumoOrcSecao = {
+        item: String(row.item),
+        key: row.key,
+        qtdOrc,
+        valorUnitOrc,
+        custoOrc,
+        custoEst,
+        qtdCompra: qtdCompraNum,
+        valorUnitReal: valorUnitRealNum,
+        custoReal
+      };
+      const arrT = detalheInsPorTitulo.get(chaveTitulo) ?? [];
+      arrT.push(entry);
+      detalheInsPorTitulo.set(chaveTitulo, arrT);
+      const arrS = detalheInsPorSubtitulo.get(chaveSubtitulo) ?? [];
+      arrS.push(entry);
+      detalheInsPorSubtitulo.set(chaveSubtitulo, arrS);
+
+      bumpAgg(
+        aggTituloPorSubtitulo,
+        chaveTitulo,
+        chaveSubtitulo,
+        custoOrc,
+        custoEst,
+        custoReal,
+        row.key,
+        row.parentKey
+      );
+      bumpAgg(
+        aggSubtituloPorComp,
+        chaveSubtitulo,
+        chaveComp,
+        custoOrc,
+        custoEst,
+        custoReal,
+        row.key,
+        row.parentKey
+      );
+
+      const atualTit = porTitulo.get(chaveTitulo) ?? { custoOrc: 0, custoEst: 0, custoReal: 0 };
+      atualTit.custoOrc += custoOrc;
+      atualTit.custoEst += custoEst;
+      atualTit.custoReal += custoReal;
+      porTitulo.set(chaveTitulo, atualTit);
+
+      const atualSub = porSubtitulo.get(chaveSubtitulo) ?? { custoOrc: 0, custoEst: 0, custoReal: 0 };
+      atualSub.custoOrc += custoOrc;
+      atualSub.custoEst += custoEst;
+      atualSub.custoReal += custoReal;
+      porSubtitulo.set(chaveSubtitulo, atualSub);
+    }
+    const aggPorTituloParaTooltip = new Map<string, DetalheAggSecao[]>();
+    aggTituloPorSubtitulo.forEach((inner, k) => {
+      aggPorTituloParaTooltip.set(k, innerAggToLista(inner));
+    });
+    const aggPorSubtituloParaTooltip = new Map<string, DetalheAggSecao[]>();
+    aggSubtituloPorComp.forEach((inner, k) => {
+      aggPorSubtituloParaTooltip.set(k, innerAggToLista(inner));
+    });
+    return {
+      porTitulo,
+      porSubtitulo,
+      detalheInsPorTitulo,
+      detalheInsPorSubtitulo,
+      aggPorTituloParaTooltip,
+      aggPorSubtituloParaTooltip
+    };
+  }, [linhasAnaliticoComManuais, planilhaQuantidadeCompra, planilhaValorUnitCompraReal]);
+
+  /** Indicadores % iguais à Ficha de demanda (levantamento, preço unit. rel., faturamento) por chave de linha. */
+  const pctFichaDemandaPorKey = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        levantamentoPct: number | undefined;
+        precoUnitarioRelPct: number | undefined;
+        faturamentoPct: number | undefined;
+        pctCustoValorPago: number | undefined;
+      }
+    >();
+    for (const r of linhasFichaDemanda) {
+      m.set(r.key, {
+        levantamentoPct: r.levantamentoPct,
+        precoUnitarioRelPct: r.precoUnitarioRelPct,
+        faturamentoPct: r.faturamentoPct,
+        pctCustoValorPago: r.pctCustoValorPago
+      });
+    }
+    return m;
+  }, [linhasFichaDemanda]);
 
   /** Insumos da planilha agrupados por composição (parentKey = key da linha composição). */
   const insumosPlanilhaPorComposicao = useMemo(() => {
@@ -2485,35 +3419,42 @@ export function OrcamentoPageView({
   }, [linhasAnaliticoOrcamento]);
 
   const resumoFinanceiro = useMemo(() => {
-    const descontoPct = 25.01 / 100;
-    const bdiPct = 28.35 / 100;
-    const ipca1Pct = 3.93583 / 100;
-    const ipca2Pct = 3.92595 / 100;
-    const ipca3Pct = 5.31964 / 100;
+    const descontoPct = parsePercentualMeta(meta.descontoPercentual);
+    const bdiPct = parsePercentualMeta(meta.bdiPercentual);
 
     const totalBase = total;
     const valorDesconto = totalBase * descontoPct;
     const totalComDesconto = totalBase - valorDesconto;
     const totalComDescontoEBdi = totalComDesconto * (1 + bdiPct);
-    const reajuste1 = totalComDescontoEBdi * (1 + ipca1Pct);
-    const reajuste2 = reajuste1 * (1 + ipca2Pct);
-    const reajuste3 = reajuste2 * (1 + ipca3Pct);
+    const reajustes = (meta.reajustes ?? []).map((r, idx) => ({
+      idx,
+      nome: (r.nome || '').trim() || `${idx + 1}º reajuste`,
+      percentualPct: parsePercentualMeta(r.percentual)
+    }));
+
+    let acumulado = totalComDescontoEBdi;
+    const reajustesAplicados = reajustes.map((r) => {
+      acumulado = acumulado * (1 + r.percentualPct);
+      return {
+        ...r,
+        valor: acumulado
+      };
+    });
+    const valorFinal = reajustesAplicados.length > 0
+      ? reajustesAplicados[reajustesAplicados.length - 1]!.valor
+      : totalComDescontoEBdi;
 
     return {
       descontoPct,
       bdiPct,
-      ipca1Pct,
-      ipca2Pct,
-      ipca3Pct,
       totalBase,
       valorDesconto,
       totalComDesconto,
       totalComDescontoEBdi,
-      reajuste1,
-      reajuste2,
-      reajuste3
+      reajustesAplicados,
+      valorFinal
     };
-  }, [total]);
+  }, [meta.bdiPercentual, meta.descontoPercentual, meta.reajustes, total]);
 
   /** Rodapé da Ficha de demanda: totais por MA/MO/LO e painel de faturamento vs orçamento. */
   const resumoRodapeFichaDemanda = useMemo(() => {
@@ -2531,7 +3472,7 @@ export function OrcamentoPageView({
       const vReal = planilhaValorUnitCompraReal[l.key];
       if (qC === undefined || !Number.isFinite(qC) || vReal === undefined || !Number.isFinite(vReal)) continue;
       const val = qC * vReal;
-      const g = grupoPrecoCompraInsumoRodape(l.categoria, l.descricao);
+      const g = grupoPrecoCompraInsumoPlanilha(l.key, l.categoria || '', l.descricao || '', planilhaTipoInsumo);
       if (g === 'MA') {
         precoMa += val;
         temMa = true;
@@ -2562,7 +3503,7 @@ export function OrcamentoPageView({
       }
     }
 
-    const valorFinalOrc = resumoFinanceiro.reajuste3;
+    const valorFinalOrc = resumoFinanceiro.valorFinal;
     const relEst =
       valorFinalOrc > 0 && temEst ? (sumEst / valorFinalOrc) * 100 : null;
     const relReal =
@@ -2583,8 +3524,9 @@ export function OrcamentoPageView({
     linhasAnaliticoOrcamento,
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
+    planilhaTipoInsumo,
     linhasFichaDemanda,
-    resumoFinanceiro.reajuste3
+    resumoFinanceiro.valorFinal
   ]);
 
   // Sincroniza linhas de itens de demolição/remoção para a composição Carga de Entulho
@@ -2672,14 +3614,19 @@ export function OrcamentoPageView({
   };
 
   const handleCalcBlur = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
-    const r = evalSimpleExpr(raw);
-    const rawSemIgual = String(raw).trim().replace(/^=/, '').replace(/,/g, '.');
-    onCommit(r !== null ? r : parseFloat(rawSemIgual) || 0);
+    const n = parsePlanilhaCalcOrPtBr(raw);
+    onCommit(n ?? 0);
     setDraftCalc(p => { const n = { ...p }; delete n[draftKey]; return n; });
   };
 
+  const handleCalcChange = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
+    setDraftCalc(p => ({ ...p, [draftKey]: raw }));
+    const n = parseCalcOrNumber(raw);
+    if (n !== null) onCommit(n);
+  };
+
   const commitPlanilhaQtdCompra = (lineKey: string, raw: string) => {
-    const n = parsePlanilhaPtBr(raw);
+    const n = parsePlanilhaCalcOrPtBr(raw);
     setPlanilhaQuantidadeCompra(prev => {
       const next = { ...prev };
       if (n === null) delete next[lineKey];
@@ -2694,7 +3641,7 @@ export function OrcamentoPageView({
   };
 
   const commitPlanilhaVlCompraReal = (lineKey: string, raw: string) => {
-    const n = parsePlanilhaPtBr(raw);
+    const n = parsePlanilhaCalcOrPtBr(raw);
     setPlanilhaValorUnitCompraReal(prev => {
       const next = { ...prev };
       if (n === null) delete next[lineKey];
@@ -2706,6 +3653,96 @@ export function OrcamentoPageView({
       delete x[`v|${lineKey}`];
       return x;
     });
+  };
+
+  const handlePlanilhaQtdCompraChange = (lineKey: string, raw: string) => {
+    setPlanilhaCompraDraft((p) => ({ ...p, [`q|${lineKey}`]: raw }));
+    const n = parsePlanilhaCalcOrPtBr(raw);
+    if (String(raw || '').trim() === '') {
+      setPlanilhaQuantidadeCompra((prev) => {
+        const next = { ...prev };
+        delete next[lineKey];
+        return next;
+      });
+      return;
+    }
+    if (n !== null) {
+      setPlanilhaQuantidadeCompra((prev) => ({ ...prev, [lineKey]: Math.max(0, n) }));
+    }
+  };
+
+  const handlePlanilhaVlCompraRealChange = (lineKey: string, raw: string) => {
+    setPlanilhaCompraDraft((p) => ({ ...p, [`v|${lineKey}`]: raw }));
+    const n = parsePlanilhaCalcOrPtBr(raw);
+    if (String(raw || '').trim() === '') {
+      setPlanilhaValorUnitCompraReal((prev) => {
+        const next = { ...prev };
+        delete next[lineKey];
+        return next;
+      });
+      return;
+    }
+    if (n !== null) {
+      setPlanilhaValorUnitCompraReal((prev) => ({ ...prev, [lineKey]: Math.max(0, n) }));
+    }
+  };
+
+  const addInsumoManualAnalitico = (parentKey: string) => {
+    const novo: InsumoAnaliticoManual = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      parentKey,
+      tipo: 'Insumo',
+      codigo: '',
+      banco: '',
+      descricao: '',
+      und: '',
+      quant: '',
+      quantidadeReal: '',
+      quantidadeOrcada: '',
+      valorUnit: ''
+    };
+    setInsumosAnaliticoManuais((prev) => ({
+      ...prev,
+      [parentKey]: [...(prev[parentKey] ?? []), novo]
+    }));
+  };
+
+  const updateInsumoManualAnalitico = (
+    parentKey: string,
+    id: string,
+    campo: keyof Omit<InsumoAnaliticoManual, 'id' | 'parentKey'>,
+    valor: string
+  ) => {
+    setInsumosAnaliticoManuais((prev) => ({
+      ...prev,
+      [parentKey]: (prev[parentKey] ?? []).map((ins) => (ins.id === id ? { ...ins, [campo]: valor } : ins))
+    }));
+  };
+
+  const removerInsumoManualAnalitico = (parentKey: string, id: string) => {
+    setInsumosAnaliticoManuais((prev) => ({
+      ...prev,
+      [parentKey]: (prev[parentKey] ?? []).filter((ins) => ins.id !== id)
+    }));
+  };
+
+  const normalizarNumeroManualAnalitico = (
+    parentKey: string,
+    id: string,
+    campo: 'quant' | 'quantidadeReal' | 'quantidadeOrcada' | 'valorUnit',
+    casas = 2
+  ) => {
+    const atual = (insumosAnaliticoManuais[parentKey] ?? []).find((ins) => ins.id === id);
+    if (!atual) return;
+    const raw = atual[campo];
+    const n = parseCalcOrNumber(raw);
+    if (n === null) return;
+    updateInsumoManualAnalitico(
+      parentKey,
+      id,
+      campo,
+      n.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })
+    );
   };
 
   const removeLinhaMedicao = (itemKey: string, idx: number) => {
@@ -2966,9 +4003,9 @@ export function OrcamentoPageView({
     pushLinhaResumo(`DESCONTO (${pctLabel2(rf.descontoPct)}%)`, rf.valorDesconto);
     pushLinhaResumo('TOTAL COM DESCONTO', rf.totalComDesconto);
     pushLinhaResumo(`TOTAL GERAL COM DESCONTO E BDI (${pctLabel2(rf.bdiPct)}%)`, rf.totalComDescontoEBdi);
-    pushLinhaResumo(`1º REAJUSTE IPCA (${pctLabel5(rf.ipca1Pct)}%)`, rf.reajuste1);
-    pushLinhaResumo(`2º REAJUSTE IPCA (${pctLabel5(rf.ipca2Pct)}%)`, rf.reajuste2);
-    pushLinhaResumo(`3º REAJUSTE IPCA (${pctLabel5(rf.ipca3Pct)}%)`, rf.reajuste3);
+    rf.reajustesAplicados.forEach((r) => {
+      pushLinhaResumo(`${r.nome.toUpperCase()} (${pctLabel5(r.percentualPct)}%)`, r.valor);
+    });
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = [
@@ -3020,6 +4057,17 @@ export function OrcamentoPageView({
         descricao: item.descricao || ''
       };
 
+      const materialUnitario = Number(linha?.materialUnitario ?? 0);
+      const maoDeObraUnitario = Number(linha?.maoDeObraUnitario ?? 0);
+
+      if (ehComposicaoCacamba4m3(item.descricao)) {
+        return {
+          info,
+          data: gerarAnaliticoCacamba4m3(materialUnitario, maoDeObraUnitario),
+          seedKeyParaCache: null
+        };
+      }
+
       if (composicaoDaLinha?.analiticoLinhas?.length) {
         const totalAnalitico = composicaoDaLinha.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0);
         return {
@@ -3032,8 +4080,6 @@ export function OrcamentoPageView({
         };
       }
 
-      const materialUnitario = Number(linha?.materialUnitario ?? 0);
-      const maoDeObraUnitario = Number(linha?.maoDeObraUnitario ?? 0);
       const seedKey = `${item.codigo}|${item.banco}|${item.chave || ''}`;
       const unitAnalitico = analiticoCache[seedKey] ?? gerarAnaliticoComposicaoUnit(materialUnitario, maoDeObraUnitario, seedKey);
       return {
@@ -3107,12 +4153,14 @@ export function OrcamentoPageView({
         return null;
       })();
 
-      const unitAnalitico = composicaoDaLinha?.analiticoLinhas?.length
-        ? {
-            total: composicaoDaLinha.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0),
-            linhas: composicaoDaLinha.analiticoLinhas
-          }
-        : (analiticoCache[seedKey] ?? gerarAnaliticoComposicaoUnit(materialUnitario, maoDeObraUnitario, seedKey));
+      const unitAnalitico = ehComposicaoCacamba4m3(item.descricao)
+        ? gerarAnaliticoCacamba4m3(materialUnitario, maoDeObraUnitario)
+        : composicaoDaLinha?.analiticoLinhas?.length
+          ? {
+              total: composicaoDaLinha.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0),
+              linhas: composicaoDaLinha.analiticoLinhas
+            }
+          : analiticoCache[seedKey] ?? gerarAnaliticoComposicaoUnit(materialUnitario, maoDeObraUnitario, seedKey);
 
       for (const l of unitAnalitico.linhas) {
         rows.push([
@@ -3121,7 +4169,7 @@ export function OrcamentoPageView({
           item.codigo,
           item.banco,
           item.descricao || '',
-          l.categoria,
+          l.tipoLabel || l.categoria,
           l.descricao,
           l.unidade,
           roundTo(l.quantidade * quantidadeItem, 4),
@@ -3196,7 +4244,7 @@ export function OrcamentoPageView({
           l.banco,
           l.descricao,
           l.und,
-          l.quant,
+          l.quantidadeReal,
           l.quantidadeReal,
           l.quantidadeOrcada,
           l.valorUnit,
@@ -3211,7 +4259,7 @@ export function OrcamentoPageView({
         l.banco || '—',
         l.descricao,
         l.und,
-        l.quant,
+        l.quantidadeReal,
         l.quantidadeReal,
         l.quantidadeOrcada,
         l.valorUnit,
@@ -3238,6 +4286,27 @@ export function OrcamentoPageView({
     }
     const nomeContrato = nomeContratoExport();
     const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const pctExportMap = new Map<
+      string,
+      {
+        levantamentoPct?: number;
+        precoUnitarioRelPct?: number;
+        faturamentoPct?: number;
+        pctCustoValorPago?: number;
+      }
+    >();
+    for (const r of linhasFichaDemanda) {
+      pctExportMap.set(r.key, {
+        levantamentoPct: r.levantamentoPct,
+        precoUnitarioRelPct: r.precoUnitarioRelPct,
+        faturamentoPct: r.faturamentoPct,
+        pctCustoValorPago: r.pctCustoValorPago
+      });
+    }
+    const fmtPctPlanilhaExport = (p: number | undefined) =>
+      p !== undefined && Number.isFinite(p)
+        ? `${p.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+        : '';
     const rows: (string | number)[][] = [
       ['GENNESIS ENGENHARIA E CONSULTORIA'],
       ['PLANILHA ANALÍTICA'],
@@ -3249,30 +4318,34 @@ export function OrcamentoPageView({
         'Código',
         'Banco',
         'Serviço',
+        'Tipo',
         'UN',
         'Quantidade',
         'Valor unit. orçamento',
         'Total orçamento',
-        'Quantidade compra',
+        'Valor unit. estimado',
         'Custo estimado',
+        'Quantidade compra',
         'Valor unit. compra real',
         'Custo compra real',
-        'Tipo'
+        '% Qtd. solicitada',
+        '% Valor total',
+        '% Custo / valor pago'
       ]
     ];
     for (const l of linhasAnaliticoOrcamento) {
       if (l.kind === 'tituloServico') {
-        rows.push([l.main, '', '', l.servicoNome, '', '', '', '', '', '', '', '', '']);
+        rows.push([l.main, '', '', l.servicoNome, '', '', '', '', '', '', '', '', '', '', '', '', '']);
         continue;
       }
       if (l.kind === 'subtituloBloco') {
-        rows.push([`${l.main}.${l.subIdx}`, '', '', l.texto, '', '', '', '', '', '', '', '', '']);
+        rows.push([`${l.main}.${l.subIdx}`, '', '', l.texto, '', '', '', '', '', '', '', '', '', '', '', '', '']);
         continue;
       }
       if (l.kind === 'composicao') {
         const filhos = insumosPlanilhaPorComposicao.get(l.key) ?? [];
         let sumQtdCompra = 0;
-        let sumCustoEst = 0;
+        const sumCustoEst = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
         let sumCustoReal = 0;
         let sumQtdCompraComVlReal = 0;
         let temQtdCompra = false;
@@ -3289,7 +4362,6 @@ export function OrcamentoPageView({
           if (qC !== undefined && Number.isFinite(qC)) {
             temQtdCompra = true;
             sumQtdCompra += qC;
-            sumCustoEst += qC * vOrc;
             if (vReal !== undefined && Number.isFinite(vReal)) {
               sumCustoReal += qC * vReal;
               sumQtdCompraComVlReal += qC;
@@ -3297,51 +4369,62 @@ export function OrcamentoPageView({
           }
         }
         const vlUnitCompraRealAgreg = temAlgumVlUnitCompraReal ? somaVlUnitCompraRealInsumos : null;
+        const pe = pctExportMap.get(l.key);
         rows.push([
           l.item,
           l.codigo,
           l.banco,
           l.descricao,
+          '',
           l.und,
-          l.quant,
+          l.quantidadeReal,
           l.valorUnit,
           l.total,
+          '',
+          roundTo(sumCustoEst, 2),
           temQtdCompra ? sumQtdCompra : '',
-          temQtdCompra ? roundTo(sumCustoEst, 2) : '',
           vlUnitCompraRealAgreg !== null ? roundTo(vlUnitCompraRealAgreg, 2) : '',
           sumQtdCompraComVlReal > 0 ? roundTo(sumCustoReal, 2) : '',
-          ''
+          fmtPctPlanilhaExport(pe?.levantamentoPct),
+          fmtPctPlanilhaExport(pe?.faturamentoPct),
+          fmtPctPlanilhaExport(pe?.pctCustoValorPago)
         ]);
         continue;
       }
       const qC = planilhaQuantidadeCompra[l.key];
       const vReal = planilhaValorUnitCompraReal[l.key];
       const vOrc = l.valorUnit;
-      const custoEst = qC !== undefined && Number.isFinite(qC) ? qC * vOrc : null;
+      const custoEst = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
       const custoCompraR =
         qC !== undefined && vReal !== undefined && Number.isFinite(qC) && Number.isFinite(vReal)
           ? qC * vReal
           : null;
+      const pi = pctExportMap.get(l.key);
       rows.push([
         l.item,
         l.codigo || '—',
         l.banco || '—',
         l.descricao,
+        planilhaTipoInsumo[l.key] ?? tipoPlanilhaInsumo(l.categoria || ''),
         l.und || '—',
-        l.quant,
+        l.quantidadeReal,
         l.valorUnit,
         l.total,
+        roundTo(vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO, 2),
+        roundTo(custoEst, 2),
         qC !== undefined && Number.isFinite(qC) ? qC : '',
-        custoEst !== null ? roundTo(custoEst, 2) : '',
         vReal !== undefined && Number.isFinite(vReal) ? roundTo(vReal, 2) : '',
         custoCompraR !== null ? roundTo(custoCompraR, 2) : '',
-        tipoPlanilhaInsumo(l.categoria || '')
+        fmtPctPlanilhaExport(pi?.levantamentoPct),
+        fmtPctPlanilhaExport(pi?.faturamentoPct),
+        fmtPctPlanilhaExport(pi?.pctCustoValorPago)
       ]);
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = [
-      { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 44 }, { wch: 6 },
-      { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 6 }
+      { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 44 }, { wch: 12 }, { wch: 6 },
+      { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 },
+      { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Planilha analítica');
@@ -3424,7 +4507,7 @@ export function OrcamentoPageView({
         r.pctCustoValorPago !== undefined && Number.isFinite(r.pctCustoValorPago)
           ? `${r.pctCustoValorPago.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
           : '',
-        r.tipo
+        tipoFichaDemandaLabel(r.tipo)
       ]);
     }
     rows.push(['']);
@@ -3583,7 +4666,7 @@ export function OrcamentoPageView({
         r.pctCustoValorPago !== undefined && Number.isFinite(r.pctCustoValorPago)
           ? fmtPct(r.pctCustoValorPago)
           : '—',
-        trunc(r.tipo || '—', 8)
+        trunc(tipoFichaDemandaLabel(r.tipo), 8)
       ]);
     }
 
@@ -3630,7 +4713,7 @@ export function OrcamentoPageView({
   };
 
   const protectedRoute = embeddedContractId
-    ? ({ route: '/ponto/contratos' as const, contractId: embeddedContractId })
+    ? ({ route: '/ponto/orcamento' as const, contractId: embeddedContractId })
     : ({ route: '/ponto/orcamento' as const, contractId: undefined as string | undefined });
 
   return (
@@ -3639,16 +4722,16 @@ export function OrcamentoPageView({
         <div className="space-y-6">
           <div className={embeddedContractId ? '' : 'text-center'}>
             {embeddedContractId ? (
-              <div className="relative">
+              <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
                 <Link
                   href={`/ponto/contratos/${embeddedContractId}`}
                   aria-label="Voltar ao contrato"
-                  title="Voltar ao contrato"
-                  className="absolute left-0 top-1 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 dark:text-red-400 hover:bg-gray-100/80 dark:hover:bg-gray-800/80"
+                  className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
                 >
-                  <ArrowLeft className="h-5 w-5" />
+                  <ArrowLeft className="h-4 w-4 shrink-0" />
+                  Voltar
                 </Link>
-                <div className="text-center px-12 sm:px-16">
+                <div className="w-full max-w-3xl px-14 text-center sm:px-20">
                   <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Orçamento</h1>
                   <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
                     Automação de orçamentos com composições e serviços padrão por contrato
@@ -4032,17 +5115,6 @@ export function OrcamentoPageView({
                             : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
                         }`}
                       >
-                        Planilha analítica
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setOrcamentoViewTab('fichaDemanda')}
-                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
-                          orcamentoViewTab === 'fichaDemanda'
-                            ? 'bg-red-600 text-white shadow-sm'
-                            : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
-                        }`}
-                      >
                         Ficha de demanda
                       </button>
                     </div>
@@ -4110,9 +5182,27 @@ export function OrcamentoPageView({
                         <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Orçamento realizado por</div>
                         <div className="mt-0.5 font-medium text-gray-900 dark:text-gray-100 break-words">{meta.orcamentoRealizadoPor || '—'}</div>
                       </div>
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Desconto (%)</div>
+                        <div className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{meta.descontoPercentual || '0'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">BDI (%)</div>
+                        <div className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{meta.bdiPercentual || '0'}</div>
+                      </div>
                       <div className="sm:col-span-2 xl:col-span-3">
                         <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Descrição</div>
                         <div className="mt-0.5 font-medium text-gray-900 dark:text-gray-100 break-words">{meta.descricao || '—'}</div>
+                      </div>
+                      <div className="sm:col-span-2 xl:col-span-3">
+                        <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Reajustes (%)</div>
+                        <div className="mt-0.5 font-medium text-gray-900 dark:text-gray-100 break-words">
+                          {(meta.reajustes ?? []).length > 0
+                            ? meta.reajustes
+                                .map((r, idx) => `${r.nome || `Reajuste ${idx + 1}`}: ${r.percentual || '0'}%`)
+                                .join(' | ')
+                            : '—'}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -4147,7 +5237,7 @@ export function OrcamentoPageView({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                          {linhasAnaliticoOrcamento.map((l) => {
+                          {linhasAnaliticoOrcamento.map((l, idxLinha) => {
                             if (l.kind === 'tituloServico') {
                               return (
                                 <tr key={l.key} className="bg-red-600 dark:bg-red-950/90">
@@ -4182,36 +5272,63 @@ export function OrcamentoPageView({
                             }
                             if (l.kind === 'composicao') {
                               return (
-                                <tr key={l.key} className="bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700">
-                                  <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-50">
-                                    {l.item}
-                                  </td>
-                                  <td className="px-3 py-2 text-center text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
-                                  <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
-                                  <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco}</td>
-                                  <td className="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"><div className="truncate max-w-[min(520px,55vw)]">{l.descricao}</div></td>
-                                  <td className="px-3 py-2 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
-                                  <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                  <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                  <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                  <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
-                                    <MoedaCelula
-                                      valor={l.valorUnit}
-                                      className="font-medium text-gray-900 dark:text-gray-100"
-                                    />
-                                  </td>
-                                  <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
-                                    <MoedaCelula
-                                      valor={l.total}
-                                      className="font-semibold text-gray-900 dark:text-gray-50"
-                                      valorClassName="font-semibold"
-                                    />
-                                  </td>
-                                </tr>
+                                <React.Fragment key={l.key}>
+                                  <tr className="bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700">
+                                    <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-50">
+                                      {l.item}
+                                    </td>
+                                    <td className="px-3 py-2 text-center text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
+                                    <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
+                                    <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco}</td>
+                                    <td className="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="truncate max-w-[min(460px,50vw)]">{l.descricao}</div>
+                                        <button
+                                          type="button"
+                                          onClick={() => addInsumoManualAnalitico(l.key)}
+                                          className="inline-flex items-center justify-center h-6 w-6 rounded text-white text-base leading-none hover:bg-white/10 shrink-0"
+                                          title="Adicionar insumo manual nesta composição"
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-2 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
+                                    <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                    <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                    <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                    <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                      <MoedaCelula
+                                        valor={l.valorUnit}
+                                        className="font-medium text-gray-900 dark:text-gray-100"
+                                      />
+                                    </td>
+                                    <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                      <MoedaCelula
+                                        valor={l.total}
+                                        className="font-semibold text-gray-900 dark:text-gray-50"
+                                        valorClassName="font-semibold"
+                                      />
+                                    </td>
+                                  </tr>
+                                </React.Fragment>
                               );
                             }
+                            const proximaLinha = linhasAnaliticoOrcamento[idxLinha + 1];
+                            const ultimoInsumoDaComposicao =
+                              !proximaLinha ||
+                              proximaLinha.kind !== 'insumo' ||
+                              proximaLinha.parentKey !== l.parentKey;
+                            const manuais = insumosAnaliticoManuais[l.parentKey] ?? [];
+                            const composicaoPai = linhasAnaliticoOrcamento.find(
+                              (linha) => linha.kind === 'composicao' && linha.key === l.parentKey
+                            );
+                            const baseInsumos = linhasAnaliticoOrcamento.filter(
+                              (linha) => linha.kind === 'insumo' && linha.parentKey === l.parentKey
+                            ).length;
                             return (
-                              <tr key={l.key} className="bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800">
+                              <React.Fragment key={l.key}>
+                              <tr className="bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800">
                                 <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm tabular-nums text-gray-700 dark:text-gray-300">
                                   {l.item}
                                 </td>
@@ -4230,6 +5347,93 @@ export function OrcamentoPageView({
                                   <MoedaCelula valor={l.total} className="text-gray-900 dark:text-gray-100" />
                                 </td>
                               </tr>
+                              {ultimoInsumoDaComposicao && manuais.map((ins, idx) => {
+                                const itemManual =
+                                  composicaoPai && composicaoPai.kind === 'composicao'
+                                    ? `${composicaoPai.item}.${baseInsumos + idx + 1}`
+                                    : `${baseInsumos + idx + 1}`;
+                                const quantUnitNum = parsePlanilhaCalcOrPtBr(ins.quant);
+                                const qtdComp =
+                                  composicaoPai && composicaoPai.kind === 'composicao'
+                                    ? Number(composicaoPai.quantidadeReal) || 0
+                                    : 0;
+                                const qtdRealNum = quantUnitNum !== null ? quantUnitNum * qtdComp : null;
+                                const vUnitNum = parsePlanilhaCalcOrPtBr(ins.valorUnit);
+                                const totalManual =
+                                  qtdRealNum !== null && vUnitNum !== null ? qtdRealNum * vUnitNum : null;
+                                return (
+                                  <tr key={ins.id} className="bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700">
+                                    <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm tabular-nums text-gray-700 dark:text-gray-300">
+                                      {itemManual}
+                                    </td>
+                                    <td className="px-3 py-2 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                      Insumo
+                                    </td>
+                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                      <input type="text" value={ins.codigo} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'codigo', e.target.value)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center" placeholder="Código" />
+                                    </td>
+                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                      <input type="text" value={ins.banco} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'banco', e.target.value)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center" placeholder="Banco" />
+                                    </td>
+                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                      <div className="flex items-center gap-2">
+                                        <input type="text" value={ins.descricao} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'descricao', e.target.value)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" placeholder="Descrição do insumo" />
+                                        <button type="button" onClick={() => removerInsumoManualAnalitico(l.parentKey, ins.id)} className="p-1.5 rounded text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 shrink-0" title="Remover insumo manual">
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                      <select
+                                        value={ins.und}
+                                        onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'und', e.target.value)}
+                                        className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center"
+                                      >
+                                        <option value="">UND</option>
+                                        <option value="UN">UN</option>
+                                        <option value="M">M</option>
+                                        <option value="M²">M²</option>
+                                        <option value="M³">M³</option>
+                                        <option value="H">H</option>
+                                        <option value="DIA">DIA</option>
+                                        <option value="KG">KG</option>
+                                        <option value="L">L</option>
+                                        <option value="CJ">CJ</option>
+                                        <option value="VB">VB</option>
+                                      </select>
+                                    </td>
+                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                      <input type="text" inputMode="decimal" value={ins.quant} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'quant', e.target.value)} onBlur={() => normalizarNumeroManualAnalitico(l.parentKey, ins.id, 'quant', 2)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center tabular-nums" placeholder="0,00" />
+                                    </td>
+                                    <td className="px-3 py-2 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                      {qtdRealNum !== null
+                                        ? qtdRealNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : '—'}
+                                    </td>
+                                    <td className="px-3 py-2 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                      {qtdRealNum !== null
+                                        ? qtdRealNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : '—'}
+                                    </td>
+                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                      <div className="flex w-full min-w-0 items-center justify-between gap-1">
+                                        <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 tabular-nums">
+                                          R$
+                                        </span>
+                                        <input type="text" inputMode="decimal" value={ins.valorUnit} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'valorUnit', e.target.value)} onBlur={() => normalizarNumeroManualAnalitico(l.parentKey, ins.id, 'valorUnit', 2)} className="min-w-0 w-[6.5rem] max-w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-right tabular-nums" placeholder="0,00" />
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 text-right text-gray-900 dark:text-gray-100">
+                                      {totalManual !== null ? (
+                                        <MoedaCelula valor={totalManual} className="w-full text-sm text-gray-900 dark:text-gray-100" />
+                                      ) : (
+                                        '—'
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              </React.Fragment>
                             );
                           })}
                         </tbody>
@@ -4255,7 +5459,7 @@ export function OrcamentoPageView({
                   <div className="space-y-3">
                     {linhasAnaliticoOrcamento.length === 0 ? (
                       <OrcamentoSecaoVazia
-                        titulo="Planilha analítica vazia"
+                        titulo="Ficha de demanda vazia"
                         texto="Adicione itens na aba Orçamento para acompanhar custos estimados, compras e valores unitários."
                         Icon={FileSpreadsheet}
                         onIrOrcamento={() => setOrcamentoViewTab('montagem')}
@@ -4266,89 +5470,255 @@ export function OrcamentoPageView({
                           <table className="min-w-full border-collapse">
                             <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
                               <tr>
-                                <th className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.item}
+                                  className="cursor-help w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide"
+                                >
                                   Item
                                 </th>
-                                <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.codigo}
+                                  className="cursor-help px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
                                   Código
                                 </th>
-                                <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.banco}
+                                  className="cursor-help px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
                                   Banco
                                 </th>
-                                <th className="min-w-[220px] px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.servico}
+                                  className="cursor-help min-w-[220px] px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                >
                                   Serviço
                                 </th>
-                                <th className="w-14 px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.tipo}
+                                  className="cursor-help w-14 px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  Tipo
+                                </th>
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.un}
+                                  className="cursor-help w-14 px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                >
                                   UN
                                 </th>
-                                <th className="w-[108px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadQuantidade}
+                                  className="cursor-help w-[108px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
                                   Quantidade
                                 </th>
-                                <th className="w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadValorUnitOrc}
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
                                   Valor unit. orçamento
                                 </th>
-                                <th className="w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
-                                  Total orçamento
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadTotalOrc}
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  Custo orçamento
                                 </th>
-                                <th className="w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadValorUnitEst}
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  Valor unit. estimado (60%)
+                                </th>
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadCustoEst}
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  Custo estimado (60%)
+                                </th>
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadQtdCompra}
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
                                   Quantidade compra
                                 </th>
-                                <th className="w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
-                                  Custo estimado
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadSobra}
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  Sobra
                                 </th>
-                                <th className="w-[130px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
-                                  Valor unit. compra real
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadVlCompraReal}
+                                  className="cursor-help w-[130px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  Valor unit. real
                                 </th>
-                                <th className="w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">
-                                  Custo compra real
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadCustoCompraReal}
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  Custo real
                                 </th>
-                                <th className="w-14 px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">
-                                  Tipo
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadPctLev}
+                                  className="cursor-help w-[100px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  % Qtd. solicitada
+                                </th>
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadPctFat}
+                                  className="cursor-help w-[100px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  % Valor total
+                                </th>
+                                <th
+                                  title={PLANILHA_ANALITICA_TOOLTIP.theadPctCvp}
+                                  className="cursor-help min-w-[10rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                >
+                                  % Custo / valor pago
                                 </th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                              {linhasAnaliticoOrcamento.map((l) => {
+                              {linhasAnaliticoComManuais.map((l) => {
                                 const itemW =
                                   'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm tabular-nums';
                                 if (l.kind === 'tituloServico') {
+                                  const resumo = resumoSecoesFicha.porTitulo.get(String(l.main)) ?? {
+                                    custoOrc: 0,
+                                    custoEst: 0,
+                                    custoReal: 0
+                                  };
+                                  const listaAggTit =
+                                    resumoSecoesFicha.aggPorTituloParaTooltip.get(String(l.main)) ?? [];
                                   return (
                                     <tr key={l.key} className="bg-red-600 dark:bg-red-950/90">
-                                      <td className={`${itemW} font-bold text-white`}>
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.item}
+                                        className={`${itemW} cursor-help font-bold text-white`}
+                                      >
                                         {l.main}
                                       </td>
-                                      <td
-                                        colSpan={12}
-                                        className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-left text-white align-middle"
-                                      >
+                                      <td title={PLANILHA_ANALITICA_TOOLTIP.tituloServico} colSpan={7} className="cursor-help px-3 py-2 text-xs font-bold uppercase tracking-wide text-left text-white align-middle">
                                         {l.servicoNome}
                                       </td>
+                                      <td className="px-3 py-2 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
+                                        <CalcHoverBridge
+                                          hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'orc')}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={resumo.custoOrc} className="text-white font-bold" valorClassName="font-bold" />
+                                        </CalcHoverBridge>
+                                      </td>
+                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
+                                        <CalcHoverBridge
+                                          hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'est')}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={resumo.custoEst} className="text-white font-bold" valorClassName="font-bold" />
+                                        </CalcHoverBridge>
+                                      </td>
+                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
+                                        <CalcHoverBridge
+                                          hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'real')}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={resumo.custoReal} className="text-white font-bold" valorClassName="font-bold" />
+                                        </CalcHoverBridge>
+                                      </td>
+                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
                                     </tr>
                                   );
                                 }
                                 if (l.kind === 'subtituloBloco') {
+                                  const resumo = resumoSecoesFicha.porSubtitulo.get(`${l.main}.${l.subIdx}`) ?? {
+                                    custoOrc: 0,
+                                    custoEst: 0,
+                                    custoReal: 0
+                                  };
+                                  const listaAggSub =
+                                    resumoSecoesFicha.aggPorSubtituloParaTooltip.get(`${l.main}.${l.subIdx}`) ?? [];
                                   return (
                                     <tr
                                       key={l.key}
                                       className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
                                     >
-                                      <td className={`${itemW} text-xs font-semibold text-gray-800 dark:text-gray-200`}>
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.item}
+                                        className={`${itemW} cursor-help text-xs font-semibold text-gray-800 dark:text-gray-200`}
+                                      >
                                         {`${l.main}.${l.subIdx}`}
                                       </td>
-                                      <td colSpan={12} className="px-3 py-1.5 align-middle">
+                                      <td title={PLANILHA_ANALITICA_TOOLTIP.subtituloBloco} colSpan={7} className="cursor-help px-3 py-1.5 align-middle">
                                         {l.texto ? (
                                           <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
                                             {l.texto}
                                           </span>
                                         ) : null}
                                       </td>
+                                      <td
+                                        className={`px-3 py-1.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`custo-orc-bloco-${l.main}-${l.subIdx}`)
+                                            ? CLASSE_CELULA_HOVER_FONTE
+                                            : ''
+                                        }`}
+                                      >
+                                        <CalcHoverBridge
+                                          hoverSourceIds={hoverIdsAggCustoOrc(listaAggSub)}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={resumo.custoOrc} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                                        </CalcHoverBridge>
+                                      </td>
+                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td
+                                        className={`px-3 py-1.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`custo-est-bloco-${l.main}-${l.subIdx}`)
+                                            ? CLASSE_CELULA_HOVER_FONTE
+                                            : ''
+                                        }`}
+                                      >
+                                        <CalcHoverBridge
+                                          hoverSourceIds={hoverIdsAggCustoEst(listaAggSub)}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={resumo.custoEst} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                                        </CalcHoverBridge>
+                                      </td>
+                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td
+                                        className={`px-3 py-1.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`custo-real-bloco-${l.main}-${l.subIdx}`)
+                                            ? CLASSE_CELULA_HOVER_FONTE
+                                            : ''
+                                        }`}
+                                      >
+                                        <CalcHoverBridge
+                                          hoverSourceIds={hoverIdsAggCustoReal(listaAggSub)}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={resumo.custoReal} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                                        </CalcHoverBridge>
+                                      </td>
+                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
                                     </tr>
                                   );
                                 }
                                 if (l.kind === 'composicao') {
                                   const filhos = insumosPlanilhaPorComposicao.get(l.key) ?? [];
                                   let sumQtdCompra = 0;
-                                  let sumCustoEst = 0;
+                                  const sumCustoEst = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
                                   let sumCustoReal = 0;
                                   let sumQtdCompraComVlReal = 0;
                                   let temQtdCompra = false;
@@ -4366,7 +5736,6 @@ export function OrcamentoPageView({
                                     if (qC !== undefined && Number.isFinite(qC)) {
                                       temQtdCompra = true;
                                       sumQtdCompra += qC;
-                                      sumCustoEst += qC * vOrc;
                                       if (vReal !== undefined && Number.isFinite(vReal)) {
                                         sumCustoReal += qC * vReal;
                                         sumQtdCompraComVlReal += qC;
@@ -4375,51 +5744,193 @@ export function OrcamentoPageView({
                                   }
                                   const vlUnitCompraRealAgreg =
                                     temAlgumVlUnitCompraReal ? somaVlUnitCompraRealInsumos : null;
+                                  const pctRow = pctFichaDemandaPorKey.get(l.key);
+                                  const pctLev = pctRow?.levantamentoPct;
+                                  const pctFat = pctRow?.faturamentoPct;
+                                  const pctCvp = pctRow?.pctCustoValorPago;
+                                  const custoEstCompCalc = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
+                                  const levantamentoCondComp =
+                                    pctLev !== undefined && Number.isFinite(pctLev)
+                                      ? classeLevantamentoCondicional(pctLev)
+                                      : '';
+                                  const valorTotalCondComp =
+                                    pctFat !== undefined && Number.isFinite(pctFat)
+                                      ? classeValorTotalCondicional(pctFat)
+                                      : '';
                                   return (
                                     <tr
                                       key={l.key}
                                       className="bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700"
                                     >
-                                      <td className={`${itemW} font-semibold text-gray-900 dark:text-gray-50`}>
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.item}
+                                        className={`${itemW} cursor-help font-semibold text-gray-900 dark:text-gray-50`}
+                                      >
                                         {l.item}
                                       </td>
-                                      <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
-                                      <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco}</td>
-                                      <td className="min-w-[220px] px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.codigo}
+                                        className="cursor-help px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
+                                      >
+                                        {l.codigo}
+                                      </td>
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.banco}
+                                        className="cursor-help px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
+                                      >
+                                        {l.banco}
+                                      </td>
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.servico}
+                                        className="cursor-help min-w-[220px] px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
+                                      >
                                         <div className="truncate max-w-[min(520px,55vw)]" title={l.descricao}>
                                           {l.descricao}
                                         </div>
                                       </td>
-                                      <td className="px-3 py-2 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.tipoCompLinha}
+                                        className="cursor-help px-3 py-2 text-sm text-center text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
+                                      />
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.un}
+                                        className="cursor-help px-3 py-2 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                      >
                                         {l.und}
                                       </td>
-                                      <td className="px-3 py-2 text-sm text-right tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                        {l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.quantidadeComp}
+                                        className={`cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`qtd-orc-${l.key}`)
+                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                            : ''
+                                        }`}
+                                      >
+                                        {l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                                       </td>
-                                      <td className="px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcComp}
+                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`vl-orc-${l.key}`)
+                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                            : ''
+                                        }`}
+                                      >
                                         <MoedaCelula valor={l.valorUnit} />
                                       </td>
-                                      <td className="px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={l.total} className="font-semibold" valorClassName="font-semibold" />
+                                      <td
+                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`custo-orc-${l.key}`)
+                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                            : ''
+                                        }`}
+                                      >
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`qtd-orc-${l.key}`, `vl-orc-${l.key}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={l.total} className="font-semibold" valorClassName="font-semibold" />
+                                        </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-2 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700" />
-                                      <td className="px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">
-                                        {temQtdCompra ? <MoedaCelula valor={sumCustoEst} /> : null}
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstComp}
+                                        className="cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                      >
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`vl-orc-${l.key}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={l.valorUnit * PLANILHA_FATOR_CUSTO_ESTIMADO} />
+                                        </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">
+                                      <td
+                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`custo-est-${l.key}`)
+                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                            : ''
+                                        }`}
+                                      >
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`custo-est-${l.key}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={custoEstCompCalc} />
+                                        </CalcHoverBridge>
+                                      </td>
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraComp}
+                                        className="cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                      />
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraComp}
+                                        className="cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                      />
+                                      <td
+                                        title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealComp}
+                                        className="cursor-help px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                      >
                                         {vlUnitCompraRealAgreg !== null ? <MoedaCelula valor={vlUnitCompraRealAgreg} /> : null}
                                       </td>
-                                      <td className="px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">
-                                        {sumQtdCompraComVlReal > 0 ? <MoedaCelula valor={sumCustoReal} /> : null}
+                                      <td
+                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
+                                          calcHoverSourceIds.includes(`custo-real-${l.key}`)
+                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                            : ''
+                                        }`}
+                                      >
+                                        {sumQtdCompraComVlReal > 0 ? (
+                                          <CalcHoverBridge
+                                            hoverSourceIds={[`custo-real-${l.key}`]}
+                                            onHoverSourcesChange={setCalcHoverSourceIds}
+                                          >
+                                            <MoedaCelula valor={sumCustoReal} />
+                                          </CalcHoverBridge>
+                                        ) : null}
                                       </td>
-                                      <td className="px-3 py-2 text-sm text-center text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700" />
+                                      <td
+                                        className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                          levantamentoCondComp || 'text-gray-800 dark:text-gray-200'
+                                        }`}
+                                      >
+                                        {pctLev !== undefined && Number.isFinite(pctLev)
+                                          ? `${pctLev.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+                                          : (
+                                              <span className="text-gray-500 dark:text-gray-400">—</span>
+                                            )}
+                                      </td>
+                                      <td
+                                        className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                          valorTotalCondComp || 'text-gray-800 dark:text-gray-200'
+                                        }`}
+                                      >
+                                        {pctFat !== undefined && Number.isFinite(pctFat)
+                                          ? `${pctFat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+                                          : (
+                                              <span className="text-gray-500 dark:text-gray-400">—</span>
+                                            )}
+                                      </td>
+                                      <td
+                                        className="cursor-help px-3 py-2 text-sm text-center tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                      >
+                                        {pctCvp !== undefined && Number.isFinite(pctCvp) ? (
+                                          <CalcHoverBridge
+                                            hoverSourceIds={[`custo-real-${l.key}`, `custo-orc-${l.key}`]}
+                                            onHoverSourcesChange={setCalcHoverSourceIds}
+                                          >
+                                            <span>{`${pctCvp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                          </CalcHoverBridge>
+                                        ) : (
+                                          <span className="text-gray-500 dark:text-gray-400">—</span>
+                                        )}
+                                      </td>
                                     </tr>
                                   );
                                 }
                                 const qC = planilhaQuantidadeCompra[l.key];
                                 const vReal = planilhaValorUnitCompraReal[l.key];
                                 const vOrc = l.valorUnit;
-                                const custoEst = qC !== undefined && Number.isFinite(qC) ? qC * vOrc : null;
+                                const valorUnitEstimado = vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO;
+                                const custoEst = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
                                 const custoCompraR =
                                   qC !== undefined &&
                                   vReal !== undefined &&
@@ -4427,31 +5938,157 @@ export function OrcamentoPageView({
                                   Number.isFinite(vReal)
                                     ? qC * vReal
                                     : null;
+                                const pctInsumo = pctFichaDemandaPorKey.get(l.key);
+                                const pctLevIn = pctInsumo?.levantamentoPct;
+                                const pctFatIn = pctInsumo?.faturamentoPct;
+                                const pctCvpIn = pctInsumo?.pctCustoValorPago;
+                                const composicaoPaiParaPct = linhasAnaliticoComManuais.find(
+                                  (x) => x.kind === 'composicao' && x.key === l.parentKey
+                                );
+                                const faturamentoComposicaoPai =
+                                  composicaoPaiParaPct && composicaoPaiParaPct.kind === 'composicao'
+                                    ? composicaoPaiParaPct.quantidadeReal * composicaoPaiParaPct.valorUnit
+                                    : 0;
+                                const valorTotalCondIn =
+                                  pctFatIn !== undefined && Number.isFinite(pctFatIn)
+                                    ? classeValorTotalCondicional(pctFatIn)
+                                    : '';
+                                const sobraInsumo =
+                                  qC !== undefined && Number.isFinite(qC) ? l.quantidadeReal - qC : null;
+                                const levantamentoCondIn =
+                                  pctLevIn !== undefined && Number.isFinite(pctLevIn)
+                                    ? classeLevantamentoCondicional(pctLevIn)
+                                    : '';
                                 return (
                                   <tr key={l.key} className="bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800">
-                                    <td className={`${itemW} text-gray-700 dark:text-gray-300`}>{l.item}</td>
-                                    <td className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo || '—'}</td>
-                                    <td className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco || '—'}</td>
-                                    <td className="min-w-[220px] px-3 py-2 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.item}
+                                      className={`${itemW} cursor-help text-gray-700 dark:text-gray-300`}
+                                    >
+                                      {l.item}
+                                    </td>
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.codigo}
+                                      className="cursor-help px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
+                                    >
+                                      {l.codigo || '—'}
+                                    </td>
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.banco}
+                                      className="cursor-help px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
+                                    >
+                                      {l.banco || '—'}
+                                    </td>
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.servico}
+                                      className="cursor-help min-w-[220px] px-3 py-2 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                    >
                                       <div className="truncate max-w-[min(520px,55vw)]" title={l.descricao}>
                                         {l.descricao}
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '—'}</td>
-                                    <td className="px-3 py-2 text-sm text-right tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
-                                      {l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.tipo}
+                                      className="cursor-help px-3 py-2 text-sm text-center font-medium text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                    >
+                                      <select
+                                        value={
+                                          (String(planilhaTipoInsumo[l.key] ?? '') === 'MAT'
+                                            ? 'MA'
+                                            : planilhaTipoInsumo[l.key]) ?? tipoPlanilhaInsumo(l.categoria)
+                                        }
+                                        onChange={(e) =>
+                                          setPlanilhaTipoInsumo((prev) => ({
+                                            ...prev,
+                                            [l.key]: e.target.value as 'MO' | 'MA' | 'LO'
+                                          }))
+                                        }
+                                        className="w-[5.2rem] max-w-full px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs sm:text-sm"
+                                        title="Selecione o tipo do insumo"
+                                      >
+                                        <option value="MO">MO</option>
+                                        <option value="MA">MA</option>
+                                        <option value="LO">LO</option>
+                                      </select>
                                     </td>
-                                    <td className="px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.un}
+                                      className="cursor-help px-3 py-2 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
+                                    >
+                                      {l.und || '—'}
+                                    </td>
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.quantidadeInsumo}
+                                      className={`cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
+                                        calcHoverSourceIds.includes(`qtd-orc-${l.key}`)
+                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                          : ''
+                                      }`}
+                                    >
+                                      {l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                    </td>
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcInsumo}
+                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
+                                        calcHoverSourceIds.includes(`vl-orc-${l.key}`)
+                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                          : ''
+                                      }`}
+                                    >
                                       <MoedaCelula valor={l.valorUnit} />
                                     </td>
-                                    <td className="px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                      <MoedaCelula valor={l.total} />
+                                    <td
+                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                        calcHoverSourceIds.includes(`custo-orc-${l.key}`)
+                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                          : ''
+                                      }`}
+                                    >
+                                      <CalcHoverBridge
+                                        hoverSourceIds={[`qtd-orc-${l.key}`, `vl-orc-${l.key}`]}
+                                        onHoverSourcesChange={setCalcHoverSourceIds}
+                                      >
+                                        <MoedaCelula valor={l.total} />
+                                      </CalcHoverBridge>
                                     </td>
-                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstInsumo}
+                                      className="cursor-help px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                    >
+                                      <CalcHoverBridge
+                                        hoverSourceIds={[`vl-orc-${l.key}`]}
+                                        onHoverSourcesChange={setCalcHoverSourceIds}
+                                      >
+                                        <MoedaCelula valor={valorUnitEstimado} />
+                                      </CalcHoverBridge>
+                                    </td>
+                                    <td
+                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
+                                        calcHoverSourceIds.includes(`custo-est-${l.key}`)
+                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                          : ''
+                                      }`}
+                                    >
+                                      <CalcHoverBridge
+                                        hoverSourceIds={[`custo-est-${l.key}`]}
+                                        onHoverSourcesChange={setCalcHoverSourceIds}
+                                      >
+                                        <MoedaCelula valor={custoEst} />
+                                      </CalcHoverBridge>
+                                    </td>
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
+                                      className={`cursor-help px-2 py-2 border-l border-gray-200 dark:border-gray-700 ${
+                                        calcHoverSourceIds.includes(`qtd-compra-${l.key}`)
+                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                          : ''
+                                      }`}
+                                    >
                                       <input
                                         type="text"
                                         inputMode="decimal"
                                         placeholder="0"
+                                        title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
                                         className="w-full min-w-0 px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm tabular-nums"
                                         value={
                                           planilhaCompraDraft[`q|${l.key}`] ??
@@ -4459,16 +6096,35 @@ export function OrcamentoPageView({
                                             ? qC.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
                                             : '')
                                         }
-                                        onChange={(e) =>
-                                          setPlanilhaCompraDraft((p) => ({ ...p, [`q|${l.key}`]: e.target.value }))
-                                        }
+                                        onChange={(e) => handlePlanilhaQtdCompraChange(l.key, e.target.value)}
                                         onBlur={(e) => commitPlanilhaQtdCompra(l.key, e.target.value)}
                                       />
                                     </td>
-                                    <td className="px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
-                                      {custoEst !== null ? <MoedaCelula valor={custoEst} /> : '—'}
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraInsumo}
+                                      className={`cursor-help px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                        sobraInsumo !== null && sobraInsumo < 0
+                                          ? 'font-semibold bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200'
+                                          : 'text-gray-700 dark:text-gray-300'
+                                      }`}
+                                    >
+                                      {sobraInsumo !== null ? (
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`qtd-orc-${l.key}`, `qtd-compra-${l.key}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <span>{sobraInsumo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                                        </CalcHoverBridge>
+                                      ) : '—'}
                                     </td>
-                                    <td className="px-2 py-2 align-middle border-l border-gray-200 dark:border-gray-700">
+                                    <td
+                                      title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
+                                      className={`cursor-help px-2 py-2 align-middle border-l border-gray-200 dark:border-gray-700 ${
+                                        calcHoverSourceIds.includes(`vl-real-${l.key}`)
+                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                          : ''
+                                      }`}
+                                    >
                                       <div className="flex w-full min-w-0 items-center justify-between gap-1">
                                         <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 tabular-nums">
                                           R$
@@ -4477,6 +6133,7 @@ export function OrcamentoPageView({
                                           type="text"
                                           inputMode="decimal"
                                           placeholder="0,00"
+                                          title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
                                           className="min-w-0 w-[6.5rem] max-w-full px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm tabular-nums"
                                           value={
                                             planilhaCompraDraft[`v|${l.key}`] ??
@@ -4484,18 +6141,73 @@ export function OrcamentoPageView({
                                               ? vReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                                               : '')
                                           }
-                                          onChange={(e) =>
-                                            setPlanilhaCompraDraft((p) => ({ ...p, [`v|${l.key}`]: e.target.value }))
-                                          }
+                                          onChange={(e) => handlePlanilhaVlCompraRealChange(l.key, e.target.value)}
                                           onBlur={(e) => commitPlanilhaVlCompraReal(l.key, e.target.value)}
                                         />
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                      {custoCompraR !== null ? <MoedaCelula valor={custoCompraR} /> : '—'}
+                                    <td
+                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                        calcHoverSourceIds.includes(`custo-real-${l.key}`)
+                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                          : ''
+                                      }`}
+                                    >
+                                      {custoCompraR !== null ? (
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`qtd-compra-${l.key}`, `vl-real-${l.key}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <MoedaCelula valor={custoCompraR} />
+                                        </CalcHoverBridge>
+                                      ) : '—'}
                                     </td>
-                                    <td className="px-3 py-2 text-sm text-center font-medium text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
-                                      {tipoPlanilhaInsumo(l.categoria)}
+                                    <td
+                                      className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                        levantamentoCondIn ||
+                                        'text-gray-700 dark:text-gray-300'
+                                      }`}
+                                    >
+                                      {pctLevIn !== undefined && Number.isFinite(pctLevIn) ? (
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`qtd-compra-${l.key}`, `qtd-orc-${l.key}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <span>{`${pctLevIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        </CalcHoverBridge>
+                                      ) : (
+                                        <span className="text-gray-500 dark:text-gray-400">—</span>
+                                      )}
+                                    </td>
+                                    <td
+                                      className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                        valorTotalCondIn || 'text-gray-700 dark:text-gray-300'
+                                      }`}
+                                    >
+                                      {pctFatIn !== undefined && Number.isFinite(pctFatIn) ? (
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`custo-real-${l.key}`, `custo-orc-${l.key}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <span>{`${pctFatIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        </CalcHoverBridge>
+                                      ) : (
+                                        <span className="text-gray-500 dark:text-gray-400">—</span>
+                                      )}
+                                    </td>
+                                    <td
+                                      className="cursor-help px-3 py-2 text-sm text-center tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                    >
+                                      {pctCvpIn !== undefined && Number.isFinite(pctCvpIn) ? (
+                                        <CalcHoverBridge
+                                          hoverSourceIds={[`custo-real-${l.key}`, `custo-orc-${l.parentKey}`]}
+                                          onHoverSourcesChange={setCalcHoverSourceIds}
+                                        >
+                                          <span>{`${pctCvpIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        </CalcHoverBridge>
+                                      ) : (
+                                        <span className="text-gray-500 dark:text-gray-400">—</span>
+                                      )}
                                     </td>
                                   </tr>
                                 );
@@ -4503,15 +6215,142 @@ export function OrcamentoPageView({
                             </tbody>
                           </table>
                         </div>
+                        <div className="mt-6 flex flex-col gap-4">
+                          <div className="space-y-4">
+                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
+                              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
+                                Preço de compra por grupo
+                              </h4>
+                              <dl className="divide-y divide-gray-200/90 dark:divide-gray-700/90">
+                                {(
+                                  [
+                                    ['Preço compra MA', resumoRodapeFichaDemanda.precoMa],
+                                    ['Preço compra MO', resumoRodapeFichaDemanda.precoMo],
+                                    ['Preço compra LO', resumoRodapeFichaDemanda.precoLo]
+                                  ] as const
+                                ).map(([label, val]) => (
+                                  <div
+                                    key={label}
+                                    className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0"
+                                  >
+                                    <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
+                                      {label}
+                                    </dt>
+                                    <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
+                                      {val !== null && val !== undefined
+                                        ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                        : '—'}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
+                              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
+                                Relações com o orçamento
+                              </h4>
+                              <dl className="divide-y divide-gray-200/90 dark:divide-gray-700/90">
+                                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0">
+                                  <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
+                                    Relação de preço estimado × orçamento
+                                  </dt>
+                                  <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
+                                    {resumoRodapeFichaDemanda.relacaoEstimadoOrcamentoPct !== null
+                                      ? `${resumoRodapeFichaDemanda.relacaoEstimadoOrcamentoPct.toLocaleString('pt-BR', {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2
+                                        })}%`
+                                      : '—'}
+                                  </dd>
+                                </div>
+                                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+                                  <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
+                                    Relação de preço de compra real × orçamento
+                                  </dt>
+                                  <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
+                                    {resumoRodapeFichaDemanda.relacaoRealOrcamentoPct !== null
+                                      ? `${resumoRodapeFichaDemanda.relacaoRealOrcamentoPct.toLocaleString('pt-BR', {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2
+                                        })}%`
+                                      : '—'}
+                                  </dd>
+                                </div>
+                              </dl>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
+                            <dl className="divide-y divide-gray-200/90 dark:divide-gray-700/90">
+                              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0">
+                                <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
+                                  Total faturado (material / mão de obra / locação)
+                                </dt>
+                                <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
+                                  {`R$ ${resumoRodapeFichaDemanda.totalFaturadoMatMoLoc.toLocaleString('pt-BR', {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2
+                                  })}`}
+                                </dd>
+                              </div>
+                              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+                                <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
+                                  Preço de compra estimado
+                                </dt>
+                                <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
+                                  {resumoRodapeFichaDemanda.precoCompraEstimadoTotal !== null
+                                    ? `R$ ${resumoRodapeFichaDemanda.precoCompraEstimadoTotal.toLocaleString('pt-BR', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                      })}`
+                                    : '—'}
+                                </dd>
+                              </div>
+                              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+                                <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
+                                  Preço de compra real
+                                </dt>
+                                <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
+                                  {resumoRodapeFichaDemanda.precoCompraRealTotal !== null
+                                    ? `R$ ${resumoRodapeFichaDemanda.precoCompraRealTotal.toLocaleString('pt-BR', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                      })}`
+                                    : '—'}
+                                </dd>
+                              </div>
+                            </dl>
+                            <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-gray-300/80 dark:border-gray-600 pt-4">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                                Valor total do orçamento
+                              </span>
+                              <span className="shrink-0 text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-50 text-right">
+                                {`R$ ${resumoRodapeFichaDemanda.valorTotalOrcamentoFinal.toLocaleString('pt-BR', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2
+                                })}`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                         <div className="flex flex-wrap items-center gap-3 pt-1">
                           <button
                             type="button"
                             onClick={exportarPlanilhaAnalitica}
                             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
-                            title="Exporta a planilha analítica (orçamento e compras) em Excel"
+                            title={PLANILHA_ANALITICA_TOOLTIP.exportPlanilha}
                           >
                             <FileSpreadsheet className="w-5 h-5 shrink-0" />
-                            Exportar planilha analítica (.xlsx)
+                            Exportar ficha de demanda (.xlsx)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={exportarFichaDemandaPdf}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
+                            title="Exporta a ficha de demanda em PDF"
+                          >
+                            <FileDown className="w-5 h-5 shrink-0" />
+                            Exportar ficha de demanda (.pdf)
                           </button>
                         </div>
                         </>
@@ -4756,6 +6595,10 @@ export function OrcamentoPageView({
                                 <td
                                   className={`px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp ? '' : 'text-gray-700 dark:text-gray-300'
+                                  } ${
+                                    !ehComp && calcHoverSourceIds.includes(`ficha-qtd-compra-${r.key}`)
+                                      ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
+                                      : ''
                                   }`}
                                 >
                                   {ehComp
@@ -4790,6 +6633,10 @@ export function OrcamentoPageView({
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-700 dark:text-gray-300'
+                                  } ${
+                                    !ehComp && calcHoverSourceIds.includes(`ficha-vl-orc-${r.key}`)
+                                      ? 'bg-amber-50 ring-1 ring-inset ring-amber-400/70 dark:bg-amber-900/20 dark:ring-amber-500/60'
+                                      : ''
                                   }`}
                                 >
                                   {ehComp
@@ -4826,14 +6673,35 @@ export function OrcamentoPageView({
                                       : 'text-gray-700 dark:text-gray-300'
                                   }`}
                                 >
-                                  {r.valorTotalOrcamento !== undefined
-                                    ? (
+                                  {ehComp ? (
+                                    <span className="inline-block">
+                                      {r.valorTotalOrcamento !== undefined ? (
                                         <MoedaCelula
                                           valor={r.valorTotalOrcamento}
                                           className="w-full text-sm text-gray-700 dark:text-gray-300"
                                         />
-                                      )
-                                    : '—'}
+                                      ) : (
+                                        <span className="text-gray-500 dark:text-gray-400">—</span>
+                                      )}
+                                    </span>
+                                  ) : r.valorTotalOrcamento !== undefined ? (
+                                    <CalcHoverBridge
+                                      hoverSourceIds={[
+                                        `ficha-qtd-compra-${r.key}`,
+                                        `ficha-vl-orc-${r.key}`
+                                      ]}
+                                      onHoverSourcesChange={setCalcHoverSourceIds}
+                                    >
+                                      <span className="inline-block">
+                                        <MoedaCelula
+                                          valor={r.valorTotalOrcamento}
+                                          className="w-full text-sm text-gray-700 dark:text-gray-300"
+                                        />
+                                      </span>
+                                    </CalcHoverBridge>
+                                  ) : (
+                                    <span className="inline-block text-gray-500 dark:text-gray-400">—</span>
+                                  )}
                                 </td>
                                 <td
                                   className={`px-3 py-2 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
@@ -4889,7 +6757,7 @@ export function OrcamentoPageView({
                                       : 'font-medium text-gray-700 dark:text-gray-300'
                                   }`}
                                 >
-                                  {ehComp ? null : r.tipo}
+                                  {ehComp ? null : tipoFichaDemandaLabel(r.tipo)}
                                 </td>
                               </tr>
                               );
@@ -4898,124 +6766,6 @@ export function OrcamentoPageView({
                         </table>
                       </div>
 
-                      <div className="mt-6 flex flex-col gap-4">
-                        <div className="space-y-4">
-                          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
-                            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
-                              Preço de compra por grupo
-                            </h4>
-                            <dl className="divide-y divide-gray-200/90 dark:divide-gray-700/90">
-                              {(
-                                [
-                                  ['Preço compra MA', resumoRodapeFichaDemanda.precoMa],
-                                  ['Preço compra MO', resumoRodapeFichaDemanda.precoMo],
-                                  ['Preço compra LO', resumoRodapeFichaDemanda.precoLo]
-                                ] as const
-                              ).map(([label, val]) => (
-                                <div
-                                  key={label}
-                                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0"
-                                >
-                                  <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
-                                    {label}
-                                  </dt>
-                                  <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
-                                    {val !== null && val !== undefined
-                                      ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                      : '—'}
-                                  </dd>
-                                </div>
-                              ))}
-                            </dl>
-                          </div>
-                          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
-                            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
-                              Relações com o orçamento
-                            </h4>
-                            <dl className="divide-y divide-gray-200/90 dark:divide-gray-700/90">
-                              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0">
-                                <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
-                                  Relação de preço estimado × orçamento
-                                </dt>
-                                <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
-                                  {resumoRodapeFichaDemanda.relacaoEstimadoOrcamentoPct !== null
-                                    ? `${resumoRodapeFichaDemanda.relacaoEstimadoOrcamentoPct.toLocaleString('pt-BR', {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2
-                                      })}%`
-                                    : '—'}
-                                </dd>
-                              </div>
-                              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
-                                <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
-                                  Relação de preço de compra real × orçamento
-                                </dt>
-                                <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
-                                  {resumoRodapeFichaDemanda.relacaoRealOrcamentoPct !== null
-                                    ? `${resumoRodapeFichaDemanda.relacaoRealOrcamentoPct.toLocaleString('pt-BR', {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2
-                                      })}%`
-                                    : '—'}
-                                </dd>
-                              </div>
-                            </dl>
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
-                          <dl className="divide-y divide-gray-200/90 dark:divide-gray-700/90">
-                            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0">
-                              <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
-                                Total faturado (material / mão de obra / locação)
-                              </dt>
-                              <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
-                                {`R$ ${resumoRodapeFichaDemanda.totalFaturadoMatMoLoc.toLocaleString('pt-BR', {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2
-                                })}`}
-                              </dd>
-                            </div>
-                            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
-                              <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
-                                Preço de compra estimado
-                              </dt>
-                              <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
-                                {resumoRodapeFichaDemanda.precoCompraEstimadoTotal !== null
-                                  ? `R$ ${resumoRodapeFichaDemanda.precoCompraEstimadoTotal.toLocaleString('pt-BR', {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2
-                                    })}`
-                                  : '—'}
-                              </dd>
-                            </div>
-                            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
-                              <dt className="min-w-0 flex-1 text-sm text-gray-600 dark:text-gray-400 leading-snug">
-                                Preço de compra real
-                              </dt>
-                              <dd className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 text-right">
-                                {resumoRodapeFichaDemanda.precoCompraRealTotal !== null
-                                  ? `R$ ${resumoRodapeFichaDemanda.precoCompraRealTotal.toLocaleString('pt-BR', {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2
-                                    })}`
-                                  : '—'}
-                              </dd>
-                            </div>
-                          </dl>
-                          <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-gray-300/80 dark:border-gray-600 pt-4">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-                              Valor total do orçamento
-                            </span>
-                            <span className="shrink-0 text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-50 text-right">
-                              {`R$ ${resumoRodapeFichaDemanda.valorTotalOrcamentoFinal.toLocaleString('pt-BR', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2
-                              })}`}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
                       <div className="flex flex-wrap items-center gap-3 pt-1">
                         <button
                           type="button"
@@ -5095,6 +6845,7 @@ export function OrcamentoPageView({
                                 ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
                                 draftCalc={draftCalc}
                                 setDraftCalc={setDraftCalc}
+                                handleCalcChange={handleCalcChange}
                                 handleCalcBlur={handleCalcBlur}
                                 updateLinhaMedicao={updateLinhaMedicao}
                                 addLinhaMedicao={addLinhaMedicao}
@@ -5444,7 +7195,7 @@ export function OrcamentoPageView({
                                             type="text"
                                             inputMode="decimal"
                                             value={draftCalc[`qtd|${row.key}`] ?? (row.quantidade === 0 ? '' : String(row.quantidade))}
-                                            onChange={e => setDraftCalc(p => ({ ...p, [`qtd|${row.key}`]: e.target.value }))}
+                                            onChange={e => handleCalcChange(`qtd|${row.key}`, e.target.value, n => setQuantidadeItem(row.key, Math.max(0, n)))}
                                             onBlur={e => handleCalcBlur(`qtd|${row.key}`, draftCalc[`qtd|${row.key}`] ?? e.target.value, n => setQuantidadeItem(row.key, Math.max(0, n)))}
                                             placeholder="0"
                                             className="w-[4.5rem] min-w-0 px-2 py-1 text-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm mx-auto block"
@@ -5510,9 +7261,10 @@ export function OrcamentoPageView({
                           [`Desconto (${(resumoFinanceiro.descontoPct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, resumoFinanceiro.valorDesconto],
                           ['Total com desconto', resumoFinanceiro.totalComDesconto],
                           [`Total geral com desconto e BDI (${(resumoFinanceiro.bdiPct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, resumoFinanceiro.totalComDescontoEBdi],
-                          [`1º reajuste IPCA (${(resumoFinanceiro.ipca1Pct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 })}%)`, resumoFinanceiro.reajuste1],
-                          [`2º reajuste IPCA (${(resumoFinanceiro.ipca2Pct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 })}%)`, resumoFinanceiro.reajuste2],
-                          [`3º reajuste IPCA (${(resumoFinanceiro.ipca3Pct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 })}%)`, resumoFinanceiro.reajuste3]
+                          ...resumoFinanceiro.reajustesAplicados.map((r) => [
+                            `${r.nome} (${(r.percentualPct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 })}%)`,
+                            r.valor
+                          ] as [string, number])
                         ].map(([label, value]) => (
                           <div
                             key={String(label)}
@@ -5532,7 +7284,7 @@ export function OrcamentoPageView({
                           Valor final
                         </span>
                         <span className="shrink-0 text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-50 text-right">
-                          R$ {resumoFinanceiro.reajuste3.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          R$ {resumoFinanceiro.valorFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                     </div>
@@ -5775,6 +7527,81 @@ export function OrcamentoPageView({
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Desconto (%)</label>
+              <input
+                value={editarDadosDraft.descontoPercentual}
+                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, descontoPercentual: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: 25,01"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">BDI (%)</label>
+              <input
+                value={editarDadosDraft.bdiPercentual}
+                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, bdiPercentual: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: 28,35"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reajustes (%)</label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditarDadosDraft((p) => ({
+                      ...p,
+                      reajustes: [...(p.reajustes ?? []), { nome: `${(p.reajustes?.length ?? 0) + 1}º reajuste`, percentual: '' }]
+                    }))
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  + Adicionar reajuste
+                </button>
+              </div>
+              <div className="space-y-2">
+                {(editarDadosDraft.reajustes ?? []).map((r, idx) => (
+                  <div key={`edit-reajuste-${idx}`} className="grid grid-cols-1 sm:grid-cols-[1fr_11rem_auto] gap-2">
+                    <input
+                      value={r.nome}
+                      onChange={(e) =>
+                        setEditarDadosDraft((p) => ({
+                          ...p,
+                          reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, nome: e.target.value } : rr))
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                      placeholder={`Reajuste ${idx + 1}`}
+                    />
+                    <input
+                      value={r.percentual}
+                      onChange={(e) =>
+                        setEditarDadosDraft((p) => ({
+                          ...p,
+                          reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, percentual: e.target.value } : rr))
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                      placeholder="%"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditarDadosDraft((p) => ({
+                          ...p,
+                          reajustes: (p.reajustes ?? []).filter((_, i) => i !== idx)
+                        }))
+                      }
+                      className="px-3 py-2 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-300 hover:bg-red-50/60 dark:hover:bg-red-950/30 text-xs font-medium"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição</label>
               <input
@@ -5872,6 +7699,81 @@ export function OrcamentoPageView({
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Desconto (%)</label>
+              <input
+                value={novoOrcamentoMetaDraft.descontoPercentual}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, descontoPercentual: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: 25,01"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">BDI (%)</label>
+              <input
+                value={novoOrcamentoMetaDraft.bdiPercentual}
+                onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, bdiPercentual: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: 28,35"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reajustes (%)</label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNovoOrcamentoMetaDraft((p) => ({
+                      ...p,
+                      reajustes: [...(p.reajustes ?? []), { nome: `${(p.reajustes?.length ?? 0) + 1}º reajuste`, percentual: '' }]
+                    }))
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  + Adicionar reajuste
+                </button>
+              </div>
+              <div className="space-y-2">
+                {(novoOrcamentoMetaDraft.reajustes ?? []).map((r, idx) => (
+                  <div key={`new-reajuste-${idx}`} className="grid grid-cols-1 sm:grid-cols-[1fr_11rem_auto] gap-2">
+                    <input
+                      value={r.nome}
+                      onChange={(e) =>
+                        setNovoOrcamentoMetaDraft((p) => ({
+                          ...p,
+                          reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, nome: e.target.value } : rr))
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                      placeholder={`Reajuste ${idx + 1}`}
+                    />
+                    <input
+                      value={r.percentual}
+                      onChange={(e) =>
+                        setNovoOrcamentoMetaDraft((p) => ({
+                          ...p,
+                          reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, percentual: e.target.value } : rr))
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                      placeholder="%"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNovoOrcamentoMetaDraft((p) => ({
+                          ...p,
+                          reajustes: (p.reajustes ?? []).filter((_, i) => i !== idx)
+                        }))
+                      }
+                      className="px-3 py-2 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-300 hover:bg-red-50/60 dark:hover:bg-red-950/30 text-xs font-medium"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição *</label>

@@ -183,7 +183,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             name: 'Permissões',
             href: '/ponto/permissoes',
             icon: Settings,
-            description: 'Gerenciar permissões de usuários',
+            description: 'Gerenciar permissões de funcionários',
             permission: isAdministrator
           }
         ]
@@ -194,11 +194,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Users,
         items: [
           {
-            name: 'Gerenciar Funcionários',
+            name: 'Funcionários',
             href: '/ponto/funcionarios',
             icon: Users,
             description: 'Cadastrar e gerenciar funcionários',
-            permission: isAdministrator || isDepartmentPessoal
+            permission: isAdministrator || isDepartmentPessoal || permissions.canManageEmployees
           },
           {
             name: 'Folha de Pagamento',
@@ -233,7 +233,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
             description: 'Aprovar solicitações de correção',
-            permission: isAdministrator || isDepartmentProjetos || can(pk('/ponto/gerenciar-solicitacoes'))
+            permission: isAdministrator || can(pk('/ponto/gerenciar-solicitacoes'))
           },
           {
             name: 'Férias',
@@ -466,6 +466,15 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const menuItems = getMenuItems();
 
   const isActive = (href: string) => {
+    if (pathname == null) return false;
+    if (href === '/ponto/contratos') {
+      if (pathname === '/ponto/contratos') return true;
+      // Rotas fixas sob /ponto/contratos (ex.: controle geral) — não marcam "Contratos", só o item próprio.
+      if (pathname.startsWith('/ponto/contratos/controle-geral')) return false;
+      // Detalhe do contrato e subpáginas (orçamento, permissões, etc.)
+      return /^\/ponto\/contratos\/[^/]+/.test(pathname);
+    }
+
     return pathname === href;
   };
 
@@ -649,7 +658,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const hasActiveItem = category.items.some(item => isActive(item.href));
             const isExpanded = isMenuExpanded(category.id);
             const visibleItems = category.items.filter(item => item.permission);
-            const forceAsGroup = category.id === 'engenharia' || category.id === 'painel-controle';
+            // Sempre mostrar como grupo expansível (título + subitens), mesmo com 1 item visível —
+            // evita que "Funcionários" apareça solto fora de "Departamento Pessoal".
+            const forceAsGroup =
+              category.id === 'engenharia' ||
+              category.id === 'painel-controle' ||
+              category.id === 'departamento-pessoal';
             const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             

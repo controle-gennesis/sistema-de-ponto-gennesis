@@ -1417,6 +1417,17 @@ model UserContractPermission {
   @@map("user_contract_permissions")
 }
 
+/// Template de permissões por cargo (nome do campo `Employee.position`). Usado como padrão na tela Permissões.
+model PositionPermissionTemplate {
+  id                   String   @id @default(cuid())
+  position             String   @unique
+  permissions          Json
+  allowedContractIds   Json     @default("[]")
+  updatedAt            DateTime @updatedAt
+
+  @@map("position_permission_templates")
+}
+
 // Conversas do chatbot WhatsApp (Meta Cloud API)
 model WhatsAppConversation {
   id           String    @id @default(cuid())
