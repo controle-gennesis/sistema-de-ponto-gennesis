@@ -58,6 +58,7 @@ function serializePermissionSet(s: Set<string>): string {
 }
 
 const CONTRACTS_MODULE_KEY = pathToModuleKey('/ponto/contratos');
+const EMPLOYEES_MODULE_KEY = pathToModuleKey('/ponto/funcionarios');
 const CONTRACT_ACTIONS = ['ver', 'criar', 'editar', 'excluir'] as const;
 type ContractAction = (typeof CONTRACT_ACTIONS)[number];
 
@@ -72,24 +73,31 @@ function serializeContractIds(s: Set<string>): string {
 function serializeFullBaseline(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
-  contractIds: Set<string>
+  contractIds: Set<string>,
+  employeeActions: Set<ContractAction>
 ): string {
-  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}`;
+  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}`;
 }
 
 /** Mesmo formato retornado por GET /permissions/users/:id (alinha cache do React Query ao PUT). */
 function buildPermissionsSnapshotForCache(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
-  contractIds: Set<string>
+  contractIds: Set<string>,
+  employeeActions: Set<ContractAction>
 ): PermissionItem[] {
   const hasAnyContractsData =
     selected.has(CONTRACTS_MODULE_KEY) ||
     contractActions.size > 0 ||
     contractIds.size > 0;
+  const hasAnyEmployeesData =
+    selected.has(EMPLOYEES_MODULE_KEY) || employeeActions.size > 0;
   const modules = new Set(selected);
   if (hasAnyContractsData) {
     modules.add(CONTRACTS_MODULE_KEY);
+  }
+  if (hasAnyEmployeesData) {
+    modules.add(EMPLOYEES_MODULE_KEY);
   }
   const out: PermissionItem[] = [];
   for (const module of Array.from(modules)) {
@@ -97,6 +105,9 @@ function buildPermissionsSnapshotForCache(
   }
   for (const action of Array.from(contractActions)) {
     out.push({ module: CONTRACTS_MODULE_KEY, action });
+  }
+  for (const action of Array.from(employeeActions)) {
+    out.push({ module: EMPLOYEES_MODULE_KEY, action });
   }
   return out;
 }
@@ -123,7 +134,7 @@ const CATEGORY_ORDER = [
 function inferCategoryFromHref(href: string): string {
   const h = href.replace(/\/$/, '') || '/';
   if (
-    ['/ponto/dashboard', '/ponto/chatgpt', '/ponto/bi', '/ponto/conversas-whatsapp'].some((p) => h === p)
+    ['/ponto/dashboard', '/ponto/bi', '/ponto/conversas-whatsapp'].some((p) => h === p)
   ) {
     return 'Principal';
   }
@@ -437,6 +448,7 @@ export function UserPermissionsEditor({
   const queryClient = useQueryClient();
   const [selectedSet, setSelectedSet] = useState<Set<string>>(new Set());
   const [contractActionsSet, setContractActionsSet] = useState<Set<ContractAction>>(new Set());
+  const [employeeActionsSet, setEmployeeActionsSet] = useState<Set<ContractAction>>(new Set());
   const [selectedContractIds, setSelectedContractIds] = useState<Set<string>>(new Set());
   const [copyFromUserIdGeneral, setCopyFromUserIdGeneral] = useState('');
   const [copyFromUserIdContracts, setCopyFromUserIdContracts] = useState('');
@@ -454,6 +466,8 @@ export function UserPermissionsEditor({
   contractActionsRef.current = contractActionsSet;
   const selectedContractIdsRef = useRef(selectedContractIds);
   selectedContractIdsRef.current = selectedContractIds;
+  const employeeActionsRef = useRef(employeeActionsSet);
+  employeeActionsRef.current = employeeActionsSet;
 
   /** Serialização estável para comparar com o último estado vindo do servidor (evita PUT na hidratação). */
   const baselineSerializedRef = useRef<string | null>(null);
@@ -518,8 +532,9 @@ export function UserPermissionsEditor({
     if (!userPermissionData?.permissions) {
       setSelectedSet(new Set());
       setContractActionsSet(new Set());
+      setEmployeeActionsSet(new Set());
       setSelectedContractIds(new Set());
-      baselineSerializedRef.current = serializeFullBaseline(new Set(), new Set(), new Set());
+      baselineSerializedRef.current = serializeFullBaseline(new Set(), new Set(), new Set(), new Set());
       return;
     }
     const perms = userPermissionData.permissions;
@@ -527,32 +542,42 @@ export function UserPermissionsEditor({
       perms.filter((p) => p.action === PERMISSION_ACCESS_ACTION).map((p) => p.module)
     );
     const nextContract = new Set<ContractAction>();
+    const nextEmployee = new Set<ContractAction>();
     for (const p of perms) {
-      if (p.module !== CONTRACTS_MODULE_KEY) continue;
-      if (CONTRACT_ACTIONS.includes(p.action as ContractAction)) {
+      if (p.module === CONTRACTS_MODULE_KEY && CONTRACT_ACTIONS.includes(p.action as ContractAction)) {
         nextContract.add(p.action as ContractAction);
+      }
+      if (p.module === EMPLOYEES_MODULE_KEY && CONTRACT_ACTIONS.includes(p.action as ContractAction)) {
+        nextEmployee.add(p.action as ContractAction);
       }
     }
     const nextContractIds = new Set(userPermissionData.allowedContractIds ?? []);
     setSelectedSet(next);
     setContractActionsSet(nextContract);
+    setEmployeeActionsSet(nextEmployee);
     setSelectedContractIds(nextContractIds);
-    baselineSerializedRef.current = serializeFullBaseline(next, nextContract, nextContractIds);
+    baselineSerializedRef.current = serializeFullBaseline(next, nextContract, nextContractIds, nextEmployee);
   }, [userPermissionData]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const currentSelected = new Set(selectedSetRef.current);
       const currentContractActions = Array.from(contractActionsRef.current);
+      const currentEmployeeActions = Array.from(employeeActionsRef.current);
       const currentContractIds = Array.from(selectedContractIdsRef.current);
       const hasAnyContractsData =
         currentSelected.has(CONTRACTS_MODULE_KEY) ||
         currentContractActions.length > 0 ||
         currentContractIds.length > 0;
+      const hasAnyEmployeesData =
+        currentSelected.has(EMPLOYEES_MODULE_KEY) || currentEmployeeActions.length > 0;
 
       // Segurança: se houver qualquer dado de contratos, garante o acesso base no payload.
       if (hasAnyContractsData) {
         currentSelected.add(CONTRACTS_MODULE_KEY);
+      }
+      if (hasAnyEmployeesData) {
+        currentSelected.add(EMPLOYEES_MODULE_KEY);
       }
 
       const basePermissions = Array.from(currentSelected).map((module) => ({ module }));
@@ -560,7 +585,11 @@ export function UserPermissionsEditor({
         module: CONTRACTS_MODULE_KEY,
         action,
       }));
-      const permissions = [...basePermissions, ...contractActionPermissions];
+      const employeeActionPermissions = currentEmployeeActions.map((action) => ({
+        module: EMPLOYEES_MODULE_KEY,
+        action,
+      }));
+      const permissions = [...basePermissions, ...contractActionPermissions, ...employeeActionPermissions];
       const allowedContractIds = currentContractIds;
       if (isPositionMode) {
         await api.put('/permissions/position-template', {
@@ -580,7 +609,8 @@ export function UserPermissionsEditor({
       baselineSerializedRef.current = serializeFullBaseline(
         selectedSetRef.current,
         contractActionsRef.current,
-        selectedContractIdsRef.current
+        selectedContractIdsRef.current,
+        employeeActionsRef.current
       );
       await queryClient.invalidateQueries({ queryKey: ['permission-users'] });
       await queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
@@ -594,7 +624,8 @@ export function UserPermissionsEditor({
         const snapshot = buildPermissionsSnapshotForCache(
           selectedSetRef.current,
           contractActionsRef.current,
-          selectedContractIdsRef.current
+          selectedContractIdsRef.current,
+          employeeActionsRef.current
         );
         queryClient.setQueryData<UserPermissionPayload | undefined>(['permission-user', userId], (old) => {
           if (!old) return old;
@@ -623,14 +654,20 @@ export function UserPermissionsEditor({
     if (loadingPermissions || permissionError) return;
     if (baselineSerializedRef.current === null) return;
 
-    const serialized = serializeFullBaseline(selectedSet, contractActionsSet, selectedContractIds);
+    const serialized = serializeFullBaseline(
+      selectedSet,
+      contractActionsSet,
+      selectedContractIds,
+      employeeActionsSet
+    );
     if (serialized === baselineSerializedRef.current) return;
 
     const t = window.setTimeout(() => {
       const latest = serializeFullBaseline(
         selectedSetRef.current,
         contractActionsRef.current,
-        selectedContractIdsRef.current
+        selectedContractIdsRef.current,
+        employeeActionsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       persistPermissions();
@@ -640,6 +677,7 @@ export function UserPermissionsEditor({
   }, [
     selectedSet,
     contractActionsSet,
+    employeeActionsSet,
     selectedContractIds,
     loadingPermissions,
     permissionError,
@@ -654,7 +692,8 @@ export function UserPermissionsEditor({
       const latest = serializeFullBaseline(
         selectedSetRef.current,
         contractActionsRef.current,
-        selectedContractIdsRef.current
+        selectedContractIdsRef.current,
+        employeeActionsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       persistPermissions();
@@ -694,6 +733,9 @@ export function UserPermissionsEditor({
           setContractActionsSet(new Set());
           setSelectedContractIds(new Set());
         }
+        if (key === EMPLOYEES_MODULE_KEY) {
+          setEmployeeActionsSet(new Set());
+        }
       } else {
         n.add(key);
       }
@@ -726,6 +768,32 @@ export function UserPermissionsEditor({
       setSelectedSet((s) => {
         const m = new Set(s);
         if (n.size > 0) m.add(CONTRACTS_MODULE_KEY);
+        return m;
+      });
+      return n;
+    });
+  };
+
+  const toggleEmployeeAction = (action: ContractAction) => {
+    setEmployeeActionsSet((prev) => {
+      const n = new Set(prev);
+      const isTurningOn = !n.has(action);
+
+      if (!isTurningOn) n.delete(action);
+      else n.add(action);
+
+      if (isTurningOn && action !== 'ver') {
+        n.add('ver');
+      }
+      if (!isTurningOn && action === 'ver') {
+        n.delete('criar');
+        n.delete('editar');
+        n.delete('excluir');
+      }
+
+      setSelectedSet((s) => {
+        const m = new Set(s);
+        if (n.size > 0) m.add(EMPLOYEES_MODULE_KEY);
         return m;
       });
       return n;
@@ -767,14 +835,18 @@ export function UserPermissionsEditor({
           .map((p) => p.module)
       );
       const nextContractActions = new Set<ContractAction>();
+      const nextEmployeeActions = new Set<ContractAction>();
       for (const p of source.permissions || []) {
-        if (p.module !== CONTRACTS_MODULE_KEY) continue;
-        if (CONTRACT_ACTIONS.includes(p.action as ContractAction)) {
+        if (p.module === CONTRACTS_MODULE_KEY && CONTRACT_ACTIONS.includes(p.action as ContractAction)) {
           nextContractActions.add(p.action as ContractAction);
+        }
+        if (p.module === EMPLOYEES_MODULE_KEY && CONTRACT_ACTIONS.includes(p.action as ContractAction)) {
+          nextEmployeeActions.add(p.action as ContractAction);
         }
       }
       setSelectedSet(nextGeneral);
       setContractActionsSet(nextContractActions);
+      setEmployeeActionsSet(nextEmployeeActions);
       toast.success('Permissões de acesso copiadas. Salvamento automático em andamento.');
     } catch (error) {
       const msg =
@@ -834,13 +906,14 @@ export function UserPermissionsEditor({
 
   const handleRestoreDefaults = () => {
     toast(
-      'Padrões por cargo podem ser configurados na página Permissões (Painel de Controle) ou no cadastro de cargos, quando disponível.'
+      'Padrões por cargo podem ser ajustados pelo administrador no cadastro de cargos ou no fluxo de permissões do funcionário, quando disponível.'
     );
   };
 
   const hasPendingChanges =
     baselineSerializedRef.current !== null &&
-    serializeFullBaseline(selectedSet, contractActionsSet, selectedContractIds) !== baselineSerializedRef.current;
+    serializeFullBaseline(selectedSet, contractActionsSet, selectedContractIds, employeeActionsSet) !==
+      baselineSerializedRef.current;
 
   const handleBackWithSave = async () => {
     if (isSavingPermissions) return;
@@ -921,6 +994,7 @@ export function UserPermissionsEditor({
 
   /** Em contratos, "Ver" representa o acesso ao módulo. */
   const contractVerChecked = selectedSet.has(CONTRACTS_MODULE_KEY) || contractActionsSet.has('ver');
+  const employeeVerChecked = selectedSet.has(EMPLOYEES_MODULE_KEY) || employeeActionsSet.has('ver');
 
   const toggleContractVerCell = () => {
     const hasAnyContractsPermission =
@@ -940,6 +1014,27 @@ export function UserPermissionsEditor({
     setSelectedSet((prev) => {
       const next = new Set(prev);
       next.add(CONTRACTS_MODULE_KEY);
+      return next;
+    });
+  };
+
+  const toggleEmployeeVerCell = () => {
+    const hasAny =
+      selectedSet.has(EMPLOYEES_MODULE_KEY) || employeeActionsSet.size > 0;
+
+    if (hasAny) {
+      setSelectedSet((prev) => {
+        const next = new Set(prev);
+        next.delete(EMPLOYEES_MODULE_KEY);
+        return next;
+      });
+      setEmployeeActionsSet(new Set());
+      return;
+    }
+
+    setSelectedSet((prev) => {
+      const next = new Set(prev);
+      next.add(EMPLOYEES_MODULE_KEY);
       return next;
     });
   };
@@ -1141,7 +1236,13 @@ export function UserPermissionsEditor({
                             const Icon = moduleIcon(mod.href);
                             const lbl = labelFor(mod);
                             const isContracts = mod.key === CONTRACTS_MODULE_KEY;
-                            const verOn = isContracts ? contractVerChecked : selectedSet.has(mod.key);
+                            const isEmployees = mod.key === EMPLOYEES_MODULE_KEY;
+                            const granularRow = isContracts || isEmployees;
+                            const verOn = isContracts
+                              ? contractVerChecked
+                              : isEmployees
+                                ? employeeVerChecked
+                                : selectedSet.has(mod.key);
                             return (
                               <tr
                                 key={mod.key}
@@ -1164,9 +1265,16 @@ export function UserPermissionsEditor({
                                       onCheckedChange={(next) => {
                                         if (next === verOn) return;
                                         if (isContracts) toggleContractVerCell();
+                                        else if (isEmployees) toggleEmployeeVerCell();
                                         else toggleModule(mod.key);
                                       }}
-                                      aria-label={isContracts ? `Ver contratos — ${lbl}` : `Acesso a ${lbl}`}
+                                      aria-label={
+                                        isContracts
+                                          ? `Ver contratos — ${lbl}`
+                                          : isEmployees
+                                            ? `Ver funcionários — ${lbl}`
+                                            : `Acesso a ${lbl}`
+                                      }
                                     />
                                   </div>
                                 </td>
@@ -1174,13 +1282,23 @@ export function UserPermissionsEditor({
                                   <td key={gran} className="px-1 py-3.5 text-center align-middle">
                                     <div className="flex justify-center">
                                       <PermissionMatrixCheckbox
-                                        disabled={!isContracts}
+                                        disabled={!granularRow}
                                         checked={
-                                          isContracts ? contractActionsSet.has(gran) : false
+                                          isContracts
+                                            ? contractActionsSet.has(gran)
+                                            : isEmployees
+                                              ? employeeActionsSet.has(gran)
+                                              : false
                                         }
                                         onCheckedChange={(next) => {
-                                          if (!isContracts || next === contractActionsSet.has(gran)) return;
-                                          toggleContractAction(gran);
+                                          if (!granularRow) return;
+                                          if (isContracts) {
+                                            if (next === contractActionsSet.has(gran)) return;
+                                            toggleContractAction(gran);
+                                          } else if (isEmployees) {
+                                            if (next === employeeActionsSet.has(gran)) return;
+                                            toggleEmployeeAction(gran);
+                                          }
                                         }}
                                         aria-label={`${gran} — ${lbl}`}
                                       />

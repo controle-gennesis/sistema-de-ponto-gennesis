@@ -72,9 +72,48 @@ export function usePermissions() {
 
   const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
 
+  const employeesKey = pk('/ponto/funcionarios');
+  /** Ações granulares persistidas além do `acesso` do módulo (matriz Ver/Criar/Editar/Excluir). */
+  const EMPLOYEE_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
+  const isElevatedUser = isAdministrator || !!permissionData?.isAdmin;
+  const hasEmployeeAcesso = can(employeesKey);
+  /**
+   * Com matriz granular, o salvamento ainda grava `acesso` no módulo (payload base).
+   * Nesse caso o `acesso` não pode liberar criar/excluir — só as linhas `ponto_funcionarios:criar` etc.
+   * Cadastro antigo: só `acesso`, sem linhas CRUD → mantém comportamento de “módulo inteiro”.
+   */
+  const hasEmployeeGranular =
+    !isElevatedUser &&
+    EMPLOYEE_MODULE_CRUD.some((a) => allowedActionSet.has(`${employeesKey}:${a}`));
+  /** Qualquer permissão no módulo (rota / botões da lista). */
+  const canAccessEmployeesModule =
+    hasEmployeeAcesso ||
+    canAction(employeesKey, 'ver') ||
+    canAction(employeesKey, 'criar') ||
+    canAction(employeesKey, 'editar') ||
+    canAction(employeesKey, 'excluir');
+
+  const canViewEmployees = hasEmployeeGranular
+    ? EMPLOYEE_MODULE_CRUD.some((a) => canAction(employeesKey, a))
+    : hasEmployeeAcesso;
+  const canCreateEmployees = hasEmployeeGranular
+    ? canAction(employeesKey, 'criar')
+    : hasEmployeeAcesso;
+  const canEditEmployees = hasEmployeeGranular
+    ? canAction(employeesKey, 'editar')
+    : hasEmployeeAcesso;
+  const canDeleteEmployees = hasEmployeeGranular
+    ? canAction(employeesKey, 'excluir')
+    : hasEmployeeAcesso;
+
   const finalPermissions = {
     canAccessPayroll: can(pk('/ponto/folha-pagamento')) || can(pk('/relatorios/alocacao')),
-    canManageEmployees: can(pk('/ponto/funcionarios')),
+    /** Acesso ao módulo Funcionários (inclui granularidade definida na tela de permissões). */
+    canManageEmployees: canAccessEmployeesModule,
+    canViewEmployees,
+    canCreateEmployees,
+    canEditEmployees,
+    canDeleteEmployees,
     canViewReports: can(pk('/ponto/dashboard')),
     canManageVacations:
       can(pk('/ponto/gerenciar-ferias')) ||
@@ -118,6 +157,10 @@ export function usePermissions() {
     canCreateContracts: finalPermissions.canCreateContracts,
     canEditContracts: finalPermissions.canEditContracts,
     canDeleteContracts: finalPermissions.canDeleteContracts,
+    canViewEmployees: finalPermissions.canViewEmployees,
+    canCreateEmployees: finalPermissions.canCreateEmployees,
+    canEditEmployees: finalPermissions.canEditEmployees,
+    canDeleteEmployees: finalPermissions.canDeleteEmployees,
   };
 }
 
@@ -142,7 +185,8 @@ export function useRoutePermission(route: string) {
   const routePermissions: Record<string, boolean> = {
     '/ponto': isAdministrator || isDepartmentPessoal || permissions.canRegisterTime,
     '/ponto/dashboard': isAdministrator || isDepartmentPessoal || permissions.canViewDashboard,
-    '/ponto/funcionarios': isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
+    '/ponto/funcionarios':
+      isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal || can(pk('/ponto/aniversariantes')),
     '/ponto/atestados': isAdministrator || can(pk('/ponto/atestados')),
     '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados')),
@@ -157,8 +201,7 @@ export function useRoutePermission(route: string) {
     '/ponto/centros-custo': isAdministrator || isDepartmentPessoal || can(pk('/ponto/centros-custo')),
     '/ponto/materiais-construcao': isAdministrator || isDepartmentPessoal || can(pk('/ponto/materiais-construcao')),
     '/ponto/andamento-da-os': isAdministrator || can(pk('/ponto/andamento-da-os')),
-    '/ponto/permissoes': isAdministrator,
-    '/ponto/chatgpt': isAdministrator || can(pk('/ponto/chatgpt')),
+    '/ponto/permissoes': true,
     '/ponto/bi': isAdministrator || can(pk('/ponto/bi')),
     '/ponto/conversas-whatsapp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp')),
     '/ponto/financeiro': isAdministrator || can(pk('/ponto/financeiro')),

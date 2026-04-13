@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -180,6 +180,7 @@ export default function ContratosPage() {
   const [permissionsTarget, setPermissionsTarget] = useState<PermissionsTargetPreview | null>(null);
   const [permissionTab, setPermissionTab] = useState<PermissionEditorTab>('gerais');
   const [showContractsTab, setShowContractsTab] = useState(false);
+  const [contractUsersSearch, setContractUsersSearch] = useState('');
 
   const closePermissionsEditor = () => {
     setPermissionsTarget(null);
@@ -424,7 +425,30 @@ export default function ContratosPage() {
   const contractForActionMenu = contractActionMenu
     ? contracts.find((c: Contract) => c.id === contractActionMenu.contractId) || null
     : null;
-  const usersWithContractsModule = (contractUsers || []).filter((u) => u.hasContractsModule);
+  const usersWithContractsModule = useMemo(
+    () => (contractUsers || []).filter((u) => u.hasContractsModule),
+    [contractUsers]
+  );
+
+  const filteredContractUsers = useMemo(() => {
+    const q = contractUsersSearch.trim().toLowerCase();
+    if (!q) return usersWithContractsModule;
+    const qDigits = q.replace(/\D/g, '');
+    return usersWithContractsModule.filter((u) => {
+      const name = (u.name || '').toLowerCase();
+      const email = (u.email || '').toLowerCase();
+      const dept = (u.employee?.department || '').toLowerCase();
+      const pos = (u.employee?.position || '').toLowerCase();
+      const cpfDigits = (u.cpf || '').replace(/\D/g, '');
+      if (name.includes(q) || email.includes(q) || dept.includes(q) || pos.includes(q)) return true;
+      if (qDigits.length >= 2 && cpfDigits.includes(qDigits)) return true;
+      return false;
+    });
+  }, [usersWithContractsModule, contractUsersSearch]);
+
+  useEffect(() => {
+    setContractUsersSearch('');
+  }, [permissionsContract?.id]);
 
   if (loadingUser) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
@@ -497,27 +521,48 @@ export default function ContratosPage() {
                   padding="none"
                 >
                   <div className="border-b border-gray-200 bg-white px-4 py-5 dark:border-gray-700 dark:bg-gray-800 sm:px-6">
-                    <div className="flex min-w-0 items-start gap-4 sm:items-center">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-blue-500 bg-white text-sm font-bold text-blue-600 dark:border-blue-400 dark:bg-gray-800 dark:text-blue-400">
-                        {permissionsContract.name
-                          .split(' ')
-                          .map((n) => n[0])
-                          .join('')
-                          .slice(0, 2)
-                          .toUpperCase()}
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                      <div className="flex min-w-0 items-start gap-4 sm:items-center">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-blue-500 bg-white text-sm font-bold text-blue-600 dark:border-blue-400 dark:bg-gray-800 dark:text-blue-400">
+                          {permissionsContract.name
+                            .split(' ')
+                            .map((n) => n[0])
+                            .join('')
+                            .slice(0, 2)
+                            .toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                            {permissionsContract.name}
+                          </h2>
+                          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                            <span className="text-gray-700 dark:text-gray-300">
+                              {usersWithContractsModule.length}{' '}
+                              {usersWithContractsModule.length === 1
+                                ? 'usuário com módulo de contratos'
+                                : 'usuários com módulo de contratos'}
+                            </span>
+                            {contractUsersSearch.trim() && usersWithContractsModule.length > 0 ? (
+                              <span className="text-gray-500 dark:text-gray-400">
+                                {' · '}
+                                {filteredContractUsers.length}{' '}
+                                {filteredContractUsers.length === 1 ? 'resultado' : 'resultados'}
+                              </span>
+                            ) : null}
+                          </p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          {permissionsContract.name}
-                        </h2>
-                        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                          <span className="text-gray-700 dark:text-gray-300">
-                            {usersWithContractsModule.length}{' '}
-                            {usersWithContractsModule.length === 1
-                              ? 'usuário com módulo de contratos'
-                              : 'usuários com módulo de contratos'}
-                          </span>
-                        </p>
+                      <div className="relative w-full shrink-0 sm:max-w-xs">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                        <input
+                          type="search"
+                          value={contractUsersSearch}
+                          onChange={(e) => setContractUsersSearch(e.target.value)}
+                          placeholder="Buscar colaborador…"
+                          autoComplete="off"
+                          className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/30 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+                          aria-label="Buscar colaborador na lista"
+                        />
                       </div>
                     </div>
                   </div>
@@ -560,8 +605,14 @@ export default function ContratosPage() {
                                 Nenhum usuário com módulo de contratos disponível para este contrato.
                               </td>
                             </tr>
+                          ) : filteredContractUsers.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="py-14 text-center text-sm text-gray-500 dark:text-gray-400">
+                                Nenhum colaborador encontrado com essa busca. Tente nome, e-mail, setor ou CPF.
+                              </td>
+                            </tr>
                           ) : (
-                            usersWithContractsModule.map((u) => (
+                            filteredContractUsers.map((u) => (
                               <tr
                                 key={u.id}
                                 onClick={() => {
@@ -581,7 +632,7 @@ export default function ContratosPage() {
                                     {u.name}
                                   </div>
                                   {u.cpf ? (
-                                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">CPF: {u.cpf}</div>
+                                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{u.cpf}</div>
                                   ) : null}
                                 </td>
                                 <td className="py-3.5 pl-1 pr-4 text-sm text-gray-700 dark:text-gray-300">
@@ -660,7 +711,7 @@ export default function ContratosPage() {
                         resetForm();
                         setShowForm(true);
                       }}
-                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100"
+                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                     >
                       <Plus className="w-4 h-4" />
                       Novo Contrato

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -22,7 +23,9 @@ import {
   ClipboardList,
   Pencil,
   ArrowLeft,
-  ListPlus
+  ListPlus,
+  MoreVertical,
+  Eye
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -34,7 +37,15 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
 import { OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
-import { calcularQuantidadeLinha, inferirTipoUnidadePorDimensao } from './orcamentoMedicaoCalc';
+import {
+  gradeTableCls,
+  gradeTableRowTrCls,
+  inputGradeCls,
+  inputGradeMoedaCls,
+  moedaGradeFieldWrapperCls,
+  selectGradeSemSetaCls
+} from './orcamentoGradeCellClasses';
+import { calcV, calcularQuantidadeLinha, inferirTipoUnidadePorDimensao } from './orcamentoMedicaoCalc';
 import type { LinhaMedicao, DimensoesItem, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
 export type { LinhaMedicao, TipoUnidadeFormula, DimensoesItem } from './orcamentoMedicaoTypes';
 
@@ -800,6 +811,10 @@ function ehComposicaoCacamba4m3(descricao: string | undefined): boolean {
 /** Fator (60%) aplicado ao valor unit. estimado e ao custo estimado na planilha analítica. */
 const PLANILHA_FATOR_CUSTO_ESTIMADO = 0.6;
 
+/** Largura estável para colunas «R$ + valor» (planilha «Valor unit. real», analítico insumo manual). */
+const GRADE_COL_MOEDA_UNIT =
+  'w-[7.5rem] min-w-[7.5rem] max-w-[8rem] whitespace-nowrap';
+
 /** Textos de ajuda (title): como cada campo da planilha analítica é obtido ou calculado. */
 const PLANILHA_ANALITICA_TOOLTIP = {
   item: 'Numeração hierárquica do item no orçamento (estrutura em níveis do serviço).',
@@ -1037,10 +1052,14 @@ function MoedaCelula({
   simboloClassName?: string;
 }) {
   const formatted = Number(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const titulo = `R$ ${formatted}`;
   return (
-    <div className={`flex w-full min-w-0 items-baseline justify-between gap-2 tabular-nums ${className ?? ''}`}>
+    <div
+      className={`flex w-full min-w-0 max-w-full items-baseline justify-between gap-1.5 overflow-hidden tabular-nums ${className ?? ''}`}
+      title={titulo}
+    >
       <span className={`shrink-0 ${simboloClassName ?? ''}`}>R$</span>
-      <span className={`min-w-0 text-right ${valorClassName ?? ''}`}>{formatted}</span>
+      <span className={`min-w-0 flex-1 truncate text-right ${valorClassName ?? ''}`}>{formatted}</span>
     </div>
   );
 }
@@ -1058,7 +1077,7 @@ function CalcHoverBridge({
   if (!hoverSourceIds?.length || !onHoverSourcesChange) return <>{children}</>;
   return (
     <span
-      className="inline max-w-full"
+      className="block w-full min-w-0 max-w-full"
       onMouseEnter={() => onHoverSourcesChange(hoverSourceIds)}
       onMouseLeave={() => onHoverSourcesChange([])}
     >
@@ -1246,6 +1265,8 @@ function ServicosDropdownCheckbox({
   );
 }
 
+const ORCAMENTO_LISTA_MENU_WIDTH_PX = 224;
+
 export function OrcamentoPageView({
   lockedCostCenterId = null,
   embeddedContractId = null
@@ -1304,11 +1325,23 @@ export function OrcamentoPageView({
   const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
   const [calcHoverSourceIds, setCalcHoverSourceIds] = useState<string[]>([]);
   const [insumosAnaliticoManuais, setInsumosAnaliticoManuais] = useState<Record<string, InsumoAnaliticoManual[]>>({});
+  /** Menu botão direito — composição/insumo catálogo (adicionar manual + excluir composição) ou insumo manual (abaixo + excluir linha). */
+  const [menuCtxAnalitico, setMenuCtxAnalitico] = useState<
+    | { kind: 'composicao'; left: number; top: number; composicaoKey: string }
+    | { kind: 'manual'; left: number; top: number; parentKey: string; insumoId: string; idx: number }
+    | null
+  >(null);
   const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(null);
   const [listaOrcamentos, setListaOrcamentos] = useState<{ id: string; nome: string; updatedAt: string }[]>([]);
   const [carregandoListaOrcamentos, setCarregandoListaOrcamentos] = useState(false);
   const [nomeOrcamentoRascunho, setNomeOrcamentoRascunho] = useState('');
   const [orcamentosSearch, setOrcamentosSearch] = useState('');
+  const [orcamentoListaActionMenu, setOrcamentoListaActionMenu] = useState<{
+    orcamentoId: string;
+    nome: string;
+    top: number;
+    left: number;
+  } | null>(null);
   const [editarDadosOpen, setEditarDadosOpen] = useState(false);
   const [editarDadosDraft, setEditarDadosDraft] = useState<
     OrcamentoMeta & { nomeOrcamento: string }
@@ -1334,6 +1367,17 @@ export function OrcamentoPageView({
     return listaOrcamentos.filter((o) => (o.nome || '').toLowerCase().includes(q));
   }, [listaOrcamentos, orcamentosSearch]);
 
+  /** Nome do contrato (centro de custo) selecionado — só o nome, sem código. */
+  const rotuloContratoListaOrcamentos = useMemo(() => {
+    if (!centroCustoId || !costCenters?.length) return null;
+    const cc = costCenters.find((c: { id?: string }) => c.id === centroCustoId) as
+      | { name?: string }
+      | undefined;
+    if (!cc) return null;
+    const name = String(cc.name ?? '').trim();
+    return name || null;
+  }, [centroCustoId, costCenters]);
+
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
   const [novoOrcamentoMetaOpen, setNovoOrcamentoMetaOpen] = useState(false);
   const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta>(() =>
@@ -1342,6 +1386,15 @@ export function OrcamentoPageView({
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [loadingEmployeeOptions, setLoadingEmployeeOptions] = useState(false);
   const [currentUserName, setCurrentUserName] = useState('');
+
+  useEffect(() => {
+    if (!orcamentoListaActionMenu) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOrcamentoListaActionMenu(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [orcamentoListaActionMenu]);
 
   useEffect(() => {
     if (lockedCostCenterId) {
@@ -2580,7 +2633,10 @@ export function OrcamentoPageView({
         if (tipoUnidade === 'un') {
           qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
         } else if (dim?.linhas?.length) {
-          qtd = dim.linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, tipoUnidade), 0);
+          qtd = dim.linhas.reduce(
+            (s, ln) => (ln.cabecalhoSecao ? s : s + calcularQuantidadeLinha(ln, tipoUnidade)),
+            0
+          );
         } else {
           qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
         }
@@ -2637,11 +2693,8 @@ export function OrcamentoPageView({
     return { itensCalculados: listaComCacamba, total: soma };
   }, [subtitulosAdicionados, quantidadesPorItem, dimensoesPorItem, mapaComposicoes, itensOcultosNoOrcamento]);
 
-  /** Itens com medição dimensional (não UN) — memória de cálculo e exportação. */
-  const itensMemoriaMedicao = useMemo(
-    () => itensCalculados.filter(r => r.tipoUnidade !== 'un'),
-    [itensCalculados]
-  );
+  /** Todos os itens do orçamento na ordem da memória de cálculo (inclui UN e medições dimensionais). */
+  const itensMemoriaCalculoLista = useMemo(() => itensCalculados, [itensCalculados]);
 
   const linhasAnaliticoOrcamento = useMemo(() => {
     type Linha =
@@ -2809,6 +2862,15 @@ export function OrcamentoPageView({
     }
     return out;
   }, [subtitulosAdicionados, itensCalculados, mapaComposicoes]);
+
+  /** Número do item como na planilha analítica (ex. 1.2.3) — memória de cálculo. */
+  const rotuloItemComposicaoPorKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind === 'composicao') m.set(l.key, l.item);
+    }
+    return m;
+  }, [linhasAnaliticoOrcamento]);
 
   /** Ficha de demanda: só composições e insumos (sem faixas de título/subtítulo). */
   const linhasFichaDemanda = useMemo(() => {
@@ -3541,28 +3603,39 @@ export function OrcamentoPageView({
       if (!ehItemDemolicaoOuRemocao(row.item.descricao)) continue;
       const dim = dimensoesPorItem[row.key];
       if (dim?.linhas?.length) {
-        for (let sourceIdx = 0; sourceIdx < dim.linhas.length; sourceIdx++) {
-          const ln = dim.linhas[sourceIdx];
-          const origemLinhaId = `${row.key}|${sourceIdx}`;
-          const descricaoLinha = `${ln.descricao?.trim() || row.item.descricao || ''}`.trim().slice(0, 120);
-          const linhaCargaExistente = linhasCargaAtuais.find(x => x.origemLinhaId === origemLinhaId)
-            || linhasCargaAtuais.find(x => (x.descricao || '').trim() === descricaoLinha);
-          linhasAgregadas.push({
-            ...ln,
-            origemLinhaId,
-            origemComposicaoDescricao: row.item.descricao || '',
-            descricao: descricaoLinha,
-            // Mantém ajustes manuais feitos na Carga de Entulho.
-            C: (ln.C || 0) === 0 ? (linhaCargaExistente?.C ?? ln.C) : ln.C,
-            L: (ln.L || 0) === 0 ? (linhaCargaExistente?.L ?? ln.L) : ln.L,
-            H: (ln.H || 0) === 0 ? (linhaCargaExistente?.H ?? ln.H) : ln.H,
-            empolamento: linhaCargaExistente?.empolamento ?? ln.empolamento,
-            // Campo que nasceu vazio na origem permanece editável na Carga.
-            editavelC: (ln.C || 0) === 0,
-            editavelL: (ln.L || 0) === 0,
-            editavelH: (ln.H || 0) === 0
-          });
+        const detalhes = dim.linhas.filter(ln => !ln.cabecalhoSecao);
+        if (detalhes.length === 0) continue;
+        const tipoOrigem =
+          row.tipoUnidade ?? inferirTipoUnidadePorDimensao(dim.linhas);
+        let somaSubtotal = 0;
+        let somaVolumeBruto = 0;
+        for (const ln of detalhes) {
+          somaSubtotal += calcularQuantidadeLinha(ln, tipoOrigem);
+          somaVolumeBruto += calcV(ln, tipoOrigem);
         }
+        const origemLinhaId = `${row.key}|agg`;
+        const nomeComp = `${row.item.descricao || ''}`.trim().slice(0, 120);
+        const rotuloOrigem = rotuloItemComposicaoPorKey.get(row.key)?.trim() ?? '';
+        const existenteAgg = linhasCargaAtuais.find(x => x.origemLinhaId === origemLinhaId);
+        const origemM2 = tipoOrigem === 'm2';
+        linhasAgregadas.push({
+          linhaAgregadaCarga: true,
+          tipoOrigemMedicao: tipoOrigem,
+          origemLinhaId,
+          origemComposicaoRotulo: rotuloOrigem,
+          origemComposicaoDescricao: row.item.descricao || '',
+          descricao: nomeComp || 'Composição',
+          C: 0,
+          L: 0,
+          H: origemM2 ? (existenteAgg?.H ?? 0) : 0,
+          N: 1,
+          empolamento: existenteAgg?.empolamento ?? 1,
+          ...(origemM2 ? {} : { valorManual: somaSubtotal }),
+          volumeM3BrutoSomado: somaVolumeBruto,
+          editavelC: false,
+          editavelL: false,
+          editavelH: origemM2
+        });
       }
     }
     const atualCarga = dimensoesPorItem[cargaKey];
@@ -3571,9 +3644,13 @@ export function OrcamentoPageView({
     if (JSON.stringify(linhasAgregadas.map(l => ({ ...l }))) === JSON.stringify(atualLinhas.map(l => ({ ...l })))) return;
     setDimensoesPorItem(prev => ({
       ...prev,
-      [cargaKey]: { tipoUnidade: 'm3' as const, linhas: linhasAgregadas }
+      [cargaKey]: {
+        ...(atualCarga ?? { tipoUnidade: 'm3' as const, linhas: [] }),
+        tipoUnidade: 'm3' as const,
+        linhas: linhasAgregadas
+      }
     }));
-  }, [itensCalculados, dimensoesPorItem]);
+  }, [itensCalculados, dimensoesPorItem, rotuloItemComposicaoPorKey]);
 
   const setQuantidadeItem = (itemKey: string, valor: number) => {
     setQuantidadesPorItem(prev => ({ ...prev, [itemKey]: Math.max(0, valor) }));
@@ -3587,15 +3664,58 @@ export function OrcamentoPageView({
     setDimensoesPorItem(prev => ({ ...prev, [itemKey]: d }));
   };
 
-  const addLinhaMedicao = (itemKey: string) => {
+  const addLinhaMedicao = (itemKey: string, inserirAposIdx?: number) => {
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const atual =
       dimensoesPorItem[itemKey] || { tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3', linhas: [] };
+    const novaLinha = { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 };
+    const linhas = [...atual.linhas];
+    if (
+      inserirAposIdx !== undefined &&
+      inserirAposIdx >= 0 &&
+      inserirAposIdx < linhas.length
+    ) {
+      linhas.splice(inserirAposIdx + 1, 0, novaLinha);
+    } else {
+      linhas.push(novaLinha);
+    }
     setDimensoesPorItem(prev => ({
       ...prev,
       [itemKey]: {
         ...atual,
-        linhas: [...atual.linhas, { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 }]
+        linhas
+      }
+    }));
+  };
+
+  const addLinhaCabecalhoSecaoMedicao = (itemKey: string, inserirAposIdx?: number) => {
+    const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
+    const atual =
+      dimensoesPorItem[itemKey] || { tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3', linhas: [] };
+    const novaLinha: LinhaMedicao = {
+      cabecalhoSecao: true,
+      descricao: 'DESCRIÇÃO: ',
+      C: 0,
+      L: 0,
+      H: 0,
+      N: 1,
+      empolamento: 1
+    };
+    const linhas = [...atual.linhas];
+    if (
+      inserirAposIdx !== undefined &&
+      inserirAposIdx >= 0 &&
+      inserirAposIdx < linhas.length
+    ) {
+      linhas.splice(inserirAposIdx + 1, 0, novaLinha);
+    } else {
+      linhas.push(novaLinha);
+    }
+    setDimensoesPorItem(prev => ({
+      ...prev,
+      [itemKey]: {
+        ...atual,
+        linhas
       }
     }));
   };
@@ -3611,6 +3731,27 @@ export function OrcamentoPageView({
     }
     novaLinhas[idx] = updated;
     setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhas: novaLinhas } }));
+  };
+
+  const updateRotuloColunaMedicao = (
+    itemKey: string,
+    campo: 'descricao' | 'C' | 'L' | 'H' | 'N' | 'pct',
+    rotulo: string
+  ) => {
+    const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
+    const atual =
+      dimensoesPorItem[itemKey] ||
+      ({ tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3', linhas: [] } as DimensoesItem);
+    setDimensoesPorItem(prev => ({
+      ...prev,
+      [itemKey]: {
+        ...atual,
+        rotulosColunas: {
+          ...(atual.rotulosColunas ?? {}),
+          [campo]: rotulo
+        }
+      }
+    }));
   };
 
   const handleCalcBlur = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
@@ -3687,24 +3828,36 @@ export function OrcamentoPageView({
     }
   };
 
+  const novoInsumoManualAnaliticoVazio = (parentKey: string): InsumoAnaliticoManual => ({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    parentKey,
+    tipo: 'Insumo',
+    codigo: '',
+    banco: '',
+    descricao: '',
+    und: '',
+    quant: '',
+    quantidadeReal: '',
+    quantidadeOrcada: '',
+    valorUnit: ''
+  });
+
   const addInsumoManualAnalitico = (parentKey: string) => {
-    const novo: InsumoAnaliticoManual = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      parentKey,
-      tipo: 'Insumo',
-      codigo: '',
-      banco: '',
-      descricao: '',
-      und: '',
-      quant: '',
-      quantidadeReal: '',
-      quantidadeOrcada: '',
-      valorUnit: ''
-    };
+    const novo = novoInsumoManualAnaliticoVazio(parentKey);
     setInsumosAnaliticoManuais((prev) => ({
       ...prev,
       [parentKey]: [...(prev[parentKey] ?? []), novo]
     }));
+  };
+
+  const addInsumoManualAnaliticoApos = (parentKey: string, inserirAposIdx: number) => {
+    const novo = novoInsumoManualAnaliticoVazio(parentKey);
+    setInsumosAnaliticoManuais((prev) => {
+      const lista = [...(prev[parentKey] ?? [])];
+      const pos = Math.min(Math.max(0, inserirAposIdx + 1), lista.length);
+      lista.splice(pos, 0, novo);
+      return { ...prev, [parentKey]: lista };
+    });
   };
 
   const updateInsumoManualAnalitico = (
@@ -3816,7 +3969,14 @@ export function OrcamentoPageView({
         rows.push([codigo, descricaoBase, un, '', '', '', '', '', '', '', '']);
         for (let i = 0; i < row.dimensoes.linhas.length; i++) {
           const ln = row.dimensoes.linhas[i];
-          const descLinha = ln.descricao?.trim() || `Medição ${i + 1}`;
+          const descBase = ln.descricao?.trim() || `Medição ${i + 1}`;
+          const descLinha = ln.origemComposicaoRotulo?.trim()
+            ? `${ln.origemComposicaoRotulo.trim()} ${descBase}`.trim()
+            : descBase;
+          if (ln.cabecalhoSecao) {
+            rows.push(['', descLinha, un, '', '', '', '', '', '', '', '']);
+            continue;
+          }
           const empolRaw = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 0);
           const empol = (empolRaw != null && empolRaw > 0) ? empolRaw : 1;
           rows.push([
@@ -3836,6 +3996,14 @@ export function OrcamentoPageView({
           const col = (c: number) => String.fromCharCode(64 + c);
           const D = col(4); const E = col(5); const F = col(6); const G = col(7); const H = col(8); const I = col(9); const J = col(10); const K = col(11);
           const tipo = tipoAuto;
+          if (ln.linhaAgregadaCarga) {
+            const vol = calcV(ln, tipo);
+            const sub = calcularQuantidadeLinha(ln, tipo);
+            rows[r - 1][8] = ln.tipoOrigemMedicao === 'm2' ? (ln.volumeM3BrutoSomado ?? 0) : '';
+            rows[r - 1][9] = vol;
+            rows[r - 1][10] = sub;
+            continue;
+          }
           if (tipo === 'm3') {
             formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
             formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}*${F}${r}` });
@@ -4093,15 +4261,15 @@ export function OrcamentoPageView({
 
   useEffect(() => {
     if (orcamentoViewTab !== 'memorial') return;
-    if (itensMemoriaMedicao.length === 0) {
+    if (itensMemoriaCalculoLista.length === 0) {
       setMemorialItemKey(null);
       return;
     }
-    const existe = memorialItemKey && itensMemoriaMedicao.some(r => r.key === memorialItemKey);
+    const existe = memorialItemKey && itensMemoriaCalculoLista.some(r => r.key === memorialItemKey);
     if (!existe) {
-      setMemorialItemKey(itensMemoriaMedicao[0].key);
+      setMemorialItemKey(itensMemoriaCalculoLista[0].key);
     }
-  }, [orcamentoViewTab, itensMemoriaMedicao, memorialItemKey]);
+  }, [orcamentoViewTab, itensMemoriaCalculoLista, memorialItemKey]);
 
   useEffect(() => {
     if (orcamentoViewTab !== 'memorial' || !memorialItemKey) return;
@@ -4732,7 +4900,9 @@ export function OrcamentoPageView({
                   Voltar
                 </Link>
                 <div className="w-full max-w-3xl px-14 text-center sm:px-20">
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Orçamento</h1>
+                  <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl break-words">
+                    {rotuloContratoListaOrcamentos ?? 'Orçamento'}
+                  </h1>
                   <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
                     Automação de orçamentos com composições e serviços padrão por contrato
                   </p>
@@ -4740,7 +4910,9 @@ export function OrcamentoPageView({
               </div>
             ) : (
               <>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Orçamento</h1>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl break-words">
+                  {rotuloContratoListaOrcamentos ?? 'Orçamento'}
+                </h1>
                 <p className="mt-2 text-gray-600 dark:text-gray-400">
                   Automação de orçamentos com composições e serviços padrão por contrato
                 </p>
@@ -4877,95 +5049,68 @@ export function OrcamentoPageView({
                 </CardContent>
               </Card>
             ) : !orcamentoAtivoId ? (
-              <Card>
-                <CardHeader>
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div className="flex items-center min-w-0">
-                      <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                        <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              <Card className="w-full">
+                <CardHeader className="border-b-0 pb-1">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center space-x-3">
+                      <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                        <Calculator className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                       </div>
-                      <div className="ml-3 sm:ml-4 min-w-0">
+                      <div className="min-w-0">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Orçamentos</h3>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                           Crie novos orçamentos e confira orçamento analítico e ficha de demanda nas abas ao editar.
                         </p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={criarNovoOrcamento}
-                      disabled={carregandoListaOrcamentos}
-                      className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed transition-colors text-sm sm:text-base w-full sm:w-auto shrink-0"
-                    >
-                      {carregandoListaOrcamentos ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5 shrink-0" aria-hidden />}
-                      Novo orçamento
-                    </button>
+                    <div className="flex w-full flex-shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+                      {!carregandoListaOrcamentos && listaOrcamentos.length > 0 && (
+                        <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                          <input
+                            type="text"
+                            value={orcamentosSearch}
+                            onChange={(e) => setOrcamentosSearch(e.target.value)}
+                            placeholder="Buscar orçamento..."
+                            className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                          />
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={criarNovoOrcamento}
+                        disabled={carregandoListaOrcamentos}
+                        className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:pointer-events-none disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        {carregandoListaOrcamentos ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                        ) : (
+                          <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                        )}
+                        Novo orçamento
+                      </button>
+                    </div>
                   </div>
                 </CardHeader>
-                <CardContent className="p-0">
+                <CardContent>
                   {carregandoListaOrcamentos ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="border-b border-gray-200 dark:border-gray-700">
-                          <tr>
-                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Orçamento
-                            </th>
-                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Atualizado
-                            </th>
-                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Ações
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                          <tr>
-                            <td colSpan={3} className="px-6 py-8 text-center">
-                              <div className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400">
-                                <Loader2 className="w-6 h-6 animate-spin shrink-0" />
-                                <span>Carregando orçamentos…</span>
-                              </div>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
+                    <div className="flex flex-col items-center justify-center gap-3 py-12 text-gray-600 dark:text-gray-400">
+                      <Loader2 className="h-8 w-8 shrink-0 animate-spin text-red-600 dark:text-red-400" aria-hidden />
+                      <span className="text-sm font-medium">Carregando orçamentos…</span>
                     </div>
                   ) : listaOrcamentos.length === 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="border-b border-gray-200 dark:border-gray-700">
-                          <tr>
-                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Orçamento
-                            </th>
-                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Atualizado
-                            </th>
-                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Ações
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                          <tr>
-                            <td colSpan={3} className="px-6 py-8 text-center">
-                              <div className="text-gray-500 dark:text-gray-400 max-w-lg mx-auto">
-                                <p>Nenhum orçamento ainda.</p>
-                                <p className="text-sm mt-2">
-                                  Na aba <strong className="text-gray-700 dark:text-gray-300">Importações</strong> você pode importar a estrutura do contrato, ou use{' '}
-                                  <strong className="text-gray-700 dark:text-gray-300">Novo orçamento</strong> acima.
-                                </p>
-                              </div>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
+                    <div className="py-8 text-center">
+                      <Calculator className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" aria-hidden />
+                      <p className="text-gray-600 dark:text-gray-400">Nenhum orçamento ainda.</p>
+                      <p className="mx-auto mt-2 max-w-lg text-sm text-gray-500 dark:text-gray-500">
+                        Na aba <strong className="text-gray-700 dark:text-gray-300">Importações</strong> você pode importar a estrutura do contrato, ou use{' '}
+                        <strong className="text-gray-700 dark:text-gray-300">Novo orçamento</strong> acima.
+                      </p>
                     </div>
                   ) : (
                     <>
-                      <div className="px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <p className="text-sm text-gray-600 dark:text-gray-400 order-2 sm:order-1">
+                      <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                        <span>
                           <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredListaOrcamentos.length}</span>
                           {' de '}
                           <span className="font-medium text-gray-800 dark:text-gray-200">{listaOrcamentos.length}</span>
@@ -4974,66 +5119,67 @@ export function OrcamentoPageView({
                           {orcamentosSearch.trim() && listaOrcamentos.length > 0 ? (
                             <span className="text-gray-500 dark:text-gray-500"> · filtro ativo</span>
                           ) : null}
-                        </p>
-                        <div className="relative w-full sm:max-w-xs order-1 sm:order-2">
-                          <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          <input
-                            type="text"
-                            value={orcamentosSearch}
-                            onChange={(e) => setOrcamentosSearch(e.target.value)}
-                            placeholder="Buscar orçamento..."
-                            className="w-full pl-9 pr-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100"
-                          />
-                        </div>
+                        </span>
                       </div>
                       <div className="overflow-x-auto">
-                        <table className="w-full">
+                        <table className={`w-full border-collapse text-sm ${gradeTableCls}`}>
                           <thead className="border-b border-gray-200 dark:border-gray-700">
-                            <tr>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            <tr className={gradeTableRowTrCls}>
+                              <th className="px-3 sm:px-6 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Orçamento
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-3 sm:px-6 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Atualizado
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Ações
+                              <th className="px-3 sm:px-6 py-2.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Ação
                               </th>
                             </tr>
                           </thead>
-                          <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                             {filteredListaOrcamentos.length === 0 ? (
                               <tr>
-                                <td colSpan={3} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+                                <td colSpan={3} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                   Nenhum orçamento encontrado para essa busca.
                                 </td>
                               </tr>
                             ) : (
                               filteredListaOrcamentos.map((o) => (
-                                <tr key={o.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap max-w-[min(100%,24rem)]">
-                                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate block">
+                                <tr
+                                  key={o.id}
+                                  className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${gradeTableRowTrCls}`}
+                                >
+                                  <td className="max-w-[min(100%,24rem)] whitespace-nowrap px-3 py-2.5 align-middle sm:px-6">
+                                    <span className="block truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                                       {o.nome}
                                     </span>
                                   </td>
-                                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+                                  <td className="whitespace-nowrap px-3 py-2.5 align-middle text-left text-sm text-gray-700 dark:text-gray-300 tabular-nums sm:px-6">
                                     {o.updatedAt ? new Date(o.updatedAt).toLocaleString('pt-BR') : '—'}
                                   </td>
-                                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right">
-                                    <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                                  <td className="whitespace-nowrap px-3 py-2.5 text-right align-middle sm:px-6">
+                                    <div className="flex justify-end">
                                       <button
                                         type="button"
-                                        onClick={() => abrirOrcamentoDaLista(o.id)}
-                                        className="px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 text-sm font-medium transition-colors"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                          setOrcamentoListaActionMenu((prev) => {
+                                            if (prev?.orcamentoId === o.id) return null;
+                                            let left = r.right - ORCAMENTO_LISTA_MENU_WIDTH_PX;
+                                            left = Math.max(
+                                              8,
+                                              Math.min(left, window.innerWidth - ORCAMENTO_LISTA_MENU_WIDTH_PX - 8)
+                                            );
+                                            return { orcamentoId: o.id, nome: o.nome, top: r.bottom + 4, left };
+                                          });
+                                        }}
+                                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                        aria-label="Menu de ações"
+                                        aria-expanded={orcamentoListaActionMenu?.orcamentoId === o.id}
+                                        aria-haspopup="menu"
                                       >
-                                        Abrir
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => excluirOrcamentoDaLista(o.id, o.nome)}
-                                        className="px-3 py-1.5 rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors"
-                                      >
-                                        Excluir
+                                        <MoreVertical className="h-4 w-4" />
                                       </button>
                                     </div>
                                   </td>
@@ -5043,20 +5189,69 @@ export function OrcamentoPageView({
                           </tbody>
                         </table>
                       </div>
+                      {orcamentoListaActionMenu &&
+                        typeof document !== 'undefined' &&
+                        createPortal(
+                          <>
+                            <div
+                              className="fixed inset-0 z-[200]"
+                              aria-hidden
+                              onClick={() => setOrcamentoListaActionMenu(null)}
+                            />
+                            <div
+                              role="menu"
+                              className="fixed z-[201] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
+                              style={{
+                                top: orcamentoListaActionMenu.top,
+                                left: orcamentoListaActionMenu.left
+                              }}
+                            >
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const id = orcamentoListaActionMenu.orcamentoId;
+                                  setOrcamentoListaActionMenu(null);
+                                  abrirOrcamentoDaLista(id);
+                                }}
+                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                              >
+                                <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                                <span>Ver detalhes</span>
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const { orcamentoId, nome } = orcamentoListaActionMenu;
+                                  setOrcamentoListaActionMenu(null);
+                                  excluirOrcamentoDaLista(orcamentoId, nome);
+                                }}
+                                className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                              >
+                                <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                                <span>Excluir</span>
+                              </button>
+                            </div>
+                          </>,
+                          document.body
+                        )}
                     </>
                   )}
                 </CardContent>
               </Card>
             ) : (
             <Card>
-              <CardHeader>
+              <CardHeader className="!border-b-0">
                 <div className="space-y-4">
                   <button
                     type="button"
                     onClick={voltarParaListaOrcamentos}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-sm"
+                    className="inline-flex items-center gap-2 px-0 py-1 text-sm font-medium text-gray-800 transition-colors hover:text-red-600 dark:text-gray-200 dark:hover:text-red-400"
                   >
-                    <ArrowLeft className="w-4 h-4" />
+                    <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
                     Voltar à lista
                   </button>
 
@@ -5065,7 +5260,7 @@ export function OrcamentoPageView({
                       <button
                         type="button"
                         onClick={() => setOrcamentoViewTab('dados')}
-                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
                           orcamentoViewTab === 'dados'
                             ? 'bg-red-600 text-white shadow-sm'
                             : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
@@ -5076,7 +5271,7 @@ export function OrcamentoPageView({
                       <button
                         type="button"
                         onClick={() => setOrcamentoViewTab('montagem')}
-                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
                           orcamentoViewTab === 'montagem'
                             ? 'bg-red-600 text-white shadow-sm'
                             : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
@@ -5087,7 +5282,7 @@ export function OrcamentoPageView({
                       <button
                         type="button"
                         onClick={() => setOrcamentoViewTab('memorial')}
-                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
                           orcamentoViewTab === 'memorial'
                             ? 'bg-red-600 text-white shadow-sm'
                             : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
@@ -5098,7 +5293,7 @@ export function OrcamentoPageView({
                       <button
                         type="button"
                         onClick={() => setOrcamentoViewTab('analitico')}
-                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
                           orcamentoViewTab === 'analitico'
                             ? 'bg-red-600 text-white shadow-sm'
                             : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
@@ -5109,7 +5304,7 @@ export function OrcamentoPageView({
                       <button
                         type="button"
                         onClick={() => setOrcamentoViewTab('planilhaAnalitica')}
-                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
                           orcamentoViewTab === 'planilhaAnalitica'
                             ? 'bg-red-600 text-white shadow-sm'
                             : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
@@ -5220,9 +5415,9 @@ export function OrcamentoPageView({
                     ) : (
                     <>
                     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                      <table className="min-w-full border-collapse">
+                      <table className={`min-w-full border-collapse ${gradeTableCls}`}>
                         <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
-                          <tr>
+                          <tr className={gradeTableRowTrCls}>
                             <th className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Item</th>
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Tipo</th>
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Código</th>
@@ -5232,7 +5427,7 @@ export function OrcamentoPageView({
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quant.</th>
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade real</th>
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade orçada</th>
-                            <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Valor unit</th>
+                            <th className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Valor unit</th>
                             <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Total</th>
                           </tr>
                         </thead>
@@ -5240,13 +5435,13 @@ export function OrcamentoPageView({
                           {linhasAnaliticoOrcamento.map((l, idxLinha) => {
                             if (l.kind === 'tituloServico') {
                               return (
-                                <tr key={l.key} className="bg-red-600 dark:bg-red-950/90">
-                                  <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm font-bold tabular-nums text-white">
+                                <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
+                                  <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white">
                                     {l.main}
                                   </td>
                                   <td
                                     colSpan={10}
-                                    className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-left text-white align-middle"
+                                    className="px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-left text-white align-middle"
                                   >
                                     {l.servicoNome}
                                   </td>
@@ -5257,12 +5452,12 @@ export function OrcamentoPageView({
                               return (
                                 <tr
                                   key={l.key}
-                                  className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
+                                  className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls}`}
                                 >
-                                  <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
+                                  <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
                                     {`${l.main}.${l.subIdx}`}
                                   </td>
-                                  <td colSpan={10} className="px-3 py-1.5 align-middle">
+                                  <td colSpan={10} className="px-3 py-2.5 align-middle">
                                     <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
                                       {l.texto}
                                     </span>
@@ -5273,37 +5468,47 @@ export function OrcamentoPageView({
                             if (l.kind === 'composicao') {
                               return (
                                 <React.Fragment key={l.key}>
-                                  <tr className="bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700">
-                                    <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-50">
+                                  <tr
+                                    className={`bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
+                                    onContextMenuCapture={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      const mw = 280;
+                                      const mh = 120;
+                                      let left = e.clientX;
+                                      let top = e.clientY;
+                                      left = Math.min(left, window.innerWidth - mw - 8);
+                                      top = Math.min(top, window.innerHeight - mh - 8);
+                                      setMenuCtxAnalitico({
+                                        kind: 'composicao',
+                                        left,
+                                        top,
+                                        composicaoKey: l.key
+                                      });
+                                    }}
+                                  >
+                                    <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-50">
                                       {l.item}
                                     </td>
-                                    <td className="px-3 py-2 text-center text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
-                                    <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
-                                    <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco}</td>
-                                    <td className="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
-                                      <div className="flex items-center justify-between gap-2">
-                                        <div className="truncate max-w-[min(460px,50vw)]">{l.descricao}</div>
-                                        <button
-                                          type="button"
-                                          onClick={() => addInsumoManualAnalitico(l.key)}
-                                          className="inline-flex items-center justify-center h-6 w-6 rounded text-white text-base leading-none hover:bg-white/10 shrink-0"
-                                          title="Adicionar insumo manual nesta composição"
-                                        >
-                                          +
-                                        </button>
+                                    <td className="px-3 py-2.5 text-center text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
+                                    <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
+                                    <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco}</td>
+                                    <td className="px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                      <div className="truncate max-w-[min(520px,55vw)]" title={l.descricao}>
+                                        {l.descricao}
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
-                                    <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                    <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                    <td className="px-3 py-2 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                    <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                    <td className="px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
+                                    <td className="px-3 py-2.5 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                    <td className="px-3 py-2.5 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                    <td className="px-3 py-2.5 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                    <td className="px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
                                       <MoedaCelula
                                         valor={l.valorUnit}
                                         className="font-medium text-gray-900 dark:text-gray-100"
                                       />
                                     </td>
-                                    <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                    <td className="px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
                                       <MoedaCelula
                                         valor={l.total}
                                         className="font-semibold text-gray-900 dark:text-gray-50"
@@ -5328,22 +5533,40 @@ export function OrcamentoPageView({
                             ).length;
                             return (
                               <React.Fragment key={l.key}>
-                              <tr className="bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800">
-                                <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm tabular-nums text-gray-700 dark:text-gray-300">
+                              <tr
+                                className={`bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800 ${gradeTableRowTrCls}`}
+                                onContextMenuCapture={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const mw = 280;
+                                  const mh = 120;
+                                  let left = e.clientX;
+                                  let top = e.clientY;
+                                  left = Math.min(left, window.innerWidth - mw - 8);
+                                  top = Math.min(top, window.innerHeight - mh - 8);
+                                  setMenuCtxAnalitico({
+                                    kind: 'composicao',
+                                    left,
+                                    top,
+                                    composicaoKey: l.parentKey
+                                  });
+                                }}
+                              >
+                                <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm tabular-nums text-gray-700 dark:text-gray-300">
                                   {l.item}
                                 </td>
-                                <td className="px-3 py-2 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
-                                <td className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo || '---'}</td>
-                                <td className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco || '---'}</td>
-                                <td className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"><div className="truncate max-w-[min(520px,55vw)]">{l.descricao}</div></td>
-                                <td className="px-3 py-2 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '---'}</td>
-                                <td className="px-3 py-2 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                <td className="px-3 py-2 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                <td className="px-3 py-2 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                <td className="px-3 py-2.5 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
+                                <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo || '---'}</td>
+                                <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco || '---'}</td>
+                                <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"><div className="truncate max-w-[min(520px,55vw)]">{l.descricao}</div></td>
+                                <td className="px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '---'}</td>
+                                <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                <td className="px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
                                   <MoedaCelula valor={l.valorUnit} className="text-gray-700 dark:text-gray-300" />
                                 </td>
-                                <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                <td className="px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
                                   <MoedaCelula valor={l.total} className="text-gray-900 dark:text-gray-100" />
                                 </td>
                               </tr>
@@ -5362,32 +5585,55 @@ export function OrcamentoPageView({
                                 const totalManual =
                                   qtdRealNum !== null && vUnitNum !== null ? qtdRealNum * vUnitNum : null;
                                 return (
-                                  <tr key={ins.id} className="bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700">
-                                    <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm tabular-nums text-gray-700 dark:text-gray-300">
+                                  <tr
+                                    key={ins.id}
+                                    className={`bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
+                                    onContextMenuCapture={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      const mw = 220;
+                                      const mh = 104;
+                                      let left = e.clientX;
+                                      let top = e.clientY;
+                                      left = Math.min(left, window.innerWidth - mw - 8);
+                                      top = Math.min(top, window.innerHeight - mh - 8);
+                                      setMenuCtxAnalitico({
+                                        kind: 'manual',
+                                        left,
+                                        top,
+                                        parentKey: l.parentKey,
+                                        insumoId: ins.id,
+                                        idx
+                                      });
+                                    }}
+                                  >
+                                    <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm tabular-nums text-gray-700 dark:text-gray-300">
                                       {itemManual}
                                     </td>
-                                    <td className="px-3 py-2 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                    <td className="px-3 py-2.5 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
                                       Insumo
                                     </td>
-                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
-                                      <input type="text" value={ins.codigo} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'codigo', e.target.value)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center" placeholder="Código" />
+                                    <td className="p-0 border-l border-gray-200 dark:border-gray-700">
+                                      <input type="text" value={ins.codigo} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'codigo', e.target.value)} className={`${inputGradeCls} text-center`} placeholder="Código" />
                                     </td>
-                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
-                                      <input type="text" value={ins.banco} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'banco', e.target.value)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center" placeholder="Banco" />
+                                    <td className="p-0 border-l border-gray-200 dark:border-gray-700">
+                                      <input type="text" value={ins.banco} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'banco', e.target.value)} className={`${inputGradeCls} text-center`} placeholder="Banco" />
                                     </td>
-                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
-                                      <div className="flex items-center gap-2">
-                                        <input type="text" value={ins.descricao} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'descricao', e.target.value)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" placeholder="Descrição do insumo" />
-                                        <button type="button" onClick={() => removerInsumoManualAnalitico(l.parentKey, ins.id)} className="p-1.5 rounded text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 shrink-0" title="Remover insumo manual">
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      </div>
+                                    <td className="p-0 border-l border-gray-200 dark:border-gray-700">
+                                      <input
+                                        type="text"
+                                        value={ins.descricao}
+                                        onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'descricao', e.target.value)}
+                                        className={`${inputGradeCls} text-left`}
+                                        placeholder="Descrição do insumo"
+                                      />
                                     </td>
-                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
+                                    <td className="p-0 border-l border-gray-200 dark:border-gray-700">
                                       <select
                                         value={ins.und}
                                         onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'und', e.target.value)}
-                                        className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center"
+                                        className={selectGradeSemSetaCls}
+                                        title="Unidade (UND)"
                                       >
                                         <option value="">UND</option>
                                         <option value="UN">UN</option>
@@ -5402,28 +5648,28 @@ export function OrcamentoPageView({
                                         <option value="VB">VB</option>
                                       </select>
                                     </td>
-                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
-                                      <input type="text" inputMode="decimal" value={ins.quant} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'quant', e.target.value)} onBlur={() => normalizarNumeroManualAnalitico(l.parentKey, ins.id, 'quant', 2)} className="w-full min-w-0 px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-center tabular-nums" placeholder="0,00" />
+                                    <td className="p-0 border-l border-gray-200 dark:border-gray-700">
+                                      <input type="text" inputMode="decimal" value={ins.quant} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'quant', e.target.value)} onBlur={() => normalizarNumeroManualAnalitico(l.parentKey, ins.id, 'quant', 2)} className={`${inputGradeCls} text-center tabular-nums`} placeholder="0,00" />
                                     </td>
-                                    <td className="px-3 py-2 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                    <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">
                                       {qtdRealNum !== null
                                         ? qtdRealNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                                         : '—'}
                                     </td>
-                                    <td className="px-3 py-2 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                    <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">
                                       {qtdRealNum !== null
                                         ? qtdRealNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                                         : '—'}
                                     </td>
-                                    <td className="px-2 py-2 border-l border-gray-200 dark:border-gray-700">
-                                      <div className="flex w-full min-w-0 items-center justify-between gap-1">
-                                        <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 tabular-nums">
+                                    <td className={`p-0 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}>
+                                      <div className={moedaGradeFieldWrapperCls}>
+                                        <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
                                           R$
                                         </span>
-                                        <input type="text" inputMode="decimal" value={ins.valorUnit} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'valorUnit', e.target.value)} onBlur={() => normalizarNumeroManualAnalitico(l.parentKey, ins.id, 'valorUnit', 2)} className="min-w-0 w-[6.5rem] max-w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-right tabular-nums" placeholder="0,00" />
+                                        <input type="text" inputMode="decimal" value={ins.valorUnit} onChange={(e) => updateInsumoManualAnalitico(l.parentKey, ins.id, 'valorUnit', e.target.value)} onBlur={() => normalizarNumeroManualAnalitico(l.parentKey, ins.id, 'valorUnit', 2)} className={`${inputGradeMoedaCls} text-right`} placeholder="0,00" />
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 text-right text-gray-900 dark:text-gray-100">
+                                    <td className="px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 text-right text-gray-900 dark:text-gray-100">
                                       {totalManual !== null ? (
                                         <MoedaCelula valor={totalManual} className="w-full text-sm text-gray-900 dark:text-gray-100" />
                                       ) : (
@@ -5450,6 +5696,95 @@ export function OrcamentoPageView({
                         Exportar orçamento analítico (.xlsx)
                       </button>
                     </div>
+                    {menuCtxAnalitico &&
+                      typeof document !== 'undefined' &&
+                      createPortal(
+                        <>
+                          <div
+                            className="fixed inset-0 z-[200]"
+                            aria-hidden
+                            onClick={() => setMenuCtxAnalitico(null)}
+                          />
+                          <div
+                            role="menu"
+                            className="fixed z-[201] min-w-[17rem] max-w-[min(100vw-1rem,22rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                            style={{ left: menuCtxAnalitico.left, top: menuCtxAnalitico.top }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {menuCtxAnalitico.kind === 'composicao' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/80"
+                                  onClick={() => {
+                                    addInsumoManualAnalitico(menuCtxAnalitico.composicaoKey);
+                                    setMenuCtxAnalitico(null);
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                                  Adicionar insumo manual
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                                  onClick={() => {
+                                    if (
+                                      typeof window !== 'undefined' &&
+                                      !window.confirm(
+                                        'Remover esta composição inteira do orçamento? Os insumos manuais ligados a ela também serão desconsiderados na próxima montagem da lista.'
+                                      )
+                                    ) {
+                                      setMenuCtxAnalitico(null);
+                                      return;
+                                    }
+                                    removerItemComposicaoDoOrcamento(menuCtxAnalitico.composicaoKey);
+                                    setMenuCtxAnalitico(null);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
+                                  Excluir composição do orçamento
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/80"
+                                  onClick={() => {
+                                    addInsumoManualAnaliticoApos(
+                                      menuCtxAnalitico.parentKey,
+                                      menuCtxAnalitico.idx
+                                    );
+                                    setMenuCtxAnalitico(null);
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                                  Adicionar insumo abaixo
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                                  onClick={() => {
+                                    removerInsumoManualAnalitico(
+                                      menuCtxAnalitico.parentKey,
+                                      menuCtxAnalitico.insumoId
+                                    );
+                                    setMenuCtxAnalitico(null);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
+                                  Excluir insumo
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </>,
+                        document.body
+                      )}
                     </>
                     )}
                   </div>
@@ -5467,9 +5802,9 @@ export function OrcamentoPageView({
                     ) : (
                         <>
                         <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                          <table className="min-w-full border-collapse">
+                          <table className={`min-w-full border-collapse ${gradeTableCls}`}>
                             <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
-                              <tr>
+                              <tr className={gradeTableRowTrCls}>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.item}
                                   className="cursor-help w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide"
@@ -5508,7 +5843,7 @@ export function OrcamentoPageView({
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadQuantidade}
-                                  className="cursor-help w-[108px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                  className="cursor-help w-[108px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Quantidade
                                 </th>
@@ -5538,7 +5873,7 @@ export function OrcamentoPageView({
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadQtdCompra}
-                                  className="cursor-help w-[120px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                  className="cursor-help w-[120px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Quantidade compra
                                 </th>
@@ -5550,7 +5885,7 @@ export function OrcamentoPageView({
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadVlCompraReal}
-                                  className="cursor-help w-[130px] px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600"
+                                  className={`cursor-help ${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}
                                 >
                                   Valor unit. real
                                 </th>
@@ -5583,7 +5918,7 @@ export function OrcamentoPageView({
                             <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
                               {linhasAnaliticoComManuais.map((l) => {
                                 const itemW =
-                                  'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm tabular-nums';
+                                  'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm tabular-nums';
                                 if (l.kind === 'tituloServico') {
                                   const resumo = resumoSecoesFicha.porTitulo.get(String(l.main)) ?? {
                                     custoOrc: 0,
@@ -5593,17 +5928,17 @@ export function OrcamentoPageView({
                                   const listaAggTit =
                                     resumoSecoesFicha.aggPorTituloParaTooltip.get(String(l.main)) ?? [];
                                   return (
-                                    <tr key={l.key} className="bg-red-600 dark:bg-red-950/90">
+                                    <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
                                         className={`${itemW} cursor-help font-bold text-white`}
                                       >
                                         {l.main}
                                       </td>
-                                      <td title={PLANILHA_ANALITICA_TOOLTIP.tituloServico} colSpan={7} className="cursor-help px-3 py-2 text-xs font-bold uppercase tracking-wide text-left text-white align-middle">
+                                      <td title={PLANILHA_ANALITICA_TOOLTIP.tituloServico} colSpan={7} className="cursor-help px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-left text-white align-middle">
                                         {l.servicoNome}
                                       </td>
-                                      <td className="px-3 py-2 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
+                                      <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
                                         <CalcHoverBridge
                                           hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'orc')}
                                           onHoverSourcesChange={setCalcHoverSourceIds}
@@ -5611,8 +5946,8 @@ export function OrcamentoPageView({
                                           <MoedaCelula valor={resumo.custoOrc} className="text-white font-bold" valorClassName="font-bold" />
                                         </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
-                                      <td className="px-3 py-2 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
+                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
                                         <CalcHoverBridge
                                           hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'est')}
                                           onHoverSourcesChange={setCalcHoverSourceIds}
@@ -5620,10 +5955,10 @@ export function OrcamentoPageView({
                                           <MoedaCelula valor={resumo.custoEst} className="text-white font-bold" valorClassName="font-bold" />
                                         </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
-                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
-                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
-                                      <td className="px-3 py-2 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
+                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
                                         <CalcHoverBridge
                                           hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'real')}
                                           onHoverSourcesChange={setCalcHoverSourceIds}
@@ -5631,9 +5966,9 @@ export function OrcamentoPageView({
                                           <MoedaCelula valor={resumo.custoReal} className="text-white font-bold" valorClassName="font-bold" />
                                         </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
-                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
-                                      <td className="px-3 py-2 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
+                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                     </tr>
                                   );
                                 }
@@ -5648,7 +5983,7 @@ export function OrcamentoPageView({
                                   return (
                                     <tr
                                       key={l.key}
-                                      className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
+                                      className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls}`}
                                     >
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
@@ -5656,7 +5991,7 @@ export function OrcamentoPageView({
                                       >
                                         {`${l.main}.${l.subIdx}`}
                                       </td>
-                                      <td title={PLANILHA_ANALITICA_TOOLTIP.subtituloBloco} colSpan={7} className="cursor-help px-3 py-1.5 align-middle">
+                                      <td title={PLANILHA_ANALITICA_TOOLTIP.subtituloBloco} colSpan={7} className="cursor-help px-3 py-2.5 align-middle">
                                         {l.texto ? (
                                           <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
                                             {l.texto}
@@ -5664,7 +5999,7 @@ export function OrcamentoPageView({
                                         ) : null}
                                       </td>
                                       <td
-                                        className={`px-3 py-1.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
+                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`custo-orc-bloco-${l.main}-${l.subIdx}`)
                                             ? CLASSE_CELULA_HOVER_FONTE
                                             : ''
@@ -5677,9 +6012,9 @@ export function OrcamentoPageView({
                                           <MoedaCelula valor={resumo.custoOrc} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                         </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td
-                                        className={`px-3 py-1.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
+                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`custo-est-bloco-${l.main}-${l.subIdx}`)
                                             ? CLASSE_CELULA_HOVER_FONTE
                                             : ''
@@ -5692,11 +6027,11 @@ export function OrcamentoPageView({
                                           <MoedaCelula valor={resumo.custoEst} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                         </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
-                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
-                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td
-                                        className={`px-3 py-1.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
+                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`custo-real-bloco-${l.main}-${l.subIdx}`)
                                             ? CLASSE_CELULA_HOVER_FONTE
                                             : ''
@@ -5709,9 +6044,9 @@ export function OrcamentoPageView({
                                           <MoedaCelula valor={resumo.custoReal} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                         </CalcHoverBridge>
                                       </td>
-                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
-                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
-                                      <td className="px-3 py-1.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
+                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                     </tr>
                                   );
                                 }
@@ -5760,7 +6095,7 @@ export function OrcamentoPageView({
                                   return (
                                     <tr
                                       key={l.key}
-                                      className="bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700"
+                                      className={`bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
                                     >
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
@@ -5770,19 +6105,19 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.codigo}
-                                        className="cursor-help px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
+                                        className="cursor-help px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
                                       >
                                         {l.codigo}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.banco}
-                                        className="cursor-help px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
+                                        className="cursor-help px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
                                       >
                                         {l.banco}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                        className="cursor-help min-w-[220px] px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
+                                        className="cursor-help min-w-[220px] px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         <div className="truncate max-w-[min(520px,55vw)]" title={l.descricao}>
                                           {l.descricao}
@@ -5790,17 +6125,17 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.tipoCompLinha}
-                                        className="cursor-help px-3 py-2 text-sm text-center text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
+                                        className="cursor-help px-3 py-2.5 text-sm text-center text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
                                       />
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                        className="cursor-help px-3 py-2 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="cursor-help px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         {l.und}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.quantidadeComp}
-                                        className={`cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`cursor-help px-3 py-2.5 text-center text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`qtd-orc-${l.key}`)
                                             ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                             : ''
@@ -5810,7 +6145,7 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcComp}
-                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`vl-orc-${l.key}`)
                                             ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                             : ''
@@ -5819,7 +6154,7 @@ export function OrcamentoPageView({
                                         <MoedaCelula valor={l.valorUnit} />
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`custo-orc-${l.key}`)
                                             ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                             : ''
@@ -5834,7 +6169,7 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstComp}
-                                        className="cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="cursor-help px-3 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         <CalcHoverBridge
                                           hoverSourceIds={[`vl-orc-${l.key}`]}
@@ -5844,7 +6179,7 @@ export function OrcamentoPageView({
                                         </CalcHoverBridge>
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`custo-est-${l.key}`)
                                             ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                             : ''
@@ -5859,20 +6194,20 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraComp}
-                                        className="cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="cursor-help px-3 py-2.5 text-center text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       />
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraComp}
-                                        className="cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="cursor-help px-3 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       />
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealComp}
-                                        className="cursor-help px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className={`cursor-help px-2 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
                                       >
                                         {vlUnitCompraRealAgreg !== null ? <MoedaCelula valor={vlUnitCompraRealAgreg} /> : null}
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
                                           calcHoverSourceIds.includes(`custo-real-${l.key}`)
                                             ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                             : ''
@@ -5888,7 +6223,7 @@ export function OrcamentoPageView({
                                         ) : null}
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                           levantamentoCondComp || 'text-gray-800 dark:text-gray-200'
                                         }`}
                                       >
@@ -5899,7 +6234,7 @@ export function OrcamentoPageView({
                                             )}
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                           valorTotalCondComp || 'text-gray-800 dark:text-gray-200'
                                         }`}
                                       >
@@ -5910,7 +6245,7 @@ export function OrcamentoPageView({
                                             )}
                                       </td>
                                       <td
-                                        className="cursor-help px-3 py-2 text-sm text-center tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="cursor-help px-3 py-2.5 text-sm text-center tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         {pctCvp !== undefined && Number.isFinite(pctCvp) ? (
                                           <CalcHoverBridge
@@ -5960,7 +6295,7 @@ export function OrcamentoPageView({
                                     ? classeLevantamentoCondicional(pctLevIn)
                                     : '';
                                 return (
-                                  <tr key={l.key} className="bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800">
+                                  <tr key={l.key} className={`bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800 ${gradeTableRowTrCls}`}>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.item}
                                       className={`${itemW} cursor-help text-gray-700 dark:text-gray-300`}
@@ -5969,19 +6304,19 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.codigo}
-                                      className="cursor-help px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
+                                      className="cursor-help px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
                                     >
                                       {l.codigo || '—'}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.banco}
-                                      className="cursor-help px-3 py-2 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
+                                      className="cursor-help px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
                                     >
                                       {l.banco || '—'}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                      className="cursor-help min-w-[220px] px-3 py-2 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="cursor-help min-w-[220px] px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       <div className="truncate max-w-[min(520px,55vw)]" title={l.descricao}>
                                         {l.descricao}
@@ -5989,7 +6324,7 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.tipo}
-                                      className="cursor-help px-3 py-2 text-sm text-center font-medium text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="cursor-help p-0 text-sm text-center font-medium text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       <select
                                         value={
@@ -6003,7 +6338,7 @@ export function OrcamentoPageView({
                                             [l.key]: e.target.value as 'MO' | 'MA' | 'LO'
                                           }))
                                         }
-                                        className="w-[5.2rem] max-w-full px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs sm:text-sm"
+                                        className={selectGradeSemSetaCls}
                                         title="Selecione o tipo do insumo"
                                       >
                                         <option value="MO">MO</option>
@@ -6013,13 +6348,13 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                      className="cursor-help px-3 py-2 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
+                                      className="cursor-help px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       {l.und || '—'}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.quantidadeInsumo}
-                                      className={`cursor-help px-3 py-2 text-sm text-right tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
                                         calcHoverSourceIds.includes(`qtd-orc-${l.key}`)
                                           ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                           : ''
@@ -6029,7 +6364,7 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcInsumo}
-                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
                                         calcHoverSourceIds.includes(`vl-orc-${l.key}`)
                                           ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                           : ''
@@ -6038,7 +6373,7 @@ export function OrcamentoPageView({
                                       <MoedaCelula valor={l.valorUnit} />
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
                                         calcHoverSourceIds.includes(`custo-orc-${l.key}`)
                                           ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                           : ''
@@ -6053,7 +6388,7 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstInsumo}
-                                      className="cursor-help px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       <CalcHoverBridge
                                         hoverSourceIds={[`vl-orc-${l.key}`]}
@@ -6063,7 +6398,7 @@ export function OrcamentoPageView({
                                       </CalcHoverBridge>
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
                                         calcHoverSourceIds.includes(`custo-est-${l.key}`)
                                           ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                           : ''
@@ -6078,7 +6413,7 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
-                                      className={`cursor-help px-2 py-2 border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help p-0 border-l border-gray-200 dark:border-gray-700 ${
                                         calcHoverSourceIds.includes(`qtd-compra-${l.key}`)
                                           ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                           : ''
@@ -6089,7 +6424,7 @@ export function OrcamentoPageView({
                                         inputMode="decimal"
                                         placeholder="0"
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
-                                        className="w-full min-w-0 px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm tabular-nums"
+                                        className={`${inputGradeCls} text-center tabular-nums`}
                                         value={
                                           planilhaCompraDraft[`q|${l.key}`] ??
                                           (qC !== undefined
@@ -6102,7 +6437,7 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraInsumo}
-                                      className={`cursor-help px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                         sobraInsumo !== null && sobraInsumo < 0
                                           ? 'font-semibold bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200'
                                           : 'text-gray-700 dark:text-gray-300'
@@ -6119,14 +6454,14 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
-                                      className={`cursor-help px-2 py-2 align-middle border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help p-0 align-middle border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT} ${
                                         calcHoverSourceIds.includes(`vl-real-${l.key}`)
                                           ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                           : ''
                                       }`}
                                     >
-                                      <div className="flex w-full min-w-0 items-center justify-between gap-1">
-                                        <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 tabular-nums">
+                                      <div className={moedaGradeFieldWrapperCls}>
+                                        <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
                                           R$
                                         </span>
                                         <input
@@ -6134,7 +6469,7 @@ export function OrcamentoPageView({
                                           inputMode="decimal"
                                           placeholder="0,00"
                                           title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
-                                          className="min-w-0 w-[6.5rem] max-w-full px-2 py-1 text-right rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm tabular-nums"
+                                          className={`${inputGradeMoedaCls} text-right`}
                                           value={
                                             planilhaCompraDraft[`v|${l.key}`] ??
                                             (vReal !== undefined
@@ -6147,7 +6482,7 @@ export function OrcamentoPageView({
                                       </div>
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
                                         calcHoverSourceIds.includes(`custo-real-${l.key}`)
                                           ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
                                           : ''
@@ -6163,7 +6498,7 @@ export function OrcamentoPageView({
                                       ) : '—'}
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                         levantamentoCondIn ||
                                         'text-gray-700 dark:text-gray-300'
                                       }`}
@@ -6180,7 +6515,7 @@ export function OrcamentoPageView({
                                       )}
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                         valorTotalCondIn || 'text-gray-700 dark:text-gray-300'
                                       }`}
                                     >
@@ -6196,7 +6531,7 @@ export function OrcamentoPageView({
                                       )}
                                     </td>
                                     <td
-                                      className="cursor-help px-3 py-2 text-sm text-center tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="cursor-help px-3 py-2.5 text-sm text-center tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       {pctCvpIn !== undefined && Number.isFinite(pctCvpIn) ? (
                                         <CalcHoverBridge
@@ -6370,9 +6705,9 @@ export function OrcamentoPageView({
                     ) : (
                       <div className="space-y-6">
                       <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                        <table className="min-w-full border-collapse">
+                        <table className={`min-w-full table-fixed border-collapse ${gradeTableCls}`}>
                           <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
-                            <tr>
+                            <tr className={gradeTableRowTrCls}>
                               <th className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
                                 Item
                               </th>
@@ -6451,12 +6786,12 @@ export function OrcamentoPageView({
                                 key={r.key}
                                 className={
                                   ehComp
-                                    ? 'bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700'
-                                    : 'bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800/95'
+                                    ? `bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`
+                                    : `bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800/95 ${gradeTableRowTrCls}`
                                 }
                               >
                                 <td
-                                  className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-sm tabular-nums ${
+                                  className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm tabular-nums ${
                                     ehComp
                                       ? 'font-semibold text-gray-900 dark:text-gray-50'
                                       : 'text-gray-700 dark:text-gray-300'
@@ -6465,7 +6800,7 @@ export function OrcamentoPageView({
                                   {r.item}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-semibold text-gray-900 dark:text-gray-50'
                                       : 'text-gray-500 dark:text-gray-400'
@@ -6474,7 +6809,7 @@ export function OrcamentoPageView({
                                   {r.codigo}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-500 dark:text-gray-400'
@@ -6483,7 +6818,7 @@ export function OrcamentoPageView({
                                   {r.banco}
                                 </td>
                                 <td
-                                  className={`min-w-[220px] px-3 py-2 text-sm border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`min-w-[220px] px-3 py-2.5 text-sm border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp ? 'font-semibold text-gray-900 dark:text-gray-50' : 'text-gray-700 dark:text-gray-300'
                                   }`}
                                 >
@@ -6492,14 +6827,14 @@ export function OrcamentoPageView({
                                   </div>
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp ? 'font-medium text-gray-800 dark:text-gray-200' : 'text-gray-500 dark:text-gray-400'
                                   }`}
                                 >
                                   {r.un}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     levantamentoCond ||
                                     (ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
@@ -6526,7 +6861,7 @@ export function OrcamentoPageView({
                                         )}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'text-right font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-center text-gray-700 dark:text-gray-300'
@@ -6551,7 +6886,7 @@ export function OrcamentoPageView({
                                         )}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'text-right font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-center text-gray-700 dark:text-gray-300'
@@ -6581,7 +6916,7 @@ export function OrcamentoPageView({
                                         )}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp ? '' : 'text-gray-700 dark:text-gray-300'
                                   }`}
                                 >
@@ -6593,7 +6928,7 @@ export function OrcamentoPageView({
                                       })}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp ? '' : 'text-gray-700 dark:text-gray-300'
                                   } ${
                                     !ehComp && calcHoverSourceIds.includes(`ficha-qtd-compra-${r.key}`)
@@ -6611,7 +6946,7 @@ export function OrcamentoPageView({
                                       : '—'}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? ''
                                       : sobra !== null && sobra < 0
@@ -6629,7 +6964,7 @@ export function OrcamentoPageView({
                                       : '—'}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-700 dark:text-gray-300'
@@ -6649,7 +6984,7 @@ export function OrcamentoPageView({
                                       )}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-700 dark:text-gray-300'
@@ -6667,14 +7002,14 @@ export function OrcamentoPageView({
                                       : '—'}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-700 dark:text-gray-300'
                                   }`}
                                 >
                                   {ehComp ? (
-                                    <span className="inline-block">
+                                    <span className="block w-full min-w-0">
                                       {r.valorTotalOrcamento !== undefined ? (
                                         <MoedaCelula
                                           valor={r.valorTotalOrcamento}
@@ -6692,7 +7027,7 @@ export function OrcamentoPageView({
                                       ]}
                                       onHoverSourcesChange={setCalcHoverSourceIds}
                                     >
-                                      <span className="inline-block">
+                                      <span className="block w-full min-w-0">
                                         <MoedaCelula
                                           valor={r.valorTotalOrcamento}
                                           className="w-full text-sm text-gray-700 dark:text-gray-300"
@@ -6700,11 +7035,11 @@ export function OrcamentoPageView({
                                       </span>
                                     </CalcHoverBridge>
                                   ) : (
-                                    <span className="inline-block text-gray-500 dark:text-gray-400">—</span>
+                                    <span className="block text-gray-500 dark:text-gray-400">—</span>
                                   )}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-700 dark:text-gray-300'
@@ -6720,7 +7055,7 @@ export function OrcamentoPageView({
                                     : '—'}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-right text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-700 dark:text-gray-300'
@@ -6736,7 +7071,7 @@ export function OrcamentoPageView({
                                     : '—'}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                  className={`px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                     ehComp
                                       ? 'font-medium text-gray-900 dark:text-gray-100'
                                       : 'text-gray-700 dark:text-gray-300'
@@ -6744,20 +7079,51 @@ export function OrcamentoPageView({
                                 >
                                   {r.pctCustoValorPago !== undefined &&
                                   Number.isFinite(r.pctCustoValorPago)
-                                    ? `${r.pctCustoValorPago.toLocaleString('pt-BR', {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2
-                                      })}%`
+                                    ? (() => {
+                                        const pctStr = `${r.pctCustoValorPago.toLocaleString('pt-BR', {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2
+                                        })}%`;
+                                        return (
+                                          <span className="block min-w-0 truncate" title={pctStr}>
+                                            {pctStr}
+                                          </span>
+                                        );
+                                      })()
                                     : '—'}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-sm border-l border-gray-200 dark:border-gray-700 ${
-                                    ehComp
-                                      ? 'text-gray-400 dark:text-gray-600'
-                                      : 'font-medium text-gray-700 dark:text-gray-300'
+                                  className={`border-l border-gray-200 dark:border-gray-700 ${
+                                    ehComp ? 'px-3 py-2.5 text-center text-sm text-gray-400 dark:text-gray-600' : 'p-0'
                                   }`}
                                 >
-                                  {ehComp ? null : tipoFichaDemandaLabel(r.tipo)}
+                                  {ehComp ? null : (
+                                    <select
+                                      value={(() => {
+                                        const p = planilhaTipoInsumo[r.key];
+                                        const dePlanilha =
+                                          String(p ?? '') === 'MAT' ? 'MA' : p;
+                                        if (dePlanilha === 'MO' || dePlanilha === 'MA' || dePlanilha === 'LO') {
+                                          return dePlanilha;
+                                        }
+                                        const t = r.tipo === 'MAT' ? 'MA' : r.tipo;
+                                        if (t === 'MO' || t === 'MA' || t === 'LO') return t;
+                                        return 'MA';
+                                      })()}
+                                      onChange={(e) =>
+                                        setPlanilhaTipoInsumo((prev) => ({
+                                          ...prev,
+                                          [r.key]: e.target.value as 'MO' | 'MA' | 'LO'
+                                        }))
+                                      }
+                                      className={selectGradeSemSetaCls}
+                                      title="Selecione o tipo do insumo (igual à planilha analítica)"
+                                    >
+                                      <option value="MO">MO</option>
+                                      <option value="MA">MA</option>
+                                      <option value="LO">LO</option>
+                                    </select>
+                                  )}
                                 </td>
                               </tr>
                               );
@@ -6800,58 +7166,49 @@ export function OrcamentoPageView({
                         Icon={Calculator}
                         onIrOrcamento={() => setOrcamentoViewTab('montagem')}
                       />
-                    ) : itensMemoriaMedicao.length === 0 ? (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 rounded-xl border border-gray-200/90 dark:border-gray-700/80 bg-white/50 dark:bg-gray-900/40 px-5 py-8 text-center leading-relaxed shadow-sm">
-                        Nenhum serviço com medição por dimensão neste orçamento. Ajuste quantidades e preços na aba{' '}
-                        <span className="font-medium text-gray-900 dark:text-gray-100">Orçamento</span>.
-                      </p>
                     ) : (
                       <div className="space-y-8">
-                        {itensMemoriaMedicao.map(row => (
-                          <section
-                            key={row.key}
-                            id={`memorial-medicoes-${row.key}`}
-                            className="scroll-mt-6 rounded-2xl border border-gray-200/90 dark:border-gray-700/70 bg-slate-50 dark:bg-gray-900 p-5 sm:p-6 shadow-sm"
-                          >
-                            <div className="mb-4 pb-3 border-b border-gray-200/80 dark:border-gray-700/60">
-                              <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                                Serviço
-                              </p>
-                              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-50 leading-snug">
-                                <span className="font-mono tabular-nums text-gray-700 dark:text-gray-300">
-                                  {row.item.codigo}
-                                </span>{' '}
-                                <span className="text-gray-500 dark:text-gray-400 font-normal">{row.item.banco}</span>
-                                <span className="text-gray-400 dark:text-gray-500"> — </span>
-                                <span className="font-normal">{row.item.descricao}</span>
-                              </h2>
-                            </div>
-                            <div className="space-y-3 max-w-full">
-                              <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
-                                Medições e quantitativos
-                              </h3>
-                              <OrcamentoMedicaoPainel
-                                rowKey={row.key}
-                                tipoUnidade={row.tipoUnidade}
-                                itemCodigo={row.item.codigo}
-                                itemBanco={row.item.banco}
-                                itemDescricao={row.item.descricao || ''}
-                                dim={
-                                  dimensoesPorItem[row.key] ?? {
-                                    tipoUnidade: row.tipoUnidade,
-                                    linhas: []
-                                  }
+                        {itensMemoriaCalculoLista.map((row, rowIdx) => (
+                          <section key={row.key} id={`memorial-medicoes-${row.key}`} className="scroll-mt-6">
+                            <OrcamentoMedicaoPainel
+                              rowKey={row.key}
+                              tipoUnidade={row.tipoUnidade}
+                              itemRotulo={
+                                rotuloItemComposicaoPorKey.get(row.key) ?? String(rowIdx + 1)
+                              }
+                              itemDescricao={row.item.descricao || ''}
+                              unidadeMedida={
+                                (row.unidadeComposicao && row.unidadeComposicao.trim()) ||
+                                (row.tipoUnidade === 'm3'
+                                  ? 'm³'
+                                  : row.tipoUnidade === 'm2'
+                                    ? 'm²'
+                                    : row.tipoUnidade === 'm'
+                                      ? 'm'
+                                      : 'UN')
+                              }
+                              quantidadeUn={row.quantidade}
+                              quantidadeUnReadOnly={ehComposicaoCacamba4m3(row.item.descricao)}
+                              onQuantidadeUnChange={n => setQuantidadeItem(row.key, n)}
+                              dim={
+                                dimensoesPorItem[row.key] ?? {
+                                  tipoUnidade: row.tipoUnidade,
+                                  linhas: []
                                 }
-                                ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
-                                draftCalc={draftCalc}
-                                setDraftCalc={setDraftCalc}
-                                handleCalcChange={handleCalcChange}
-                                handleCalcBlur={handleCalcBlur}
-                                updateLinhaMedicao={updateLinhaMedicao}
-                                addLinhaMedicao={addLinhaMedicao}
-                                removeLinhaMedicao={removeLinhaMedicao}
-                              />
-                            </div>
+                              }
+                              ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
+                              draftCalc={draftCalc}
+                              setDraftCalc={setDraftCalc}
+                              handleCalcChange={handleCalcChange}
+                              handleCalcBlur={handleCalcBlur}
+                              updateLinhaMedicao={updateLinhaMedicao}
+                              updateRotuloColunaMedicao={(campo, rotulo) =>
+                                updateRotuloColunaMedicao(row.key, campo, rotulo)
+                              }
+                              addLinhaMedicao={addLinhaMedicao}
+                              addLinhaCabecalhoSecaoMedicao={addLinhaCabecalhoSecaoMedicao}
+                              removeLinhaMedicao={removeLinhaMedicao}
+                            />
                           </section>
                         ))}
                       </div>
@@ -7081,9 +7438,9 @@ export function OrcamentoPageView({
                       </button>
                     </div>
                     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
-                      <table className="min-w-[1210px] w-full border-collapse text-sm">
+                      <table className={`min-w-[1210px] w-full border-collapse text-sm ${gradeTableCls}`}>
                         <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
-                          <tr>
+                          <tr className={gradeTableRowTrCls}>
                             <th className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
                               Item
                             </th>
@@ -7134,7 +7491,7 @@ export function OrcamentoPageView({
                         return (
                           <React.Fragment key={bloco.key}>
                             {mostrarTituloServico && (
-                            <tr className="bg-red-600 dark:bg-red-950/90">
+                            <tr className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
                               <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white">
                                 {main}
                               </td>
@@ -7145,11 +7502,11 @@ export function OrcamentoPageView({
                               </td>
                             </tr>
                             )}
-                            <tr className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900">
-                              <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
+                            <tr className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls}`}>
+                              <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
                                 {`${main}.${subIdx}`}
                               </td>
-                              <td colSpan={colunasTotais - 1} className="px-3 py-1.5">
+                              <td colSpan={colunasTotais - 1} className="px-3 py-2.5">
                                 <div className="flex items-center justify-between gap-3">
                                   <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
                                     {mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}
@@ -7173,21 +7530,21 @@ export function OrcamentoPageView({
                                     const pesoPctOrcamento = total > 0 ? (row.total / total) * 100 : 0;
                                     return (
                                     <React.Fragment key={row.key}>
-                                    <tr className="border-b border-gray-100/90 bg-white hover:bg-gray-50/90 dark:border-gray-700/90 dark:bg-gray-800 dark:hover:bg-gray-800/95">
-                                      <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2 align-middle text-center text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300">
+                                    <tr className={`border-b border-gray-100/90 bg-white hover:bg-gray-50/90 dark:border-gray-700/90 dark:bg-gray-800 dark:hover:bg-gray-800/95 ${gradeTableRowTrCls}`}>
+                                      <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300">
                                         {`${main}.${subIdx}.${itemIdx + 1}`}
                                       </td>
-                                      <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.codigo}</td>
-                                      <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.banco}</td>
-                                      <td className="min-w-[260px] px-3 py-2 text-sm text-gray-900 dark:text-gray-100 align-middle max-w-md border-l border-gray-200 dark:border-gray-700"><div className="truncate" title={row.item.descricao}>{row.item.descricao}</div></td>
-                                      <td className="px-2 py-2 text-center align-middle border-l border-gray-200 dark:border-gray-700">
+                                      <td className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.codigo}</td>
+                                      <td className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.banco}</td>
+                                      <td className="min-w-[260px] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle max-w-md border-l border-gray-200 dark:border-gray-700"><div className="truncate" title={row.item.descricao}>{row.item.descricao}</div></td>
+                                      <td className="px-2 py-2.5 text-center align-middle border-l border-gray-200 dark:border-gray-700">
                                         <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                                           {row.unidadeComposicao?.trim()
                                             ? row.unidadeComposicao.trim()
                                             : (usaDimensoes ? (tipoAuto === 'm3' ? 'm³' : tipoAuto === 'm2' ? 'm²' : tipoAuto === 'm' ? 'm' : 'UN') : 'UN')}
                                         </span>
                                       </td>
-                                      <td className="px-2 py-2 text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                      <td className={`text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700 ${row.tipoUnidade !== 'un' || ehCacamba4m3 ? 'px-2 py-2.5' : 'p-0'}`}>
                                         {row.tipoUnidade !== 'un' || ehCacamba4m3 ? (
                                           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                                         ) : (
@@ -7198,36 +7555,36 @@ export function OrcamentoPageView({
                                             onChange={e => handleCalcChange(`qtd|${row.key}`, e.target.value, n => setQuantidadeItem(row.key, Math.max(0, n)))}
                                             onBlur={e => handleCalcBlur(`qtd|${row.key}`, draftCalc[`qtd|${row.key}`] ?? e.target.value, n => setQuantidadeItem(row.key, Math.max(0, n)))}
                                             placeholder="0"
-                                            className="w-[4.5rem] min-w-0 px-2 py-1 text-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm mx-auto block"
+                                            className={`${inputGradeCls} text-center tabular-nums`}
                                           />
                                         )}
                                       </td>
-                                      <td className="px-2 py-2 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                      <td className="px-2 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.maoDeObraUnitario} className="text-sm" />
                                       </td>
-                                      <td className="px-2 py-2 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                      <td className="px-2 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.materialUnitario} className="text-sm" />
                                       </td>
-                                      <td className="px-2 py-2 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                      <td className="px-2 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.precoUnitario} className="text-sm" />
                                       </td>
                                       {showDetalhesFinanceiros && (
                                         <>
-                                          <td className="px-2 py-2 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                          <td className="px-2 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                             <MoedaCelula valor={row.subMaoDeObra} className="text-sm" />
                                           </td>
-                                          <td className="px-2 py-2 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                          <td className="px-2 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                             <MoedaCelula valor={row.subMaterial} className="text-sm" />
                                           </td>
                                         </>
                                       )}
-                                      <td className="px-2 py-2 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                      <td className="px-2 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.total} className="text-sm font-semibold" valorClassName="font-semibold" />
                                       </td>
-                                      <td className="px-2 py-2 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
+                                      <td className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
                                         {pesoPctOrcamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                                       </td>
-                                      <td className="px-2 py-2 align-middle text-center border-l border-gray-200 dark:border-gray-700">
+                                      <td className="px-2 py-2.5 align-middle text-center border-l border-gray-200 dark:border-gray-700">
                                         <div className="flex items-center justify-center gap-1 whitespace-nowrap">
                                         <button
                                           type="button"

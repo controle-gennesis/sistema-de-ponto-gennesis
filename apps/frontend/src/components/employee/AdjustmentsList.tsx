@@ -4,8 +4,8 @@ import { Edit, Trash2, AlertTriangle } from 'lucide-react';
 
 interface AdjustmentsListProps {
   adjustments: SalaryAdjustment[];
-  onEdit: (adjustment: SalaryAdjustment) => void;
-  onDelete: (id: string) => void;
+  onEdit?: (adjustment: SalaryAdjustment) => void;
+  onDelete?: (id: string) => void;
 }
 
 const getTypeColor = (type: AdjustmentType): string => {
@@ -60,21 +60,29 @@ export function AdjustmentsList({ adjustments, onEdit, onDelete }: AdjustmentsLi
 
       {adjustments.map((adjustment) => (
         <div key={adjustment.id} className="group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-          <div className="grid grid-cols-[auto,1fr,auto,auto] items-center gap-3">
+          <div
+            className={`grid items-center gap-3 ${onEdit || onDelete ? 'grid-cols-[auto,1fr,auto,auto]' : 'grid-cols-[auto,1fr,auto]'}`}
+          >
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getTypeColor(adjustment.type)}`}>{getTypeLabel(adjustment.type)}</span>
             <div className="min-w-0">
               <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{adjustment.description}</p>
               <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{`Criado por ${adjustment.creator.name} • ${new Date(adjustment.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}</div>
             </div>
             <div className="text-sm font-semibold text-green-600 dark:text-green-400">+R$ {adjustment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-              <button onClick={() => onEdit(adjustment)} className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-md" title="Editar">
-                <Edit className="w-4 h-4" />
-              </button>
-              <button onClick={() => onDelete(adjustment.id)} className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md" title="Excluir">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
+            {(onEdit || onDelete) && (
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                {onEdit && (
+                  <button onClick={() => onEdit(adjustment)} className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-md" title="Editar">
+                    <Edit className="w-4 h-4" />
+                  </button>
+                )}
+                {onDelete && (
+                  <button onClick={() => onDelete(adjustment.id)} className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md" title="Excluir">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ))}

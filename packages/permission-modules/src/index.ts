@@ -1,7 +1,8 @@
 /**
  * Registro central de módulos do sistema para permissões.
- * Cada item corresponde a um submenu (rota) — uma entrada = um checkbox na tela de permissões.
- * Ação persistida no banco: sempre `acesso` (acesso total àquele submenu).
+ * Cada item corresponde a um submenu (rota) — uma entrada na matriz “Acesso”.
+ * Ação base no banco: `acesso` (libera o módulo). Módulos Contratos e Funcionários também
+ * aceitam ações granulares: `ver`, `criar`, `editar`, `excluir` (ver `PERMISSION_MODULE_CRUD_ACTIONS`).
  */
 
 export type PermissionModuleDef = {
@@ -15,10 +16,14 @@ export type PermissionModuleDef = {
 
 /** Ação padrão de acesso a módulo (submenu). */
 export const PERMISSION_ACCESS_ACTION = 'acesso' as const;
-/** Ações extras usadas no módulo de contratos para granularidade operacional. */
-export const PERMISSION_CONTRACT_ACTIONS = ['ver', 'editar', 'excluir'] as const;
-export type PermissionContractAction = (typeof PERMISSION_CONTRACT_ACTIONS)[number];
-export const PERMISSION_ACTIONS = [PERMISSION_ACCESS_ACTION, ...PERMISSION_CONTRACT_ACTIONS] as const;
+/** Ações CRUD granulares (contratos, funcionários, etc.). */
+export const PERMISSION_MODULE_CRUD_ACTIONS = ['ver', 'criar', 'editar', 'excluir'] as const;
+export type PermissionModuleCrudAction = (typeof PERMISSION_MODULE_CRUD_ACTIONS)[number];
+/** @deprecated use PERMISSION_MODULE_CRUD_ACTIONS */
+export const PERMISSION_CONTRACT_ACTIONS = PERMISSION_MODULE_CRUD_ACTIONS;
+/** @deprecated use PermissionModuleCrudAction */
+export type PermissionContractAction = PermissionModuleCrudAction;
+export const PERMISSION_ACTIONS = [PERMISSION_ACCESS_ACTION, ...PERMISSION_MODULE_CRUD_ACTIONS] as const;
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
 
 /** Converte uma rota do app em chave de módulo (ex.: `/ponto/folha-pagamento` → `ponto_folha-pagamento`). */
@@ -35,7 +40,6 @@ export function pathToModuleKey(href: string): string {
 export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Principal
   { key: pathToModuleKey('/ponto/dashboard'), name: 'Dashboard', href: '/ponto/dashboard', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/chatgpt'), name: 'Assistente Virtual', href: '/ponto/chatgpt', category: 'Principal' },
   { key: pathToModuleKey('/ponto/bi'), name: 'Solicitações Fluig', href: '/ponto/bi', category: 'Principal' },
   { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Conversas WhatsApp', href: '/ponto/conversas-whatsapp', category: 'Principal' },
   // Painel de Controle

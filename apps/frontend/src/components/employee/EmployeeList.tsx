@@ -1129,7 +1129,15 @@ export function EmployeeList({
   };
 
   // Verificar se o usuário tem permissões administrativas baseadas no cargo
-  const { canManageEmployees, isAdministrator, can, canAction } = usePermissions();
+  const {
+    canManageEmployees,
+    canCreateEmployees,
+    canEditEmployees,
+    canDeleteEmployees,
+    isAdministrator,
+    can,
+    canAction,
+  } = usePermissions();
 
   /** Mesma ideia da página de contratos: matriz (Permissões / Controle), não só cargo Administrador. */
   const canManageUserPermissions =
@@ -1438,10 +1446,9 @@ export function EmployeeList({
                 Funcionários
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                {canManageEmployees 
-                  ? 'Visualizar e gerenciar funcionários cadastrados' 
-                  : 'Visualizar funcionários cadastrados'
-                }
+                {canCreateEmployees || canEditEmployees || canDeleteEmployees
+                  ? 'Visualizar e gerenciar funcionários cadastrados'
+                  : 'Visualizar funcionários cadastrados'}
               </p>
             </div>
           </div>
@@ -1634,7 +1641,7 @@ export function EmployeeList({
                       Email
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Cargo
+                      Setor
                     </th>
                     <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                       Status
@@ -1668,7 +1675,7 @@ export function EmployeeList({
                           </div>
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{employee.email || '—'}</td>
-                        <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{employee.employee?.position || '—'}</td>
+                        <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{employee.employee?.department || '—'}</td>
                         <td className="px-3 sm:px-6 py-3 text-center">
                           <span
                             className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -1748,7 +1755,7 @@ export function EmployeeList({
                       <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                       <span>Ver detalhes</span>
                     </button>
-                    {canManageEmployees && showDeleteButton && employeeForActionMenu.isActive && (
+                    {canDeleteEmployees && showDeleteButton && employeeForActionMenu.isActive && (
                       <button
                         type="button"
                         role="menuitem"
@@ -1763,7 +1770,7 @@ export function EmployeeList({
                         <span>Desligar o funcionário</span>
                       </button>
                     )}
-                    {canManageEmployees && showDeleteButton && !employeeForActionMenu.isActive && (
+                    {(canEditEmployees || canDeleteEmployees) && showDeleteButton && !employeeForActionMenu.isActive && (
                       <button
                         type="button"
                         role="menuitem"
@@ -2066,16 +2073,18 @@ export function EmployeeList({
                   </div>
                 </div>
                     <div className="flex items-center gap-2">
-                      {canManageEmployees && showDeleteButton && (
-                        selectedEmployee.isActive ? (
-                          <button
-                            onClick={() => setDeleteConfirm(selectedEmployee.id)}
-                            className="px-3 py-1.5 text-sm rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
-                            title="Desligar funcionário"
-                          >
-                            Desligar
-                          </button>
-                        ) : (
+                      {showDeleteButton &&
+                        (selectedEmployee.isActive ? (
+                          canDeleteEmployees ? (
+                            <button
+                              onClick={() => setDeleteConfirm(selectedEmployee.id)}
+                              className="px-3 py-1.5 text-sm rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+                              title="Desligar funcionário"
+                            >
+                              Desligar
+                            </button>
+                          ) : null
+                        ) : canEditEmployees || canDeleteEmployees ? (
                           <button
                             onClick={() => setReactivateConfirm(selectedEmployee.id)}
                             className="px-3 py-1.5 text-sm rounded-lg border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30"
@@ -2083,8 +2092,7 @@ export function EmployeeList({
                           >
                             Reativar
                           </button>
-                        )
-                      )}
+                        ) : null)}
                 <button
                   onClick={() => setSelectedEmployee(null)}
                         className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
@@ -2141,7 +2149,7 @@ export function EmployeeList({
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dados Pessoais</h4>
-                      {canManageEmployees && (
+                      {canEditEmployees && (
                         <button
                           onClick={() => {
                             setEditingEmployee(selectedEmployee);
@@ -2186,7 +2194,7 @@ export function EmployeeList({
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dados Profissionais</h4>
-                      {canManageEmployees && (
+                      {canEditEmployees && (
                         <button
                           onClick={() => {
                             setEditingEmployee(selectedEmployee);
@@ -2261,7 +2269,7 @@ export function EmployeeList({
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dados Bancários</h4>
-                      {canManageEmployees && (
+                      {canEditEmployees && (
                         <button
                           onClick={() => {
                             setEditingEmployee(selectedEmployee);
@@ -2330,7 +2338,7 @@ export function EmployeeList({
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-5 bg-white dark:bg-gray-800">
                   <div className="flex items-center justify-between mb-4">
                     <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Valores e Adicionais</h4>
-                    {canManageEmployees && (
+                    {canEditEmployees && (
                       <button
                         onClick={() => {
                           setEditingEmployee(selectedEmployee);
@@ -2395,13 +2403,15 @@ export function EmployeeList({
                           </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => { setShowAddAdjustmentForm(true); setIsAdjustmentsMinimized(false); }}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Adicionar</span>
-                      </button>
+                      {canEditEmployees && (
+                        <button
+                          onClick={() => { setShowAddAdjustmentForm(true); setIsAdjustmentsMinimized(false); }}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Adicionar</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => setIsAdjustmentsMinimized(!isAdjustmentsMinimized)}
                         className="p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -2417,16 +2427,20 @@ export function EmployeeList({
                   </div>
                   <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isAdjustmentsMinimized ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'}`}>
                     <div className="px-4 pb-4 space-y-4">
-                      {showAddAdjustmentForm && selectedEmployee.employee && (
+                      {canEditEmployees && showAddAdjustmentForm && selectedEmployee.employee && (
                         <AdjustmentForm employeeId={selectedEmployee.employee.id} onSave={handleAddAdjustment} onCancel={() => setShowAddAdjustmentForm(false)} />
                       )}
-                      {editingAdjustment && selectedEmployee.employee && (
+                      {canEditEmployees && editingAdjustment && selectedEmployee.employee && (
                         <AdjustmentForm employeeId={selectedEmployee.employee.id} adjustment={editingAdjustment} onSave={handleUpdateAdjustment} onCancel={() => setEditingAdjustment(null)} />
                       )}
                       {adjustments.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 p-6 text-center text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50">Nenhum acréscimo cadastrado.</div>
                       ) : (
-                        <AdjustmentsList adjustments={adjustments} onEdit={handleEditAdjustment} onDelete={handleDeleteAdjustment} />
+                        <AdjustmentsList
+                          adjustments={adjustments}
+                          onEdit={canEditEmployees ? handleEditAdjustment : undefined}
+                          onDelete={canDeleteEmployees ? handleDeleteAdjustment : undefined}
+                        />
                       )}
                     </div>
                   </div>
@@ -2442,13 +2456,15 @@ export function EmployeeList({
                           </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => { setShowAddDiscountForm(true); setIsDiscountsMinimized(false); }}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Adicionar</span>
-                      </button>
+                      {canEditEmployees && (
+                        <button
+                          onClick={() => { setShowAddDiscountForm(true); setIsDiscountsMinimized(false); }}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Adicionar</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => setIsDiscountsMinimized(!isDiscountsMinimized)}
                         className="p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -2464,16 +2480,20 @@ export function EmployeeList({
                   </div>
                   <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isDiscountsMinimized ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'}`}>
                     <div className="px-4 pb-4 space-y-4">
-                      {showAddDiscountForm && selectedEmployee.employee && (
+                      {canEditEmployees && showAddDiscountForm && selectedEmployee.employee && (
                         <DiscountForm employeeId={selectedEmployee.employee.id} onSave={handleAddDiscount} onCancel={() => setShowAddDiscountForm(false)} />
                       )}
-                      {editingDiscount && selectedEmployee.employee && (
+                      {canEditEmployees && editingDiscount && selectedEmployee.employee && (
                         <DiscountForm employeeId={selectedEmployee.employee.id} discount={editingDiscount} onSave={handleUpdateDiscount} onCancel={() => setEditingDiscount(null)} />
                       )}
                       {discounts.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 p-6 text-center text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50">Nenhum desconto cadastrado.</div>
                       ) : (
-                        <DiscountsList discounts={discounts} onEdit={handleEditDiscount} onDelete={handleDeleteDiscount} />
+                        <DiscountsList
+                          discounts={discounts}
+                          onEdit={canEditEmployees ? handleEditDiscount : undefined}
+                          onDelete={canDeleteEmployees ? handleDeleteDiscount : undefined}
+                        />
                       )}
                     </div>
                   </div>
@@ -2561,7 +2581,7 @@ export function EmployeeList({
                       </div>
 
                       {/* Botões de Ação */}
-                      {canManageEmployees && (
+                      {canEditEmployees && (
                         <div className="flex items-end gap-2.5">
                           <button
                             onClick={() => setShowImportModal(true)}
@@ -2710,35 +2730,39 @@ export function EmployeeList({
                                                 <Camera className={`w-3.5 h-3.5 ${record.photoUrl ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`} />
                                                 <span>Ver Foto</span>
                                               </button>
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  if (record.type !== 'ABSENCE_JUSTIFIED') {
-                                                    handleEditRecord(record);
+                                              {canEditEmployees && (
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (record.type !== 'ABSENCE_JUSTIFIED') {
+                                                      handleEditRecord(record);
+                                                      setOpenRecordMenu(null);
+                                                    }
+                                                  }}
+                                                  disabled={record.type === 'ABSENCE_JUSTIFIED'}
+                                                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors text-sm border-t border-gray-200 dark:border-gray-700 ${
+                                                    record.type === 'ABSENCE_JUSTIFIED'
+                                                      ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+                                                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                                  }`}
+                                                >
+                                                  <Edit className={`w-3.5 h-3.5 ${record.type === 'ABSENCE_JUSTIFIED' ? 'text-gray-400 dark:text-gray-500' : 'text-blue-600 dark:text-blue-400'}`} />
+                                                  <span>Editar</span>
+                                                </button>
+                                              )}
+                                              {canDeleteEmployees && (
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDeleteRecordConfirm(record.id);
                                                     setOpenRecordMenu(null);
-                                                  }
-                                                }}
-                                                disabled={record.type === 'ABSENCE_JUSTIFIED'}
-                                                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors text-sm border-t border-gray-200 dark:border-gray-700 ${
-                                                  record.type === 'ABSENCE_JUSTIFIED'
-                                                    ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
-                                                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                                                }`}
-                                              >
-                                                <Edit className={`w-3.5 h-3.5 ${record.type === 'ABSENCE_JUSTIFIED' ? 'text-gray-400 dark:text-gray-500' : 'text-blue-600 dark:text-blue-400'}`} />
-                                                <span>Editar</span>
-                                              </button>
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setDeleteRecordConfirm(record.id);
-                                                  setOpenRecordMenu(null);
-                                                }}
-                                                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 border-t border-gray-200 dark:border-gray-700"
-                                              >
-                                                <Trash2 className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
-                                                <span>Remover</span>
-                                              </button>
+                                                  }}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 border-t border-gray-200 dark:border-gray-700"
+                                                >
+                                                  <Trash2 className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                                                  <span>Remover</span>
+                                                </button>
+                                              )}
                                             </div>
                                           </>
                                         )}

@@ -23,7 +23,6 @@ import {
   BookText,
   BookPlus,
   BookImage,
-  Settings,
   BarChart3,
   FileText,
   Search,
@@ -38,12 +37,10 @@ import {
   Package,
   ShoppingCart,
   Building2,
-  Bot,
   Cake,
   Calculator,
   ClipboardList,
   FileCheck,
-  SlidersHorizontal,
   CreditCard
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -152,13 +149,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
           },
           {
-            name: 'Assistente Virtual',
-            href: '/ponto/chatgpt',
-            icon: Bot,
-            description: 'Tire suas dúvidas com o ChatGPT',
-            permission: isAdministrator || can(pk('/ponto/chatgpt'))
-          },
-          {
             name: 'Solicitações Fluig',
             href: '/ponto/bi',
             icon: BarChart3,
@@ -171,20 +161,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: MessageSquare,
             description: 'Conversas do chatbot WhatsApp para o pessoal ver',
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp'))
-          }
-        ]
-      },
-      {
-        id: 'painel-controle',
-        name: 'Painel de Controle',
-        icon: SlidersHorizontal,
-        items: [
-          {
-            name: 'Permissões',
-            href: '/ponto/permissoes',
-            icon: Settings,
-            description: 'Gerenciar permissões de funcionários',
-            permission: isAdministrator
           }
         ]
       },
@@ -662,7 +638,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             // evita que "Funcionários" apareça solto fora de "Departamento Pessoal".
             const forceAsGroup =
               category.id === 'engenharia' ||
-              category.id === 'painel-controle' ||
               category.id === 'departamento-pessoal';
             const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;

@@ -14,6 +14,7 @@ import {
 } from '@/components/permissions/UserPermissionsEditor';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
+import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -89,6 +90,7 @@ interface EmployeeRow {
 export default function FuncionariosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreateEmployees } = usePermissions();
   const [isCreateEmployeeOpen, setIsCreateEmployeeOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [permissionsTarget, setPermissionsTarget] = useState<PermissionsTargetPreview | null>(null);
@@ -203,8 +205,8 @@ export default function FuncionariosPage() {
         <EmployeeList
           userRole={user.role}
           showDeleteButton={true}
-          onImportEmployees={() => setIsImportModalOpen(true)}
-          onCreateEmployee={() => setIsCreateEmployeeOpen(true)}
+          onImportEmployees={canCreateEmployees ? () => setIsImportModalOpen(true) : undefined}
+          onCreateEmployee={canCreateEmployees ? () => setIsCreateEmployeeOpen(true) : undefined}
           onManagePermissions={(emp) => {
             setPermissionTab('gerais');
             setShowContractsTab(false);
