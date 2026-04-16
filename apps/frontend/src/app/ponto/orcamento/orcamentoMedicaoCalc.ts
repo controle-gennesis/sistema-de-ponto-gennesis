@@ -41,15 +41,16 @@ export function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
 export function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
   if (linha.cabecalhoSecao) return 0;
   const tipoOrigQ = linha.tipoOrigemMedicao ?? 'm3';
-  if (linha.linhaAgregadaCarga && tipoOrigQ === 'm3' && linha.valorManual != null && linha.valorManual >= 0) {
-    return linha.valorManual;
-  }
   const fator =
     linha.empolamento != null && linha.empolamento > 0
       ? linha.empolamento
       : (linha as unknown as { percPerda?: number }).percPerda != null
         ? 1 + (linha as unknown as { percPerda: number }).percPerda / 100
         : 1;
+  /** Base agregada (m³): valorManual já soma os subtotais das demolições; ainda falta o % da linha de carga. */
+  if (linha.linhaAgregadaCarga && tipoOrigQ === 'm3' && linha.valorManual != null && linha.valorManual >= 0) {
+    return linha.valorManual * fator;
+  }
   const temDimensoes = (linha.C || 0) !== 0 || (linha.L || 0) !== 0 || (linha.H || 0) !== 0;
   if (!temDimensoes && linha.valorManual != null && linha.valorManual >= 0) {
     return linha.valorManual * fator;

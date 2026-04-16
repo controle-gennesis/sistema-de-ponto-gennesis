@@ -212,26 +212,26 @@ export function OrcamentoMedicaoPainel({
   const lnFallback: LinhaMedicao = { C: 0, L: 0, H: 0, N: 0, empolamento: 0 };
 
   const renderCabecalhoServico = (colCount: number) => (
-    <tr className={gradeTableRowTrCls}>
+    <tr className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
       <th
         colSpan={colCount}
-        className="overflow-hidden rounded-t-xl border-b border-r border-gray-200 bg-slate-50 px-3 py-2.5 text-left align-middle font-normal dark:border-gray-600 dark:bg-slate-800/85 sm:px-3.5"
+        className="border-b border-r border-red-700/70 bg-red-600 px-3 py-2.5 text-left align-middle font-normal dark:border-red-900 dark:bg-red-950/90 sm:px-3.5"
       >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-3">
-          <p className="min-w-0 flex-1 text-left text-sm font-medium leading-snug text-gray-800 dark:text-gray-100">
+          <p className="min-w-0 flex-1 text-left text-sm font-bold leading-snug text-white">
             <span
-              className="mr-2 inline font-semibold tabular-nums text-gray-600 dark:text-gray-300"
+              className="mr-2 inline font-bold tabular-nums text-white"
               aria-label={`Item ${itemRotulo || '—'}`}
             >
               {itemRotulo || '—'}
             </span>
-            <span className="text-gray-800 dark:text-gray-100">{itemDescricao}</span>
+            <span className="text-white">{itemDescricao}</span>
           </p>
           <div
-            className={`flex shrink-0 items-center justify-center self-start border-t border-gray-200 pt-2 text-center sm:self-center sm:border-t-0 sm:border-l sm:border-gray-200 sm:pt-0 sm:pl-3 dark:border-gray-600 ${colMed}`}
+            className={`flex shrink-0 items-center justify-center self-start border-t border-white/25 pt-2 text-center sm:self-center sm:border-t-0 sm:border-l sm:border-white/25 sm:pt-0 sm:pl-3 ${colMed}`}
             title="Unidade de medida"
           >
-            <span className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-white">
               {unidadeMedida.trim() || '—'}
             </span>
           </div>
@@ -555,32 +555,23 @@ export function OrcamentoMedicaoPainel({
         {renderDim('H')}
         {renderDim('N')}
         <td className={`${tdRestBody} text-center`}>
-          {ln.linhaAgregadaCarga && ehCargaEntulho && ln.tipoOrigemMedicao === 'm3' ? (
-            <span
-              className="block px-2 py-2.5 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100"
-              title="Linha agregada por composição"
-            >
-              1
-            </span>
-          ) : (
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="1"
-              value={draftCalc[`${rowKey}|${idx}|empol`] ?? (empolVal === 0 ? '0' : empolVal === 1 ? '1' : String(empolVal))}
-              onChange={e =>
-                handleCalcChange(`${rowKey}|${idx}|empol`, e.target.value, n =>
-                  updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n))
-                )
-              }
-              onBlur={e =>
-                handleCalcBlur(`${rowKey}|${idx}|empol`, draftCalc[`${rowKey}|${idx}|empol`] ?? e.target.value, n =>
-                  updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n))
-                )
-              }
-              className={`${inputCls} text-center`}
-            />
-          )}
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="1"
+            value={draftCalc[`${rowKey}|${idx}|empol`] ?? (empolVal === 0 ? '0' : empolVal === 1 ? '1' : String(empolVal))}
+            onChange={e =>
+              handleCalcChange(`${rowKey}|${idx}|empol`, e.target.value, n =>
+                updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n))
+              )
+            }
+            onBlur={e =>
+              handleCalcBlur(`${rowKey}|${idx}|empol`, draftCalc[`${rowKey}|${idx}|empol`] ?? e.target.value, n =>
+                updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n))
+              )
+            }
+            className={`${inputCls} text-center`}
+          />
         </td>
         {renderCelulaA()}
         {renderCelulaV()}
@@ -645,15 +636,13 @@ export function OrcamentoMedicaoPainel({
     );
 
   const tabelaEnvoltorio = (children: React.ReactNode) => (
-    <div className="overflow-hidden rounded-xl border-l border-t border-gray-200/95 bg-white dark:border-gray-600 dark:bg-gray-900">
-      <div className="min-w-0 overflow-x-auto">
-        <table
-          className={`w-full min-w-[56rem] table-fixed border-separate border-spacing-0 text-sm [&_tbody>tr:last-child>td:first-child:last-child]:rounded-b-xl [&_tbody>tr:last-child>td:first-child:not(:last-child)]:rounded-bl-xl [&_tbody>tr:last-child>td:last-child:not(:first-child)]:rounded-br-xl ${gradeTableCls}`}
-        >
-          {colgroupMedicoes}
-          {children}
-        </table>
-      </div>
+    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+      <table
+        className={`w-full min-w-[56rem] table-fixed border-collapse text-sm ${gradeTableCls}`}
+      >
+        {colgroupMedicoes}
+        {children}
+      </table>
     </div>
   );
 

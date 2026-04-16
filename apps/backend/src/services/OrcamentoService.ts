@@ -102,6 +102,15 @@ export class OrcamentoService {
     return path.join(this.localDir(centroCustoId), `${orcamentoId}.json`);
   }
 
+  private hasOrcamentoPerfeitoImport(imports: unknown[]): boolean {
+    if (!Array.isArray(imports) || imports.length === 0) return false;
+    return imports.some((imp) => {
+      if (!imp || typeof imp !== 'object') return false;
+      const origem = (imp as { origem?: unknown }).origem;
+      return origem === 'orcamento-perfeito';
+    });
+  }
+
   async migrateLegacyIfNeeded(centroCustoId: string): Promise<void> {
     const indexPath = this.localIndexPath(centroCustoId);
     const legacyPath = this.localLegacyPath(centroCustoId);
@@ -336,9 +345,26 @@ export class OrcamentoService {
   }
 
   async saveServicosPadrao(centroCustoId: string, data: ServicosPadraoData): Promise<void> {
+    const servicos = Array.isArray(data.servicos) ? data.servicos : [];
+    const imports = Array.isArray(data.imports) ? data.imports : [];
+    const shouldDelete = servicos.length === 0 && imports.length === 0;
+
+    if (shouldDelete) {
+      if (this.useLocal || !this.s3) {
+        const p = this.localServicosPadraoPath(centroCustoId);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+        return;
+      }
+      await this.s3!.deleteObject({
+        Bucket: this.bucketName,
+        Key: this.getServicosPadraoKey(centroCustoId)
+      }).promise();
+      return;
+    }
+
     const body = JSON.stringify({
-      servicos: data.servicos || [],
-      imports: data.imports || []
+      servicos,
+      imports
     });
     if (this.useLocal || !this.s3) {
       const dir = this.localDir(centroCustoId);
@@ -418,10 +444,13 @@ export class OrcamentoService {
     const index = await this.getIndex(centroCustoId);
     const exists = index.orcamentos.some(o => o.id === orcamentoId);
     if (!exists) throw new Error('Orçamento não encontrado no índice');
-    await this.saveServicosPadrao(centroCustoId, {
-      servicos: data.servicos || [],
-      imports: data.imports || []
-    });
+    const imports = Array.isArray(data.imports) ? data.imports : [];
+    if (this.hasOrcamentoPerfeitoImport(imports)) {
+      await this.saveServicosPadrao(centroCustoId, {
+        servicos: data.servicos || [],
+        imports
+      });
+    }
     await this.saveOrcamentoSessao(centroCustoId, orcamentoId, data.sessaoOrcamento);
   }
 
