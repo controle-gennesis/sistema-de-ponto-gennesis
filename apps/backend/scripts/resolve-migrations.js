@@ -200,16 +200,13 @@ async function resolveFailedMigrations() {
         });
         console.log('✅ Migration marcada como aplicada');
       } catch (applyError) {
-        console.log('⚠️  Erro ao marcar como aplicada, tentando rolled_back...');
-        try {
-          execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
-            stdio: 'inherit',
-            cwd: path.join(__dirname, '..')
-          });
-          console.log('✅ Migration marcada como rolled back');
-        } catch (rollbackError) {
-          console.log('⚠️  Não foi possível resolver migration automaticamente:', rollbackError.message);
-          // Continua mesmo assim
+        const out = `${applyError.stderr || ''} ${applyError.stdout || ''} ${applyError.message || ''}`;
+        // P3008 = já consta como aplicada — não fazer rolled-back (isso corrompe o histórico e o deploy).
+        if (out.includes('P3008') || out.includes('already recorded as applied')) {
+          console.log('✅ Init já estava aplicada (P3008). Seguindo sem alterar o histórico.');
+        } else {
+          console.log('⚠️  migrate resolve --applied falhou:', out.trim().slice(0, 400));
+          console.log('⚠️  Não usamos rolled-back automático (evita estado inconsistente no Railway).');
         }
       }
     } else {
