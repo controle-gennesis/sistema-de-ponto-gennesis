@@ -5,7 +5,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
-import { ArrowLeft, FileText, Plus, Receipt, X, Edit2, ClipboardList, FileDown, ExternalLink, BarChart3, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  FileText,
+  Plus,
+  Receipt,
+  X,
+  Edit2,
+  ClipboardList,
+  FileDown,
+  ExternalLink,
+  BarChart3,
+  Trash2,
+  Percent
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -13,14 +26,20 @@ import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
-import { STATUS_ORCAMENTO_OPCOES, STATUS_EXECUCAO_OPCOES, type PleitoFormData } from '@/lib/pleitoForm';
+import {
+  STATUS_ORCAMENTO_OPCOES,
+  STATUS_EXECUCAO_OPCOES,
+  isBudgetStatusInValorOrcadoSum,
+  type PleitoFormData
+} from '@/lib/pleitoForm';
 import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import {
   formatOsSePasta,
   formatOsSePastaOrDash,
   folderForDivSe,
-  enrichDivSeOptionsWithPleitos
+  enrichDivSeOptionsWithPleitos,
+  type DivSeOptionRow
 } from '@/lib/formatOsSePasta';
 
 interface ContractBilling {
@@ -76,6 +95,25 @@ interface Contract {
   valuePlusAddenda: number;
 }
 
+interface ContractAnnualValueRow {
+  id: string;
+  contractId: string;
+  year: number;
+  value: number;
+  budgetAdjustmentDelta?: number | null;
+  budgetAdjustmentEffectiveDate?: string | null;
+  computedBaseAnnual?: number | null;
+}
+
+interface ContractAddendumRow {
+  id: string;
+  contractId: string;
+  effectiveDate: string;
+  amount: number;
+  note?: string | null;
+  createdAt?: string;
+}
+
 interface ContractWeeklyProduction {
   id: string;
   contractId: string;
@@ -90,6 +128,8 @@ const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'O
 
 const LIST_DISPLAY_LIMIT = 10;
 const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
+const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
+const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
 
 const MESES_FILTRO = [
   { value: 0, label: 'Todos os meses' },
@@ -121,10 +161,21 @@ function parseDateOnlyLocal(dateStr: string): Date | null {
 
 function parseDateSafe(dateStr: string | Date | null | undefined): Date | null {
   if (!dateStr) return null;
-  if (dateStr instanceof Date) return dateStr;
+  if (dateStr instanceof Date) {
+    if (Number.isNaN(dateStr.getTime())) return null;
+    const y = dateStr.getFullYear();
+    const mo = dateStr.getMonth();
+    const day = dateStr.getDate();
+    return new Date(y, mo, day, 12, 0, 0, 0);
+  }
   const raw = String(dateStr).trim();
   const dateOnly = parseDateOnlyLocal(raw);
   if (dateOnly) return dateOnly;
+  /** ISO com hora/Z desloca o dia no fuso local — vigência deve usar só o calendário YYYY-MM-DD. */
+  const isoPrefix = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoPrefix) {
+    return parseDateOnlyLocal(`${isoPrefix[1]}-${isoPrefix[2]}-${isoPrefix[3]}`);
+  }
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -150,6 +201,188 @@ function getDateMonth(dateStr: string | null | undefined): number | null {
   if (!d) return null;
   const m = getCalendarPartsBrasilia(d).find((p) => p.type === 'month')?.value;
   return m != null ? Number(m) : null;
+}
+
+function addYearsLocal(date: Date, years: number): Date {
+  return new Date(date.getFullYear() + years, date.getMonth(), date.getDate(), 12, 0, 0, 0);
+}
+
+/**
+ * Quantidade de "anos de contrato": menor k ≥ 1 tal que (início + k anos) ≥ fim da vigência.
+ * Ex.: 28/02/2026 a 28/02/2030 → k = 4 (aniversários: +1a, +2a, +3a, +4a atinge o fim).
+ */
+function countContractYearsOfVigencia(startDate: string, endDate: string): number {
+  const start = parseDateSafe(startDate);
+  const end = parseDateSafe(endDate);
+  if (!start || !end || end.getTime() <= start.getTime()) return 0;
+  let k = 0;
+  while (k < 100) {
+    k += 1;
+    const boundary = addYearsLocal(start, k);
+    if (boundary.getTime() >= end.getTime()) return k;
+  }
+  return 0;
+}
+
+/**
+ * Indica se o mês civil (1–12) no ano calendário cruza a vigência [início, fim):
+ * primeiro instante do mês < fim e último dia do mês ≥ início.
+ * Assim, meses antes do início ficam em branco e o mês da data final deixa de receber meta quando o fim é o 1º dia daquele mês.
+ */
+function calendarMonthHasMetaMensalInVigencia(
+  calendarYear: number,
+  calendarMonth1to12: number,
+  contractStart: Date,
+  contractEnd: Date
+): boolean {
+  const ms = new Date(calendarYear, calendarMonth1to12 - 1, 1, 12, 0, 0, 0);
+  const me = new Date(calendarYear, calendarMonth1to12, 0, 12, 0, 0, 0);
+  return ms.getTime() < contractEnd.getTime() && me.getTime() >= contractStart.getTime();
+}
+
+function toYearMonthKey(y: number, m1to12: number): string {
+  return `${y}-${String(m1to12).padStart(2, '0')}`;
+}
+
+/** Meses civis em [monthStart, monthEnd] que cruzam a vigência (para rateio só no ano civil). */
+function countVigenciaMonthsInRange(
+  calendarYear: number,
+  monthStart: number,
+  monthEnd: number,
+  contractStart: Date,
+  contractEnd: Date
+): number {
+  let n = 0;
+  for (let m = monthStart; m <= monthEnd; m++) {
+    if (calendarMonthHasMetaMensalInVigencia(calendarYear, m, contractStart, contractEnd)) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
+type VigenciaMonth = { y: number; m: number; key: string };
+
+/** Meses da vigência com meta mensal, em ordem cronológica. */
+function listVigenciaMonthKeys(contractStart: Date, contractEnd: Date): VigenciaMonth[] {
+  const months: VigenciaMonth[] = [];
+  const cursor = new Date(contractStart.getFullYear(), contractStart.getMonth(), 1, 12, 0, 0, 0);
+  const endCursor = new Date(contractEnd.getFullYear(), contractEnd.getMonth(), 1, 12, 0, 0, 0);
+  while (cursor.getTime() <= endCursor.getTime()) {
+    const y = cursor.getFullYear();
+    const m = cursor.getMonth() + 1;
+    if (calendarMonthHasMetaMensalInVigencia(y, m, contractStart, contractEnd)) {
+      months.push({ y, m, key: toYearMonthKey(y, m) });
+    }
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return months;
+}
+
+function parseContractAddendaForMeta(rows: ContractAddendumRow[]): Array<{ effectiveDate: Date; amount: number }> {
+  const out: Array<{ effectiveDate: Date; amount: number }> = [];
+  for (const a of rows) {
+    const d = parseDateSafe(a.effectiveDate);
+    if (!d) continue;
+    out.push({ effectiveDate: d, amount: Number(a.amount) || 0 });
+  }
+  return out;
+}
+
+type AnnualBudgetAdjustmentRow = { year: number; effectiveDate: Date; amount: number };
+
+function parseAnnualBudgetAdjustments(rows: ContractAnnualValueRow[] | undefined): AnnualBudgetAdjustmentRow[] {
+  if (!rows?.length) return [];
+  const out: AnnualBudgetAdjustmentRow[] = [];
+  for (const r of rows) {
+    if (r.budgetAdjustmentDelta == null || !r.budgetAdjustmentEffectiveDate) continue;
+    const eff = parseDateSafe(r.budgetAdjustmentEffectiveDate);
+    if (!eff) continue;
+    const amount = Number(r.budgetAdjustmentDelta);
+    if (!Number.isFinite(amount) || Math.abs(amount) < 1e-9) continue;
+    out.push({ year: r.year, effectiveDate: eff, amount });
+  }
+  out.sort((a, b) => a.effectiveDate.getTime() - b.effectiveDate.getTime());
+  return out;
+}
+
+/**
+ * Mês civil (1–12) em que o ajuste do valor anual passa a valer na linha.
+ * `null` quando a data efetiva é posterior ao ano da linha (linha ignorada).
+ */
+function annualAdjustmentEffectiveCivilMonth(civilYear: number, effectiveDate: Date): number | null {
+  const effY = effectiveDate.getFullYear();
+  const effM = effectiveDate.getMonth() + 1;
+  if (effY > civilYear) return null;
+  if (effY === civilYear) return effM;
+  return 1;
+}
+
+function sumGlobalMetaAllocatedBeforeEffMonth(
+  globalMap: Map<string, number>,
+  civilYear: number,
+  effMonth: number,
+  contractStart: Date,
+  contractEnd: Date
+): number {
+  let sum = 0;
+  for (let m = 1; m < effMonth; m++) {
+    if (!calendarMonthHasMetaMensalInVigencia(civilYear, m, contractStart, contractEnd)) continue;
+    sum += globalMap.get(toYearMonthKey(civilYear, m)) ?? 0;
+  }
+  return sum;
+}
+
+/**
+ * Monta a meta mensal por mês da vigência.
+ * Regra: no início a meta é saldo ÷ meses restantes; quando chega um aditivo em um mês,
+ * soma/subtrai no saldo e recalcula para aquele mês em diante até o fim da vigência.
+ */
+function buildContractMetaSchedule(
+  contractStart: Date,
+  contractEnd: Date,
+  initialTotal: number,
+  addenda: Array<{ effectiveDate: Date; amount: number }>
+): Map<string, number> {
+  const months = listVigenciaMonthKeys(contractStart, contractEnd);
+  const schedule = new Map<string, number>();
+  if (!months.length) return schedule;
+
+  const addSumByMonth = new Map<string, number>();
+  for (const a of addenda) {
+    const y = a.effectiveDate.getFullYear();
+    const m = a.effectiveDate.getMonth() + 1;
+    const k = toYearMonthKey(y, m);
+    addSumByMonth.set(k, (addSumByMonth.get(k) || 0) + a.amount);
+  }
+
+  let remaining = initialTotal;
+  const firstKey = months[0].key;
+  addSumByMonth.forEach((v, k) => {
+    if (k < firstKey) remaining += v;
+  });
+
+  let i = 0;
+  while (i < months.length) {
+    const curKey = months[i].key;
+    remaining += addSumByMonth.get(curKey) || 0;
+
+    let j = i + 1;
+    while (j < months.length) {
+      if ((addSumByMonth.get(months[j].key) || 0) !== 0) break;
+      j += 1;
+    }
+    // Meta recalculada pelo saldo dividido por TODOS os meses restantes até o fim da vigência.
+    // Ela permanece fixa até aparecer um novo aditivo (quando recalcula novamente).
+    const remainingMonthsToEnd = months.length - i;
+    const meta = remainingMonthsToEnd > 0 ? remaining / remainingMonthsToEnd : 0;
+    for (let k = i; k < j; k++) {
+      schedule.set(months[k].key, meta);
+      remaining -= meta;
+    }
+    i = j;
+  }
+  return schedule;
 }
 
 function formatDate(dateStr: string) {
@@ -247,47 +480,7 @@ function parseBudgetToNumberSafe(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Opção da lista OS/SE (API `/pleitos/divse-list`): valor salvo = apenas `divSe`. */
-interface DivSeListOption {
-  divSe: string;
-  folderNumber: string | null;
-}
-
-/** Compatível com resposta antiga (só strings) ou nova ({ divSe, folderNumber }). */
-function normalizeDivSeOptions(raw: unknown): DivSeListOption[] {
-  if (!Array.isArray(raw)) return [];
-  const out: DivSeListOption[] = [];
-  const seen = new Set<string>();
-  for (const item of raw) {
-    if (typeof item === 'string') {
-      const d = item.trim();
-      if (!d) continue;
-      const key = `${d}\0`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ divSe: d, folderNumber: null });
-      continue;
-    }
-    if (item && typeof item === 'object' && 'divSe' in item) {
-      const o = item as { divSe?: string; folderNumber?: string | null };
-      const d = (o.divSe || '').trim();
-      if (!d) continue;
-      const f = o.folderNumber?.trim() || null;
-      const key = `${d}\0${f ?? ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ divSe: d, folderNumber: f });
-    }
-  }
-  out.sort(
-    (a, b) =>
-      a.divSe.localeCompare(b.divSe, 'pt-BR') ||
-      (a.folderNumber || '').localeCompare(b.folderNumber || '', 'pt-BR')
-  );
-  return out;
-}
-
-function filterDivSeOptions(options: DivSeListOption[], query: string): DivSeListOption[] {
+function filterDivSeOptions(options: DivSeOptionRow[], query: string): DivSeOptionRow[] {
   const q = query.trim().toLowerCase();
   if (!q) return options;
   return options.filter((o) => {
@@ -319,6 +512,56 @@ function sumBillingRequestSameOs(
   }, 0);
 }
 
+type PleitoGerarBuildResult =
+  | { ok: true; items: { id: string; billingRequest: number }[] }
+  | { ok: false; message: string };
+
+/** Monta payload para gerar pleito: % do orçamento por OS (mesmas regras do modal). */
+function buildPleitoGerarItems(
+  ids: string[],
+  pleitos: ContractPleito[],
+  allPleitos: ContractPleito[],
+  getPctForId: (id: string) => number
+): PleitoGerarBuildResult {
+  const pendingByOs = new Map<string, number>();
+  const items: { id: string; billingRequest: number }[] = [];
+  for (const id of ids) {
+    const p = pleitos.find((x) => x.id === id);
+    if (!p) {
+      return { ok: false, message: `A OS ${id} não foi encontrada para cálculo do pleito.` };
+    }
+    const orcamento = p.budget ? Number(p.budget) : 0;
+    if (orcamento <= 0) {
+      return { ok: false, message: `A OS ${p.divSe || id} está sem orçamento para cálculo do pleito.` };
+    }
+    const pct = getPctForId(id);
+    if (pct <= 0) {
+      return { ok: false, message: `Informe a % do orçamento para a OS ${p.divSe || id}` };
+    }
+    const valorCalculado = (orcamento * pct) / 100;
+    const osKey = (p.divSe || '').trim().toLowerCase();
+    const alreadyPleiteado = sumBillingRequestSameOs(allPleitos, p.divSe);
+    const batchPending = pendingByOs.get(osKey) || 0;
+    if (alreadyPleiteado + batchPending + valorCalculado > orcamento + 0.01) {
+      return { ok: false, message: 'valor faturado acima do permitido' };
+    }
+    pendingByOs.set(osKey, batchPending + valorCalculado);
+    items.push({ id, billingRequest: valorCalculado });
+  }
+  return { ok: true, items };
+}
+
+function isPleitoHistorico(p: ContractPleito): boolean {
+  const marker = (p.reportsBilling || '').trim();
+  return marker === PLEITO_HISTORY_MARKER || marker === PLEITO_HISTORY_MARKER_GERADO_100;
+}
+
+function getHistoricoEtiqueta(p: ContractPleito): string | null {
+  const marker = (p.reportsBilling || '').trim();
+  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return HISTORICO_ETIQUETA_GERADO_100;
+  return null;
+}
+
 export default function ContractDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -340,8 +583,6 @@ export default function ContractDetailPage() {
     grossValue: ''
   });
   const [osSeDropdownOpen, setOsSeDropdownOpen] = useState(false);
-  const [showEditValorAnual, setShowEditValorAnual] = useState(false);
-  const [valorAnualEdit, setValorAnualEdit] = useState('');
   const [selectedBilling, setSelectedBilling] = useState<ContractBilling | null>(null);
   const [editingBilling, setEditingBilling] = useState(false);
   const [filterBillingOsSe, setFilterBillingOsSe] = useState('');
@@ -370,7 +611,11 @@ export default function ContractDetailPage() {
   const [histOsFilter, setHistOsFilter] = useState('');
   const [histPastaFilter, setHistPastaFilter] = useState('');
   const [histDescricaoFilter, setHistDescricaoFilter] = useState('');
+  const [histEtiquetaFilter, setHistEtiquetaFilter] = useState('all');
   const [historicoDrafts, setHistoricoDrafts] = useState<Record<string, { billingStatus: 'pago' | 'nao-pago'; invoiceNumber: string }>>({});
+  const [selectedHistoricoPleitos, setSelectedHistoricoPleitos] = useState<Set<string>>(new Set());
+  const [showHistoricoBatchNfModal, setShowHistoricoBatchNfModal] = useState(false);
+  const [historicoBatchInvoiceModalValue, setHistoricoBatchInvoiceModalValue] = useState('');
   const [pleitoGeradoData, setPleitoGeradoData] = useState<Array<{ pleito: ContractPleito; valorPleiteado: number; pctOrcamento: number }>>([]);
   const [productionForm, setProductionForm] = useState({ fillingDate: '', divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
   const [productionOsSeDropdownOpen, setProductionOsSeDropdownOpen] = useState(false);
@@ -378,6 +623,14 @@ export default function ContractDetailPage() {
   const [editingProduction, setEditingProduction] = useState(false);
   const [productionEditForm, setProductionEditForm] = useState({ fillingDate: '', divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
   const [productionOsSeEditDropdownOpen, setProductionOsSeEditDropdownOpen] = useState(false);
+  const [showValorAnualAdjustModal, setShowValorAnualAdjustModal] = useState(false);
+  const [adjFormYear, setAdjFormYear] = useState(currentYear);
+  const [adjFormDeltaStr, setAdjFormDeltaStr] = useState('');
+  const [adjFormDate, setAdjFormDate] = useState('');
+  const [showAddendumModal, setShowAddendumModal] = useState(false);
+  const [addendumDate, setAddendumDate] = useState('');
+  const [addendumAmount, setAddendumAmount] = useState('');
+  const [addendumNote, setAddendumNote] = useState('');
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -423,6 +676,27 @@ export default function ContractDetailPage() {
     enabled: !!contractId
   });
 
+  const { data: annualValuesResponse } = useQuery({
+    queryKey: ['contract-annual-values', contractId],
+    queryFn: async () => {
+      const res = await api.get(`/contracts/${contractId}/annual-values`);
+      return res.data as {
+        success: boolean;
+        data: ContractAnnualValueRow[];
+        computedBaseAnnual: number | null;
+      };
+    },
+    enabled: !!contractId
+  });
+  const { data: addendaResponse } = useQuery({
+    queryKey: ['contract-addenda', contractId],
+    queryFn: async () => {
+      const res = await api.get(`/contracts/${contractId}/addenda`);
+      return res.data as { success: boolean; data: ContractAddendumRow[] };
+    },
+    enabled: !!contractId
+  });
+
   const { data: pleitoDetailData, isLoading: loadingPleitoDetail } = useQuery({
     queryKey: ['pleito', selectedPleitoId],
     queryFn: async () => {
@@ -430,23 +704,6 @@ export default function ContractDetailPage() {
       return res.data;
     },
     enabled: !!selectedPleitoId
-  });
-
-  const { data: divSeListData } = useQuery({
-    queryKey: ['pleitos-divse-list'],
-    queryFn: async () => {
-      const res = await api.get('/pleitos/divse-list');
-      return res.data;
-    }
-  });
-
-  const { data: annualValuesData } = useQuery({
-    queryKey: ['contract-annual-values', contractId],
-    queryFn: async () => {
-      const res = await api.get(`/contracts/${contractId}/annual-values`);
-      return res.data;
-    },
-    enabled: !!contractId
   });
 
   const createBillingMutation = useMutation({
@@ -493,22 +750,6 @@ export default function ContractDetailPage() {
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
       toast.error(err.response?.data?.message || 'Erro ao excluir faturamento');
-    }
-  });
-
-  const updateValorAnualMutation = useMutation({
-    mutationFn: async ({ year, value }: { year: number; value: number }) => {
-      const res = await api.put(`/contracts/${contractId}/annual-values/${year}`, { value });
-      return res.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['contract-annual-values', contractId] });
-      setShowEditValorAnual(false);
-      setValorAnualEdit('');
-      toast.success('Valor anual atualizado com sucesso!');
-    },
-    onError: (err: { response?: { data?: { message?: string } } }) => {
-      toast.error(err.response?.data?.message || 'Erro ao atualizar valor anual');
     }
   });
 
@@ -559,15 +800,97 @@ export default function ContractDetailPage() {
     }
   });
 
+  const saveAnnualAdjustmentMutation = useMutation({
+    mutationFn: async (payload: {
+      year: number;
+      budgetAdjustmentDelta: number;
+      budgetAdjustmentEffectiveDate: string;
+    }) => {
+      const res = await api.put(`/contracts/${contractId}/annual-values/${payload.year}`, {
+        budgetAdjustmentDelta: payload.budgetAdjustmentDelta,
+        budgetAdjustmentEffectiveDate: payload.budgetAdjustmentEffectiveDate
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contract-annual-values', contractId] });
+      setShowValorAnualAdjustModal(false);
+      toast.success('Ajuste de valor anual salvo');
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message || 'Erro ao salvar ajuste');
+    }
+  });
+
+  const clearAnnualAdjustmentMutation = useMutation({
+    mutationFn: async (year: number) => {
+      const res = await api.put(`/contracts/${contractId}/annual-values/${year}`, {
+        budgetAdjustmentDelta: 0,
+        budgetAdjustmentEffectiveDate: null
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contract-annual-values', contractId] });
+      setShowValorAnualAdjustModal(false);
+      toast.success('Ajuste removido');
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message || 'Erro ao remover ajuste');
+    }
+  });
+  const createAddendumMutation = useMutation({
+    mutationFn: async (payload: { effectiveDate: string; amount: number; note?: string | null }) => {
+      const res = await api.post(`/contracts/${contractId}/addenda`, payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contract-addenda', contractId] });
+      setShowAddendumModal(false);
+      setAddendumDate('');
+      setAddendumAmount('');
+      setAddendumNote('');
+      toast.success('Aditivo cadastrado com sucesso');
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message || 'Erro ao cadastrar aditivo');
+    }
+  });
+  const deleteAddendumMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.delete(`/contracts/${contractId}/addenda/${id}`);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contract-addenda', contractId] });
+      toast.success('Aditivo removido');
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message || 'Erro ao remover aditivo');
+    }
+  });
+
   const contract = contractData?.data as Contract | undefined;
+  const addenda = ((addendaResponse?.data || []) as ContractAddendumRow[])
+    .slice()
+    .sort((a, b) => {
+      const da = parseDateSafe(a.effectiveDate)?.getTime() || 0;
+      const db = parseDateSafe(b.effectiveDate)?.getTime() || 0;
+      return da - db;
+    });
+  const totalAddenda = useMemo(
+    () => addenda.reduce((sum, a) => sum + (Number(a.amount) || 0), 0),
+    [addenda]
+  );
+  const valorMaisAditivosTotal = contract ? contract.valuePlusAddenda + totalAddenda : 0;
   const billings = (billingsData?.data || []) as ContractBilling[];
   const allPleitos = (pleitosData?.data || []) as ContractPleito[];
-  const pleitos = allPleitos.filter((p) => (p.reportsBilling || '').trim() !== PLEITO_HISTORY_MARKER);
+  const pleitos = allPleitos.filter((p) => !isPleitoHistorico(p));
   const productions = ((Array.isArray(productionsData) ? productionsData : (productionsData as { data?: ContractWeeklyProduction[] })?.data) || []) as ContractWeeklyProduction[];
-  const annualValues = (annualValuesData?.data || []) as { year: number; value: number }[];
+  /** Somente OS / SE cadastradas neste contrato (não usar lista global de todos os contratos). */
   const divSeOptions = useMemo(
-    () => enrichDivSeOptionsWithPleitos(normalizeDivSeOptions(divSeListData?.data), pleitos),
-    [divSeListData?.data, pleitos]
+    () => enrichDivSeOptionsWithPleitos([], pleitos),
+    [pleitos]
   );
 
   const osSeFiltered = useMemo(
@@ -601,6 +924,24 @@ export default function ContractDetailPage() {
     return years.length > 0 ? years : [start];
   }, [contract]);
 
+  /** Valor de cada ano de vigência: (valor + aditivos) ÷ anos da vigência (aniversários a partir da data inicial até o fim). */
+  const contractYearsCount = useMemo(
+    () => (contract ? countContractYearsOfVigencia(contract.startDate, contract.endDate) : 0),
+    [contract]
+  );
+  const valorAnualBase = useMemo(() => {
+    if (!contract || contractYearsCount <= 0) return null;
+    return valorMaisAditivosTotal / contractYearsCount;
+  }, [contract, contractYearsCount, valorMaisAditivosTotal]);
+
+  const contractVigenciaDates = useMemo(() => {
+    if (!contract) return null;
+    const start = parseDateSafe(contract.startDate);
+    const end = parseDateSafe(contract.endDate);
+    if (!start || !end) return null;
+    return { start, end };
+  }, [contract]);
+
   // Ajustar ano selecionado se não estiver na lista (0 = todos os anos)
   const isAllYears = selectedYear === 0;
   const safeSelectedYear = isAllYears
@@ -608,6 +949,26 @@ export default function ContractDetailPage() {
     : availableYears.includes(selectedYear)
       ? selectedYear
       : availableYears[0] ?? currentYear;
+
+  const annualAdjustByYear = useMemo(() => {
+    const rows = annualValuesResponse?.data;
+    if (!rows?.length) return new Map<number, { delta: number; effectiveDate: Date }>();
+    const m = new Map<number, { delta: number; effectiveDate: Date }>();
+    for (const r of rows) {
+      if (r.budgetAdjustmentDelta == null || r.budgetAdjustmentEffectiveDate == null) continue;
+      const d = parseDateSafe(r.budgetAdjustmentEffectiveDate);
+      if (!d) continue;
+      m.set(r.year, { delta: Number(r.budgetAdjustmentDelta), effectiveDate: d });
+    }
+    return m;
+  }, [annualValuesResponse]);
+
+  const valorAnualAjustado = useMemo(() => {
+    if (valorAnualBase === null) return null;
+    const adj = annualAdjustByYear.get(safeSelectedYear);
+    if (!adj) return valorAnualBase;
+    return valorAnualBase + adj.delta;
+  }, [valorAnualBase, annualAdjustByYear, safeSelectedYear]);
 
   // Produção Semanal filtrada por Mês/Ano selecionados
   const filteredProductions = useMemo(() => {
@@ -622,19 +983,88 @@ export default function ContractDetailPage() {
     });
   }, [productions, isAllYears, selectedYear, selectedMonth]);
 
-  // Valor anual: customizado pelo usuário ou zerado para preenchimento manual
-  const valorAnual = useMemo(() => {
-    if (!contract) return null;
-    const custom = annualValues.find((av) => av.year === safeSelectedYear);
-    if (custom) return custom.value;
-    return 0;
-  }, [contract, annualValues, safeSelectedYear]);
+  /**
+   * Meta base: Valor + Aditivos (saldo ÷ meses até o fim da vigência).
+   * Ajuste Valor Anual: sobrescreve do mês efetivo até dezembro; saldo antes do ajuste =
+   * valorAnualBase − soma das metas globais nos meses civis anteriores (evita rateio linear 1/12 ignorando aditivos).
+   */
+  const contractAddendaForMeta = useMemo(() => parseContractAddendaForMeta(addenda), [addenda]);
 
-  // Meta mensal = Valor anual do ano selecionado ÷ 12
-  const metaMensal = useMemo(() => {
-    if (valorAnual === null || valorAnual <= 0) return null;
-    return valorAnual / 12;
-  }, [valorAnual]);
+  const globalMetaSchedule = useMemo(() => {
+    if (!contractVigenciaDates || !contract) return new Map<string, number>();
+    return buildContractMetaSchedule(
+      contractVigenciaDates.start,
+      contractVigenciaDates.end,
+      contract.valuePlusAddenda,
+      contractAddendaForMeta
+    );
+  }, [contractVigenciaDates, contract, contractAddendaForMeta]);
+
+  const annualBudgetAdjustments = useMemo(
+    () => parseAnnualBudgetAdjustments(annualValuesResponse?.data),
+    [annualValuesResponse]
+  );
+
+  const metaSchedule = useMemo(() => {
+    const out = new Map(globalMetaSchedule);
+    if (!contractVigenciaDates || !contract || valorAnualBase === null || valorAnualBase <= 0) return out;
+
+    const { start, end } = contractVigenciaDates;
+
+    for (const r of annualBudgetAdjustments) {
+      const effMonth = annualAdjustmentEffectiveCivilMonth(r.year, r.effectiveDate);
+      if (effMonth === null) continue;
+
+      const allocatedBefore = sumGlobalMetaAllocatedBeforeEffMonth(
+        globalMetaSchedule,
+        r.year,
+        effMonth,
+        start,
+        end
+      );
+      const pool = valorAnualBase - allocatedBefore + r.amount;
+      const monthsAfter = countVigenciaMonthsInRange(r.year, effMonth, 12, start, end);
+      if (monthsAfter <= 0) continue;
+
+      const metaY = pool / monthsAfter;
+      for (let m = effMonth; m <= 12; m++) {
+        if (!calendarMonthHasMetaMensalInVigencia(r.year, m, start, end)) continue;
+        out.set(toYearMonthKey(r.year, m), metaY);
+      }
+    }
+
+    return out;
+  }, [globalMetaSchedule, annualBudgetAdjustments, contractVigenciaDates, contract, valorAnualBase]);
+
+  const metaMensalCardInfo = useMemo(() => {
+    const meses = Array.from({ length: 12 }, (_, i) => i + 1)
+      .map((m) => ({ m, key: toYearMonthKey(safeSelectedYear, m), v: metaSchedule.get(toYearMonthKey(safeSelectedYear, m)) ?? null }))
+      .filter((x) => x.v !== null);
+    if (!meses.length) return { kind: 'empty' as const };
+    const firstVal = meses[0].v as number;
+    const change = meses.find((x) => Math.abs((x.v as number) - firstVal) > 0.009);
+    if (!change) return { kind: 'single' as const, value: firstVal };
+    return {
+      kind: 'split' as const,
+      baseMeta: firstVal,
+      metaAfter: change.v as number,
+      ateMesLabel: MESES[Math.max(0, change.m - 2)],
+      deMesLabel: MESES[change.m - 1],
+    };
+  }, [metaSchedule, safeSelectedYear]);
+
+  useEffect(() => {
+    if (!showValorAnualAdjustModal) return;
+    const rows = annualValuesResponse?.data ?? [];
+    const row = rows.find((r) => r.year === adjFormYear);
+    if (row?.budgetAdjustmentDelta != null && row.budgetAdjustmentEffectiveDate) {
+      setAdjFormDeltaStr(formatCurrencyInput(Number(row.budgetAdjustmentDelta)));
+      setAdjFormDate(toInputDate(row.budgetAdjustmentEffectiveDate));
+    } else {
+      setAdjFormDeltaStr('');
+      setAdjFormDate('');
+    }
+  }, [showValorAnualAdjustModal, adjFormYear, annualValuesResponse]);
 
   // Soma do faturamento por mês (valor bruto) no ano selecionado
   const faturamentoPorMes = useMemo(() => {
@@ -690,6 +1120,7 @@ export default function ContractDetailPage() {
     const porMes: number[] = new Array(12).fill(0);
     const year = safeSelectedYear;
     pleitos.forEach((p) => {
+      if (!isBudgetStatusInValorOrcadoSum(p.budgetStatus)) return;
       // Regra solicitada: usar somente a coluna "ORÇAMENTO" da OS.
       const valorOrcado = parseBudgetToNumberSafe(p.budget);
       if (valorOrcado <= 0) return;
@@ -714,6 +1145,12 @@ export default function ContractDetailPage() {
   const pendenteFaturamentoPorMes = useMemo(
     () => valorOrcadoPorMes.map((v, i) => v - (faturamentoPorMes[i] || 0)),
     [valorOrcadoPorMes, faturamentoPorMes]
+  );
+
+  /** Produção − Faturamento (controle mensal). */
+  const prodMenosFatPorMes = useMemo(
+    () => producaoPorMes.map((prod, i) => prod - (faturamentoPorMes[i] || 0)),
+    [producaoPorMes, faturamentoPorMes]
   );
 
   // Soma dos pleitos por ano (para Metas Anuais)
@@ -745,25 +1182,28 @@ export default function ContractDetailPage() {
   // Valor total pendente para faturar (todos os anos)
   const pendenteParaFaturarTodosAnos = useMemo(() => {
     if (!contract) return null;
-    return contract.valuePlusAddenda - faturamentoTotalTodosAnos;
-  }, [contract, faturamentoTotalTodosAnos]);
+    return valorMaisAditivosTotal - faturamentoTotalTodosAnos;
+  }, [contract, valorMaisAditivosTotal, faturamentoTotalTodosAnos]);
 
-  // Saldo anual = Valor anual - Faturamento cadastrado
+  // Saldo anual = Valor anual (com ajuste de orçamento, se houver) − Faturamento cadastrado
   const saldoAnual = useMemo(() => {
-    if (valorAnual === null) return null;
-    return valorAnual - faturamentoAnual;
-  }, [valorAnual, faturamentoAnual]);
+    if (valorAnualAjustado === null) return null;
+    return valorAnualAjustado - faturamentoAnual;
+  }, [valorAnualAjustado, faturamentoAnual]);
 
-  // Para "Todos os anos": valor anual customizado ou zero para preenchimento manual
   const valorAnualPorAno = useMemo(() => {
     if (!contract) return {} as Record<number, number | null>;
     const result: Record<number, number | null> = {};
     availableYears.forEach((year) => {
-      const custom = annualValues.find((av) => av.year === year);
-      result[year] = custom ? custom.value : 0;
+      if (valorAnualBase === null) {
+        result[year] = null;
+        return;
+      }
+      const adj = annualAdjustByYear.get(year);
+      result[year] = adj ? valorAnualBase + adj.delta : valorAnualBase;
     });
     return result;
-  }, [contract, availableYears, annualValues]);
+  }, [contract, availableYears, valorAnualBase, annualAdjustByYear]);
 
   const faturamentoPorAno = useMemo(() => {
     const result: Record<number, number> = {};
@@ -790,6 +1230,7 @@ export default function ContractDetailPage() {
     availableYears.forEach((year) => {
       result[year] = pleitos
         .filter((p) => {
+          if (!isBudgetStatusInValorOrcadoSum(p.budgetStatus)) return false;
           const pYear = p.creationYear ?? getDateYear(p.startDate);
           return pYear === year;
         })
@@ -805,6 +1246,15 @@ export default function ContractDetailPage() {
     });
     return result;
   }, [availableYears, valorOrcadoPorAno, faturamentoPorAno]);
+
+  /** Produção − Faturamento (controle anual). */
+  const prodMenosFatPorAno = useMemo(() => {
+    const result: Record<number, number> = {};
+    availableYears.forEach((year) => {
+      result[year] = (producaoPorAno[year] || 0) - (faturamentoPorAno[year] || 0);
+    });
+    return result;
+  }, [availableYears, producaoPorAno, faturamentoPorAno]);
 
   // Faturamento filtrado por ano e mês (para exibição nas tabelas)
   const filteredBillings = useMemo(() => {
@@ -836,10 +1286,13 @@ export default function ContractDetailPage() {
   // Pleitos filtrados por ano, mês e filtros de status
   const filteredPleitos = useMemo(() => {
     let result = pleitos.filter((p) => {
+      const monthNum = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
+      const baseDate = monthNum && p.creationYear
+        ? new Date(p.creationYear, monthNum - 1, 1, 12, 0, 0, 0)
+        : parseDateSafe(p.startDate || p.createdAt || null);
       const year = p.creationYear ?? getDateYear(p.startDate);
       if (!isAllYears && (year === null || year !== selectedYear)) return false;
       if (selectedMonth === 0) return true;
-      const monthNum = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
       if (monthNum === null && p.startDate) return getDateMonth(p.startDate) === selectedMonth;
       return monthNum === selectedMonth;
     });
@@ -1001,12 +1454,12 @@ export default function ContractDetailPage() {
   };
 
   const gerarPleitoMutation = useMutation({
-    mutationFn: async (items: { id: string; billingRequest: number }[]) => {
+    mutationFn: async (items: { id: string; billingRequest: number; generatedByPleitear100?: boolean }[]) => {
       const now = new Date();
       const creationMonth = String(now.getMonth() + 1).padStart(2, '0');
       const creationYear = now.getFullYear();
       await Promise.all(
-        items.map(async ({ id, billingRequest }) => {
+        items.map(async ({ id, billingRequest, generatedByPleitear100 }) => {
           const source = pleitos.find((p) => p.id === id);
           if (!source) return;
           await api.post(`/contracts/${contractId}/pleitos`, {
@@ -1032,7 +1485,7 @@ export default function ContractDetailPage() {
             budgetAmount4: source.budgetAmount4,
             pv: source.pv,
             ipi: source.ipi,
-            reportsBilling: PLEITO_HISTORY_MARKER,
+            reportsBilling: generatedByPleitear100 ? PLEITO_HISTORY_MARKER_GERADO_100 : PLEITO_HISTORY_MARKER,
             engineer: source.engineer,
             supervisor: source.supervisor
           });
@@ -1061,7 +1514,11 @@ export default function ContractDetailPage() {
 
   const deletePleitosSelecionadosMutation = useMutation({
     mutationFn: async (ids: string[]) => {
-      await Promise.all(ids.map((id) => api.delete(`/pleitos/${id}`)));
+      await Promise.all(
+        ids.map((id) =>
+          api.delete(`/pleitos/${id}`, { params: { excluirOrdemServico: true } })
+        )
+      );
     },
     onSuccess: (_data, ids) => {
       queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
@@ -1137,39 +1594,35 @@ export default function ContractDetailPage() {
 
   const handleConfirmarPleito = () => {
     const ids = Array.from(selectedForPleito);
-    const pendingByOs = new Map<string, number>();
-    const items: { id: string; billingRequest: number }[] = [];
-    for (const id of ids) {
-      const pctStr = valorPleiteado[id] || '';
-      const pct = parseCurrencyInput(pctStr);
-      const p = pleitos.find((x) => x.id === id);
-      if (!p) {
-        toast.error(`A OS ${id} não foi encontrada para cálculo do pleito.`);
-        return;
-      }
-
-      const orcamento = p.budget ? Number(p.budget) : 0;
-
-      if (orcamento <= 0) {
-        toast.error(`A OS ${p.divSe || id} está sem orçamento para cálculo do pleito.`);
-        return;
-      }
-      if (pct <= 0) {
-        toast.error(`Informe a % do orçamento para a OS ${p.divSe || id}`);
-        return;
-      }
-      const valorCalculado = (orcamento * pct) / 100;
-      const osKey = (p.divSe || '').trim().toLowerCase();
-      const alreadyPleiteado = sumBillingRequestSameOs(allPleitos, p.divSe);
-      const batchPending = pendingByOs.get(osKey) || 0;
-      if (alreadyPleiteado + batchPending + valorCalculado > orcamento + 0.01) {
-        toast.error('valor faturado acima do permitido');
-        return;
-      }
-      pendingByOs.set(osKey, batchPending + valorCalculado);
-      items.push({ id, billingRequest: valorCalculado });
+    const result = buildPleitoGerarItems(ids, pleitos, allPleitos, (id) =>
+      parseCurrencyInput(valorPleiteado[id] || '')
+    );
+    if (!result.ok) {
+      toast.error(result.message);
+      return;
     }
-    gerarPleitoMutation.mutate(items);
+    gerarPleitoMutation.mutate(result.items.map((item) => ({ ...item, generatedByPleitear100: false })));
+  };
+
+  const handlePleitar100PorcentoSelecionadas = () => {
+    const ids = Array.from(selectedForPleito);
+    if (ids.length === 0) {
+      toast.error('Selecione ao menos uma ordem de serviço.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Gerar pleito a 100% do orçamento para ${ids.length} OS(s) selecionada(s)?`
+      )
+    ) {
+      return;
+    }
+    const result = buildPleitoGerarItems(ids, pleitos, allPleitos, () => 100);
+    if (!result.ok) {
+      toast.error(result.message);
+      return;
+    }
+    gerarPleitoMutation.mutate(result.items.map((item) => ({ ...item, generatedByPleitear100: true })));
   };
 
   const pleitoModalExcedeState = useMemo(() => {
@@ -1224,7 +1677,7 @@ export default function ContractDetailPage() {
   const generatedPleitos = useMemo(
     () =>
       allPleitos.filter((p) =>
-        (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER ||
+        isPleitoHistorico(p) ||
         ((p.billingRequest != null ? Number(p.billingRequest) : 0) > 0)
       ),
     [allPleitos]
@@ -1251,9 +1704,10 @@ export default function ContractDetailPage() {
       if (osQuery && !(p.divSe || '').toLowerCase().includes(osQuery)) return false;
       if (pastaQuery && !(p.folderNumber || '').toLowerCase().includes(pastaQuery)) return false;
       if (descricaoQuery && !(p.serviceDescription || '').toLowerCase().includes(descricaoQuery)) return false;
+      if (histEtiquetaFilter === 'gerado-100' && getHistoricoEtiqueta(p) !== HISTORICO_ETIQUETA_GERADO_100) return false;
       return true;
     });
-  }, [generatedPleitos, histYearFilter, histMonthFilter, histOsFilter, histPastaFilter, histDescricaoFilter]);
+  }, [generatedPleitos, histYearFilter, histMonthFilter, histOsFilter, histPastaFilter, histDescricaoFilter, histEtiquetaFilter]);
 
   const [isSavingHistoricoPleitos, setIsSavingHistoricoPleitos] = useState(false);
   useEffect(() => {
@@ -1266,6 +1720,9 @@ export default function ContractDetailPage() {
       };
     });
     setHistoricoDrafts(nextDrafts);
+    setSelectedHistoricoPleitos(new Set());
+    setShowHistoricoBatchNfModal(false);
+    setHistoricoBatchInvoiceModalValue('');
   }, [showHistoricoPleitosModal, generatedPleitos]);
 
   const changedHistoricoPleitoIds = useMemo(() => {
@@ -1301,6 +1758,68 @@ export default function ContractDetailPage() {
     } finally {
       setIsSavingHistoricoPleitos(false);
     }
+  };
+
+  const filteredHistoricoPleitoIds = useMemo(
+    () => filteredHistoricoPleitos.map((p) => p.id),
+    [filteredHistoricoPleitos]
+  );
+  const allFilteredHistoricoSelected = filteredHistoricoPleitoIds.length > 0 &&
+    filteredHistoricoPleitoIds.every((id) => selectedHistoricoPleitos.has(id));
+  const someFilteredHistoricoSelected = filteredHistoricoPleitoIds.some((id) => selectedHistoricoPleitos.has(id));
+
+  const toggleSelectAllFilteredHistoricoPleitos = (checked: boolean) => {
+    setSelectedHistoricoPleitos((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        filteredHistoricoPleitoIds.forEach((id) => next.add(id));
+      } else {
+        filteredHistoricoPleitoIds.forEach((id) => next.delete(id));
+      }
+      return next;
+    });
+  };
+
+  const handleOpenHistoricoFaturar100Modal = () => {
+    const idsSelecionados = Array.from(selectedHistoricoPleitos).filter((id) =>
+      filteredHistoricoPleitoIds.includes(id)
+    );
+    if (idsSelecionados.length === 0) {
+      toast.error('Selecione ao menos uma OS no histórico de pleitos.');
+      return;
+    }
+    setHistoricoBatchInvoiceModalValue('');
+    setShowHistoricoBatchNfModal(true);
+  };
+
+  const handleConfirmHistoricoFaturar100Selecionadas = () => {
+    const idsSelecionados = Array.from(selectedHistoricoPleitos).filter((id) =>
+      filteredHistoricoPleitoIds.includes(id)
+    );
+    if (idsSelecionados.length === 0) {
+      toast.error('Selecione ao menos uma OS no histórico de pleitos.');
+      return;
+    }
+    const invoice = historicoBatchInvoiceModalValue.trim();
+    if (!invoice) {
+      toast.error('Informe o número da nota fiscal para faturar as OSs selecionadas.');
+      return;
+    }
+    setHistoricoDrafts((prev) => {
+      const next = { ...prev };
+      idsSelecionados.forEach((id) => {
+        const current = next[id] || { billingStatus: 'nao-pago' as const, invoiceNumber: '' };
+        next[id] = {
+          ...current,
+          billingStatus: 'pago',
+          invoiceNumber: invoice
+        };
+      });
+      return next;
+    });
+    setShowHistoricoBatchNfModal(false);
+    setHistoricoBatchInvoiceModalValue('');
+    toast.success(`${idsSelecionados.length} OS(s) marcada(s) como faturada(s) com a NF ${invoice}.`);
   };
 
   const loadLogoBase64 = (): Promise<string | null> => {
@@ -1559,29 +2078,53 @@ export default function ContractDetailPage() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 dark:text-gray-400">Valor + Aditivos</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-gray-500 dark:text-gray-400">Valor + Aditivos</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddendumModal(true)}
+                      className="shrink-0 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+                      title="Cadastrar aditivo"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
                   <p className="font-medium text-gray-900 dark:text-gray-100">
-                    {formatCurrency(contract.valuePlusAddenda)}
+                    {formatCurrency(valorMaisAditivosTotal)}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Base: {formatCurrency(contract.valuePlusAddenda)} {totalAddenda !== 0 ? `• Aditivos: ${totalAddenda >= 0 ? '+' : ''}${formatCurrency(totalAddenda)}` : ''}
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 dark:text-gray-400">Valor Anual ({safeSelectedYear})</p>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-gray-900 dark:text-gray-100">
-                      {valorAnual !== null ? formatCurrency(valorAnual) : '-'}
-                    </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-gray-500 dark:text-gray-400">Valor Anual ({safeSelectedYear})</p>
                     <button
                       type="button"
                       onClick={() => {
-                        setValorAnualEdit(valorAnual !== null ? formatCurrencyInput(valorAnual) : '');
-                        setShowEditValorAnual(true);
+                        setAdjFormYear(safeSelectedYear);
+                        setShowValorAnualAdjustModal(true);
                       }}
-                      className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-                      title="Editar valor anual"
+                      className="shrink-0 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+                      title="Ajustar valor anual (orçamento do órgão)"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                   </div>
+                  <p className="font-medium text-gray-900 dark:text-gray-100">
+                    {valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Base: (Valor + aditivos) ÷ {contractYearsCount > 0 ? contractYearsCount : '—'} ano(s)
+                    {valorAnualBase !== null &&
+                      valorAnualAjustado !== null &&
+                      Math.abs(valorAnualAjustado - valorAnualBase) > 0.009 && (
+                        <span className="block mt-0.5">
+                          Ajuste orçamentário: {valorAnualAjustado >= valorAnualBase ? '+' : ''}
+                          {formatCurrency(valorAnualAjustado - valorAnualBase)}
+                        </span>
+                      )}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500 dark:text-gray-400">Saldo Anual ({safeSelectedYear})</p>
@@ -1594,11 +2137,28 @@ export default function ContractDetailPage() {
                 </div>
                 <div>
                   <p className="text-gray-500 dark:text-gray-400">Meta Mensal ({safeSelectedYear})</p>
-                  <p className="font-medium text-green-600 dark:text-green-400">
-                    {metaMensal !== null ? formatCurrency(metaMensal) : '-'}
-                  </p>
+                  {metaMensalCardInfo.kind === 'empty' && (
+                    <p className="font-medium text-green-600 dark:text-green-400">-</p>
+                  )}
+                  {metaMensalCardInfo.kind === 'single' && (
+                    <p className="font-medium text-green-600 dark:text-green-400">
+                      {formatCurrency(metaMensalCardInfo.value)}
+                    </p>
+                  )}
+                  {metaMensalCardInfo.kind === 'split' && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-green-600 dark:text-green-400">
+                        Até {metaMensalCardInfo.ateMesLabel}: {formatCurrency(metaMensalCardInfo.baseMeta)}/mês
+                      </p>
+                      <p className="text-xs font-medium text-emerald-500 dark:text-emerald-400">
+                        De {metaMensalCardInfo.deMesLabel}: {formatCurrency(metaMensalCardInfo.metaAfter)}/mês
+                      </p>
+                    </div>
+                  )}
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Valor anual ÷ 12
+                    Meta = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot; recalculam a
+                    partir da data até o fim do contrato. Ajuste no &quot;Valor Anual&quot; (lápis) só altera a meta do mês da
+                    data até dezembro daquele ano civil.
                   </p>
                 </div>
               </div>
@@ -1668,7 +2228,9 @@ export default function ContractDetailPage() {
                     Controle Geral - {safeSelectedYear}
                   </h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Meta mensal = Valor anual ({safeSelectedYear}) ÷ 12 meses
+                    Meta base = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot;
+                    recalculam da data do evento até o fim do contrato; ajuste do valor anual recalcula só entre o mês da data
+                    e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência.
                   </p>
                 </>
               )}
@@ -1745,6 +2307,21 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-teal-50/50 dark:bg-teal-900/10">
+                        <td className="px-4 py-4 text-sm font-medium text-teal-800 dark:text-teal-300 bg-gray-50 dark:bg-gray-800/50">
+                          Prod. - Fat.
+                        </td>
+                        {availableYears.map((year) => (
+                          <td
+                            key={year}
+                            className="px-3 py-4 text-center text-sm font-medium text-teal-700 dark:text-teal-400"
+                          >
+                            {prodMenosFatPorAno[year] !== 0
+                              ? formatCurrency(prodMenosFatPorAno[year])
+                              : '-'}
+                          </td>
+                        ))}
+                      </tr>
                       <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-sky-50/50 dark:bg-sky-900/10">
                         <td className="px-4 py-4 text-sm font-medium text-sky-700 dark:text-sky-400 bg-gray-50 dark:bg-gray-800/50">
                           Valor Orçado
@@ -1795,14 +2372,18 @@ export default function ContractDetailPage() {
                         <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800/50">
                           Meta Mensal
                         </td>
-                        {MESES.map((mes) => (
+                        {MESES.map((mes, i) => {
+                          const month = i + 1;
+                          const cellMeta = metaSchedule.get(toYearMonthKey(safeSelectedYear, month)) ?? null;
+                          return (
                           <td
                             key={mes}
                             className="px-3 py-4 text-center text-sm font-medium text-gray-900 dark:text-gray-100"
                           >
-                            {metaMensal !== null ? formatCurrency(metaMensal) : '-'}
+                            {cellMeta !== null ? formatCurrency(cellMeta) : '-'}
                           </td>
-                        ))}
+                          );
+                        })}
                       </tr>
                       <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-amber-50/50 dark:bg-amber-900/10">
                         <td className="px-4 py-4 text-sm font-medium text-amber-700 dark:text-amber-400 bg-gray-50 dark:bg-gray-800/50">
@@ -1840,6 +2421,21 @@ export default function ContractDetailPage() {
                             className="px-3 py-4 text-center text-sm font-medium text-green-700 dark:text-green-400"
                           >
                             {faturamentoPorMes[i] > 0 ? formatCurrency(faturamentoPorMes[i]) : '-'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-teal-50/50 dark:bg-teal-900/10">
+                        <td className="px-4 py-4 text-sm font-medium text-teal-800 dark:text-teal-300 bg-gray-50 dark:bg-gray-800/50">
+                          Prod. - Fat.
+                        </td>
+                        {MESES.map((mes, i) => (
+                          <td
+                            key={mes}
+                            className="px-3 py-4 text-center text-sm font-medium text-teal-700 dark:text-teal-400"
+                          >
+                            {prodMenosFatPorMes[i] !== 0
+                              ? formatCurrency(prodMenosFatPorMes[i])
+                              : '-'}
                           </td>
                         ))}
                       </tr>
@@ -1908,6 +2504,16 @@ export default function ContractDetailPage() {
                             className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                           >
                             {gerarPleitoMutation.isPending ? 'Gerando...' : 'Gerar Pleito'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handlePleitar100PorcentoSelecionadas}
+                            disabled={gerarPleitoMutation.isPending || selectedForPleito.size === 0}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+                            title="Gera pleito com 100% do orçamento em cada OS marcada (sem abrir o modal de %)"
+                          >
+                            <Percent className="w-4 h-4 shrink-0" />
+                            {gerarPleitoMutation.isPending ? 'Gerando...' : 'Pleitear 100%'}
                           </button>
                           <button
                             type="button"
@@ -2416,6 +3022,232 @@ export default function ContractDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Modal de aditivos do contrato */}
+          {showAddendumModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+              <div className="absolute inset-0" onClick={() => setShowAddendumModal(false)} />
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                    <Plus className="w-5 h-5" />
+                    Aditivos do contrato
+                  </h3>
+                  <button type="button" onClick={() => setShowAddendumModal(false)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Cada aditivo recalcula a meta mensal a partir da data informada até o fim da vigência.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <input
+                      type="date"
+                      value={addendumDate}
+                      onChange={(e) => setAddendumDate(e.target.value)}
+                      className="h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Valor (R$)"
+                      value={addendumAmount}
+                      onChange={(e) => setAddendumAmount(e.target.value)}
+                      className="h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const amount = parseCurrencyInput(addendumAmount);
+                        if (!addendumDate) return toast.error('Informe a data do aditivo');
+                        if (Math.abs(amount) < 1e-9) return toast.error('Informe um valor diferente de zero');
+                        createAddendumMutation.mutate({
+                          effectiveDate: addendumDate,
+                          amount,
+                          note: addendumNote.trim() || null
+                        });
+                      }}
+                      className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                      disabled={createAddendumMutation.isPending}
+                    >
+                      {createAddendumMutation.isPending ? 'Salvando…' : 'Adicionar'}
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Observação (opcional)"
+                    value={addendumNote}
+                    onChange={(e) => setAddendumNote(e.target.value)}
+                    className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  />
+                  <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 dark:bg-gray-900/40">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs text-gray-500">Data</th>
+                          <th className="px-3 py-2 text-left text-xs text-gray-500">Valor</th>
+                          <th className="px-3 py-2 text-left text-xs text-gray-500">Obs.</th>
+                          <th className="px-3 py-2 text-right text-xs text-gray-500">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {addenda.length === 0 ? (
+                          <tr>
+                            <td className="px-3 py-3 text-sm text-gray-500" colSpan={4}>Nenhum aditivo cadastrado.</td>
+                          </tr>
+                        ) : addenda.map((a) => (
+                          <tr key={a.id} className="border-t border-gray-200 dark:border-gray-700">
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{formatDate(a.effectiveDate)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{a.amount >= 0 ? '+' : ''}{formatCurrency(a.amount)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">{a.note || '-'}</td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                onClick={() => deleteAddendumMutation.mutate(a.id)}
+                                title="Excluir aditivo"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal ajuste valor anual (orçamento do órgão) */}
+          {showValorAnualAdjustModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+              <div className="absolute inset-0" onClick={() => setShowValorAnualAdjustModal(false)} />
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                    <Edit2 className="w-5 h-5" />
+                    Ajuste do valor anual
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowValorAnualAdjustModal(false)}
+                    className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Informe o <strong>valor</strong> (positivo ou negativo) e a <strong>data</strong>. Esse ajuste altera a meta
+                    mensal apenas do <strong>mês da data até dezembro do ano civil</strong> selecionado (não altera anos
+                    seguintes). Os aditivos cadastrados em &quot;Valor + Aditivos&quot; seguem outra regra e alteram a meta até o
+                    fim da vigência. O quadro &quot;Valor + Aditivos&quot; não é alterado por aqui.
+                  </p>
+                  {valorAnualBase !== null && (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                      Valor anual base: <span className="font-medium">{formatCurrency(valorAnualBase)}</span>
+                    </p>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Ano civil</label>
+                    <select
+                      value={adjFormYear}
+                      onChange={(e) => setAdjFormYear(Number(e.target.value))}
+                      className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
+                    >
+                      {availableYears.map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Ajuste (R$){' '}
+                      <span className="font-normal text-gray-500">positivo soma, negativo retira</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">R$</span>
+                      <input
+                        type="text"
+                        value={adjFormDeltaStr}
+                        onChange={(e) => setAdjFormDeltaStr(e.target.value)}
+                        placeholder="0,00"
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Data do aditivo *
+                    </label>
+                    <input
+                      type="date"
+                      value={adjFormDate}
+                      onChange={(e) => setAdjFormDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    />
+                  </div>
+                  {valorAnualBase !== null && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Referência (base + aditivo no ano):{' '}
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">
+                        {formatCurrency(valorAnualBase + parseCurrencyInput(adjFormDeltaStr || '0'))}
+                      </span>
+                      <span className="block mt-1 text-xs">
+                        A meta mensal pós-aditivo não é esse valor ÷ 12; use a tabela Controle Geral para ver o rateio.
+                      </span>
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={saveAnnualAdjustmentMutation.isPending || clearAnnualAdjustmentMutation.isPending}
+                      onClick={() => {
+                        const delta = parseCurrencyInput(adjFormDeltaStr || '0');
+                        if (!adjFormDate.trim()) {
+                          toast.error('Informe a data do aditivo');
+                          return;
+                        }
+                        if (Math.abs(delta) < 1e-9) {
+                          toast.error('Informe um valor de ajuste diferente de zero ou use Remover ajuste');
+                          return;
+                        }
+                        saveAnnualAdjustmentMutation.mutate({
+                          year: adjFormYear,
+                          budgetAdjustmentDelta: delta,
+                          budgetAdjustmentEffectiveDate: adjFormDate
+                        });
+                      }}
+                      className="flex-1 min-w-[8rem] h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                    >
+                      {saveAnnualAdjustmentMutation.isPending ? 'Salvando…' : 'Salvar'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saveAnnualAdjustmentMutation.isPending || clearAnnualAdjustmentMutation.isPending}
+                      onClick={() => {
+                        clearAnnualAdjustmentMutation.mutate(adjFormYear);
+                      }}
+                      className="flex-1 min-w-[8rem] h-10 px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium"
+                    >
+                      {clearAnnualAdjustmentMutation.isPending ? 'Removendo…' : 'Remover ajuste'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowValorAnualAdjustModal(false)}
+                      className="flex-1 min-w-[8rem] h-10 px-4 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-sm"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Modal Cadastrar Produção Semanal */}
           {showProductionModal && !editingProduction && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -2905,7 +3737,7 @@ export default function ContractDetailPage() {
                     <div className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhum pleito gerado até o momento.</div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                         <select
                           value={histMonthFilter}
                           onChange={(e) => setHistMonthFilter(e.target.value)}
@@ -2947,8 +3779,26 @@ export default function ContractDetailPage() {
                           placeholder="Descrição"
                           className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                         />
+                        <select
+                          value={histEtiquetaFilter}
+                          onChange={(e) => setHistEtiquetaFilter(e.target.value)}
+                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        >
+                          <option value="all">Etiqueta: Todas</option>
+                          <option value="gerado-100">{HISTORICO_ETIQUETA_GERADO_100}</option>
+                        </select>
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleOpenHistoricoFaturar100Modal}
+                            disabled={isSavingHistoricoPleitos || selectedHistoricoPleitos.size === 0}
+                            className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            Faturar 100% selecionadas
+                          </button>
+                        </div>
                         <button
                           type="button"
                           onClick={handleSaveAllHistoricoPleitos}
@@ -2964,8 +3814,22 @@ export default function ContractDetailPage() {
                       <table className="w-full min-w-[1500px]">
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
+                            <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
+                              <input
+                                type="checkbox"
+                                checked={allFilteredHistoricoSelected}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = someFilteredHistoricoSelected && !allFilteredHistoricoSelected;
+                                }}
+                                onChange={(e) => toggleSelectAllFilteredHistoricoPleitos(e.target.checked)}
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label="Selecionar OSs filtradas no histórico de pleitos"
+                                className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+                              />
+                            </th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Pago pelo cliente</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Nº NF</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Etiqueta</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Orçamento</th>
@@ -2983,12 +3847,32 @@ export default function ContractDetailPage() {
                               billingStatus: ((p.billingStatus || '').toLowerCase() === 'pago' ? 'pago' : 'nao-pago') as 'pago' | 'nao-pago',
                               invoiceNumber: p.invoiceNumber || ''
                             };
+                            const etiqueta = getHistoricoEtiqueta(p);
+                            const isSelectedHistorico = selectedHistoricoPleitos.has(p.id);
                             return (
                               <tr
                                 key={p.id}
                                 onClick={() => setSelectedPleitoId(p.id)}
-                                className="hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                                className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer ${isSelectedHistorico ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
                               >
+                                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelectedHistorico}
+                                    onChange={(e) =>
+                                      setSelectedHistoricoPleitos((prev) => {
+                                        const next = new Set(prev);
+                                        if (e.target.checked) {
+                                          next.add(p.id);
+                                        } else {
+                                          next.delete(p.id);
+                                        }
+                                        return next;
+                                      })
+                                    }
+                                    className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+                                  />
+                                </td>
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
                                   <select
                                     value={rowDraft.billingStatus}
@@ -3026,6 +3910,13 @@ export default function ContractDetailPage() {
                                     className="w-full min-w-[140px] bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm font-mono text-gray-900 dark:text-gray-100 placeholder:text-gray-400 disabled:opacity-60"
                                   />
                                 </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                  {etiqueta ? (
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5 text-xs font-medium">
+                                      {etiqueta}
+                                    </span>
+                                  ) : '-'}
+                                </td>
                                 <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                                   {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
                                 </td>
@@ -3042,6 +3933,51 @@ export default function ContractDetailPage() {
                     </div>
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+          {showHistoricoBatchNfModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2">
+              <div className="absolute inset-0" onClick={() => setShowHistoricoBatchNfModal(false)} />
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Faturar 100% das OSs selecionadas</h3>
+                  <button
+                    onClick={() => setShowHistoricoBatchNfModal(false)}
+                    className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="px-5 py-4 space-y-3">
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    Informe o número da nota fiscal uma única vez para aplicar em todas as OSs selecionadas.
+                  </p>
+                  <input
+                    type="text"
+                    value={historicoBatchInvoiceModalValue}
+                    onChange={(e) => setHistoricoBatchInvoiceModalValue(e.target.value)}
+                    placeholder="Número da Nota Fiscal"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    autoFocus
+                  />
+                </div>
+                <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowHistoricoBatchNfModal(false)}
+                    className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmHistoricoFaturar100Selecionadas}
+                    className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800"
+                  >
+                    Aplicar nas selecionadas
+                  </button>
                 </div>
               </div>
             </div>
@@ -3392,78 +4328,6 @@ export default function ContractDetailPage() {
             </div>
           )}
 
-          {/* Modal Editar Valor Anual */}
-          {showEditValorAnual && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-              <div className="absolute inset-0" onClick={() => setShowEditValorAnual(false)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Editar Valor Anual ({safeSelectedYear})
-                  </h3>
-                  <button
-                    onClick={() => setShowEditValorAnual(false)}
-                    className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const parsed = parseCurrencyInput(valorAnualEdit);
-                    if (parsed <= 0) {
-                      toast.error('Informe um valor válido');
-                      return;
-                    }
-                    updateValorAnualMutation.mutate({ year: safeSelectedYear, value: parsed });
-                  }}
-                  className="p-6 space-y-4"
-                >
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Valor Anual para {safeSelectedYear} *
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">R$</span>
-                      <input
-                        type="text"
-                        required
-                        value={valorAnualEdit}
-                        onChange={(e) => {
-                          const v = e.target.value.replace(/\D/g, '');
-                          const formatted = v ? (Number(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
-                          setValorAnualEdit(formatted);
-                        }}
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        placeholder="0,00"
-                        autoFocus
-                      />
-                    </div>
-                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Este valor será aplicado apenas ao ano {safeSelectedYear}. Os outros anos não serão alterados.
-                    </p>
-                  </div>
-                  <div className="flex justify-end gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowEditValorAnual(false)}
-                      className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={updateValorAnualMutation.isPending}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                    >
-                      {updateValorAnualMutation.isPending ? 'Salvando...' : 'Salvar'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
         </div>
       </MainLayout>
     </ProtectedRoute>

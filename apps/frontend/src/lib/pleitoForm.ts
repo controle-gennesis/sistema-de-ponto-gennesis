@@ -17,9 +17,16 @@ export const STATUS_ORCAMENTO_OPCOES = [
   'Analise Fiscal',
   'Engenharia',
   'Equipe de Orçamento',
+  'Aprovado',
   'Faturado',
   'Stand By'
 ];
+
+/** Somente estes status entram na soma "Valor orçado" (controle geral e painel do contrato). */
+export function isBudgetStatusInValorOrcadoSum(status: string | null | undefined): boolean {
+  const s = (status || '').trim();
+  return s === 'Aprovado' || s === 'Faturado';
+}
 
 export const OUTRO_STATUS = '__OUTRO__';
 

@@ -5,6 +5,9 @@ import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
 import { parseDateInput } from '../utils/dateInput';
 
+/** Cópia criada em "Gerar pleito"; distinta da linha principal da OS no contrato. */
+const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
+
 function toDec(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -98,6 +101,7 @@ export class PleitoController {
 
       if (gerados === '1' || gerados === 'true') {
         andParts.push({ billingRequest: { gt: 0 } });
+        andParts.push({ reportsBilling: PLEITO_HISTORICO_MARKER });
       }
 
       const where: Prisma.PleitoWhereInput =
@@ -303,8 +307,21 @@ export class PleitoController {
   async delete(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      const excluirOrdemServico =
+        req.query.excluirOrdemServico === 'true' || req.query.excluirOrdemServico === '1';
       const existing = await prisma.pleito.findUnique({ where: { id } });
       if (!existing) throw createError('Registro não encontrado', 404);
+
+      const isHistoricoGerado =
+        (existing.reportsBilling || '').trim() === PLEITO_HISTORICO_MARKER;
+
+      if (!excluirOrdemServico && !isHistoricoGerado) {
+        throw createError(
+          'Este registro é a ordem de serviço. Aqui só é possível excluir registros de pleito gerado (histórico). Para remover a OS, use a tela do contrato.',
+          400
+        );
+      }
+
       await prisma.pleito.delete({ where: { id } });
       res.json({ success: true, message: 'Excluído com sucesso' });
     } catch (error) {

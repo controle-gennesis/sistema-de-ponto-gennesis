@@ -10,7 +10,7 @@ type PermissionItem = { module: string; action: string };
 const pk = pathToModuleKey;
 
 export function usePermissions() {
-  const { data: userData, isLoading } = useQuery({
+  const { data: userData, isLoading: isLoadingUser } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
@@ -23,7 +23,7 @@ export function usePermissions() {
   const userDepartment = user?.employee?.department;
   const isAdministrator = userPosition === 'Administrador';
 
-  const { data: permissionData } = useQuery({
+  const { data: permissionData, isPending: permissionsPending } = useQuery({
     queryKey: ['me-permissions'],
     queryFn: async () => {
       const res = await api.get('/permissions/me');
@@ -31,6 +31,8 @@ export function usePermissions() {
     },
     enabled: !!user,
   });
+
+  const isLoading = isLoadingUser || (!!user && permissionsPending);
 
   const allowedSet = new Set<string>(
     ((permissionData?.permissions || []) as PermissionItem[])

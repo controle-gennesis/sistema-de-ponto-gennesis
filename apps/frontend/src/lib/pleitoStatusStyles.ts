@@ -9,6 +9,7 @@ const BUDGET_STATUS_CLASSES: Record<string, string> = {
   'Analise Fiscal': 'text-sky-700 dark:text-sky-300',
   Engenharia: 'text-blue-700 dark:text-blue-300',
   'Equipe de Orçamento': 'text-amber-800 dark:text-amber-300',
+  Aprovado: 'text-green-700 dark:text-green-400',
   Faturado: 'text-emerald-700 dark:text-emerald-400',
   'Stand By': 'text-yellow-800 dark:text-yellow-300'
 };

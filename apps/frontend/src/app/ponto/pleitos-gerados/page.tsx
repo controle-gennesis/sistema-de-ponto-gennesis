@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { FileCheck, Search, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileCheck, Search, ExternalLink, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -42,9 +43,26 @@ function formatCurrency(value: number | null | undefined) {
 
 export default function PleitosGeradosPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const limit = 20;
+
+  const deletePleitoMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/pleitos/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pleitos-gerados'] });
+      queryClient.invalidateQueries({ queryKey: ['pleitos'] });
+      queryClient.invalidateQueries({ queryKey: ['pleitos-divse-list'] });
+      queryClient.invalidateQueries({ queryKey: ['contract-pleitos'] });
+      toast.success('Pleito excluído.');
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message || 'Erro ao excluir pleito');
+    }
+  });
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -140,7 +158,7 @@ export default function PleitosGeradosPage() {
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor Pleiteado</th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">% Orçamento</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status Execução</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-20">Ação</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase min-w-[7rem]">Ação</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -195,15 +213,36 @@ export default function PleitosGeradosPage() {
                               </span>
                             </td>
                             <td className="px-4 py-3">
-                              {p.updatedContractId && (
-                                <Link
-                                  href={`/ponto/contratos/${p.updatedContractId}`}
-                                  className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                              <div className="flex flex-col gap-1.5 items-start">
+                                {p.updatedContractId && (
+                                  <Link
+                                    href={`/ponto/contratos/${p.updatedContractId}`}
+                                    className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                  >
+                                    Ver contrato
+                                    <ExternalLink className="w-3 h-3" />
+                                  </Link>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        'Excluir este registro de pleito? Esta ação não pode ser desfeita.'
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    deletePleitoMutation.mutate(p.id);
+                                  }}
+                                  disabled={deletePleitoMutation.isPending}
+                                  className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Excluir pleito"
                                 >
-                                  Ver contrato
-                                  <ExternalLink className="w-3 h-3" />
-                                </Link>
-                              )}
+                                  <Trash2 className="w-3 h-3 shrink-0" />
+                                  Excluir
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
