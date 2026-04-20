@@ -43,6 +43,8 @@ export function usePermissions() {
 
   const allowedContractIds: string[] = permissionData?.allowedContractIds ?? [];
   const allowedContractIdSet = new Set(allowedContractIds);
+  const dpApprovalContractIds: string[] = permissionData?.dpApprovalContractIds ?? [];
+  const dpApprovalContractIdSet = new Set(dpApprovalContractIds);
 
   /** Acesso total ao submenu (módulo) identificado pela chave do registro central. */
   const can = (moduleKey: string) => {
@@ -106,6 +108,22 @@ export function usePermissions() {
     ? canAction(employeesKey, 'excluir')
     : hasEmployeeAcesso;
 
+  /** Rescisão / alteração função-salário: admin, equipe DP (gerenciar), Controle «criar solicitações restritas» ou Gestor DP no contrato. */
+  const canCreateSensitiveDpRequestType = (contractId: string | null | undefined) => {
+    if (isAdministrator || permissionData?.isAdmin) return true;
+    if (can(pk('/ponto/gerenciar-solicitacoes-dp'))) return true;
+    if (can(pk('/ponto/controle/criar-tipos-restritos-dp'))) return true;
+    if (!contractId) return false;
+    return dpApprovalContractIdSet.has(contractId);
+  };
+
+  /** Tela / API de aprovações DP: gestor por contrato ou permissão legada (Controle). */
+  const canAccessDpApproverPages =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    dpApprovalContractIds.length > 0 ||
+    can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
+
   const finalPermissions = {
     canAccessPayroll: can(pk('/ponto/folha-pagamento')) || can(pk('/relatorios/alocacao')),
     /** Acesso ao módulo Funcionários (inclui granularidade definida na tela de permissões). */
@@ -143,6 +161,9 @@ export function usePermissions() {
     can,
     canAction,
     allowedContractIds,
+    dpApprovalContractIds,
+    canCreateSensitiveDpRequestType,
+    canAccessDpApproverPages,
     canAccessContract,
     isLoading,
     canAccessPayroll: finalPermissions.canAccessPayroll,
@@ -174,6 +195,7 @@ export function useRoutePermission(route: string) {
     isDepartmentCompras,
     userPosition,
     can,
+    dpApprovalContractIds,
   } = usePermissions();
 
   if (isLoading) {
@@ -185,6 +207,11 @@ export function useRoutePermission(route: string) {
   const routePermissions: Record<string, boolean> = {
     '/ponto': isAdministrator || isDepartmentPessoal || permissions.canRegisterTime,
     '/ponto/dashboard': isAdministrator || isDepartmentPessoal || permissions.canViewDashboard,
+    '/ponto/aprovacoes':
+      isAdministrator ||
+      can(pk('/ponto/aprovacoes')) ||
+      dpApprovalContractIds.length > 0 ||
+      can(pk('/ponto/controle/aprovar-solicitacoes-dp')),
     '/ponto/funcionarios':
       isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal || can(pk('/ponto/aniversariantes')),
@@ -192,6 +219,8 @@ export function useRoutePermission(route: string) {
     '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados')),
     '/ponto/solicitacoes': isAdministrator || can(pk('/ponto/solicitacoes')),
     '/ponto/gerenciar-solicitacoes': isAdministrator || can(pk('/ponto/gerenciar-solicitacoes')),
+    '/ponto/solicitacoes-dp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-dp')),
+    '/ponto/gerenciar-solicitacoes-dp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-feriados')),
@@ -208,6 +237,8 @@ export function useRoutePermission(route: string) {
     '/ponto/financeiro/analise': isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise')),
     '/ponto/financeiro/analise-extrato':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato')),
+    '/ponto/financeiro/gestao-solicitacoes':
+      isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes')),
     '/ponto/orcamento': isAdministrator || can(pk('/ponto/orcamento')),
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),

@@ -68,6 +68,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           isAdmin: true,
           permissions: [],
           allowedContractIds: [],
+          dpApprovalContractIds: [],
         },
       });
     }
@@ -85,12 +86,18 @@ router.get('/me', async (req: AuthRequest, res, next) => {
       select: { contractId: true },
     });
 
+    const dpApprovalContractIds = await prisma.userDpApprovalContract.findMany({
+      where: { userId: req.user.id },
+      select: { contractId: true },
+    });
+
     return res.json({
       success: true,
       data: {
         isAdmin: false,
         permissions,
         allowedContractIds: allowedContractIds.map((r) => r.contractId),
+        dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
       },
     });
   } catch (error) {
@@ -236,6 +243,13 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           select: { contractId: true },
         });
 
+    const dpApprovalContractIds = isAdmin
+      ? []
+      : await prisma.userDpApprovalContract.findMany({
+          where: { userId },
+          select: { contractId: true },
+        });
+
     return res.json({
       success: true,
       data: {
@@ -243,6 +257,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         isAdmin,
         permissions,
         allowedContractIds: allowedContractIds.map((r) => r.contractId),
+        dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
       },
     });
   } catch (error) {
@@ -256,6 +271,8 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     const receivedPermissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     const rawContractIds = req.body?.allowedContractIds;
     const shouldSyncContracts = Array.isArray(rawContractIds);
+    const rawDpApproval = req.body?.dpApprovalContractIds;
+    const shouldSyncDpApproval = Array.isArray(rawDpApproval);
 
     const targetUser = await prisma.user.findUnique({
       where: { id: userId },
@@ -311,6 +328,30 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       }
     }
 
+    let dpApprovalIdsToSave: string[] = [];
+    if (shouldSyncDpApproval) {
+      dpApprovalIdsToSave = rawDpApproval.filter((id: unknown) => typeof id === 'string' && id.length > 0);
+      if (dpApprovalIdsToSave.length > 0) {
+        const existing = await prisma.contract.findMany({
+          where: { id: { in: dpApprovalIdsToSave } },
+          select: { id: true },
+        });
+        const ok = new Set(existing.map((c) => c.id));
+        dpApprovalIdsToSave = dpApprovalIdsToSave.filter((id) => ok.has(id));
+      }
+      let allowedContractSet: Set<string>;
+      if (shouldSyncContracts) {
+        allowedContractSet = new Set(contractIdsToSave);
+      } else {
+        const cur = await prisma.userContractPermission.findMany({
+          where: { userId },
+          select: { contractId: true },
+        });
+        allowedContractSet = new Set(cur.map((r) => r.contractId));
+      }
+      dpApprovalIdsToSave = dpApprovalIdsToSave.filter((id) => allowedContractSet.has(id));
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.userPermission.deleteMany({
         where: { userId },
@@ -333,6 +374,19 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         if (contractIdsToSave.length > 0) {
           await tx.userContractPermission.createMany({
             data: contractIdsToSave.map((contractId) => ({
+              userId,
+              contractId,
+              updatedBy: req.user!.id,
+            })),
+          });
+        }
+      }
+
+      if (shouldSyncDpApproval) {
+        await tx.userDpApprovalContract.deleteMany({ where: { userId } });
+        if (dpApprovalIdsToSave.length > 0) {
+          await tx.userDpApprovalContract.createMany({
+            data: dpApprovalIdsToSave.map((contractId) => ({
               userId,
               contractId,
               updatedBy: req.user!.id,
@@ -433,6 +487,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           position,
           permissions: [],
           allowedContractIds: [],
+          dpApprovalContractIds: [],
         },
       });
     }
@@ -446,6 +501,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           position,
           permissions: [],
           allowedContractIds: [],
+          dpApprovalContractIds: [],
         },
       });
     }
@@ -455,12 +511,17 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
     const allowedContractIds = Array.isArray(idsRaw)
       ? idsRaw.filter((x): x is string => typeof x === 'string')
       : [];
+    const idsRawDp = (row as { dpApprovalContractIds?: unknown }).dpApprovalContractIds;
+    const dpApprovalContractIds = Array.isArray(idsRawDp)
+      ? idsRawDp.filter((x): x is string => typeof x === 'string')
+      : [];
     return res.json({
       success: true,
       data: {
         position,
         permissions,
         allowedContractIds,
+        dpApprovalContractIds,
       },
     });
   } catch (e) {
@@ -487,6 +548,8 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     const receivedPermissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     const rawContractIds = req.body?.allowedContractIds;
     const shouldSyncContracts = Array.isArray(rawContractIds);
+    const rawDpApproval = req.body?.dpApprovalContractIds;
+    const shouldSyncDpApproval = Array.isArray(rawDpApproval);
 
     const rawPayload = filterValidPermissionPayload(
       receivedPermissions
@@ -521,8 +584,36 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
       }
     }
 
+    let dpApprovalIdsToSave: string[] = [];
+    if (shouldSyncDpApproval) {
+      dpApprovalIdsToSave = rawDpApproval.filter((id: unknown) => typeof id === 'string' && id.length > 0);
+      if (dpApprovalIdsToSave.length > 0) {
+        const existing = await prisma.contract.findMany({
+          where: { id: { in: dpApprovalIdsToSave } },
+          select: { id: true },
+        });
+        const ok = new Set(existing.map((c) => c.id));
+        dpApprovalIdsToSave = dpApprovalIdsToSave.filter((id) => ok.has(id));
+      }
+      let allowedTemplateContracts: Set<string>;
+      if (shouldSyncContracts) {
+        allowedTemplateContracts = new Set(contractIdsToSave);
+      } else {
+        const row = await positionTemplates.findUnique({
+          where: { position },
+          select: { allowedContractIds: true },
+        });
+        const raw = row?.allowedContractIds;
+        allowedTemplateContracts = new Set(
+          Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []
+        );
+      }
+      dpApprovalIdsToSave = dpApprovalIdsToSave.filter((id) => allowedTemplateContracts.has(id));
+    }
+
     const permissionsJson = normalized as unknown as Prisma.InputJsonValue;
     const contractIdsJson = (shouldSyncContracts ? contractIdsToSave : []) as unknown as Prisma.InputJsonValue;
+    const dpApprovalJson = (shouldSyncDpApproval ? dpApprovalIdsToSave : []) as unknown as Prisma.InputJsonValue;
 
     await positionTemplates.upsert({
       where: { position },
@@ -530,10 +621,12 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
         position,
         permissions: permissionsJson,
         allowedContractIds: contractIdsJson,
+        dpApprovalContractIds: dpApprovalJson,
       },
       update: {
         permissions: permissionsJson,
         allowedContractIds: contractIdsJson,
+        ...(shouldSyncDpApproval ? { dpApprovalContractIds: dpApprovalJson } : {}),
       },
     });
 

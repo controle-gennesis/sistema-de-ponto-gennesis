@@ -38,6 +38,7 @@ type UserPermissionPayload = {
   isAdmin: boolean;
   permissions: PermissionItem[];
   allowedContractIds: string[];
+  dpApprovalContractIds?: string[];
 };
 type PermissionUserListItem = {
   id: string;
@@ -59,6 +60,8 @@ function serializePermissionSet(s: Set<string>): string {
 
 const CONTRACTS_MODULE_KEY = pathToModuleKey('/ponto/contratos');
 const EMPLOYEES_MODULE_KEY = pathToModuleKey('/ponto/funcionarios');
+/** Removido da UI (gestor por contrato na aba Contratos); ainda pode existir no banco até o próximo salvamento. */
+const DEPRECATED_DP_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-solicitacoes-dp');
 const CONTRACT_ACTIONS = ['ver', 'criar', 'editar', 'excluir'] as const;
 type ContractAction = (typeof CONTRACT_ACTIONS)[number];
 
@@ -74,9 +77,10 @@ function serializeFullBaseline(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
   contractIds: Set<string>,
-  employeeActions: Set<ContractAction>
+  employeeActions: Set<ContractAction>,
+  dpApprovalContractIds: Set<string>
 ): string {
-  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}`;
+  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}`;
 }
 
 /** Mesmo formato retornado por GET /permissions/users/:id (alinha cache do React Query ao PUT). */
@@ -101,6 +105,7 @@ function buildPermissionsSnapshotForCache(
   }
   const out: PermissionItem[] = [];
   for (const module of Array.from(modules)) {
+    if (module === DEPRECATED_DP_APPROVE_CONTROLE_KEY) continue;
     out.push({ module, action: PERMISSION_ACCESS_ACTION });
   }
   for (const action of Array.from(contractActions)) {
@@ -450,6 +455,7 @@ export function UserPermissionsEditor({
   const [contractActionsSet, setContractActionsSet] = useState<Set<ContractAction>>(new Set());
   const [employeeActionsSet, setEmployeeActionsSet] = useState<Set<ContractAction>>(new Set());
   const [selectedContractIds, setSelectedContractIds] = useState<Set<string>>(new Set());
+  const [selectedDpApprovalContractIds, setSelectedDpApprovalContractIds] = useState<Set<string>>(new Set());
   const [copyFromUserIdGeneral, setCopyFromUserIdGeneral] = useState('');
   const [copyFromUserIdContracts, setCopyFromUserIdContracts] = useState('');
   const [copyGeneralSearch, setCopyGeneralSearch] = useState('');
@@ -468,6 +474,8 @@ export function UserPermissionsEditor({
   selectedContractIdsRef.current = selectedContractIds;
   const employeeActionsRef = useRef(employeeActionsSet);
   employeeActionsRef.current = employeeActionsSet;
+  const selectedDpApprovalContractIdsRef = useRef(selectedDpApprovalContractIds);
+  selectedDpApprovalContractIdsRef.current = selectedDpApprovalContractIds;
 
   /** Serialização estável para comparar com o último estado vindo do servidor (evita PUT na hidratação). */
   const baselineSerializedRef = useRef<string | null>(null);
@@ -496,6 +504,7 @@ export function UserPermissionsEditor({
           isAdmin: false,
           permissions: d.permissions ?? [],
           allowedContractIds: d.allowedContractIds ?? [],
+          dpApprovalContractIds: (d as { dpApprovalContractIds?: string[] }).dpApprovalContractIds ?? [],
         } as UserPermissionPayload;
       }
       return (await api.get(`/permissions/users/${userId}`)).data?.data as UserPermissionPayload;
@@ -511,6 +520,7 @@ export function UserPermissionsEditor({
     refetchInterval: 12_000,
     refetchOnWindowFocus: true,
   });
+
   const { data: permissionUsers = [] } = useQuery({
     queryKey: ['permission-users'],
     queryFn: async () => (await api.get('/permissions/users')).data?.data as PermissionUserListItem[],
@@ -534,13 +544,21 @@ export function UserPermissionsEditor({
       setContractActionsSet(new Set());
       setEmployeeActionsSet(new Set());
       setSelectedContractIds(new Set());
-      baselineSerializedRef.current = serializeFullBaseline(new Set(), new Set(), new Set(), new Set());
+      setSelectedDpApprovalContractIds(new Set());
+      baselineSerializedRef.current = serializeFullBaseline(
+        new Set(),
+        new Set(),
+        new Set(),
+        new Set(),
+        new Set()
+      );
       return;
     }
     const perms = userPermissionData.permissions;
     const next = new Set<string>(
       perms.filter((p) => p.action === PERMISSION_ACCESS_ACTION).map((p) => p.module)
     );
+    next.delete(DEPRECATED_DP_APPROVE_CONTROLE_KEY);
     const nextContract = new Set<ContractAction>();
     const nextEmployee = new Set<ContractAction>();
     for (const p of perms) {
@@ -552,11 +570,20 @@ export function UserPermissionsEditor({
       }
     }
     const nextContractIds = new Set(userPermissionData.allowedContractIds ?? []);
+    const rawDp = new Set(userPermissionData.dpApprovalContractIds ?? []);
+    const nextDpApproval = new Set(Array.from(rawDp).filter((id) => nextContractIds.has(id)));
     setSelectedSet(next);
     setContractActionsSet(nextContract);
     setEmployeeActionsSet(nextEmployee);
     setSelectedContractIds(nextContractIds);
-    baselineSerializedRef.current = serializeFullBaseline(next, nextContract, nextContractIds, nextEmployee);
+    setSelectedDpApprovalContractIds(nextDpApproval);
+    baselineSerializedRef.current = serializeFullBaseline(
+      next,
+      nextContract,
+      nextContractIds,
+      nextEmployee,
+      nextDpApproval
+    );
   }, [userPermissionData]);
 
   const saveMutation = useMutation({
@@ -591,16 +618,19 @@ export function UserPermissionsEditor({
       }));
       const permissions = [...basePermissions, ...contractActionPermissions, ...employeeActionPermissions];
       const allowedContractIds = currentContractIds;
+      const dpApprovalContractIds = Array.from(selectedDpApprovalContractIdsRef.current);
       if (isPositionMode) {
         await api.put('/permissions/position-template', {
           position: positionTemplate,
           permissions,
           allowedContractIds,
+          dpApprovalContractIds,
         });
       } else {
         await api.put(`/permissions/users/${userId}`, {
           permissions,
           allowedContractIds,
+          dpApprovalContractIds,
         });
       }
     },
@@ -610,7 +640,8 @@ export function UserPermissionsEditor({
         selectedSetRef.current,
         contractActionsRef.current,
         selectedContractIdsRef.current,
-        employeeActionsRef.current
+        employeeActionsRef.current,
+        selectedDpApprovalContractIdsRef.current
       );
       await queryClient.invalidateQueries({ queryKey: ['permission-users'] });
       await queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
@@ -633,6 +664,7 @@ export function UserPermissionsEditor({
             ...old,
             permissions: snapshot,
             allowedContractIds: Array.from(selectedContractIdsRef.current),
+            dpApprovalContractIds: Array.from(selectedDpApprovalContractIdsRef.current),
           };
         });
       }
@@ -658,7 +690,8 @@ export function UserPermissionsEditor({
       selectedSet,
       contractActionsSet,
       selectedContractIds,
-      employeeActionsSet
+      employeeActionsSet,
+      selectedDpApprovalContractIds
     );
     if (serialized === baselineSerializedRef.current) return;
 
@@ -667,7 +700,8 @@ export function UserPermissionsEditor({
         selectedSetRef.current,
         contractActionsRef.current,
         selectedContractIdsRef.current,
-        employeeActionsRef.current
+        employeeActionsRef.current,
+        selectedDpApprovalContractIdsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       persistPermissions();
@@ -679,6 +713,7 @@ export function UserPermissionsEditor({
     contractActionsSet,
     employeeActionsSet,
     selectedContractIds,
+    selectedDpApprovalContractIds,
     loadingPermissions,
     permissionError,
     persistPermissions,
@@ -693,7 +728,8 @@ export function UserPermissionsEditor({
         selectedSetRef.current,
         contractActionsRef.current,
         selectedContractIdsRef.current,
-        employeeActionsRef.current
+        employeeActionsRef.current,
+        selectedDpApprovalContractIdsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       persistPermissions();
@@ -717,6 +753,7 @@ export function UserPermissionsEditor({
     for (const m of PERMISSION_MODULES) {
       const cat = moduleCategory(m);
       if (cat !== PERMISSION_CONTROLE_CATEGORY) continue;
+      if (m.key === DEPRECATED_DP_APPROVE_CONTROLE_KEY) continue;
       const list = map.get(cat) ?? [];
       list.push(m);
       map.set(cat, list);
@@ -803,6 +840,23 @@ export function UserPermissionsEditor({
   const toggleContract = (contractId: string) => {
     setSelectedContractIds((prev) => {
       const n = new Set(prev);
+      if (n.has(contractId)) {
+        n.delete(contractId);
+        setSelectedDpApprovalContractIds((dp) => {
+          const d = new Set(dp);
+          d.delete(contractId);
+          return d;
+        });
+      } else {
+        n.add(contractId);
+      }
+      return n;
+    });
+  };
+
+  const toggleDpApprovalContract = (contractId: string) => {
+    setSelectedDpApprovalContractIds((prev) => {
+      const n = new Set(prev);
       if (n.has(contractId)) n.delete(contractId);
       else n.add(contractId);
       return n;
@@ -834,6 +888,7 @@ export function UserPermissionsEditor({
           .filter((p) => p.action === PERMISSION_ACCESS_ACTION)
           .map((p) => p.module)
       );
+      nextGeneral.delete(DEPRECATED_DP_APPROVE_CONTROLE_KEY);
       const nextContractActions = new Set<ContractAction>();
       const nextEmployeeActions = new Set<ContractAction>();
       for (const p of source.permissions || []) {
@@ -847,6 +902,14 @@ export function UserPermissionsEditor({
       setSelectedSet(nextGeneral);
       setContractActionsSet(nextContractActions);
       setEmployeeActionsSet(nextEmployeeActions);
+      const allowedSrc = new Set(source.allowedContractIds ?? []);
+      setSelectedDpApprovalContractIds(
+        new Set(
+          [...(source.dpApprovalContractIds ?? [])].filter(
+            (id) => allowedSrc.has(id) && selectedContractIdsRef.current.has(id)
+          )
+        )
+      );
       toast.success('Permissões de acesso copiadas. Salvamento automático em andamento.');
     } catch (error) {
       const msg =
@@ -880,9 +943,12 @@ export function UserPermissionsEditor({
         }
       }
       const nextContractIds = new Set(source.allowedContractIds || []);
+      const rawDp = new Set(source.dpApprovalContractIds || []);
+      const nextDp = new Set(Array.from(rawDp).filter((id) => nextContractIds.has(id)));
       const sourceHasContractsModule = (source.permissions || []).some((p) => p.module === CONTRACTS_MODULE_KEY);
       setContractActionsSet(nextContract);
       setSelectedContractIds(nextContractIds);
+      setSelectedDpApprovalContractIds(nextDp);
       setSelectedSet((prev) => {
         const next = new Set(prev);
         if (sourceHasContractsModule || nextContract.size > 0 || nextContractIds.size > 0) {
@@ -912,8 +978,13 @@ export function UserPermissionsEditor({
 
   const hasPendingChanges =
     baselineSerializedRef.current !== null &&
-    serializeFullBaseline(selectedSet, contractActionsSet, selectedContractIds, employeeActionsSet) !==
-      baselineSerializedRef.current;
+    serializeFullBaseline(
+      selectedSet,
+      contractActionsSet,
+      selectedContractIds,
+      employeeActionsSet,
+      selectedDpApprovalContractIds
+    ) !== baselineSerializedRef.current;
 
   const handleBackWithSave = async () => {
     if (isSavingPermissions) return;
@@ -1142,8 +1213,9 @@ export function UserPermissionsEditor({
             {activeTab === 'controle' && (
               <div className="border-b border-gray-100 py-4 dark:border-gray-700/70">
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Ações administrativas que não são páginas do menu (ex.: alterar permissões, auditoria, exportações). Você
-                  pode restringir essas ações independentemente do acesso às telas.
+                  Ações administrativas que não são páginas do menu (ex.: alterar permissões, auditoria, exportações,
+                  criar solicitações restritas). Você pode restringir essas ações independentemente do acesso às
+                  telas.
                 </p>
               </div>
             )}
@@ -1186,7 +1258,7 @@ export function UserPermissionsEditor({
                                 <td className="py-3.5 pl-1 pr-4">
                                   <div className="flex min-w-0 items-center gap-3">
                                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-100 bg-white text-gray-400 shadow-sm dark:border-gray-600 dark:bg-gray-800/80 dark:text-gray-500">
-                                      <Icon className="h-4 w-4 stroke-[1.5]" />
+                                      <Icon className="h-4 w-4 stroke-[1.5]" aria-hidden />
                                     </div>
                                     <span className="min-w-0 font-medium leading-snug text-gray-900 dark:text-gray-100">
                                       {lbl}
@@ -1324,7 +1396,7 @@ export function UserPermissionsEditor({
                   <div className="text-sm">
                     <p className="font-medium text-gray-800 dark:text-gray-200">Copiar permissões de contratos</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Copia ações de contratos e contratos liberados do usuário selecionado.
+                      Copia ações de contratos, contratos liberados e coluna Gestor do usuário selecionado.
                     </p>
                   </div>
                   <div className="w-full sm:w-auto sm:min-w-[560px]">
@@ -1363,26 +1435,34 @@ export function UserPermissionsEditor({
             ) : (
               <div>
                 <div className="max-h-[min(28rem,60vh)] overflow-x-auto overflow-y-auto pt-2 sm:pt-4">
-                  <table className="w-full min-w-[640px] table-fixed text-sm">
+                  <table className="w-full min-w-[760px] table-fixed text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 align-bottom dark:border-gray-700/80">
                         <th
                           scope="col"
-                          className="w-[72%] pb-3 pl-1 pr-4 text-left text-lg font-bold leading-tight tracking-tight text-gray-900 dark:text-gray-100"
+                          className="w-[52%] pb-3 pl-1 pr-4 text-left text-lg font-bold leading-tight tracking-tight text-gray-900 dark:text-gray-100"
                         >
-                          Contratos liberados
+                          Contratos
                         </th>
                         <th
                           scope="col"
-                          className="w-[28%] px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          className="w-[24%] px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
                         >
                           Liberado
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-[24%] px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Aprovar solicitações ao DP, criar rescisão/alteração de função-salário neste contrato"
+                        >
+                          Gestor
                         </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
                       {contractsList.map((c) => {
                         const liberado = selectedContractIds.has(c.id);
+                        const gestorDp = selectedDpApprovalContractIds.has(c.id);
                         return (
                           <tr
                             key={c.id}
@@ -1393,11 +1473,9 @@ export function UserPermissionsEditor({
                                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-100 bg-white text-gray-400 shadow-sm dark:border-gray-600 dark:bg-gray-800/80 dark:text-gray-500">
                                   <FileText className="h-4 w-4 stroke-[1.5]" />
                                 </div>
-                                <div className="min-w-0">
-                                  <span className="block font-medium leading-snug text-gray-900 dark:text-gray-100">
-                                    {c.name}
-                                  </span>
-                                </div>
+                                <span className="min-w-0 font-medium leading-snug text-gray-900 dark:text-gray-100">
+                                  {c.name}
+                                </span>
                               </div>
                             </td>
                             <td className="px-1 py-3.5 text-center align-middle">
@@ -1408,6 +1486,27 @@ export function UserPermissionsEditor({
                                     if (next !== liberado) toggleContract(c.id);
                                   }}
                                   aria-label={`Liberar contrato ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={gestorDp}
+                                  onCheckedChange={(next) => {
+                                    if (next === gestorDp) return;
+                                    if (next) {
+                                      setSelectedContractIds((prev) => new Set(prev).add(c.id));
+                                      setSelectedDpApprovalContractIds((prev) => new Set(prev).add(c.id));
+                                    } else {
+                                      setSelectedDpApprovalContractIds((prev) => {
+                                        const n = new Set(prev);
+                                        n.delete(c.id);
+                                        return n;
+                                      });
+                                    }
+                                  }}
+                                  aria-label={`Gestor — ${c.name}`}
                                 />
                               </div>
                             </td>

@@ -49,7 +49,7 @@ type Props = {
 };
 
 /**
- * Larguras da grade: a1ª linha do thead é um único th com colSpan=9, então o navegador
+ * Larguras da grade: a1ª linha do thead é um único th com colSpan cheio, então o navegador
  * ignora w-* nas células seguintes e iguala as colunas. `<colgroup>` define a grade de fato.
  */
 const COLS_MEDIC_PCT = { desc: 44, med: 7 } as const;
@@ -57,14 +57,8 @@ const COLS_MEDIC_PCT = { desc: 44, med: 7 } as const;
 const colDesc = 'min-w-[18rem] sm:min-w-[22rem]';
 const colMed = 'min-w-[2.75rem] max-w-[4.25rem]';
 
-const colgroupMedicoes = (
-  <colgroup>
-    <col style={{ width: `${COLS_MEDIC_PCT.desc}%` }} />
-    {Array.from({ length: 8 }, (_, i) => (
-      <col key={i} style={{ width: `${COLS_MEDIC_PCT.med}%` }} />
-    ))}
-  </colgroup>
-);
+const rotuloUnPorTipo = (t: TipoUnidadeFormula | undefined) =>
+  t === 'm3' ? 'm³' : t === 'm2' ? 'm²' : t === 'm' ? 'm' : 'UN';
 
 const thFirst =
   `px-3 sm:px-3.5 py-2.5 text-left text-[11px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide bg-slate-50 dark:bg-slate-800/85 border-b border-r border-gray-200 dark:border-gray-600 ${colDesc}`;
@@ -156,6 +150,7 @@ export function OrcamentoMedicaoPainel({
     if (ehCargaEntulho) {
       if (ln.linhaAgregadaCarga) {
         if (ln.tipoOrigemMedicao === 'm2' && campo === 'H') return 'editar';
+        if (ln.tipoOrigemMedicao === 'm' && (campo === 'L' || campo === 'H')) return 'editar';
         return 'carga_bloq';
       }
       if (campo === 'N') return 'carga_bloq';
@@ -215,7 +210,7 @@ export function OrcamentoMedicaoPainel({
     <tr className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
       <th
         colSpan={colCount}
-        className="border-b border-r border-red-700/70 bg-red-600 px-3 py-2.5 text-left align-middle font-normal dark:border-red-900 dark:bg-red-950/90 sm:px-3.5"
+        className="border-b border-red-700/70 bg-red-600 px-3 py-2.5 text-left align-middle font-normal dark:border-red-900 dark:bg-red-950/90 sm:px-3.5"
       >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-3">
           <p className="min-w-0 flex-1 text-left text-sm font-bold leading-snug text-white">
@@ -526,29 +521,76 @@ export function OrcamentoMedicaoPainel({
       );
     };
 
+    const unNoFimCarga = ln.linhaAgregadaCarga
+      ? rotuloUnPorTipo(ln.tipoOrigemMedicao)
+      : rotuloUnPorTipo('m3');
+    const rotuloCargaVis = ln.origemComposicaoRotulo?.trim() ?? '';
+    const descMeioCarga = ln.descricao?.trim() ?? '';
+    const origemKeyNavegacao =
+      ln.linhaAgregadaCarga && ln.origemLinhaId ? ln.origemLinhaId.replace(/\|agg$/, '') : null;
+
+    /** Grid esticado + conteúdo centralizado em cada célula (evita descrição “subindo” como no 2.2.2). */
+    const rowCargaDescCls = 'grid min-h-[2.75rem] w-full min-w-0 max-w-full items-stretch gap-x-2';
+    const rowCargaDescGridStyle: React.CSSProperties = {
+      gridTemplateColumns: rotuloCargaVis
+        ? 'max-content minmax(0, 1fr) 3.25rem'
+        : 'minmax(0, 1fr) 3.25rem'
+    };
+    /** Sem rolagem: uma linha, texto cortado na borda da coluna. */
+    const descCargaMeioCls =
+      'block min-w-0 w-full overflow-hidden whitespace-nowrap text-left leading-snug';
+    const descCargaMeioWrapCls = 'flex min-h-0 min-w-0 w-full items-center overflow-hidden';
+    const rotuloCargaCls = 'flex items-center whitespace-nowrap font-medium tabular-nums leading-snug';
+    const unCargaCls = 'flex items-center justify-end font-medium tabular-nums leading-snug';
+
     return (
       <tr
         key={idx}
         className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
         onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
       >
-        <td className={tdFirstBody}>
-          <input
-            type="text"
-            placeholder="Ex: COBERTURA DAS CALDEIRAS"
-            value={
-              bloquearDescricao
-                ? [ln.origemComposicaoRotulo?.trim(), ln.descricao?.trim()].filter(Boolean).join(' ')
-                : ln.descricao || ''
-            }
-            onChange={e => !bloquearDescricao && updateLinhaMedicao(rowKey, idx, 'descricao', e.target.value)}
-            readOnly={bloquearDescricao}
-            className={
-              bloquearDescricao
-                ? `${inputBloqueadoCls} !text-left`
-                : `${inputCls} text-left`
-            }
-          />
+        <td
+          className={`${tdFirstBody} ${ehCargaEntulho && bloquearDescricao ? 'max-w-0' : ''}`}
+        >
+          {bloquearDescricao && origemKeyNavegacao ? (
+            <button
+              type="button"
+              title="Ir à memória de cálculo deste item"
+              className={`box-border cursor-pointer border-0 bg-transparent px-3 py-2.5 text-sm font-normal text-gray-900 dark:text-gray-100 sm:px-3.5 ${rowCargaDescCls}`}
+              style={rowCargaDescGridStyle}
+              onClick={() => {
+                document
+                  .getElementById(`memorial-medicoes-${origemKeyNavegacao}`)
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            >
+              {rotuloCargaVis ? <span className={rotuloCargaCls}>{rotuloCargaVis}</span> : null}
+              <div className={descCargaMeioWrapCls}>
+                <span className={descCargaMeioCls}>{descMeioCarga || '—'}</span>
+              </div>
+              <span className={unCargaCls}>{unNoFimCarga}</span>
+            </button>
+          ) : bloquearDescricao ? (
+            <div
+              className={`px-3 py-2.5 text-gray-900 dark:text-gray-100 sm:px-3.5 ${rowCargaDescCls} ${inputBloqueadoCls}`}
+              style={rowCargaDescGridStyle}
+              aria-readonly
+            >
+              {rotuloCargaVis ? <span className={rotuloCargaCls}>{rotuloCargaVis}</span> : null}
+              <div className={descCargaMeioWrapCls}>
+                <span className={descCargaMeioCls}>{descMeioCarga || '—'}</span>
+              </div>
+              <span className={unCargaCls}>{unNoFimCarga}</span>
+            </div>
+          ) : (
+            <input
+              type="text"
+              placeholder="Ex: COBERTURA DAS CALDEIRAS"
+              value={ln.descricao || ''}
+              onChange={e => updateLinhaMedicao(rowKey, idx, 'descricao', e.target.value)}
+              className={`${inputCls} text-left`}
+            />
+          )}
         </td>
         {renderDim('C')}
         {renderDim('L')}
@@ -635,12 +677,21 @@ export function OrcamentoMedicaoPainel({
       document.body
     );
 
+  /** Evita borda “dupla” grossa: o contêiner já tem borda; última linha/coluna não repetem border-b/border-r. */
+  const gradeTabelaMemorialBordaCls =
+    '[&_tbody_tr:last-child_td]:!border-b-0 [&_td:last-child]:!border-r-0 [&_thead_th:last-child]:!border-r-0';
+
   const tabelaEnvoltorio = (children: React.ReactNode) => (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
       <table
-        className={`w-full min-w-[56rem] table-fixed border-collapse text-sm ${gradeTableCls}`}
+        className={`w-full min-w-[56rem] table-fixed border-collapse text-sm ${gradeTableCls} ${gradeTabelaMemorialBordaCls}`}
       >
-        {colgroupMedicoes}
+        <colgroup>
+          <col style={{ width: `${COLS_MEDIC_PCT.desc}%` }} />
+          {Array.from({ length: 8 }, (_, i) => (
+            <col key={i} style={{ width: `${COLS_MEDIC_PCT.med}%` }} />
+          ))}
+        </colgroup>
         {children}
       </table>
     </div>

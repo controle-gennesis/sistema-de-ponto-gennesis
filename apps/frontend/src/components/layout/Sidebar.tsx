@@ -33,6 +33,7 @@ import {
   Sun,
   AlertCircle,
   MessageSquare,
+  FileCheck,
   DollarSign,
   Package,
   ShoppingCart,
@@ -40,7 +41,6 @@ import {
   Cake,
   Calculator,
   ClipboardList,
-  FileCheck,
   CreditCard
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -73,7 +73,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { permissions, isLoading, userPosition, user, isDepartmentPessoal, isDepartmentProjetos, userDepartment, can } = usePermissions();
+  const {
+    permissions,
+    isLoading,
+    userPosition,
+    user,
+    isDepartmentPessoal,
+    isDepartmentProjetos,
+    userDepartment,
+    can,
+    canAccessDpApproverPages,
+  } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +171,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: MessageSquare,
             description: 'Conversas do chatbot WhatsApp para o pessoal ver',
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp'))
+          },
+          {
+            name: 'Aprovações',
+            href: '/ponto/aprovacoes',
+            icon: FileCheck,
+            description: 'Caixa de entrada de aprovações',
+            permission: can(pk('/ponto/aprovacoes')) || canAccessDpApproverPages,
           }
         ]
       },
@@ -210,6 +227,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Aprovar solicitações de correção',
             permission: isAdministrator || can(pk('/ponto/gerenciar-solicitacoes'))
+          },
+          {
+            name: 'Solicitações Gerais',
+            href: '/ponto/solicitacoes-dp',
+            icon: MailPlus,
+            description: 'Minhas solicitações ao DP',
+            permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+          },
+          {
+            name: 'Gerenciar Solicitações Gerais',
+            href: '/ponto/gerenciar-solicitacoes-dp',
+            icon: FileText,
+            description: 'Aprovar solicitações do DP',
+            permission:
+              isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
           {
             name: 'Férias',
@@ -281,6 +313,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BarChart3,
             description: 'Importar e validar extratos bancários',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
+          },
+          {
+            name: 'Gestão de Solicitações',
+            href: '/ponto/financeiro/gestao-solicitacoes',
+            icon: BarChart3,
+            description: 'Acompanhar solicitações do Fluig na visão financeira',
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes'))
           }
         ]
       },
@@ -351,7 +390,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Listar e gerenciar ordens de compra',
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra'))
-          }
+          },
         ]
       },
       {
@@ -637,21 +676,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             // Sempre mostrar como grupo expansível (título + subitens), mesmo com 1 item visível —
             // evita que "Funcionários" apareça solto fora de "Departamento Pessoal".
             const forceAsGroup =
+              category.id === 'main' ||
               category.id === 'engenharia' ||
               category.id === 'departamento-pessoal';
             const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
-            // Verificar se é o primeiro grupo (categoria com mais de um item visível)
-            const previousCategories = menuItems.slice(0, index).filter(cat => {
-              const catVisibleItems = cat.items.filter(item => item.permission);
-              return catVisibleItems.length > 0;
-            });
-            const previousGroups = previousCategories.filter(cat => {
-              const catVisibleItems = cat.items.filter(item => item.permission);
-              return catVisibleItems.length > 1;
-            });
-            const isFirstGroup = previousGroups.length === 0 && visibleItems.length > 1;
+            // Mostrar o título "Menu" sempre no topo da navegação visível.
+            const shouldShowMenuTitle = index === 0 && !isCollapsed;
             
             // Se tiver apenas um item, renderizar como link direto
             if (isSingleItem && singleItem) {
@@ -661,6 +693,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               
               return (
                 <div key={category.id}>
+                  {shouldShowMenuTitle && (
+                    <div className="px-3 pt-2 pb-2">
+                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
+                    </div>
+                  )}
                   <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
                     {isCollapsed ? (
                       <div className="flex justify-center">
@@ -702,8 +739,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             
             return (
               <div key={category.id} className="overflow-hidden">
-                {/* Título "Menu" antes do primeiro grupo */}
-                {isFirstGroup && !isCollapsed && (
+                {/* Título "Menu" no topo da navegação */}
+                {shouldShowMenuTitle && (
                   <div className="px-3 pt-2 pb-2">
                     <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
                   </div>

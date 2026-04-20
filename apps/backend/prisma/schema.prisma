@@ -52,6 +52,8 @@ model User {
   updatedPermissions        UserPermission[]       @relation("UserPermissionUpdatedBy")
   userContractPermissions   UserContractPermission[] @relation("UserContractPermissionUser")
   updatedContractPermissions UserContractPermission[] @relation("UserContractPermissionUpdatedBy")
+  userDpApprovalContracts   UserDpApprovalContract[] @relation("UserDpApprovalContractUser")
+  updatedDpApprovalContracts UserDpApprovalContract[] @relation("UserDpApprovalContractUpdatedBy")
 
   @@map("users")
 }
@@ -114,6 +116,7 @@ model Employee {
   salaryAdjustments SalaryAdjustment[]
   salaryDiscounts   SalaryDiscount[]
   pointCorrectionRequests PointCorrectionRequest[]
+  dpRequests DpRequest[]
   manualInssValues   ManualInssValue[]
 
   @@map("employees")
@@ -554,6 +557,104 @@ enum RequestStatus {
   CANCELLED   // Cancelada
 }
 
+// Solicitações Departamento Pessoal (DP)
+enum DpRequestUrgency {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// Fluxo: gestor -> DP tramita entre etapas (financeiro, contabilidade, etc.) -> conclusão.
+enum DpRequestStatus {
+  WAITING_MANAGER    // Aguardando aprovação (antes do DP)
+  IN_REVIEW_DP       // Em análise
+  IN_FINANCEIRO      // Em análise / fila no Financeiro
+  WAITING_RETURN     // Pendência colaborador (UI solicitante: “Sua pendência”)
+  WAITING_RETURN_ACCOUNTING // Pendência contábil
+  WAITING_RETURN_ADM_TST    // Pendência ADM/TST
+  WAITING_RETURN_ENGINEERING // Pendência engenharia
+  CONCLUDED          // Concluída
+  CANCELLED          // Cancelada
+}
+
+enum DpRequestType {
+  ADMISSAO
+  ADVERTENCIA_SUSPENSAO
+  ALTERACAO_FUNCAO_SALARIO
+  ATESTADO_MEDICO
+  BENEFICIOS_VIAGEM
+  FERIAS
+  HORA_EXTRA
+  OUTRAS_SOLICITACOES
+  RESCISAO
+  RETIFICACAO_ALOCACAO
+}
+
+// Modelo de Solicitação DP (específico do AppSheet “Solicitações Departamento Pessoal”)
+model DpRequest {
+  id String @id @default(cuid())
+  /// Número legível sequencial (1, 2, 3…) para exibição e busca.
+  displayNumber Int @unique
+
+  // Solicitante
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // Dados do formulário
+  urgency        DpRequestUrgency @default(MEDIUM)
+  requestType    DpRequestType
+  title          String
+  sectorSolicitante String
+  solicitanteNome String
+  solicitanteEmail String
+
+  prazoInicio DateTime
+  prazoFim    DateTime
+
+  /// Campos específicos por tipo (JSON validado na API).
+  details Json?
+
+  // Dados vinculados ao contrato/centro de custo (pode ser persistido para histórico mesmo que contrato mude).
+  contractId String?
+  company    String?
+  polo       String?
+
+  // Workflow
+  status DpRequestStatus @default(WAITING_MANAGER)
+  /// Linha do tempo: [{ "at": ISO-8601, "status": "IN_FINANCEIRO" }, ...] — cada mudança de etapa.
+  statusHistory Json @default("[]")
+
+  // Aprovação do gestor
+  managerApprovedBy   String?
+  managerApprovedAt   DateTime?
+  managerApprovalComment String?
+  managerRejectionReason String?
+  managerRejectionComment String?
+  // (MVP) sem relação explícita com User: mantemos só o userId em managerApprovedBy.
+
+  // Feedback do DP
+  dpFeedback   String?
+  dpFeedbackAt DateTime?
+  /// Nome ou observação do responsável pela ação (registro no fluxo).
+  dpResponsibleNote String?
+  requesterReturnComment String?
+  requesterReturnedAt DateTime?
+  dpConclusionComment String?
+  dpConcludedAt DateTime?
+  dpHandledBy   String?
+  // (MVP) sem relação explícita com User: mantemos só o userId em dpHandledBy.
+
+  // Metadados
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([status])
+
+  @@map("dp_requests")
+}
+
 // Modelo de Feriados
 model Holiday {
   id          String      @id @default(cuid())
@@ -692,6 +793,11 @@ model CostCenter {
   state       String?  // Estado (DF, GO, etc.)
   polo        String?  // Polo (BRASÍLIA, GOIÁS, etc.)
   company     String?  // Empresa (ABRASIL, GÊNNESIS, MÉTRICA, etc.)
+  dataFim     DateTime?
+  dataInicio  DateTime?
+  orgao       String?
+  prazoMeses  Int?
+  valorTotal  Decimal? @db.Decimal(14, 2)
   isActive    Boolean  @default(true) // Se está ativo
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -701,6 +807,10 @@ model CostCenter {
   projects             Project[]
   materialRequests     MaterialRequest[]
   contracts            Contract[]
+  cacambas             cacambas[]
+  contract_additives   contract_additives[]
+  monthly_goals        monthly_goals[]
+  service_orders       service_orders[]
 
   @@index([code])
   @@index([isActive])
@@ -726,6 +836,7 @@ model Contract {
   pleitos      Pleito[]
   weeklyProductions ContractWeeklyProduction[]
   userPermissions   UserContractPermission[]
+  dpApprovalUsers   UserDpApprovalContract[]
 
   @@index([costCenterId])
   @@index([number])
@@ -789,6 +900,13 @@ model ContractWeeklyProduction {
 // Andamento da OS — acompanhamento de ordens de serviço (Engenharia); tabela API: pleitos
 model Pleito {
   id                   String    @id @default(cuid())
+  serviceOrderId       String
+  mes                  Int
+  ano                  Int
+  valorPrevisto        Decimal   @db.Decimal(14, 2)
+  valorExecutado       Decimal   @default(0) @db.Decimal(14, 2)
+  dataMedicao          DateTime?
+  observacao           String?
   creationMonth        String?   // Mês de criação (01-12)
   creationYear         Int?      // Ano de criação
   startDate            DateTime? // Data início
@@ -820,9 +938,13 @@ model Pleito {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
+  service_orders  service_orders @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
   updatedContract Contract? @relation(fields: [updatedContractId], references: [id], onDelete: SetNull)
 
+  @@unique([serviceOrderId, mes, ano])
+  @@index([ano, mes])
   @@index([folderNumber])
+  @@index([serviceOrderId])
   @@index([updatedContractId])
   @@map("pleitos")
 }
@@ -867,6 +989,7 @@ model MaterialRequest {
   requestedBy  String  // ID do usuário que solicitou
   costCenterId String  // Centro de custo
   projectId    String? // Obra/Projeto (opcional)
+  serviceOrderId String?
   serviceOrder String? // Ordem de serviço (texto livre)
   obra         String? // Obra (texto livre)
   description  String? // Descrição/observações da requisição
@@ -888,6 +1011,7 @@ model MaterialRequest {
   rejecter     User? @relation("MaterialRequestRejecter", fields: [rejectedBy], references: [id], onDelete: SetNull)
   costCenter   CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  service_orders service_orders? @relation(fields: [serviceOrderId], references: [id])
   items        MaterialRequestItem[]
   purchaseOrders PurchaseOrder[]
   quoteMaps    QuoteMap[] @relation("QuoteMapMaterialRequest")
@@ -896,9 +1020,84 @@ model MaterialRequest {
   @@index([requestedBy])
   @@index([costCenterId])
   @@index([projectId])
+  @@index([serviceOrderId])
+  @@index([serviceOrder])
   @@index([status])
   @@index([requestedAt])
   @@map("material_requests")
+}
+
+model cacambas {
+  id             String          @id
+  costCenterId   String
+  serviceOrderId String?
+  numero         String?
+  dataLocacao    DateTime?
+  dataDevolucao  DateTime?
+  valor          Decimal?        @db.Decimal(12, 2)
+  observacao     String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime
+
+  cost_centers   CostCenter      @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
+  service_orders service_orders? @relation(fields: [serviceOrderId], references: [id])
+
+  @@index([costCenterId])
+  @@index([serviceOrderId])
+}
+
+model contract_additives {
+  id           String     @id
+  costCenterId String
+  valor        Decimal    @db.Decimal(14, 2)
+  descricao    String?
+  dataAditivo  DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+
+  cost_centers CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
+
+  @@index([costCenterId])
+}
+
+model monthly_goals {
+  id           String     @id
+  costCenterId String
+  mes          Int
+  ano          Int
+  meta         Decimal    @db.Decimal(14, 2)
+  executado    Decimal    @default(0) @db.Decimal(14, 2)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime
+
+  cost_centers CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
+
+  @@unique([costCenterId, mes, ano])
+  @@index([ano, mes])
+  @@index([costCenterId])
+}
+
+model service_orders {
+  id                String             @id
+  costCenterId      String
+  numero            Int
+  ano               Int
+  dataInicio        DateTime
+  previsaoFim       DateTime
+  valor             Decimal            @db.Decimal(14, 2)
+  status            ServiceOrderStatus @default(NAO_INICIADO)
+  justificativa     String?
+  descricao         String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime
+
+  cacambas          cacambas[]
+  material_requests MaterialRequest[]
+  pleitos           Pleito[]
+  cost_centers      CostCenter         @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
+
+  @@unique([costCenterId, numero, ano])
+  @@index([costCenterId])
+  @@index([status])
 }
 
 enum MaterialRequestStatus {
@@ -1417,13 +1616,33 @@ model UserContractPermission {
   @@map("user_contract_permissions")
 }
 
+/// Contratos em que o usuário pode aprovar solicitações ao DP (ação Controle «Aprovar solicitações…»).
+model UserDpApprovalContract {
+  id         String   @id @default(cuid())
+  userId     String
+  contractId String
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation("UserDpApprovalContractUser", fields: [userId], references: [id], onDelete: Cascade)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  updater  User?    @relation("UserDpApprovalContractUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, contractId])
+  @@index([userId])
+  @@index([contractId])
+  @@map("user_dp_approval_contracts")
+}
+
 /// Template de permissões por cargo (nome do campo `Employee.position`). Usado como padrão na tela Permissões.
 model PositionPermissionTemplate {
-  id                   String   @id @default(cuid())
-  position             String   @unique
-  permissions          Json
-  allowedContractIds   Json     @default("[]")
-  updatedAt            DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  position               String   @unique
+  permissions            Json
+  allowedContractIds     Json     @default("[]")
+  dpApprovalContractIds  Json     @default("[]")
+  updatedAt              DateTime @updatedAt
 
   @@map("position_permission_templates")
 }
@@ -1451,6 +1670,13 @@ enum WhatsAppConversationStatus {
   PENDING
   COMPLETED
   CANCELLED
+}
+
+enum ServiceOrderStatus {
+  NAO_INICIADO
+  EM_EXECUCAO
+  EM_ANDAMENTO
+  FINALIZADO
 }
 
 model WhatsAppMessage {

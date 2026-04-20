@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Filter, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
@@ -1204,10 +1204,7 @@ export function EmployeeList({
       <Card className="mb-6 hidden">
         <CardHeader className="border-b-0 pb-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
-            </div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
             <div className="flex items-center space-x-4">
               {!isFiltersMinimized && (
                 <>
@@ -1467,11 +1464,11 @@ export function EmployeeList({
               <button
                 type="button"
                 onClick={() => setIsFiltersModalOpen(true)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                aria-label="Abrir filtros"
-                title="Filtros"
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                aria-label="Abrir filtro"
+                title="Filtro"
               >
-                <Filter className="h-4 w-4" />
+                Filtro
               </button>
               {onImportEmployees && (
                 <button
@@ -1503,10 +1500,7 @@ export function EmployeeList({
           {/* Cabeçalho dos Filtros */}
           <div className="px-4 py-3 border-b border-gray-200">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-              <Filter className="w-5 h-5 text-gray-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
-              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Filtro</h3>
               <button
                 onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
                 className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -1853,10 +1847,7 @@ export function EmployeeList({
             <div className="absolute inset-0 bg-black/40" onClick={() => setIsFiltersModalOpen(false)} />
             <div className="relative mx-4 w-full max-w-3xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
               <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
-                </div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
                 <button
                   type="button"
                   onClick={() => setIsFiltersModalOpen(false)}

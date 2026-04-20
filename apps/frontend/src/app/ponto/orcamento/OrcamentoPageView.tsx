@@ -1654,10 +1654,11 @@ function chavesParaBusca(codigo: string, banco: string, chave: string): string[]
   return Array.from(uniq);
 }
 
-/** Converte UND da planilha (M, M², M2, M³, M3, UN) para TipoUnidadeFormula */
+/** Converte UND da planilha (M, M², M2, M³, M3, M^3, M**3, UN, …) para TipoUnidadeFormula */
 function parseUnidadeComposicao(und: string | undefined): TipoUnidadeFormula | null {
   if (!und || !String(und).trim()) return null;
-  const u = String(und).toUpperCase().replace(/\s/g, '').replace(/²/g, '2').replace(/³/g, '3');
+  let u = String(und).toUpperCase().replace(/\s/g, '').replace(/²/g, '2').replace(/³/g, '3');
+  u = u.replace(/\^/g, '').replace(/\*+/g, '');
   if (u === 'M3' || u.includes('CUBIC')) return 'm3';
   if (u === 'M2' || u.includes('QUADRAD')) return 'm2';
   if (u === 'M' || u === 'MT' || u === 'METRO' || u === 'METROS') return 'm';
@@ -1665,14 +1666,28 @@ function parseUnidadeComposicao(und: string | undefined): TipoUnidadeFormula | n
   return null;
 }
 
-/** Verifica se a descrição indica item de demolição, remoção ou retirada */
+/** Exibe unidade como m³ / m² / m / UN (igual à memória e à carga; M^3 do cadastro vira m³). */
+function unidadeComposicaoParaExibicao(und: string | undefined, tipoFallback: TipoUnidadeFormula): string {
+  const parsed = parseUnidadeComposicao(und);
+  const t = parsed ?? (tipoFallback !== 'un' ? tipoFallback : null);
+  if (t === 'm3') return 'm³';
+  if (t === 'm2') return 'm²';
+  if (t === 'm') return 'm';
+  if (t === 'un') return 'UN';
+  const raw = und?.trim();
+  if (raw) return raw;
+  return tipoFallback === 'm3' ? 'm³' : tipoFallback === 'm2' ? 'm²' : tipoFallback === 'm' ? 'm' : 'UN';
+}
+
+/** Verifica se a descrição indica item de demolição, remoção, retirada ou escavação (vai para carga manual de entulho). */
 function ehItemDemolicaoOuRemocao(descricao: string | undefined): boolean {
   if (!descricao) return false;
   const d = normalizarTextoBusca(descricao);
   return (
     d.includes('demolicao') || d.includes('demolicoes') ||
     d.includes('remocao') || d.includes('remocoes') ||
-    d.includes('retirada') || d.includes('retiradas')
+    d.includes('retirada') || d.includes('retiradas') ||
+    d.includes('escavacao') || d.includes('escavacoes')
   );
 }
 
@@ -4816,15 +4831,33 @@ export function OrcamentoPageView({
           row.tipoUnidade ?? inferirTipoUnidadePorDimensao(dim.linhas);
         let somaSubtotal = 0;
         let somaVolumeBruto = 0;
+        let somaCComposicao = 0;
+        let somaLComposicao = 0;
+        let somaCM3 = 0;
+        let somaLM3 = 0;
+        let somaHM3 = 0;
         for (const ln of detalhes) {
           somaSubtotal += calcularQuantidadeLinha(ln, tipoOrigem);
           somaVolumeBruto += calcV(ln, tipoOrigem);
+          if (tipoOrigem === 'm2') {
+            const n = ln.N && ln.N > 0 ? ln.N : 1;
+            somaCComposicao += (ln.C || 0) * n;
+            somaLComposicao += (ln.L || 0) * n;
+          }
+          if (tipoOrigem === 'm3') {
+            const n = ln.N && ln.N > 0 ? ln.N : 1;
+            somaCM3 += (ln.C || 0) * n;
+            somaLM3 += (ln.L || 0) * n;
+            somaHM3 += (ln.H || 0) * n;
+          }
         }
         const origemLinhaId = `${row.key}|agg`;
         const nomeComp = `${row.item.descricao || ''}`.trim().slice(0, 120);
         const rotuloOrigem = rotuloItemComposicaoPorKey.get(row.key)?.trim() ?? '';
         const existenteAgg = linhasCargaAtuais.find(x => x.origemLinhaId === origemLinhaId);
         const origemM2 = tipoOrigem === 'm2';
+        const origemM = tipoOrigem === 'm';
+        const origemM3 = tipoOrigem === 'm3';
         linhasAgregadas.push({
           linhaAgregadaCarga: true,
           tipoOrigemMedicao: tipoOrigem,
@@ -4832,16 +4865,17 @@ export function OrcamentoPageView({
           origemComposicaoRotulo: rotuloOrigem,
           origemComposicaoDescricao: row.item.descricao || '',
           descricao: nomeComp || 'Composição',
-          C: 0,
-          L: 0,
-          H: origemM2 ? (existenteAgg?.H ?? 0) : 0,
+          // M²: C/L = Σ(C×N), Σ(L×N). M: C = subtotal agregado. M³: C/L/H = Σ(C×N), Σ(L×N), Σ(H×N) (leitura na carga; V e subtotal vêm de volumeM3BrutoSomado / valorManual).
+          C: origemM2 ? somaCComposicao : (origemM ? somaSubtotal : origemM3 ? somaCM3 : 0),
+          L: origemM2 ? somaLComposicao : (origemM ? (existenteAgg?.L ?? 0) : origemM3 ? somaLM3 : 0),
+          H: origemM2 || origemM ? (existenteAgg?.H ?? 0) : origemM3 ? somaHM3 : 0,
           N: 1,
           empolamento: existenteAgg?.empolamento ?? 1,
-          ...(origemM2 ? {} : { valorManual: somaSubtotal }),
+          ...(origemM2 || origemM ? {} : { valorManual: somaSubtotal }),
           volumeM3BrutoSomado: somaVolumeBruto,
           editavelC: false,
-          editavelL: false,
-          editavelH: origemM2
+          editavelL: origemM,
+          editavelH: origemM2 || origemM
         });
       }
     }
@@ -5180,8 +5214,12 @@ export function OrcamentoPageView({
           const descLinha = ln.origemComposicaoRotulo?.trim()
             ? `${ln.origemComposicaoRotulo.trim()} ${descBase}`.trim()
             : descBase;
+          const unLinha =
+            ln.linhaAgregadaCarga && ln.tipoOrigemMedicao
+              ? unidadeLabel(ln.tipoOrigemMedicao)
+              : un;
           if (ln.cabecalhoSecao) {
-            rows.push(['', descLinha, un, '', '', '', '', '', '', '', '']);
+            rows.push(['', descLinha, unLinha, '', '', '', '', '', '', '', '']);
             continue;
           }
           const empolRaw = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 0);
@@ -5189,7 +5227,7 @@ export function OrcamentoPageView({
           rows.push([
             '',
             descLinha,
-            un,
+            unLinha,
             ln.C ?? '',
             ln.L ?? '',
             ln.H ?? '',
@@ -7910,16 +7948,7 @@ export function OrcamentoPageView({
                                 rotuloItemComposicaoPorKey.get(row.key) ?? String(rowIdx + 1)
                               }
                               itemDescricao={row.item.descricao || ''}
-                              unidadeMedida={
-                                (row.unidadeComposicao && row.unidadeComposicao.trim()) ||
-                                (row.tipoUnidade === 'm3'
-                                  ? 'm³'
-                                  : row.tipoUnidade === 'm2'
-                                    ? 'm²'
-                                    : row.tipoUnidade === 'm'
-                                      ? 'm'
-                                      : 'UN')
-                              }
+                              unidadeMedida={unidadeComposicaoParaExibicao(row.unidadeComposicao, row.tipoUnidade)}
                               quantidadeUn={row.quantidade}
                               quantidadeUnReadOnly={ehComposicaoCacamba4m3(row.item.descricao)}
                               onQuantidadeUnChange={n => setQuantidadeItem(row.key, n)}
@@ -8289,9 +8318,10 @@ export function OrcamentoPageView({
                                       <td className="min-w-[260px] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle max-w-md border-l border-gray-200 dark:border-gray-700"><div className="truncate" title={row.item.descricao}>{row.item.descricao}</div></td>
                                       <td className="px-2 py-2.5 text-center align-middle border-l border-gray-200 dark:border-gray-700">
                                         <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                                          {row.unidadeComposicao?.trim()
-                                            ? row.unidadeComposicao.trim()
-                                            : (usaDimensoes ? (tipoAuto === 'm3' ? 'm³' : tipoAuto === 'm2' ? 'm²' : tipoAuto === 'm' ? 'm' : 'UN') : 'UN')}
+                                          {unidadeComposicaoParaExibicao(
+                                            row.unidadeComposicao,
+                                            usaDimensoes ? tipoAuto : 'un'
+                                          )}
                                         </span>
                                       </td>
                                       <td className={`text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700 ${row.tipoUnidade !== 'un' || ehCacamba4m3 ? 'px-2 py-2.5' : 'p-0'}`}>
