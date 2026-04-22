@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ContractController } from '../controllers/ContractController';
 import { ContractBillingController } from '../controllers/ContractBillingController';
 import { ContractAnnualValueController } from '../controllers/ContractAnnualValueController';
+import { ContractAddendumController } from '../controllers/ContractAddendumController';
 import { ContractPleitoController } from '../controllers/ContractPleitoController';
 import { ContractWeeklyProductionController } from '../controllers/ContractWeeklyProductionController';
 import { authenticate } from '../middleware/auth';
@@ -11,6 +12,7 @@ const contractController = new ContractController();
 const billingController = new ContractBillingController();
 const weeklyProductionController = new ContractWeeklyProductionController();
 const annualValueController = new ContractAnnualValueController();
+const addendumController = new ContractAddendumController();
 const pleitoController = new ContractPleitoController();
 
 router.use(authenticate);
@@ -66,6 +68,15 @@ router.get('/:contractId/annual-values', (req, res, next) =>
 );
 router.put('/:contractId/annual-values/:year', (req, res, next) =>
   annualValueController.setAnnualValue(req, res, next)
+);
+router.get('/:contractId/addenda', (req, res, next) =>
+  addendumController.listByContract(req, res, next)
+);
+router.post('/:contractId/addenda', (req, res, next) =>
+  addendumController.create(req, res, next)
+);
+router.delete('/:contractId/addenda/:id', (req, res, next) =>
+  addendumController.delete(req, res, next)
 );
 
 router.get('/:id', (req, res, next) =>

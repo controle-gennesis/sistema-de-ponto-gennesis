@@ -5,7 +5,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
-import { ArrowLeft, ClipboardList, Edit2, FileDown, Plus, X } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Edit2, FileDown, Percent, Plus, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -78,12 +78,26 @@ const MESES_FILTRO = [
 ];
 
 const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
+const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
+const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
 
 function displayReportsBilling(value: string | null | undefined): string {
   const t = (value || '').trim();
   if (!t) return '-';
   if (t === PLEITO_HISTORY_MARKER) return '—';
+  if (t === PLEITO_HISTORY_MARKER_GERADO_100) return HISTORICO_ETIQUETA_GERADO_100;
   return value || '-';
+}
+
+function isPleitoHistorico(p: ContractPleito): boolean {
+  const marker = (p.reportsBilling || '').trim();
+  return marker === PLEITO_HISTORY_MARKER || marker === PLEITO_HISTORY_MARKER_GERADO_100;
+}
+
+function getHistoricoEtiqueta(p: ContractPleito): string | null {
+  const marker = (p.reportsBilling || '').trim();
+  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return HISTORICO_ETIQUETA_GERADO_100;
+  return null;
 }
 
 type FaturamentoCategoria = 'sem-orcamento' | '0' | '1-25' | '26-50' | '51-75' | '76-99' | '100';
@@ -216,7 +230,11 @@ export default function AndamentoListPage() {
   const [histOsFilter, setHistOsFilter] = useState('');
   const [histPastaFilter, setHistPastaFilter] = useState('');
   const [histDescricaoFilter, setHistDescricaoFilter] = useState('');
+  const [histEtiquetaFilter, setHistEtiquetaFilter] = useState('all');
   const [historicoDrafts, setHistoricoDrafts] = useState<Record<string, { billingStatus: 'pago' | 'nao-pago'; invoiceNumber: string }>>({});
+  const [selectedHistoricoPleitos, setSelectedHistoricoPleitos] = useState<Set<string>>(new Set());
+  const [showHistoricoBatchNfModal, setShowHistoricoBatchNfModal] = useState(false);
+  const [historicoBatchInvoiceModalValue, setHistoricoBatchInvoiceModalValue] = useState('');
   const [isSavingHistoricoPleitos, setIsSavingHistoricoPleitos] = useState(false);
   const [pleitoGeradoData, setPleitoGeradoData] = useState<Array<{ pleito: ContractPleito; valorPleiteado: number; pctOrcamento: number }>>([]);
   const [showPleitoResumoModal, setShowPleitoResumoModal] = useState(false);
@@ -262,7 +280,7 @@ export default function AndamentoListPage() {
   });
 
   const allPleitos = (Array.isArray(pleitosData) ? pleitosData : (pleitosData as { data?: ContractPleito[] })?.data) || [];
-  const pleitos = allPleitos.filter((p) => (p.reportsBilling || '').trim() !== PLEITO_HISTORY_MARKER);
+  const pleitos = allPleitos.filter((p) => !isPleitoHistorico(p));
   const billings = (Array.isArray(billingsData) ? billingsData : (billingsData as { data?: ContractBilling[] })?.data) || [];
   const selectedIdsFilter = useMemo(() => {
     if (!selectedIdsParam) return new Set<string>();
@@ -384,12 +402,12 @@ export default function AndamentoListPage() {
   };
 
   const gerarPleitoMutation = useMutation({
-    mutationFn: async (items: { id: string; billingRequest: number }[]) => {
+    mutationFn: async (items: { id: string; billingRequest: number; generatedByPleitear100?: boolean }[]) => {
       const now = new Date();
       const creationMonth = String(now.getMonth() + 1).padStart(2, '0');
       const creationYear = now.getFullYear();
       await Promise.all(
-        items.map(async ({ id, billingRequest }) => {
+        items.map(async ({ id, billingRequest, generatedByPleitear100 }) => {
           const source = pleitos.find((p) => p.id === id);
           if (!source) return;
           await api.post(`/contracts/${contractId}/pleitos`, {
@@ -415,7 +433,7 @@ export default function AndamentoListPage() {
             budgetAmount4: source.budgetAmount4,
             pv: source.pv,
             ipi: source.ipi,
-            reportsBilling: PLEITO_HISTORY_MARKER,
+            reportsBilling: generatedByPleitear100 ? PLEITO_HISTORY_MARKER_GERADO_100 : PLEITO_HISTORY_MARKER,
             engineer: source.engineer,
             supervisor: source.supervisor
           });
@@ -512,7 +530,39 @@ export default function AndamentoListPage() {
       pendingByOs.set(osKey, batchPending + valorCalculado);
       items.push({ id, billingRequest: valorCalculado });
     }
-    gerarPleitoMutation.mutate(items);
+    gerarPleitoMutation.mutate(items.map((item) => ({ ...item, generatedByPleitear100: false })));
+  };
+
+  const handlePleitar100PorcentoSelecionadas = () => {
+    const ids = Array.from(selectedForPleito);
+    if (ids.length === 0) {
+      toast.error('Selecione ao menos uma ordem de serviço.');
+      return;
+    }
+    if (!window.confirm(`Gerar pleito a 100% do orçamento para ${ids.length} OS(s) selecionada(s)?`)) {
+      return;
+    }
+    const pendingByOs = new Map<string, number>();
+    const items: { id: string; billingRequest: number }[] = [];
+    for (const id of ids) {
+      const p = pleitos.find((x) => x.id === id);
+      const orcamento = p?.budget ? Number(p.budget) : 0;
+      if (orcamento <= 0) {
+        toast.error(`A OS ${p?.divSe || id} está sem orçamento para cálculo do pleito.`);
+        return;
+      }
+      const valorCalculado = orcamento;
+      const osKey = (p?.divSe || '').trim().toLowerCase();
+      const alreadyPleiteado = sumBillingRequestSameOs(allPleitos, p?.divSe);
+      const batchPending = pendingByOs.get(osKey) || 0;
+      if (alreadyPleiteado + batchPending + valorCalculado > orcamento + 0.01) {
+        toast.error('valor faturado acima do permitido');
+        return;
+      }
+      pendingByOs.set(osKey, batchPending + valorCalculado);
+      items.push({ id, billingRequest: valorCalculado });
+    }
+    gerarPleitoMutation.mutate(items.map((item) => ({ ...item, generatedByPleitear100: true })));
   };
 
   const pleitoModalExcedeState = useMemo(() => {
@@ -545,7 +595,7 @@ export default function AndamentoListPage() {
   const generatedPleitos = useMemo(
     () =>
       allPleitos.filter((p) =>
-        (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER ||
+        isPleitoHistorico(p) ||
         ((p.billingRequest != null ? Number(p.billingRequest) : 0) > 0)
       ),
     [allPleitos]
@@ -572,9 +622,10 @@ export default function AndamentoListPage() {
       if (osQuery && !(p.divSe || '').toLowerCase().includes(osQuery)) return false;
       if (pastaQuery && !(p.folderNumber || '').toLowerCase().includes(pastaQuery)) return false;
       if (descricaoQuery && !(p.serviceDescription || '').toLowerCase().includes(descricaoQuery)) return false;
+      if (histEtiquetaFilter === 'gerado-100' && getHistoricoEtiqueta(p) !== HISTORICO_ETIQUETA_GERADO_100) return false;
       return true;
     });
-  }, [generatedPleitos, histYearFilter, histMonthFilter, histOsFilter, histPastaFilter, histDescricaoFilter]);
+  }, [generatedPleitos, histYearFilter, histMonthFilter, histOsFilter, histPastaFilter, histDescricaoFilter, histEtiquetaFilter]);
 
   useEffect(() => {
     if (!showHistoricoPleitosModal) return;
@@ -586,6 +637,9 @@ export default function AndamentoListPage() {
       };
     });
     setHistoricoDrafts(nextDrafts);
+    setSelectedHistoricoPleitos(new Set());
+    setShowHistoricoBatchNfModal(false);
+    setHistoricoBatchInvoiceModalValue('');
   }, [showHistoricoPleitosModal, generatedPleitos]);
 
   const changedHistoricoPleitoIds = useMemo(() => {
@@ -621,6 +675,64 @@ export default function AndamentoListPage() {
     } finally {
       setIsSavingHistoricoPleitos(false);
     }
+  };
+
+  const filteredHistoricoPleitoIds = useMemo(
+    () => filteredHistoricoPleitos.map((p) => p.id),
+    [filteredHistoricoPleitos]
+  );
+  const allFilteredHistoricoSelected = filteredHistoricoPleitoIds.length > 0 &&
+    filteredHistoricoPleitoIds.every((id) => selectedHistoricoPleitos.has(id));
+  const someFilteredHistoricoSelected = filteredHistoricoPleitoIds.some((id) => selectedHistoricoPleitos.has(id));
+
+  const toggleSelectAllFilteredHistoricoPleitos = (checked: boolean) => {
+    setSelectedHistoricoPleitos((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        filteredHistoricoPleitoIds.forEach((id) => next.add(id));
+      } else {
+        filteredHistoricoPleitoIds.forEach((id) => next.delete(id));
+      }
+      return next;
+    });
+  };
+
+  const handleOpenHistoricoFaturar100Modal = () => {
+    const idsSelecionados = Array.from(selectedHistoricoPleitos).filter((id) =>
+      filteredHistoricoPleitoIds.includes(id)
+    );
+    if (idsSelecionados.length === 0) {
+      toast.error('Selecione ao menos uma OS no histórico de pleitos.');
+      return;
+    }
+    setHistoricoBatchInvoiceModalValue('');
+    setShowHistoricoBatchNfModal(true);
+  };
+
+  const handleConfirmHistoricoFaturar100Selecionadas = () => {
+    const idsSelecionados = Array.from(selectedHistoricoPleitos).filter((id) =>
+      filteredHistoricoPleitoIds.includes(id)
+    );
+    if (idsSelecionados.length === 0) {
+      toast.error('Selecione ao menos uma OS no histórico de pleitos.');
+      return;
+    }
+    const invoice = historicoBatchInvoiceModalValue.trim();
+    if (!invoice) {
+      toast.error('Informe o número da nota fiscal para faturar as OSs selecionadas.');
+      return;
+    }
+    setHistoricoDrafts((prev) => {
+      const next = { ...prev };
+      idsSelecionados.forEach((id) => {
+        const current = next[id] || { billingStatus: 'nao-pago' as const, invoiceNumber: '' };
+        next[id] = { ...current, billingStatus: 'pago', invoiceNumber: invoice };
+      });
+      return next;
+    });
+    setShowHistoricoBatchNfModal(false);
+    setHistoricoBatchInvoiceModalValue('');
+    toast.success(`${idsSelecionados.length} OS(s) marcada(s) como faturada(s) com a NF ${invoice}.`);
   };
 
   const loadLogoBase64 = (): Promise<string | null> => {
@@ -801,7 +913,7 @@ export default function AndamentoListPage() {
   return (
     <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div ref={containerRef} className="w-full max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Link
             href={`/ponto/contratos/${contractId}`}
             className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-6 text-sm font-medium"
@@ -853,6 +965,16 @@ export default function AndamentoListPage() {
                           className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                         >
                           {gerarPleitoMutation.isPending ? 'Gerando...' : 'Gerar Pleito'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePleitar100PorcentoSelecionadas}
+                          disabled={gerarPleitoMutation.isPending || selectedForPleito.size === 0}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+                          title="Gera pleito com 100% do orçamento em cada OS marcada"
+                        >
+                          <Percent className="w-4 h-4 shrink-0" />
+                          {gerarPleitoMutation.isPending ? 'Gerando...' : 'Pleitear 100%'}
                         </button>
                         <button
                           type="button"
@@ -1362,7 +1484,7 @@ export default function AndamentoListPage() {
                     <div className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhum pleito gerado até o momento.</div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                         <select
                           value={histMonthFilter}
                           onChange={(e) => setHistMonthFilter(e.target.value)}
@@ -1404,8 +1526,26 @@ export default function AndamentoListPage() {
                           placeholder="Descrição"
                           className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                         />
+                        <select
+                          value={histEtiquetaFilter}
+                          onChange={(e) => setHistEtiquetaFilter(e.target.value)}
+                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        >
+                          <option value="all">Etiqueta: Todas</option>
+                          <option value="gerado-100">{HISTORICO_ETIQUETA_GERADO_100}</option>
+                        </select>
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleOpenHistoricoFaturar100Modal}
+                            disabled={isSavingHistoricoPleitos || selectedHistoricoPleitos.size === 0}
+                            className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            Faturar 100% selecionadas
+                          </button>
+                        </div>
                         <button
                           type="button"
                           onClick={handleSaveAllHistoricoPleitos}
@@ -1421,8 +1561,22 @@ export default function AndamentoListPage() {
                       <table className="w-full min-w-[1500px]">
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
+                            <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
+                              <input
+                                type="checkbox"
+                                checked={allFilteredHistoricoSelected}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = someFilteredHistoricoSelected && !allFilteredHistoricoSelected;
+                                }}
+                                onChange={(e) => toggleSelectAllFilteredHistoricoPleitos(e.target.checked)}
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label="Selecionar OSs filtradas no histórico de pleitos"
+                                className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+                              />
+                            </th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Pago pelo cliente</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Nº NF</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Etiqueta</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Orçamento</th>
@@ -1440,12 +1594,29 @@ export default function AndamentoListPage() {
                               billingStatus: ((p.billingStatus || '').toLowerCase() === 'pago' ? 'pago' : 'nao-pago') as 'pago' | 'nao-pago',
                               invoiceNumber: p.invoiceNumber || ''
                             };
+                            const etiqueta = getHistoricoEtiqueta(p);
+                            const isSelectedHistorico = selectedHistoricoPleitos.has(p.id);
                             return (
                               <tr
                                 key={p.id}
                                 onClick={() => setSelectedPleitoId(p.id)}
-                                className="hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                                className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer ${isSelectedHistorico ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
                               >
+                                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelectedHistorico}
+                                    onChange={(e) =>
+                                      setSelectedHistoricoPleitos((prev) => {
+                                        const next = new Set(prev);
+                                        if (e.target.checked) next.add(p.id);
+                                        else next.delete(p.id);
+                                        return next;
+                                      })
+                                    }
+                                    className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+                                  />
+                                </td>
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
                                   <select
                                     value={rowDraft.billingStatus}
@@ -1482,6 +1653,13 @@ export default function AndamentoListPage() {
                                     }
                                     className="w-full min-w-[140px] bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm font-mono text-gray-900 dark:text-gray-100 placeholder:text-gray-400 disabled:opacity-60"
                                   />
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                  {etiqueta ? (
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5 text-xs font-medium">
+                                      {etiqueta}
+                                    </span>
+                                  ) : '-'}
                                 </td>
                                 <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{p.divSe || '-'}</td>
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{p.folderNumber || '-'}</td>
@@ -1560,6 +1738,52 @@ export default function AndamentoListPage() {
                       </tfoot>
                     </table>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showHistoricoBatchNfModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2">
+              <div className="absolute inset-0" onClick={() => setShowHistoricoBatchNfModal(false)} />
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Faturar 100% das OSs selecionadas</h3>
+                  <button
+                    onClick={() => setShowHistoricoBatchNfModal(false)}
+                    className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="px-5 py-4 space-y-3">
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    Informe o número da nota fiscal uma única vez para aplicar em todas as OSs selecionadas.
+                  </p>
+                  <input
+                    type="text"
+                    value={historicoBatchInvoiceModalValue}
+                    onChange={(e) => setHistoricoBatchInvoiceModalValue(e.target.value)}
+                    placeholder="Número da Nota Fiscal"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    autoFocus
+                  />
+                </div>
+                <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowHistoricoBatchNfModal(false)}
+                    className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmHistoricoFaturar100Selecionadas}
+                    className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800"
+                  >
+                    Aplicar nas selecionadas
+                  </button>
                 </div>
               </div>
             </div>

@@ -833,6 +833,7 @@ model Contract {
   costCenter CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   billings     ContractBilling[]
   annualValues ContractAnnualValue[]
+  addenda      ContractAddendum[]
   pleitos      Pleito[]
   weeklyProductions ContractWeeklyProduction[]
   userPermissions   UserContractPermission[]
@@ -843,12 +844,33 @@ model Contract {
   @@map("contracts")
 }
 
+// Aditivos do contrato (permite múltiplos lançamentos com data de efeito)
+model ContractAddendum {
+  id            String   @id @default(cuid())
+  contractId    String
+  effectiveDate DateTime
+  amount        Decimal  @db.Decimal(15, 2) // pode ser positivo ou negativo
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@index([contractId, effectiveDate])
+  @@map("contract_addenda")
+}
+
 // Valor anual customizado por ano (permite valor diferente a cada ano)
 model ContractAnnualValue {
   id         String   @id @default(cuid())
   contractId String
   year       Int      // Ano (ex: 2025)
-  value      Decimal  @db.Decimal(15, 2) // Valor anual para este ano
+  value      Decimal  @db.Decimal(15, 2) // Valor anual final (base + ajuste), espelho para relatórios
+  /// Soma algebrica ao valor anual calculado pelo contrato (orçamento do órgão naquele ano)
+  budgetAdjustmentDelta     Decimal?  @db.Decimal(15, 2)
+  /// Data do aditivo/orçamento: a partir deste mês civil a meta mensal usa (base + delta) ÷ 12
+  budgetAdjustmentEffectiveDate DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

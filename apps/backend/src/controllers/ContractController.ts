@@ -8,6 +8,12 @@ import { assertContractAccess, getContractAccessForUser } from '../lib/contractA
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
 
+/** Igual ao frontend: só pleitos com status de orçamento Aprovado ou Faturado entram em "Valor orçado". */
+function isBudgetStatusInValorOrcadoSum(budgetStatus: string | null | undefined): boolean {
+  const s = (budgetStatus || '').trim();
+  return s === 'Aprovado' || s === 'Faturado';
+}
+
 /** Valor orçado da OS: último R04…R01 preenchido; senão campo budget (texto). */
 function valorOrcadoFromPleito(p: {
   budget: string | null;
@@ -308,6 +314,7 @@ export class ContractController {
           pleitos: {
             select: {
               creationYear: true,
+              budgetStatus: true,
               budget: true,
               budgetAmount1: true,
               budgetAmount2: true,
@@ -361,7 +368,9 @@ export class ContractController {
         const pleitosNoAno = yearValid
           ? pleitosAll.filter((p) => p.creationYear === yearParam)
           : pleitosAll;
-        const valorOrcado = pleitosNoAno.reduce((s, p) => s + valorOrcadoFromPleito(p), 0);
+        const valorOrcado = pleitosNoAno
+          .filter((p) => isBudgetStatusInValorOrcadoSum(p.budgetStatus))
+          .reduce((s, p) => s + valorOrcadoFromPleito(p), 0);
         /** Pendente acompanha o mesmo escopo temporal do filtro de ano. */
         const baseFaturamento = yearValid ? faturamentoAnual : faturamentoAcumulado;
         const pendenteFaturamento = valorOrcado - baseFaturamento;

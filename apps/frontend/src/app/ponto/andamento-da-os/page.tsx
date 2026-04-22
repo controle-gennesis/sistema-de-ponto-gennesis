@@ -34,6 +34,7 @@ const STATUS_ORCAMENTO_OPCOES = [
   'Analise Fiscal',
   'Engenharia',
   'Equipe de Orçamento',
+  'Aprovado',
   'Faturado',
   'Stand By'
 ];
@@ -376,7 +377,8 @@ export default function AndamentoDaOsPage() {
   });
 
   const deleteMut = useMutation({
-    mutationFn: (id: string) => api.delete(`/pleitos/${id}`),
+    mutationFn: (id: string) =>
+      api.delete(`/pleitos/${id}`, { params: { excluirOrdemServico: true } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pleitos'] });
       setDeleteId(null);
