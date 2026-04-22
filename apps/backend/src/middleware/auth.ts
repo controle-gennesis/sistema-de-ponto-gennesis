@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { createError } from './errorHandler';
 import { prisma } from '../lib/prisma';
+
+const PERMISOES_MODULE_KEY = pathToModuleKey('/ponto/permissoes');
+const CONTROLE_ALTERAR_PERMISSOES_KEY = pathToModuleKey('/ponto/controle/alterar-permissoes');
 
 export interface AuthRequest extends Request {
   user?: {
@@ -119,6 +123,41 @@ export const requireAdministrator = async (
   }
 
   return next();
+};
+
+/**
+ * Administrador OU matriz de permissões (módulo Permissões e/ou Controle «alterar permissões»).
+ * Alinha com a UI que permite gerenciar permissões sem cargo Administrador.
+ */
+export const requirePermissionManagerOrAdministrator = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user) {
+    return next(createError('Usuário não autenticado', 401));
+  }
+  if (req.user.isAdmin) {
+    return next();
+  }
+  const allowed = await prisma.userPermission.findFirst({
+    where: {
+      userId: req.user.id,
+      allowed: true,
+      OR: [
+        { module: PERMISOES_MODULE_KEY, action: PERMISSION_ACCESS_ACTION },
+        { module: PERMISOES_MODULE_KEY, action: 'ver' },
+        { module: CONTROLE_ALTERAR_PERMISSOES_KEY, action: PERMISSION_ACCESS_ACTION },
+      ],
+    },
+    select: { id: true },
+  });
+  if (allowed) {
+    return next();
+  }
+  return next(
+    createError('Acesso permitido apenas para Administrador ou quem pode gerenciar permissões de usuários', 403)
+  );
 };
 
 export const optionalAuth = async (

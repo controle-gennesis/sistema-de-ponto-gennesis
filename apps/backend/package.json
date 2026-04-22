@@ -4,6 +4,7 @@
   "description": "Backend API para sistema de controle de ponto",
   "main": "dist/index.js",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "nodemon --exec \"ts-node --transpile-only src/index.ts\"",
     "dev:nodemon": "nodemon --exec \"ts-node --transpile-only src/index.ts\"",
     "build:permission-modules": "cd ../.. && npm run build -w @sistema-ponto/permission-modules",
@@ -22,7 +23,7 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
-    "@sistema-ponto/permission-modules": "*",
+    "@sistema-ponto/permission-modules": "file:../../packages/permission-modules",
     "@prisma/client": "^5.22.0",
     "axios": "^1.6.2",
     "@types/bcrypt": "^6.0.0",

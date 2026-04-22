@@ -8,6 +8,47 @@
 const { execSync } = require('child_process');
 const path = require('path');
 
+const BACKEND_ROOT = path.join(__dirname, '..');
+
+/**
+ * Migrations que falharam no deploy (ex.: tabela ainda não existia) e é seguro marcar
+ * como rolled-back para o Prisma reaplicar na ordem correta após novas migrations.
+ */
+const MIGRATIONS_TRY_ROLLBACK_IF_FAILED = ['20260416140000_dp_request_display_number'];
+
+function tryRollbackFailedMigration(migrationName) {
+  try {
+    execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
+      cwd: BACKEND_ROOT,
+      stdio: ['inherit', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    console.log(`✅ Migration "${migrationName}" liberada (rolled-back) para reaplicação.`);
+    return true;
+  } catch (e) {
+    const out = `${e.stderr || ''} ${e.stdout || ''} ${e.message || ''}`;
+    // Não está em estado "failed" — ok
+    if (
+      out.includes('P3012') ||
+      out.includes('There is no failed migration') ||
+      out.includes('could not find') ||
+      out.includes('not in a failed state')
+    ) {
+      return false;
+    }
+    console.log(`⚠️  migrate resolve --rolled-back ${migrationName}:`, out.trim().slice(0, 400));
+    return false;
+  }
+}
+
+/** Remove bloqueio P3009 causado por deploys antigos (migration falhou antes de existir dp_requests). */
+function clearKnownFailedMigrationsFromHistory() {
+  console.log('🔧 Verificando migrations conhecidas presas em estado falho (P3009)...');
+  for (const name of MIGRATIONS_TRY_ROLLBACK_IF_FAILED) {
+    tryRollbackFailedMigration(name);
+  }
+}
+
 // Tenta importar Prisma Client, se não estiver disponível, gera primeiro
 let PrismaClient;
 let prisma;
@@ -24,9 +65,9 @@ try {
 } catch (error) {
   console.log('⚠️  Prisma Client não encontrado. Gerando...');
   try {
-    execSync('npx prisma generate', { 
+    execSync('npx prisma generate', {
       stdio: 'inherit',
-      cwd: path.join(__dirname, '..')
+      cwd: BACKEND_ROOT,
     });
     PrismaClient = require('@prisma/client').PrismaClient;
     prisma = new PrismaClient({
@@ -196,20 +237,17 @@ async function resolveFailedMigrations() {
       try {
         execSync(`npx prisma migrate resolve --applied ${migrationName}`, {
           stdio: 'inherit',
-          cwd: path.join(__dirname, '..')
+          cwd: BACKEND_ROOT,
         });
         console.log('✅ Migration marcada como aplicada');
       } catch (applyError) {
-        console.log('⚠️  Erro ao marcar como aplicada, tentando rolled_back...');
-        try {
-          execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
-            stdio: 'inherit',
-            cwd: path.join(__dirname, '..')
-          });
-          console.log('✅ Migration marcada como rolled back');
-        } catch (rollbackError) {
-          console.log('⚠️  Não foi possível resolver migration automaticamente:', rollbackError.message);
-          // Continua mesmo assim
+        const out = `${applyError.stderr || ''} ${applyError.stdout || ''} ${applyError.message || ''}`;
+        // P3008 = já consta como aplicada — não fazer rolled-back (isso corrompe o histórico e o deploy).
+        if (out.includes('P3008') || out.includes('already recorded as applied')) {
+          console.log('✅ Init já estava aplicada (P3008). Seguindo sem alterar o histórico.');
+        } else {
+          console.log('⚠️  migrate resolve --applied falhou:', out.trim().slice(0, 400));
+          console.log('⚠️  Não usamos rolled-back automático (evita estado inconsistente no Railway).');
         }
       }
     } else {
@@ -217,7 +255,7 @@ async function resolveFailedMigrations() {
       try {
         execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
           stdio: 'inherit',
-          cwd: path.join(__dirname, '..')
+          cwd: BACKEND_ROOT,
         });
         console.log('✅ Migration marcada como rolled back');
       } catch (resolveError) {
@@ -229,47 +267,43 @@ async function resolveFailedMigrations() {
     // Desconecta ANTES de executar migrate deploy para liberar conexões
     await prisma.$disconnect();
     await new Promise(resolve => setTimeout(resolve, 500)); // Aguarda 500ms para garantir desconexão
-    
+
+    clearKnownFailedMigrationsFromHistory();
+
     // Agora tenta executar migrate deploy
     try {
       console.log('🔄 Executando prisma migrate deploy...');
-      execSync('npx prisma migrate deploy', { 
+      execSync('npx prisma migrate deploy', {
         stdio: 'inherit',
-        cwd: path.join(__dirname, '..')
+        cwd: BACKEND_ROOT,
       });
       console.log('✅ Migrations aplicadas com sucesso');
       return true;
     } catch (error) {
       const errorOutput = (error.stdout?.toString() || error.stderr?.toString() || error.message || '').trim();
-      
-      // Verifica se ainda há erro P3009
+
       if (errorOutput.includes('P3009') || errorOutput.includes('failed migrations')) {
-        console.log('⚠️  Ainda há migration falhada. Tentando resolver novamente...');
-        
-        // Tenta resolver novamente
+        console.log('⚠️  P3009: tentando liberar migrations conhecidas e repetir deploy...');
+        clearKnownFailedMigrationsFromHistory();
         try {
-          execSync(`npx prisma migrate resolve --applied ${migrationName}`, {
+          execSync('npx prisma migrate deploy', {
             stdio: 'inherit',
-            cwd: path.join(__dirname, '..')
+            cwd: BACKEND_ROOT,
           });
-          console.log('✅ Migration resolvida');
+          console.log('✅ Migrations aplicadas com sucesso (após recuperação)');
           return true;
-        } catch (resolveError) {
-          console.error('❌ Erro ao resolver migration:', resolveError.message);
-          // Continua mesmo assim para não bloquear o deploy
-          return true;
+        } catch (retryErr) {
+          console.error('❌ migrate deploy falhou após recuperação:', retryErr.message);
+          return false;
         }
-      } else {
-        // Outro tipo de erro
-        console.log('⚠️  Erro ao executar migrate deploy:', errorOutput.substring(0, 200));
-        // Continua mesmo assim para não bloquear o deploy
-        return true;
       }
+
+      console.error('❌ Erro ao executar migrate deploy:', errorOutput.substring(0, 500));
+      return false;
     }
   } catch (error) {
     console.error('❌ Erro inesperado:', error.message);
-    // Continua mesmo assim para não bloquear o deploy
-    return true;
+    return false;
   } finally {
     // Sempre desconecta antes de sair
     try {

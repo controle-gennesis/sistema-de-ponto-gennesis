@@ -443,7 +443,7 @@ function SolicitarMateriaisPage() {
   ]);
 
   useEffect(() => {
-    const id = searchParams.get('editRm');
+    const id = searchParams?.get('editRm') ?? null;
     if (!id) return;
     setCorrectionEditId(id);
     setActiveTab('list');

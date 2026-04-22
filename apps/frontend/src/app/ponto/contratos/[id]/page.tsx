@@ -19,6 +19,7 @@ import {
   Trash2,
   Percent
 } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Receipt, X, Edit2, ClipboardList, FileDown, ExternalLink, BarChart3, Trash2, Calculator } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -34,6 +35,8 @@ import {
 } from '@/lib/pleitoForm';
 import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
+import { usePermissions } from '@/hooks/usePermissions';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import {
   formatOsSePasta,
   formatOsSePastaOrDash,
@@ -148,6 +151,7 @@ const MESES_FILTRO = [
 ];
 
 const TIMEZONE_BRASILIA = 'America/Sao_Paulo';
+const pk = pathToModuleKey;
 
 /** Apenas calendário (YYYY-MM-DD) sem hora — evita deslocar o dia. */
 function parseDateOnlyLocal(dateStr: string): Date | null {
@@ -566,7 +570,14 @@ export default function ContractDetailPage() {
   const router = useRouter();
   const params = useParams();
   const queryClient = useQueryClient();
-  const contractId = params.id as string;
+  const { isAdministrator, can, canAction } = usePermissions();
+  const idParam = params?.id;
+  const contractId =
+    typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
+  const canAccessOrcamento = isAdministrator || can(pk('/ponto/orcamento'));
+  const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
+  const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
+  const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -1363,6 +1374,10 @@ export default function ContractDetailPage() {
 
   const handleBillingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateContrato) {
+      toast.error('Você não tem permissão para criar no módulo Contratos.');
+      return;
+    }
     const gross = parseCurrencyInput(billingForm.grossValue);
     if (!billingForm.issueDate || !billingForm.invoiceNumber.trim() || !billingForm.serviceOrder.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
@@ -1382,6 +1397,10 @@ export default function ContractDetailPage() {
 
   const handleBillingEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditContrato) {
+      toast.error('Você não tem permissão para editar no módulo Contratos.');
+      return;
+    }
     if (!selectedBilling) return;
     const gross = parseCurrencyInput(billingEditForm.grossValue);
     const netRaw = (billingEditForm.netValue || '').trim();
@@ -1412,6 +1431,10 @@ export default function ContractDetailPage() {
 
   const handleProductionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateContrato) {
+      toast.error('Você não tem permissão para criar no módulo Contratos.');
+      return;
+    }
     const value = parseCurrencyInput(productionForm.weeklyProductionValue);
     if (!productionForm.divSe.trim() || !productionForm.responsiblePerson.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
@@ -1432,6 +1455,10 @@ export default function ContractDetailPage() {
 
   const handleProductionEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditContrato) {
+      toast.error('Você não tem permissão para editar no módulo Contratos.');
+      return;
+    }
     if (!selectedProduction) return;
     const value = parseCurrencyInput(productionEditForm.weeklyProductionValue);
     if (!productionEditForm.divSe.trim() || !productionEditForm.responsiblePerson.trim()) {
@@ -1536,6 +1563,10 @@ export default function ContractDetailPage() {
   });
 
   const handleExcluirPleitosSelecionados = () => {
+    if (!canDeleteContrato) {
+      toast.error('Você não tem permissão para excluir no módulo Contratos.');
+      return;
+    }
     const ids = Array.from(selectedForPleito).filter((id) => pleitos.some((p) => p.id === id));
     if (ids.length === 0) {
       toast.error('Selecione ao menos uma ordem de serviço.');
@@ -1552,6 +1583,10 @@ export default function ContractDetailPage() {
   };
 
   const handleGerarPleito = () => {
+    if (!canCreateContrato) {
+      toast.error('Você não tem permissão para criar no módulo Contratos.');
+      return;
+    }
     const ids = Array.from(selectedForPleito);
     if (ids.length === 0) {
       toast.error('Selecione ao menos uma ordem de serviço para gerar o pleito.');
@@ -1593,6 +1628,10 @@ export default function ContractDetailPage() {
   };
 
   const handleConfirmarPleito = () => {
+    if (!canCreateContrato) {
+      toast.error('Você não tem permissão para criar no módulo Contratos.');
+      return;
+    }
     const ids = Array.from(selectedForPleito);
     const result = buildPleitoGerarItems(ids, pleitos, allPleitos, (id) =>
       parseCurrencyInput(valorPleiteado[id] || '')
@@ -1956,7 +1995,6 @@ export default function ContractDetailPage() {
   };
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
-  const isAdministrator = (user?.employee?.position || '').trim().toLowerCase() === 'administrador';
 
   if (loadingUser) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
@@ -2049,6 +2087,7 @@ export default function ContractDetailPage() {
             <div className="flex flex-wrap items-center gap-3 p-4 sm:p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
               <button
                 onClick={() => setShowPleitoModal(true)}
+                disabled={!canCreateContrato}
                 className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
               >
                 <ClipboardList className="w-4 h-4 shrink-0" />
@@ -2059,11 +2098,21 @@ export default function ContractDetailPage() {
                   setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
                   setShowProductionModal(true);
                 }}
+                disabled={!canCreateContrato}
                 className="h-10 px-4 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
               >
                 <BarChart3 className="w-4 h-4 shrink-0" />
                 Produção Semanal
               </button>
+              {canAccessOrcamento ? (
+                <Link
+                  href={`/ponto/contratos/${contractId}/orcamento`}
+                  className="h-10 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+                >
+                  <Calculator className="w-4 h-4 shrink-0" />
+                  Orçamento
+                </Link>
+              ) : null}
             </div>
           </div>
 
@@ -2485,6 +2534,7 @@ export default function ContractDetailPage() {
                       </h3>
                       <button
                         onClick={() => setShowPleitoModal(true)}
+                        disabled={!canCreateContrato}
                         className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
                         title="Nova ordem de serviço"
                       >
@@ -2500,7 +2550,7 @@ export default function ContractDetailPage() {
                           </button>
                           <button
                             onClick={handleGerarPleito}
-                            disabled={gerarPleitoMutation.isPending}
+                            disabled={!canCreateContrato || gerarPleitoMutation.isPending}
                             className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                           >
                             {gerarPleitoMutation.isPending ? 'Gerando...' : 'Gerar Pleito'}
@@ -2525,7 +2575,7 @@ export default function ContractDetailPage() {
                           <button
                             type="button"
                             onClick={handleExcluirPleitosSelecionados}
-                            disabled={deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
+                            disabled={!canDeleteContrato || deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                             title="Excluir as ordens de serviço marcadas na tabela"
                           >
@@ -2616,7 +2666,8 @@ export default function ContractDetailPage() {
                   </p>
                   <button
                     onClick={() => setShowPleitoModal(true)}
-                    className="mt-3 text-blue-600 dark:text-blue-400 hover:underline text-sm font-medium"
+                    disabled={!canCreateContrato}
+                    className="mt-3 text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:no-underline text-sm font-medium"
                   >
                     Cadastrar primeira ordem de serviço
                   </button>
@@ -2852,6 +2903,10 @@ export default function ContractDetailPage() {
                             <div className="flex items-center justify-end gap-1">
                               <button
                                 onClick={() => {
+                                  if (!canEditContrato) {
+                                    toast.error('Você não tem permissão para editar no módulo Contratos.');
+                                    return;
+                                  }
                                   setSelectedProduction(p);
                                   setProductionEditForm({
                                     fillingDate: p.fillingDate ? toInputDate(p.fillingDate) : '',
@@ -2861,18 +2916,24 @@ export default function ContractDetailPage() {
                                   });
                                   setEditingProduction(true);
                                 }}
-                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                disabled={!canEditContrato}
+                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Editar"
                               >
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => {
+                                  if (!canDeleteContrato) {
+                                    toast.error('Você não tem permissão para excluir no módulo Contratos.');
+                                    return;
+                                  }
                                   if (confirm('Excluir esta produção semanal?')) {
                                     deleteProductionMutation.mutate(p.id);
                                   }
                                 }}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                disabled={!canDeleteContrato}
+                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Excluir"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -2943,7 +3004,8 @@ export default function ContractDetailPage() {
                   </p>
                   <button
                     onClick={() => setShowBillingModal(true)}
-                    className="mt-3 text-green-600 dark:text-green-400 hover:underline text-sm font-medium"
+                    disabled={!canCreateContrato}
+                    className="mt-3 text-green-600 dark:text-green-400 hover:underline disabled:opacity-50 disabled:no-underline text-sm font-medium"
                   >
                     Cadastrar primeiro faturamento
                   </button>
@@ -2958,7 +3020,7 @@ export default function ContractDetailPage() {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor Bruto</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Preenchimento</th>
-                        {isAdministrator && (
+                        {canDeleteContrato && (
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-24">Ações</th>
                         )}
                       </tr>
@@ -2986,15 +3048,19 @@ export default function ContractDetailPage() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(b.createdAt || '')}</td>
-                          {isAdministrator && (
+                          {canDeleteContrato && (
                             <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                               <button
                                 onClick={() => {
+                                  if (!canDeleteContrato) {
+                                    toast.error('Você não tem permissão para excluir no módulo Contratos.');
+                                    return;
+                                  }
                                   if (confirm('Excluir este faturamento?')) {
                                     deleteBillingMutation.mutate(b.id);
                                   }
                                 }}
-                                disabled={deleteBillingMutation.isPending}
+                                disabled={!canDeleteContrato || deleteBillingMutation.isPending}
                                 className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Excluir"
                               >

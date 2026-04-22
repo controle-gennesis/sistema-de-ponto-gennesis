@@ -186,7 +186,9 @@ export default function AndamentoListPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const contractId = params.id as string;
+  const idParam = params?.id;
+  const contractId =
+    typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
 
   const queryClient = useQueryClient();
 
@@ -200,12 +202,12 @@ export default function AndamentoListPage() {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const yearParam = searchParams.get('year');
-  const monthParam = searchParams.get('month');
-  const statusOrcamentoParam = searchParams.get('statusOrcamento');
-  const statusExecucaoParam = searchParams.get('statusExecucao');
-  const statusFaturamentoParam = searchParams.get('statusFaturamento');
-  const selectedIdsParam = searchParams.get('selectedIds');
+  const yearParam = searchParams?.get('year') ?? null;
+  const monthParam = searchParams?.get('month') ?? null;
+  const statusOrcamentoParam = searchParams?.get('statusOrcamento') ?? null;
+  const statusExecucaoParam = searchParams?.get('statusExecucao') ?? null;
+  const statusFaturamentoParam = searchParams?.get('statusFaturamento') ?? null;
+  const selectedIdsParam = searchParams?.get('selectedIds') ?? null;
 
   const [selectedYear, setSelectedYear] = useState(() => (yearParam ? parseInt(yearParam, 10) : new Date().getFullYear()));
   const [selectedMonth, setSelectedMonth] = useState(() => (monthParam ? parseInt(monthParam, 10) : 0));

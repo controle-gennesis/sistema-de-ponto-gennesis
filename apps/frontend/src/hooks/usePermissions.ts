@@ -39,9 +39,14 @@ export function usePermissions() {
       .filter((p) => p.action === PERMISSION_ACCESS_ACTION)
       .map((p) => p.module)
   );
+  const allowedActionSet = new Set<string>(
+    ((permissionData?.permissions || []) as PermissionItem[]).map((p) => `${p.module}:${p.action}`)
+  );
 
   const allowedContractIds: string[] = permissionData?.allowedContractIds ?? [];
   const allowedContractIdSet = new Set(allowedContractIds);
+  const dpApprovalContractIds: string[] = permissionData?.dpApprovalContractIds ?? [];
+  const dpApprovalContractIdSet = new Set(dpApprovalContractIds);
 
   /** Acesso total ao submenu (módulo) identificado pela chave do registro central. */
   const can = (moduleKey: string) => {
@@ -49,6 +54,10 @@ export function usePermissions() {
       return true;
     }
     return allowedSet.has(moduleKey);
+  };
+  const canAction = (moduleKey: string, action: string) => {
+    if (isAdministrator || permissionData?.isAdmin) return true;
+    return allowedActionSet.has(`${moduleKey}:${action}`);
   };
 
   /** Acesso a um contrato específico (requer módulo Contratos + autorização explícita). */
@@ -67,9 +76,64 @@ export function usePermissions() {
 
   const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
 
+  const employeesKey = pk('/ponto/funcionarios');
+  /** Ações granulares persistidas além do `acesso` do módulo (matriz Ver/Criar/Editar/Excluir). */
+  const EMPLOYEE_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
+  const isElevatedUser = isAdministrator || !!permissionData?.isAdmin;
+  const hasEmployeeAcesso = can(employeesKey);
+  /**
+   * Com matriz granular, o salvamento ainda grava `acesso` no módulo (payload base).
+   * Nesse caso o `acesso` não pode liberar criar/excluir — só as linhas `ponto_funcionarios:criar` etc.
+   * Cadastro antigo: só `acesso`, sem linhas CRUD → mantém comportamento de “módulo inteiro”.
+   */
+  const hasEmployeeGranular =
+    !isElevatedUser &&
+    EMPLOYEE_MODULE_CRUD.some((a) => allowedActionSet.has(`${employeesKey}:${a}`));
+  /** Qualquer permissão no módulo (rota / botões da lista). */
+  const canAccessEmployeesModule =
+    hasEmployeeAcesso ||
+    canAction(employeesKey, 'ver') ||
+    canAction(employeesKey, 'criar') ||
+    canAction(employeesKey, 'editar') ||
+    canAction(employeesKey, 'excluir');
+
+  const canViewEmployees = hasEmployeeGranular
+    ? EMPLOYEE_MODULE_CRUD.some((a) => canAction(employeesKey, a))
+    : hasEmployeeAcesso;
+  const canCreateEmployees = hasEmployeeGranular
+    ? canAction(employeesKey, 'criar')
+    : hasEmployeeAcesso;
+  const canEditEmployees = hasEmployeeGranular
+    ? canAction(employeesKey, 'editar')
+    : hasEmployeeAcesso;
+  const canDeleteEmployees = hasEmployeeGranular
+    ? canAction(employeesKey, 'excluir')
+    : hasEmployeeAcesso;
+
+  /** Rescisão / alteração função-salário: admin, equipe DP (gerenciar), Controle «criar solicitações restritas» ou Gestor DP no contrato. */
+  const canCreateSensitiveDpRequestType = (contractId: string | null | undefined) => {
+    if (isAdministrator || permissionData?.isAdmin) return true;
+    if (can(pk('/ponto/gerenciar-solicitacoes-dp'))) return true;
+    if (can(pk('/ponto/controle/criar-tipos-restritos-dp'))) return true;
+    if (!contractId) return false;
+    return dpApprovalContractIdSet.has(contractId);
+  };
+
+  /** Tela / API de aprovações DP: gestor por contrato ou permissão legada (Controle). */
+  const canAccessDpApproverPages =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    dpApprovalContractIds.length > 0 ||
+    can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
+
   const finalPermissions = {
     canAccessPayroll: can(pk('/ponto/folha-pagamento')) || can(pk('/relatorios/alocacao')),
-    canManageEmployees: can(pk('/ponto/funcionarios')),
+    /** Acesso ao módulo Funcionários (inclui granularidade definida na tela de permissões). */
+    canManageEmployees: canAccessEmployeesModule,
+    canViewEmployees,
+    canCreateEmployees,
+    canEditEmployees,
+    canDeleteEmployees,
     canViewReports: can(pk('/ponto/dashboard')),
     canManageVacations:
       can(pk('/ponto/gerenciar-ferias')) ||
@@ -81,6 +145,9 @@ export function usePermissions() {
     canViewBirthdays: true,
     canRegisterTime: true,
     canViewDashboard: can(pk('/ponto/dashboard')),
+    canCreateContracts: canAction(pk('/ponto/contratos'), 'criar'),
+    canEditContracts: canAction(pk('/ponto/contratos'), 'editar'),
+    canDeleteContracts: canAction(pk('/ponto/contratos'), 'excluir'),
   };
 
   return {
@@ -94,7 +161,11 @@ export function usePermissions() {
     isDepartmentCompras,
     permissions: finalPermissions,
     can,
+    canAction,
     allowedContractIds,
+    dpApprovalContractIds,
+    canCreateSensitiveDpRequestType,
+    canAccessDpApproverPages,
     canAccessContract,
     isLoading,
     canAccessPayroll: finalPermissions.canAccessPayroll,
@@ -106,6 +177,13 @@ export function usePermissions() {
     canViewBirthdays: finalPermissions.canViewBirthdays,
     canRegisterTime: finalPermissions.canRegisterTime,
     canViewDashboard: finalPermissions.canViewDashboard,
+    canCreateContracts: finalPermissions.canCreateContracts,
+    canEditContracts: finalPermissions.canEditContracts,
+    canDeleteContracts: finalPermissions.canDeleteContracts,
+    canViewEmployees: finalPermissions.canViewEmployees,
+    canCreateEmployees: finalPermissions.canCreateEmployees,
+    canEditEmployees: finalPermissions.canEditEmployees,
+    canDeleteEmployees: finalPermissions.canDeleteEmployees,
   };
 }
 
@@ -119,6 +197,7 @@ export function useRoutePermission(route: string) {
     isDepartmentCompras,
     userPosition,
     can,
+    dpApprovalContractIds,
   } = usePermissions();
 
   if (isLoading) {
@@ -130,12 +209,20 @@ export function useRoutePermission(route: string) {
   const routePermissions: Record<string, boolean> = {
     '/ponto': isAdministrator || isDepartmentPessoal || permissions.canRegisterTime,
     '/ponto/dashboard': isAdministrator || isDepartmentPessoal || permissions.canViewDashboard,
-    '/ponto/funcionarios': isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
+    '/ponto/aprovacoes':
+      isAdministrator ||
+      can(pk('/ponto/aprovacoes')) ||
+      dpApprovalContractIds.length > 0 ||
+      can(pk('/ponto/controle/aprovar-solicitacoes-dp')),
+    '/ponto/funcionarios':
+      isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal || can(pk('/ponto/aniversariantes')),
     '/ponto/atestados': isAdministrator || can(pk('/ponto/atestados')),
     '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados')),
     '/ponto/solicitacoes': isAdministrator || can(pk('/ponto/solicitacoes')),
-    '/ponto/gerenciar-solicitacoes': isAdministrator || isDepartmentProjetos || can(pk('/ponto/gerenciar-solicitacoes')),
+    '/ponto/gerenciar-solicitacoes': isAdministrator || can(pk('/ponto/gerenciar-solicitacoes')),
+    '/ponto/solicitacoes-dp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-dp')),
+    '/ponto/gerenciar-solicitacoes-dp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-feriados')),
@@ -145,14 +232,15 @@ export function useRoutePermission(route: string) {
     '/ponto/centros-custo': isAdministrator || isDepartmentPessoal || can(pk('/ponto/centros-custo')),
     '/ponto/materiais-construcao': isAdministrator || isDepartmentPessoal || can(pk('/ponto/materiais-construcao')),
     '/ponto/andamento-da-os': isAdministrator || can(pk('/ponto/andamento-da-os')),
-    '/ponto/permissoes': isAdministrator,
-    '/ponto/chatgpt': isAdministrator || can(pk('/ponto/chatgpt')),
+    '/ponto/permissoes': true,
     '/ponto/bi': isAdministrator || can(pk('/ponto/bi')),
     '/ponto/conversas-whatsapp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp')),
     '/ponto/financeiro': isAdministrator || can(pk('/ponto/financeiro')),
     '/ponto/financeiro/analise': isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise')),
     '/ponto/financeiro/analise-extrato':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato')),
+    '/ponto/financeiro/gestao-solicitacoes':
+      isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes')),
     '/ponto/orcamento': isAdministrator || can(pk('/ponto/orcamento')),
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),

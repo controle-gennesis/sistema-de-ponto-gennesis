@@ -29,4 +29,9 @@ router.post('/conversations/:id/messages', (req, res, next) =>
   controller.sendMessageToConversation(req as any, res, next)
 );
 
+// Encerra a conversa para o WhatsApp (status CANCELLED)
+router.post('/conversations/:id/end', (req, res, next) =>
+  controller.endConversation(req as any, res, next)
+);
+
 export default router;

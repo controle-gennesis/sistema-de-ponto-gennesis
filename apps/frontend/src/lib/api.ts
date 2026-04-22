@@ -6,14 +6,14 @@ export { API_BASE_URL } from './apiBaseUrl';
 // Configurar axios
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
   // Removendo Content-Type fixo para permitir multipart/form-data
 });
 
 // Instância separada do axios para refresh (sem interceptors que causam loop)
 const refreshApi = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
 });
 
 // Flag para evitar loops infinitos de refresh

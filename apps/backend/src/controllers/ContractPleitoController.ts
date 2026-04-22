@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
 import { parseDateInput } from '../utils/dateInput';
 import { assertContractAccess } from '../lib/contractAccess';
+import { resolvePleitoCreateCore } from '../utils/pleitoCreateHelpers';
 const toDec = (v: unknown): number | null => {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -56,7 +57,15 @@ export class ContractPleitoController {
       if (!b.serviceDescription?.trim()) throw createError('Descrição do serviço é obrigatória', 400);
 
       const creationYear = b.creationYear != null && b.creationYear !== '' ? Number(b.creationYear) : null;
+      const core = await resolvePleitoCreateCore(
+        b as Record<string, unknown>,
+        Number.isInteger(creationYear) ? creationYear : null
+      );
       const data: Prisma.PleitoCreateInput = {
+        mes: core.mes,
+        ano: core.ano,
+        valorPrevisto: core.valorPrevisto,
+        service_orders: { connect: { id: core.serviceOrderId } },
         creationMonth: b.creationMonth?.trim() || null,
         creationYear: Number.isInteger(creationYear) ? creationYear : null,
         startDate: b.startDate ? parseDateInput(b.startDate) : null,

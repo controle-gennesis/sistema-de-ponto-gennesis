@@ -23,11 +23,9 @@ import {
   BookText,
   BookPlus,
   BookImage,
-  Settings,
   BarChart3,
   FileText,
   Search,
-  MoreVertical,
   LayoutDashboard,
   CalendarX2,
   MailPlus,
@@ -35,16 +33,14 @@ import {
   Sun,
   AlertCircle,
   MessageSquare,
+  FileCheck,
   DollarSign,
   Package,
   ShoppingCart,
   Building2,
-  Bot,
   Cake,
   Calculator,
   ClipboardList,
-  FileCheck,
-  SlidersHorizontal,
   CreditCard
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -77,7 +73,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { permissions, isLoading, userPosition, user, isDepartmentPessoal, isDepartmentProjetos, userDepartment, can } = usePermissions();
+  const {
+    permissions,
+    isLoading,
+    userPosition,
+    user,
+    isDepartmentPessoal,
+    isDepartmentProjetos,
+    userDepartment,
+    can,
+    canAccessDpApproverPages,
+  } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -153,13 +159,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
           },
           {
-            name: 'Assistente Virtual',
-            href: '/ponto/chatgpt',
-            icon: Bot,
-            description: 'Tire suas dúvidas com o ChatGPT',
-            permission: isAdministrator || can(pk('/ponto/chatgpt'))
-          },
-          {
             name: 'Solicitações Fluig',
             href: '/ponto/bi',
             icon: BarChart3,
@@ -167,25 +166,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || can(pk('/ponto/bi'))
           },
           {
-            name: 'Conversas WhatsApp',
+            name: 'Central de Atendimentos',
             href: '/ponto/conversas-whatsapp',
             icon: MessageSquare,
             description: 'Conversas do chatbot WhatsApp para o pessoal ver',
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp'))
-          }
-        ]
-      },
-      {
-        id: 'painel-controle',
-        name: 'Painel de Controle',
-        icon: SlidersHorizontal,
-        items: [
+          },
           {
-            name: 'Permissões',
-            href: '/ponto/permissoes',
-            icon: Settings,
-            description: 'Gerenciar permissões de usuários',
-            permission: isAdministrator
+            name: 'Aprovações',
+            href: '/ponto/aprovacoes',
+            icon: FileCheck,
+            description: 'Caixa de entrada de aprovações',
+            permission: can(pk('/ponto/aprovacoes')) || canAccessDpApproverPages,
           }
         ]
       },
@@ -195,11 +187,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Users,
         items: [
           {
-            name: 'Gerenciar Funcionários',
+            name: 'Funcionários',
             href: '/ponto/funcionarios',
             icon: Users,
             description: 'Cadastrar e gerenciar funcionários',
-            permission: isAdministrator || isDepartmentPessoal
+            permission: isAdministrator || isDepartmentPessoal || permissions.canManageEmployees
           },
           {
             name: 'Folha de Pagamento',
@@ -234,7 +226,22 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
             description: 'Aprovar solicitações de correção',
-            permission: isAdministrator || isDepartmentProjetos || can(pk('/ponto/gerenciar-solicitacoes'))
+            permission: isAdministrator || can(pk('/ponto/gerenciar-solicitacoes'))
+          },
+          {
+            name: 'Solicitações Gerais',
+            href: '/ponto/solicitacoes-dp',
+            icon: MailPlus,
+            description: 'Minhas solicitações ao DP',
+            permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+          },
+          {
+            name: 'Gerenciar Solicitações Gerais',
+            href: '/ponto/gerenciar-solicitacoes-dp',
+            icon: FileText,
+            description: 'Aprovar solicitações do DP',
+            permission:
+              isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
           {
             name: 'Férias',
@@ -306,6 +313,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BarChart3,
             description: 'Importar e validar extratos bancários',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
+          },
+          {
+            name: 'Gestão de Solicitações',
+            href: '/ponto/financeiro/gestao-solicitacoes',
+            icon: BarChart3,
+            description: 'Acompanhar solicitações do Fluig na visão financeira',
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes'))
           }
         ]
       },
@@ -314,13 +328,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         name: 'Engenharia',
         icon: Calculator,
         items: [
-          {
-            name: 'Orçamento',
-            href: '/ponto/orcamento',
-            icon: Calculator,
-            description: 'Criar orçamentos com composições e serviços padrão',
-            permission: isAdministrator || can(pk('/ponto/orcamento'))
-          },
           {
             name: 'Contratos',
             href: '/ponto/contratos',
@@ -383,7 +390,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Listar e gerenciar ordens de compra',
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra'))
-          }
+          },
         ]
       },
       {
@@ -474,6 +481,15 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const menuItems = getMenuItems();
 
   const isActive = (href: string) => {
+    if (pathname == null) return false;
+    if (href === '/ponto/contratos') {
+      if (pathname === '/ponto/contratos') return true;
+      // Rotas fixas sob /ponto/contratos (ex.: controle geral) — não marcam "Contratos", só o item próprio.
+      if (pathname.startsWith('/ponto/contratos/controle-geral')) return false;
+      // Detalhe do contrato e subpáginas (orçamento, permissões, etc.)
+      return /^\/ponto\/contratos\/[^/]+/.test(pathname);
+    }
+
     return pathname === href;
   };
 
@@ -657,20 +673,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const hasActiveItem = category.items.some(item => isActive(item.href));
             const isExpanded = isMenuExpanded(category.id);
             const visibleItems = category.items.filter(item => item.permission);
-            const forceAsGroup = category.id === 'engenharia' || category.id === 'painel-controle';
+            // Sempre mostrar como grupo expansível (título + subitens), mesmo com 1 item visível —
+            // evita que "Funcionários" apareça solto fora de "Departamento Pessoal".
+            const forceAsGroup =
+              category.id === 'main' ||
+              category.id === 'engenharia' ||
+              category.id === 'departamento-pessoal';
             const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
-            // Verificar se é o primeiro grupo (categoria com mais de um item visível)
-            const previousCategories = menuItems.slice(0, index).filter(cat => {
-              const catVisibleItems = cat.items.filter(item => item.permission);
-              return catVisibleItems.length > 0;
-            });
-            const previousGroups = previousCategories.filter(cat => {
-              const catVisibleItems = cat.items.filter(item => item.permission);
-              return catVisibleItems.length > 1;
-            });
-            const isFirstGroup = previousGroups.length === 0 && visibleItems.length > 1;
+            // Mostrar o título "Menu" sempre no topo da navegação visível.
+            const shouldShowMenuTitle = index === 0 && !isCollapsed;
             
             // Se tiver apenas um item, renderizar como link direto
             if (isSingleItem && singleItem) {
@@ -680,6 +693,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               
               return (
                 <div key={category.id}>
+                  {shouldShowMenuTitle && (
+                    <div className="px-3 pt-2 pb-2">
+                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
+                    </div>
+                  )}
                   <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
                     {isCollapsed ? (
                       <div className="flex justify-center">
@@ -721,8 +739,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             
             return (
               <div key={category.id} className="overflow-hidden">
-                {/* Título "Menu" antes do primeiro grupo */}
-                {isFirstGroup && !isCollapsed && (
+                {/* Título "Menu" no topo da navegação */}
+                {shouldShowMenuTitle && (
                   <div className="px-3 pt-2 pb-2">
                     <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
                   </div>
@@ -824,14 +842,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             <div className="bg-white dark:bg-gray-900">
               <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
                 {isCollapsed ? (
-                  /* Quando colapsada: apenas os 3 pontos */
+                  /* Quando colapsada: ícone de expandir (setas cima/baixo) */
                   <div className="flex justify-center">
                     <button
+                      type="button"
                       onClick={() => setShowUserMenu(!showUserMenu)}
                       className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                      title="Menu do usuário"
+                      title={showUserMenu ? 'Fechar menu (descer)' : 'Abrir menu (subir)'}
+                      aria-expanded={showUserMenu}
+                      aria-label={showUserMenu ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
                     >
-                      <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      {showUserMenu ? (
+                        <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      ) : (
+                        <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      )}
                     </button>
                   </div>
                 ) : (
@@ -866,14 +891,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       )}
                     </div>
                     
-                    {/* Botão de menu (3 pontos) */}
+                    {/* Botão de menu (setas cima/baixo — indica expandir/recolher) */}
                     <div className="relative">
                       <button
+                        type="button"
                         onClick={() => setShowUserMenu(!showUserMenu)}
                         className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        title="Menu do usuário"
+                        title={showUserMenu ? 'Fechar menu (descer)' : 'Abrir menu (subir)'}
+                        aria-expanded={showUserMenu}
+                        aria-label={showUserMenu ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
                       >
-                        <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        {showUserMenu ? (
+                          <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        ) : (
+                          <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        )}
                       </button>
                     </div>
                   </div>
