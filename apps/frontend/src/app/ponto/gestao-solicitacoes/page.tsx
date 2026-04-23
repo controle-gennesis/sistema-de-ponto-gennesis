@@ -18,6 +18,7 @@ export default function GestaoSolicitacoesPage() {
         },
         g5TitleDatasets: ['G5-Relatorio-DF'],
         allowedFiliais: null,
+        allowedFiliaisDatasets: ['DataSet_G3FollowUp'],
         excludedFiliais: ['FILIAL PB'],
         hideFilialFilter: true,
         showProcessCard: true,

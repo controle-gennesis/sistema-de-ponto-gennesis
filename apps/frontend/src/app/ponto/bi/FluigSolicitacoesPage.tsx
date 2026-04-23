@@ -364,6 +364,8 @@ type FluigSolicitacoesPageConfig = {
   datasetTabLabels?: Record<string, string>;
   g5TitleDatasets?: readonly string[];
   allowedFiliais?: readonly string[] | null;
+  /** Quando definido, aplica a whitelist padrão de filiais somente nesses datasets (ex.: apenas G3). */
+  allowedFiliaisDatasets?: readonly string[];
   excludedFiliais?: readonly string[];
   hideFilialFilter?: boolean;
   showProcessCard?: boolean;
@@ -444,18 +446,25 @@ export function FluigSolicitacoesPage({
     () => new Set(config?.g5TitleDatasets ?? ['DataSet_G5FollowUp']),
     [config?.g5TitleDatasets]
   );
+  const datasetId = datasets[activeTab] ?? datasets[0];
   const allowedFiliais = useMemo(() => {
     if (config && 'allowedFiliais' in config) {
-      return config.allowedFiliais ? [...config.allowedFiliais] : null;
+      const explicit = config.allowedFiliais ? [...config.allowedFiliais] : null;
+      if (explicit === null && config.allowedFiliaisDatasets?.includes(datasetId)) {
+        return [...FILIAIS_PERMITIDAS];
+      }
+      return explicit;
+    }
+    if (config?.allowedFiliaisDatasets) {
+      return config.allowedFiliaisDatasets.includes(datasetId) ? [...FILIAIS_PERMITIDAS] : null;
     }
     return [...FILIAIS_PERMITIDAS];
-  }, [config]);
+  }, [config, datasetId]);
   const excludedFiliaisSet = useMemo(
     () => new Set((config?.excludedFiliais ?? []).map((f) => f.trim().toLowerCase())),
     [config?.excludedFiliais]
   );
   const hideFilialFilter = config?.hideFilialFilter ?? false;
-  const datasetId = datasets[activeTab] ?? datasets[0];
   const showProcessCard = config?.showProcessCard ?? true;
   const effectiveRecordsPerPage = config?.fixedRecordsPerPage ?? recordsPerPage;
   const hideRecordsPerPageSelector = config?.hideRecordsPerPageSelector ?? false;
@@ -2242,7 +2251,11 @@ export function FluigSolicitacoesPage({
                                       const urgVal = getUrgenciaValue(row);
                                       const urgLower = urgVal.toLowerCase();
                                       const urgUrgent = /urg|alta|imedi|crit/i.test(urgLower);
-                                      const ccNome = centroCustoSomenteNome(getCCValue(row));
+                                      const ccRaw = getCCValue(row);
+                                      const ccNome =
+                                        datasetId === 'DataSet_G4FollowUp'
+                                          ? getCCDisplayLabel(ccRaw)
+                                          : centroCustoSomenteNome(ccRaw);
                                       return (
                                         <tr
                                           key={isCompact ? start + i : i}
