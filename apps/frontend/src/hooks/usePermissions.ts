@@ -113,7 +113,7 @@ export function usePermissions() {
   /** Rescisão / alteração função-salário: admin, equipe DP (gerenciar), Controle «criar solicitações restritas» ou Gestor DP no contrato. */
   const canCreateSensitiveDpRequestType = (contractId: string | null | undefined) => {
     if (isAdministrator || permissionData?.isAdmin) return true;
-    if (can(pk('/ponto/gerenciar-solicitacoes-dp'))) return true;
+    if (can(pk('/ponto/gerenciar-solicitacoes-gerais'))) return true;
     if (can(pk('/ponto/controle/criar-tipos-restritos-dp'))) return true;
     if (!contractId) return false;
     return dpApprovalContractIdSet.has(contractId);
@@ -221,8 +221,10 @@ export function useRoutePermission(route: string) {
     '/ponto/gerenciar-atestados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados')),
     '/ponto/solicitacoes': isAdministrator || can(pk('/ponto/solicitacoes')),
     '/ponto/gerenciar-solicitacoes': isAdministrator || can(pk('/ponto/gerenciar-solicitacoes')),
-    '/ponto/solicitacoes-dp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-dp')),
-    '/ponto/gerenciar-solicitacoes-dp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
+    '/ponto/solicitacoes-gerais':
+      isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-gerais')),
+    '/ponto/gerenciar-solicitacoes-gerais':
+      isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-gerais')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-feriados')),

@@ -192,7 +192,7 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
 const LIST_TABLE_ACTION_ICON_CLASS =
   'inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
 
-export default function GerenciarSolicitacoesDpPage() {
+export function GerenciarSolicitacoesGeraisPage() {
   const queryClient = useQueryClient();
 
   const [activeStatus, setActiveStatus] = useState<'all' | Exclude<DpRequestStatus, 'WAITING_MANAGER'>>('all');
@@ -338,7 +338,7 @@ export default function GerenciarSolicitacoesDpPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/gerenciar-solicitacoes-dp">
+    <ProtectedRoute route="/ponto/gerenciar-solicitacoes-gerais">
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
@@ -844,5 +844,13 @@ export default function GerenciarSolicitacoesDpPage() {
       </MainLayout>
     </ProtectedRoute>
   );
+}
+
+export default function LegacyGerenciarSolicitacoesDpPage() {
+  const router = useRouter();
+  React.useEffect(() => {
+    router.replace('/ponto/gerenciar-solicitacoes-gerais');
+  }, [router]);
+  return <Loading message="Redirecionando..." fullScreen size="lg" />;
 }
 

@@ -173,7 +173,9 @@ const LIST_TABLE_ACTION_ICON_CLASS =
 const SENSITIVE_DP_REQUEST_TYPES = ['RESCISAO', 'ALTERACAO_FUNCAO_SALARIO'] as const;
 
 const selectFieldCls =
-  'w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100';
+  'w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 appearance-none focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400 focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-red-500 dark:focus-visible:!ring-red-400';
+const inputFieldCls =
+  'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400 focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-red-500 dark:focus-visible:!ring-red-400';
 
 /** Polos no formulário de solicitação DP (UF); alinha com o cadastro BRASÍLIA/GOIÁS → DF/GO. */
 const DP_POLO_OPTIONS = ['DF', 'GO'] as const;
@@ -196,7 +198,7 @@ function isDpFormPolo(v: string): v is (typeof DP_POLO_OPTIONS)[number] {
   return (DP_POLO_OPTIONS as readonly string[]).includes(v);
 }
 
-export default function SolicitacoesDpPage() {
+export function SolicitacoesGeraisPage() {
   const queryClient = useQueryClient();
   const { canCreateSensitiveDpRequestType, isLoading: loadingPerms } = usePermissions();
   const [activeTab, setActiveTab] = useState<'list' | 'new'>('list');
@@ -283,6 +285,16 @@ export default function SolicitacoesDpPage() {
     company: '',
     polo: '',
   });
+
+  const resetCreateForm = () => {
+    setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
+    setDetails({});
+    setAtestadoFile(null);
+    setHoraExtraFile(null);
+    setAtestadoFileName('');
+    setHoraExtraFileName('');
+    setMultiEmpSearch('');
+  };
 
   const selectableRequestTypeEntries = React.useMemo(() => {
     return Object.entries(TYPE_LABELS).filter(([k]) => {
@@ -391,18 +403,7 @@ export default function SolicitacoesDpPage() {
     onSuccess: async () => {
       toast.success('Solicitação DP criada com sucesso!');
       await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
-      setDetails({});
-      setAtestadoFile(null);
-      setHoraExtraFile(null);
-      setAtestadoFileName('');
-      setHoraExtraFileName('');
-      setMultiEmpSearch('');
-      setForm((p) => ({
-        ...p,
-        prazoInicio: '',
-        prazoFim: '',
-        requestType: '',
-      }));
+      resetCreateForm();
       setActiveTab('list');
     },
     onError: (err: any) => {
@@ -435,7 +436,7 @@ export default function SolicitacoesDpPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/solicitacoes-dp">
+    <ProtectedRoute route="/ponto/solicitacoes-gerais">
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
@@ -455,76 +456,62 @@ export default function SolicitacoesDpPage() {
                     <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações DP</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações Gerais</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       Visualize, filtre e acompanhe o andamento das solicitações.
                     </p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-                  {activeTab === 'list' && (
-                    <>
-                      <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                        <input
-                          type="text"
-                          value={mySearch}
-                          onChange={(e) => setMySearch(e.target.value)}
-                          placeholder="Buscar por ID..."
-                          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsFiltersModalOpen(true)}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                        aria-label="Abrir filtro"
-                        title="Filtro"
-                      >
-                        <Filter className="h-4 w-4" />
-                      </button>
-                    </>
-                  )}
-                  {activeTab === 'new' && (
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('list')}
-                      className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                    >
-                      <span>Voltar para a lista</span>
-                    </button>
-                  )}
-                  {activeTab === 'list' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveTab('new');
-                        setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
-                        setDetails({});
-                        setAtestadoFile(null);
-                        setHoraExtraFile(null);
-                        setAtestadoFileName('');
-                        setHoraExtraFileName('');
-                        setMultiEmpSearch('');
-                      }}
-                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                    >
-                      <Plus className="h-4 w-4 shrink-0" />
-                      <span>Nova solicitação</span>
-                    </button>
-                  )}
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={mySearch}
+                      onChange={(e) => setMySearch(e.target.value)}
+                      placeholder="Buscar por ID..."
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsFiltersModalOpen(true)}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    aria-label="Abrir filtro"
+                    title="Filtro"
+                  >
+                    <Filter className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetCreateForm();
+                      setActiveTab('new');
+                    }}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova solicitação</span>
+                  </button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
               {activeTab === 'new' ? (
-                <form
-                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void createMutation.mutate();
-                  }}
+                <Modal
+                  isOpen={true}
+                  onClose={() => setActiveTab('list')}
+                  title="Nova solicitação"
+                  size="xl"
                 >
+                  <div className="max-h-[75vh] overflow-y-auto overflow-x-visible px-1 pt-1">
+                    <form
+                      className="grid grid-cols-1 gap-4 md:grid-cols-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void createMutation.mutate();
+                      }}
+                    >
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium mb-1 text-gray-800 dark:text-gray-200">
                       Urgência
@@ -546,7 +533,7 @@ export default function SolicitacoesDpPage() {
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium mb-1">Tipo de solicitação *</label>
                     <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+                      className={selectFieldCls}
                       value={form.requestType}
                       onChange={(e) => {
                         const rt = (e.target.value === '' ? '' : e.target.value) as DpRequestType | '';
@@ -609,6 +596,7 @@ export default function SolicitacoesDpPage() {
                     <label className="block text-sm font-medium mb-1">Início do prazo *</label>
                     <Input
                       type="date"
+                      className={inputFieldCls}
                       value={form.prazoInicio}
                       onChange={(e) => setForm((p) => ({ ...p, prazoInicio: e.target.value }))}
                     />
@@ -617,6 +605,7 @@ export default function SolicitacoesDpPage() {
                     <label className="block text-sm font-medium mb-1">Fim do prazo *</label>
                     <Input
                       type="date"
+                      className={inputFieldCls}
                       value={form.prazoFim}
                       onChange={(e) => setForm((p) => ({ ...p, prazoFim: e.target.value }))}
                     />
@@ -689,30 +678,17 @@ export default function SolicitacoesDpPage() {
                     </div>
                   </div>
 
-                  <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="min-w-0">
-                      <label className="block text-sm font-medium mb-1">Solicitante</label>
-                      <Input value={user?.name || ''} disabled fullWidth />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="block text-sm font-medium mb-1">Login</label>
-                      <Input value={user?.email || ''} disabled fullWidth />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="block text-sm font-medium mb-1">Setor solicitante</label>
-                      <Input value={employee?.department || ''} disabled fullWidth />
-                    </div>
+                      <div className="md:col-span-2 flex justify-end gap-3">
+                        <Button type="button" variant="outline" onClick={() => setActiveTab('list')}>
+                          Cancelar
+                        </Button>
+                        <Button type="submit" disabled={createMutation.isPending}>
+                          {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
+                        </Button>
+                      </div>
+                    </form>
                   </div>
-
-                  <div className="md:col-span-2 flex justify-end gap-3">
-                    <Button type="button" variant="outline" onClick={() => setActiveTab('list')}>
-                      Cancelar
-                    </Button>
-                    <Button type="submit" disabled={createMutation.isPending}>
-                      {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
-                    </Button>
-                  </div>
-                </form>
+                </Modal>
               ) : (
                 <div className="space-y-4">
                   {loadingMy ? (
@@ -851,7 +827,7 @@ export default function SolicitacoesDpPage() {
                                             setReturnComment((p) => ({ ...p, [r.id]: e.target.value }))
                                           }
                                           placeholder="Digite seu retorno para o DP..."
-                                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 min-h-[88px]"
+                                          className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[88px] focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400"
                                         />
                                         <Button
                                           size="sm"
@@ -914,7 +890,7 @@ export default function SolicitacoesDpPage() {
                       <select
                         value={myStatusFilter}
                         onChange={(e) => setMyStatusFilter(e.target.value as 'all' | DpRequestStatus)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                       >
                         <option value="all">Todos</option>
                         <option value="WAITING_MANAGER">Aguardando aprovação</option>
@@ -935,7 +911,7 @@ export default function SolicitacoesDpPage() {
                       <select
                         value={filterUrgency}
                         onChange={(e) => setFilterUrgency(e.target.value as 'all' | DpUrgency)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                       >
                         <option value="all">Todas</option>
                         {(Object.keys(URGENCY_LABELS) as DpUrgency[]).map((u) => (
@@ -950,7 +926,7 @@ export default function SolicitacoesDpPage() {
                       <select
                         value={filterRequestType}
                         onChange={(e) => setFilterRequestType(e.target.value as 'all' | DpRequestType)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                       >
                         <option value="all">Todos</option>
                         {(Object.keys(TYPE_LABELS) as DpRequestType[])
@@ -970,7 +946,7 @@ export default function SolicitacoesDpPage() {
                       <select
                         value={filterContractId}
                         onChange={(e) => setFilterContractId(e.target.value as 'all' | string)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                       >
                         <option value="all">Todos</option>
                         {contractFilterOptions.map(([id, name]) => (
@@ -1109,5 +1085,13 @@ export default function SolicitacoesDpPage() {
       </MainLayout>
     </ProtectedRoute>
   );
+}
+
+export default function LegacySolicitacoesDpPage() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace('/ponto/solicitacoes-gerais');
+  }, [router]);
+  return <Loading message="Redirecionando..." fullScreen size="lg" />;
 }
 

@@ -230,18 +230,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           },
           {
             name: 'Solicitações Gerais',
-            href: '/ponto/solicitacoes-dp',
+            href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
-            permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+            permission: isAdministrator || can(pk('/ponto/solicitacoes-gerais'))
           },
           {
             name: 'Gerenciar Solicitações Gerais',
-            href: '/ponto/gerenciar-solicitacoes-dp',
+            href: '/ponto/gerenciar-solicitacoes-gerais',
             icon: FileText,
             description: 'Aprovar solicitações do DP',
             permission:
-              isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
+              isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-gerais')),
           },
           {
             name: 'Férias',

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Input } from '@/components/ui/Input';
+import { Input as BaseInput } from '@/components/ui/Input';
 import { DEPARTMENTS_LIST } from '@/constants/payrollFilters';
 
 export type DpFormRequestType =
@@ -19,9 +19,17 @@ export type DpFormRequestType =
 type PayrollEmp = { id: string; name: string };
 
 const fieldBox =
-  'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
+  'w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm appearance-none focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400 focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-red-500 dark:focus-visible:!ring-red-400';
 const labelCls = 'block text-sm font-medium mb-1 text-gray-800 dark:text-gray-200';
 const taCls = `${fieldBox} min-h-[100px] resize-y`;
+const inputFieldCls =
+  'border-gray-300 dark:border-gray-600 focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400 focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-red-500 dark:focus-visible:!ring-red-400';
+const Input = (props: React.ComponentProps<typeof BaseInput>) => (
+  <BaseInput
+    {...props}
+    className={[inputFieldCls, props.className].filter(Boolean).join(' ')}
+  />
+);
 
 const MOTIVO_CONTRATACAO = [
   { value: 'AUMENTO_QUADRO', label: 'Aumento de quadro' },
@@ -124,7 +132,7 @@ function EmployeeComboboxSingle({
   };
 
   const inputCls = `${fieldBox} w-full pr-10 outline-none transition-shadow ${
-    isOpen ? 'ring-2 ring-blue-500 border-blue-500 dark:ring-blue-400 dark:border-blue-400' : ''
+    isOpen ? 'ring-2 ring-red-500 border-red-500 dark:ring-red-400 dark:border-red-400' : ''
   }`;
 
   return (
@@ -174,7 +182,7 @@ function EmployeeComboboxSingle({
                   role="option"
                   aria-selected={active}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
-                    active ? 'bg-blue-50 font-medium text-blue-900 dark:bg-blue-950/40 dark:text-blue-100' : 'text-gray-800 dark:text-gray-200'
+                    active ? 'bg-red-50 font-medium text-red-900 dark:bg-red-950/40 dark:text-red-100' : 'text-gray-800 dark:text-gray-200'
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
