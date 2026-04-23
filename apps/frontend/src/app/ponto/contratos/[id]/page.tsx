@@ -17,9 +17,9 @@ import {
   ExternalLink,
   BarChart3,
   Trash2,
-  Percent
+  Percent,
+  Calculator,
 } from 'lucide-react';
-import { ArrowLeft, FileText, Plus, Receipt, X, Edit2, ClipboardList, FileDown, ExternalLink, BarChart3, Trash2, Calculator } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';

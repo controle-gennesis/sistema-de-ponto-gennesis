@@ -673,12 +673,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const hasActiveItem = category.items.some(item => isActive(item.href));
             const isExpanded = isMenuExpanded(category.id);
             const visibleItems = category.items.filter(item => item.permission);
-            // Sempre mostrar como grupo expansível (título + subitens), mesmo com 1 item visível —
-            // evita que "Funcionários" apareça solto fora de "Departamento Pessoal".
-            const forceAsGroup =
-              category.id === 'main' ||
-              category.id === 'engenharia' ||
-              category.id === 'departamento-pessoal';
+            // Sempre mostrar todas as categorias como grupo expansível (título + subitens),
+            // mesmo quando só resta 1 item permitido para o usuário.
+            const forceAsGroup = true;
             const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             
