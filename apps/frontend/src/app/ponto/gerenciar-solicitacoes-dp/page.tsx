@@ -437,8 +437,19 @@ export function GerenciarSolicitacoesGeraisPage() {
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Buscar por ID..."
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-10 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
+                    {search ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                        aria-label="Limpar busca"
+                        title="Limpar"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
                   </div>
                   <button
                     type="button"
@@ -551,8 +562,18 @@ export function GerenciarSolicitacoesGeraisPage() {
                         })}
                         {filteredRequests.length === 0 && (
                           <tr>
-                            <td colSpan={9} className="py-8 text-center text-gray-500">
-                              Nenhuma solicitação DP encontrada
+                            <td colSpan={9} className="px-6 py-10 text-center">
+                              <ClipboardList
+                                className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500"
+                                aria-hidden
+                                strokeWidth={1.25}
+                              />
+                              <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                                Nenhuma solicitação encontrada
+                              </p>
+                              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                                Ajuste os filtros ou aguarde novas solicitações.
+                              </p>
                             </td>
                           </tr>
                         )}

@@ -696,21 +696,6 @@ export function SolicitacoesGeraisPage() {
                       <Loader2 className="h-8 w-8 shrink-0 animate-spin text-red-600 dark:text-red-400" aria-hidden />
                       <span className="text-sm font-medium">Carregando solicitações…</span>
                     </div>
-                  ) : myRequests.length === 0 ? (
-                    <div className="py-8 text-center">
-                      <ClipboardList
-                        className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500"
-                        aria-hidden
-                        strokeWidth={1.25}
-                      />
-                      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        Nenhuma solicitação ao DP ainda.
-                      </p>
-                      <p className="mx-auto mt-2 max-w-md text-sm text-gray-600 dark:text-gray-400">
-                        Use <span className="font-medium text-gray-700 dark:text-gray-300">Nova solicitação</span> acima
-                        para enviar um pedido ao Departamento Pessoal e acompanhar o andamento nesta lista.
-                      </p>
-                    </div>
                   ) : (
                     <>
                       <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
@@ -764,9 +749,28 @@ export function SolicitacoesGeraisPage() {
                               <tr>
                                 <td
                                   colSpan={10}
-                                  className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
+                                  className="px-6 py-10 text-center"
                                 >
-                                  Nenhuma solicitação encontrada para essa busca.
+                                  {myRequests.length === 0 ? (
+                                    <div className="py-1">
+                                      <ClipboardList
+                                        className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500"
+                                        aria-hidden
+                                        strokeWidth={1.25}
+                                      />
+                                      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                                        Nenhuma solicitação ainda.
+                                      </p>
+                                      <p className="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
+                                        Use <span className="font-medium text-gray-700 dark:text-gray-300">Nova solicitação</span> acima para
+                                        enviar um pedido e acompanhar o andamento nesta lista.
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                                      Nenhuma solicitação encontrada para essa busca.
+                                    </span>
+                                  )}
                                 </td>
                               </tr>
                             ) : (
