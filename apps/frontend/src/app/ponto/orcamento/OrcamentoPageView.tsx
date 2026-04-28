@@ -27,7 +27,10 @@ import {
   ArrowLeft,
   ListPlus,
   MoreVertical,
-  Eye
+  Eye,
+  ChevronLeft,
+  ChevronRight,
+  DownloadCloud
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -89,6 +92,187 @@ export interface LinhaAnaliticoComposicao {
 export interface AnaliticoComposicao {
   total: number;
   linhas: LinhaAnaliticoComposicao[];
+}
+
+// ─── Tipos da API Orçafascio ──────────────────────────────────────────────────
+
+export interface OrcafascioComposicaoListItem {
+  id: string;
+  code: string;
+  second_code: string | null;
+  description: string;
+  type: string;
+  unit: string;
+  is_sicro: boolean;
+  created_at: string;
+  /** Preenchido quando a listagem vem do modo «todas as bases». */
+  __orcafascio_base?: string;
+}
+
+export interface OrcafascioComposicaoItem {
+  banco: string;
+  code: string;
+  description: string;
+  type: string;
+  unit: string;
+  unitary_pnd: number;
+  unitary_pd: number;
+  coefficient: number;
+  pnd: number;
+  pd: number;
+  is_resource: boolean;
+}
+
+export interface OrcafascioComposicaoDetalhe {
+  id: string;
+  code: string;
+  second_code: string | null;
+  description: string;
+  type: string;
+  unit: string;
+  is_sicro: boolean;
+  labor: boolean;
+  calculation_method: { type: number; description: string };
+  prices: { pnd: number; pd: number };
+  items: OrcafascioComposicaoItem[];
+  created_at: string;
+}
+
+export interface OrcafascioListResponse<T> {
+  total: number;
+  per_page: number;
+  current_page: number;
+  records: T[];
+  _aggregated?: boolean;
+  _bases?: Array<{ segment: string; total: number }>;
+  /** Modo agregado: última página útil (max entre bases). */
+  _aggregated_page_limit?: number;
+  /** Segmento REST efetivo da última listagem (slug ou ID Mongo). */
+  _orcafascio_segment?: string;
+  /** True quando caiu no catálogo genérico (mybase etc.) — mistura várias tabelas no mesmo total. */
+  _orcafascio_mix_fallback?: boolean;
+  /** REST não expôs /orse — lista veio do agregado após 404 nos slugs. */
+  _orcafascio_rest_orse_404?: boolean;
+}
+
+/**
+ * Infere banco/tabela de referência (a API GET não envia o campo). Ordem: is_sicro → texto na descrição
+ * (incl. REF. SINAPI) → código numérico oficial → prefixos de código (CONFEA, SENAC, MP…).
+ */
+function inferirBancoOrcafascio(
+  comp: Pick<OrcafascioComposicaoListItem, 'code' | 'description' | 'is_sicro' | 'second_code'>
+): string {
+  const desc = comp.description ?? '';
+  const code = (comp.code ?? '').trim();
+  const sec = (comp.second_code ?? '').trim();
+  const texto = `${desc} ${sec}`;
+  const du = texto.toUpperCase();
+
+  if (comp.is_sicro) {
+    if (/SICRO\s*3|SICRO3/i.test(texto)) return 'SICRO3';
+    return 'SICRO';
+  }
+
+  const copiaDa = du.match(/COPIA\s+DA\s+(SINAPI|SICRO\S*)/);
+  if (copiaDa) return copiaDa[1].replace(/\s+/g, '');
+
+  if (/\bSICRO\s*3\b|\bSICRO3\b/i.test(texto)) return 'SICRO3';
+  if (/\bSINAPI\b/i.test(texto)) return 'SINAPI';
+  if (/\bSICRO\b/i.test(texto)) return 'SICRO';
+
+  if (/REF\.?\s*SINAPI/i.test(desc)) return 'SINAPI';
+  if (/CAT[AÁ]LOGO\s+SINAPI/i.test(du)) return 'SINAPI';
+  if (/\bORSE\b/i.test(texto)) return 'ORSE';
+
+  // Código só dígitos longos (tabelas oficiais no site Orçafascio)
+  if (/^\d{5,}$/.test(code)) return 'SINAPI';
+
+  /* Sem menção explícita à tabela: usar prefixo do código como origem do cadastro */
+  if (/^CONFEA-/i.test(code)) return 'CONFEA';
+  if (/^COMP\.?\s*SENAC\b/i.test(code)) return 'SENAC';
+  if (/^COMP\.?\s*MP\b/i.test(code)) return 'MP';
+  if (/^COMS\d/i.test(code)) return 'COMS';
+
+  return '—';
+}
+
+/** Rotula o segmento `/v1/base/{segment}/…` na tabela (IDs Mongo longos). */
+function rotuloSegmentoOrcafascioApi(seg: string | undefined): string {
+  if (!seg) return '—';
+  if (seg.length <= 22) return seg;
+  return `${seg.slice(0, 10)}…${seg.slice(-8)}`;
+}
+
+/** Formata a data de criação como MM/YYYY. */
+function formatDataOrcafascio(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
+    return `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  } catch { return '—'; }
+}
+
+/** Extrai apenas o mês (01–12) de uma data Orçafascio. */
+function formatMesOrcafascio(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
+    return String(d.getMonth() + 1).padStart(2, '0');
+  } catch { return '—'; }
+}
+
+/** Extrai apenas o ano de uma data Orçafascio. */
+function formatAnoOrcafascio(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
+    return String(d.getFullYear());
+  } catch { return '—'; }
+}
+
+/** Converte um item da composição Orçafascio na categoria analítica correta. */
+function categoriaOrcafascioItem(item: OrcafascioComposicaoItem): 'MATERIAL' | 'MÃO DE OBRA' {
+  // Itens que são sub-composições (serviços) → Mão de Obra
+  if (!item.is_resource) return 'MÃO DE OBRA';
+  // Insumos com type numérico: 3 = Mão de Obra no SINAPI
+  const typeNum = Number(item.type);
+  if (!isNaN(typeNum) && typeNum === 3) return 'MÃO DE OBRA';
+  return 'MATERIAL';
+}
+
+/** Converte a resposta detalhada do Orçafascio para o formato ComposicaoItem do sistema. */
+function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): ComposicaoItem {
+  const analiticoLinhas: LinhaAnaliticoComposicao[] = comp.items.map(item => ({
+    categoria: categoriaOrcafascioItem(item),
+    descricao: item.description,
+    unidade: item.unit,
+    quantidade: item.coefficient,
+    precoUnitario: item.unitary_pnd,
+    total: item.pnd,
+    codigo: item.code,
+    banco: item.banco,
+    tipoLabel: item.type,
+  }));
+
+  const maoDeObraUnitario = analiticoLinhas
+    .filter(l => l.categoria === 'MÃO DE OBRA')
+    .reduce((s, l) => s + (l.total ?? 0), 0);
+
+  const materialUnitario = analiticoLinhas
+    .filter(l => l.categoria === 'MATERIAL')
+    .reduce((s, l) => s + (l.total ?? 0), 0);
+
+  return {
+    codigo: comp.code,
+    banco: 'Orçafascio',
+    chave: comp.code,
+    descricao: comp.description,
+    unidade: comp.unit,
+    precoUnitario: comp.prices?.pnd ?? 0,
+    maoDeObraUnitario: maoDeObraUnitario || undefined,
+    materialUnitario: materialUnitario || undefined,
+    analiticoLinhas,
+  };
 }
 
 type InsumoAnaliticoManual = {
@@ -2194,6 +2378,17 @@ export function OrcamentoPageView({
   const [isImportandoOrcamento, setIsImportandoOrcamento] = useState(false);
   const [servicosExpandidos, setServicosExpandidos] = useState<Set<string>>(new Set());
   const [loadingFromApi, setLoadingFromApi] = useState(false);
+
+  // ── Orçafascio API ──────────────────────────────────────────────────────────
+  const [orcafascioModalOpen, setOrcafascioModalOpen] = useState(false);
+  const [orcafascioSearch, setOrcafascioSearch] = useState('');
+  const [orcafascioPage, setOrcafascioPage] = useState(1);
+  const [orcafascioLoading, setOrcafascioLoading] = useState(false);
+  const [orcafascioResultados, setOrcafascioResultados] = useState<OrcafascioListResponse<OrcafascioComposicaoListItem> | null>(null);
+  const [orcafascioDetalhe, setOrcafascioDetalhe] = useState<OrcafascioComposicaoDetalhe | null>(null);
+  const [orcafascioDetalheLoading, setOrcafascioDetalheLoading] = useState(false);
+  /** UF Sergipe — catálogo ORSE (find_by_code no backend usa SE por padrão). */
+  const orcafascioUfOrse = 'SE';
   const [showServicosDropdown, setShowServicosDropdown] = useState(false);
   const [showContratoDropdown, setShowContratoDropdown] = useState(false);
   const [servicosSearch, setServicosSearch] = useState('');
@@ -3151,6 +3346,119 @@ export function OrcamentoPageView({
     } finally {
       setIsUploading(false);
       e.target.value = '';
+    }
+  };
+
+  // ── Funções Orçafascio API ──────────────────────────────────────────────────
+
+  const buscarComposicoesOrcafascio = async (page = 1) => {
+    setOrcafascioLoading(true);
+    setOrcafascioDetalhe(null);
+    const q = orcafascioSearch.trim();
+    try {
+      // Código só dígitos (ex.: SINAPI 88418): listagem ignora — usar find_by_code
+      if (/^\d+$/.test(q)) {
+        const res = await api.get<OrcafascioComposicaoDetalhe>(
+          '/orcafascio/composicoes/by-code',
+          {
+            params: { code: q, state: orcafascioUfOrse },
+            timeout: 90000,
+          }
+        );
+        const d = res.data;
+        setOrcafascioResultados({
+          total: 1,
+          per_page: 1,
+          current_page: 1,
+          records: [
+            {
+              id: d.id,
+              code: d.code,
+              second_code: d.second_code,
+              description: d.description,
+              type: d.type,
+              unit: d.unit,
+              is_sicro: d.is_sicro,
+              created_at: d.created_at,
+            },
+          ],
+        });
+        setOrcafascioPage(1);
+        return;
+      }
+
+      const params: Record<string, unknown> = { page };
+      if (q) params.search = q;
+      const res = await api.get<OrcafascioListResponse<OrcafascioComposicaoListItem>>(
+        '/orcafascio/composicoes',
+        { params, timeout: 240000 }
+      );
+      setOrcafascioResultados(res.data);
+      setOrcafascioPage(page);
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Erro ao buscar composições';
+      if (/^\d+$/.test(q) && (status === 404 || String(msg).includes('404'))) {
+        toast.error(`Orçafascio: nenhuma composição com o código "${q}" neste estado.`);
+      } else {
+        toast.error(`Orçafascio: ${msg}`);
+      }
+      if (/^\d+$/.test(q)) setOrcafascioResultados(null);
+    } finally {
+      setOrcafascioLoading(false);
+    }
+  };
+
+  const verDetalheComposicaoOrcafascio = async (comp: OrcafascioComposicaoListItem) => {
+    setOrcafascioDetalheLoading(true);
+    try {
+      const res = await api.get<OrcafascioComposicaoDetalhe>(
+        `/orcafascio/composicoes/by-code`,
+        { params: { code: comp.code, state: orcafascioUfOrse }, timeout: 90000 }
+      );
+      setOrcafascioDetalhe(res.data);
+    } catch {
+      // fallback: busca por ID
+      try {
+        const baseSeg = comp.__orcafascio_base;
+        const res = await api.get<OrcafascioComposicaoDetalhe>(
+          `/orcafascio/composicoes/${comp.id}`,
+          {
+            params: baseSeg ? { base: baseSeg } : undefined,
+            timeout: 90000,
+          }
+        );
+        setOrcafascioDetalhe(res.data);
+      } catch (err: any) {
+        toast.error('Erro ao carregar detalhes da composição');
+      }
+    } finally {
+      setOrcafascioDetalheLoading(false);
+    }
+  };
+
+  const importarComposicaoOrcafascio = async (detalhe: OrcafascioComposicaoDetalhe) => {
+    const novaComp = orcafascioToComposicaoItem(detalhe);
+    const existe = composicoes.findIndex(c => c.codigo === novaComp.codigo);
+    let novas: ComposicaoItem[];
+    if (existe >= 0) {
+      if (!confirm(`A composição "${novaComp.codigo}" já existe no catálogo. Substituir?`)) return;
+      novas = composicoes.map((c, i) => (i === existe ? novaComp : c));
+    } else {
+      novas = [...composicoes, novaComp];
+    }
+    setComposicoes(novas);
+    try {
+      await saveComposicoesGeralToApi(novas);
+      toast.success(`Composição ${novaComp.codigo} importada com sucesso!`);
+      setOrcafascioModalOpen(false);
+      setOrcafascioDetalhe(null);
+    } catch {
+      toast.error('Erro ao salvar composição importada');
     }
   };
 
@@ -6056,7 +6364,7 @@ export function OrcamentoPageView({
                     {rotuloContratoListaOrcamentos ?? 'Orçamento'}
                   </h1>
                   <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-                    Automação de orçamentos com composições e serviços padrão por contrato
+                    Orçamentos
                   </p>
                 </div>
               </div>
@@ -6066,7 +6374,7 @@ export function OrcamentoPageView({
                   {rotuloContratoListaOrcamentos ?? 'Orçamento'}
                 </h1>
                 <p className="mt-2 text-gray-600 dark:text-gray-400">
-                  Automação de orçamentos com composições e serviços padrão por contrato
+                  Orçamentos
                 </p>
               </>
             )}
@@ -6232,7 +6540,7 @@ export function OrcamentoPageView({
                         type="button"
                         onClick={criarNovoOrcamento}
                         disabled={carregandoListaOrcamentos}
-                        className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:pointer-events-none disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                        className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
                       >
                         {carregandoListaOrcamentos ? (
                           <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
@@ -8550,6 +8858,24 @@ export function OrcamentoPageView({
                       </label>
                       <button
                         type="button"
+                        onClick={() => {
+                          setOrcafascioModalOpen(true);
+                          setOrcafascioResultados(null);
+                          setOrcafascioDetalhe(null);
+                          setOrcafascioSearch('');
+                        }}
+                        disabled={isImportandoOrcamento || isUploading || carregandoListaOrcamentos}
+                        className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium bg-violet-600 text-white shadow-sm hover:bg-violet-700 transition-colors ${
+                          isImportandoOrcamento || isUploading || carregandoListaOrcamentos
+                            ? 'opacity-50 pointer-events-none'
+                            : ''
+                        }`}
+                      >
+                        <DownloadCloud className="w-4 h-4" />
+                        <span>Buscar no Orçafascio</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={apagarPlanilhaComposicoes}
                         disabled={composicoes.length === 0}
                         className="w-full text-center text-xs font-medium py-1.5 transition-colors text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 disabled:pointer-events-none disabled:hover:text-slate-500"
@@ -8613,6 +8939,442 @@ export function OrcamentoPageView({
 
         </div>
       </MainLayout>
+
+      {/* ── Modal Orçafascio ─────────────────────────────────────────────── */}
+      {orcafascioModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-6xl max-h-[92vh] flex flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-2xl overflow-hidden">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-600 text-white">
+                  <DownloadCloud className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Importar do Orçafascio</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Catálogo ORSE (Sergipe) — busca por código ou descrição
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setOrcafascioModalOpen(false); setOrcafascioDetalhe(null); }}
+                className="rounded-lg p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Busca (somente ORSE no backend) */}
+            <div className="px-6 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0 flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1 block">
+                  Código ou descrição
+                </label>
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5">
+                  <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Vazio = listar catálogo (1ª página); ou código / trecho da descrição…"
+                    value={orcafascioSearch}
+                    onChange={e => setOrcafascioSearch(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && buscarComposicoesOrcafascio(1)}
+                    className="flex-1 text-sm bg-transparent outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400"
+                  />
+                </div>
+              </div>
+
+              <div className="self-end flex flex-col items-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => buscarComposicoesOrcafascio(1)}
+                  disabled={orcafascioLoading}
+                  title="Campo vazio ou só espaços: primeira página do catálogo; texto ou código refinam a lista."
+                  className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {orcafascioLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                  Buscar
+                </button>
+              </div>
+            </div>
+
+            {orcafascioResultados?._orcafascio_mix_fallback && (
+              <div className="px-6 py-2 border-b border-amber-200/80 dark:border-amber-900/50 bg-amber-50/90 dark:bg-amber-950/40 shrink-0">
+                <p className="text-xs text-amber-900 dark:text-amber-100 leading-snug">
+                  {orcafascioResultados._orcafascio_rest_orse_404 ? (
+                    <>
+                      <strong className="font-semibold">A API REST não tem rota para «orse».</strong> O backend recebeu{' '}
+                      <strong>404</strong> em <code className="font-mono text-[11px]">/v1/base/orse/compositions</code> — o site usa{' '}
+                      <code className="font-mono text-[11px]">app.orcafascio.com/banco/orse/…</code>, que não é o mesmo caminho da REST.
+                      Por isso esta lista veio do segmento{' '}
+                      <code className="rounded bg-amber-100/90 dark:bg-amber-900/60 px-1 py-0.5 font-mono text-[11px]">
+                        {orcafascioResultados._orcafascio_segment ?? '—'}
+                      </code>{' '}
+                      (catálogo agregado ~{orcafascioResultados.total.toLocaleString('pt-BR')} itens). Para só ORSE (~9.883), obtenha o{' '}
+                      <strong>ID Mongo</strong> da base em ORCAFASCIO_ORSE_SEGMENT (diagnóstico:{' '}
+                      <code className="font-mono text-[11px]">GET /api/orcafascio/diagnostico</code>) ou suporte Orçafascio.
+                      Para não usar este fallback: <code className="font-mono text-[11px]">ORCAFASCIO_ORSE_FALLBACK_MYBASE_ON_404=0</code> no .env.
+                    </>
+                  ) : (
+                    <>
+                      <strong className="font-semibold">Catálogo misto.</strong> Esta resposta veio do segmento{' '}
+                      <code className="rounded bg-amber-100/90 dark:bg-amber-900/60 px-1 py-0.5 font-mono text-[11px]">
+                        {orcafascioResultados._orcafascio_segment ?? '—'}
+                      </code>{' '}
+                      (oficiais agregados), por isso o total e a coluna «Banco» misturam várias tabelas. Defina{' '}
+                      <code className="font-mono text-[11px]">ORCAFASCIO_ORSE_SEGMENT</code> com o ID correto da base ORSE na REST.
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {/* Corpo */}
+            <div className="flex flex-1 min-h-0 overflow-hidden">
+
+              {/* Tabela de composições */}
+              <div className={`flex flex-col flex-1 min-w-0 overflow-hidden ${orcafascioDetalhe ? 'border-r border-gray-100 dark:border-gray-800' : ''}`}>
+
+                {orcafascioLoading && (
+                  <div className="flex items-center justify-center py-12 text-gray-400">
+                    <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                    <span className="text-sm">Carregando…</span>
+                  </div>
+                )}
+
+                {!orcafascioLoading && !orcafascioResultados && (
+                  <div className="flex flex-col items-center justify-center py-12 text-gray-400 px-6 text-center">
+                    <DownloadCloud className="w-10 h-10 mb-2 opacity-40" />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Clique em <strong className="font-medium text-gray-600 dark:text-gray-300">Buscar</strong> para carregar o catálogo.
+                    </p>
+                  </div>
+                )}
+
+                {!orcafascioLoading && orcafascioResultados && (() => {
+                  const qRaw = orcafascioSearch.trim();
+                  const qLc = qRaw.toLowerCase();
+                  const listagemPorTexto = qRaw.length > 0 && !/^\d+$/.test(qRaw);
+                  const correspondeTextoLocal = (c: OrcafascioComposicaoListItem) => {
+                    if (!listagemPorTexto) return true;
+                    const hay = `${c.code} ${c.second_code ?? ''} ${c.description}`.toLowerCase();
+                    return hay.includes(qLc);
+                  };
+                  const filtradas = orcafascioResultados.records.filter(c => correspondeTextoLocal(c));
+
+                  const totalCatalogo = orcafascioResultados.total;
+                  const nPag = orcafascioResultados.records.length;
+                  const textoSemMatchNestaPag =
+                    listagemPorTexto &&
+                    nPag > 0 &&
+                    filtradas.length === 0 &&
+                    orcafascioResultados.records.every(c => !correspondeTextoLocal(c));
+
+                  const showSegmentoApiCol =
+                    !!orcafascioResultados._aggregated ||
+                    orcafascioResultados.records.some(c => !!c.__orcafascio_base);
+
+                  return filtradas.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 px-6 text-center max-w-lg mx-auto">
+                      {orcafascioResultados.records.length === 0 ? (
+                        <p className="text-sm text-gray-400">Esta página veio vazia da API.</p>
+                      ) : textoSemMatchNestaPag ? (
+                        <>
+                          <p className="text-sm text-amber-600 dark:text-amber-400 font-medium">
+                            Nenhuma das {nPag} composição(ões) desta página contém «{qRaw}».
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">
+                            O catálogo desta base tem cerca de {totalCatalogo.toLocaleString('pt-BR')} itens, mas a API envia só alguns por página (sem filtrar pelo texto).
+                            Use as <strong className="text-gray-600 dark:text-gray-300">setas</strong> para outras páginas — o termo pode aparecer lá.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-gray-400">Nenhuma composição encontrada.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-auto">
+                      <table className="w-full text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50 dark:bg-gray-800/70 sticky top-0 z-10">
+                            {showSegmentoApiCol && (
+                              <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] whitespace-nowrap border-b border-gray-200 dark:border-gray-700 max-w-[140px]">
+                                Segmento API
+                              </th>
+                            )}
+                            <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] whitespace-nowrap border-b border-gray-200 dark:border-gray-700">Banco</th>
+                            <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] whitespace-nowrap border-b border-gray-200 dark:border-gray-700">Data</th>
+                            <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] whitespace-nowrap border-b border-gray-200 dark:border-gray-700">Código</th>
+                            <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Descrição</th>
+                            <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] whitespace-nowrap border-b border-gray-200 dark:border-gray-700">Tipo</th>
+                            <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] whitespace-nowrap border-b border-gray-200 dark:border-gray-700">UN</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtradas.map(comp => (
+                            <tr
+                              key={comp.__orcafascio_base ? `${comp.__orcafascio_base}:${comp.id}` : comp.id}
+                              onClick={() => verDetalheComposicaoOrcafascio(comp)}
+                              className={`cursor-pointer border-b border-gray-50 dark:border-gray-800/60 transition-colors hover:bg-violet-50 dark:hover:bg-violet-950/20 ${
+                                orcafascioDetalhe?.id === comp.id ? 'bg-violet-50 dark:bg-violet-950/30' : ''
+                              }`}
+                            >
+                              {showSegmentoApiCol && (
+                                <td
+                                  className="px-3 py-2 whitespace-nowrap max-w-[140px]"
+                                  title={comp.__orcafascio_base ?? ''}
+                                >
+                                  <span className="inline-flex items-center rounded bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.5 text-[9px] font-mono text-slate-600 dark:text-slate-300 truncate block max-w-[132px]">
+                                    {rotuloSegmentoOrcafascioApi(comp.__orcafascio_base)}
+                                  </span>
+                                </td>
+                              )}
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                <span className="inline-flex items-center rounded bg-violet-100 dark:bg-violet-900/50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+                                  {inferirBancoOrcafascio(comp)}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono text-[11px]">
+                                {formatDataOrcafascio(comp.created_at)}
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap font-mono font-semibold text-gray-800 dark:text-gray-200 text-[11px]">
+                                {comp.code}
+                                {comp.is_sicro && <span className="ml-1 text-[9px] text-blue-500 font-normal">SICRO</span>}
+                              </td>
+                              <td className="px-3 py-2 text-gray-700 dark:text-gray-300 max-w-xs">
+                                <span className="line-clamp-2 leading-snug">{comp.description}</span>
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-gray-500 dark:text-gray-400 text-[11px]">{comp.type}</td>
+                              <td className="px-3 py-2 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono text-[11px]">{comp.unit}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
+                {/* Paginação: total da API = catálogo na base (listagem GET na doc não filtra por texto no servidor). */}
+                {orcafascioResultados && (() => {
+                  const qRaw = orcafascioSearch.trim();
+                  const listagemPorTexto = qRaw.length > 0 && !/^\d+$/.test(qRaw);
+                  const rawLen = orcafascioResultados.records.length;
+                  const agg = !!orcafascioResultados._aggregated;
+                  const aggLimit = orcafascioResultados._aggregated_page_limit;
+                  const matchLocal = listagemPorTexto
+                    ? orcafascioResultados.records.filter(c => {
+                        const hay = `${c.code} ${c.second_code ?? ''} ${c.description}`.toLowerCase();
+                        return hay.includes(qRaw.toLowerCase());
+                      }).length
+                    : rawLen;
+                  const showPagination = agg
+                    ? ((aggLimit ?? 1) > 1 || orcafascioPage > 1)
+                    : orcafascioResultados.total > orcafascioResultados.per_page;
+                  let disableNext = orcafascioLoading;
+                  if (!disableNext) {
+                    if (agg && aggLimit != null) {
+                      disableNext = orcafascioPage >= aggLimit;
+                    } else if (!agg) {
+                      disableNext =
+                        orcafascioPage * orcafascioResultados.per_page >= orcafascioResultados.total;
+                    }
+                  }
+                  return (
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-800 shrink-0 gap-2 flex-wrap">
+                    <div className="text-xs text-gray-400 min-w-0 flex-1">
+                      <span>
+                        Pág. {orcafascioResultados.current_page}
+                        {agg && aggLimit != null ? (
+                          <>
+                            {' · '}
+                            <span className="opacity-90">
+                              até página {aggLimit.toLocaleString('pt-BR')} (por base)
+                            </span>
+                          </>
+                        ) : null}
+                        {' · '}
+                        {listagemPorTexto ? (
+                          <>
+                            <strong className="text-gray-600 dark:text-gray-300">{matchLocal}</strong>
+                            {' '}
+                            com «{qRaw}» nesta página ({rawLen} carregados)
+                            {' · '}
+                            <span className="opacity-90">
+                              total no catálogo (API): {orcafascioResultados.total.toLocaleString('pt-BR')}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            {orcafascioResultados.total.toLocaleString('pt-BR')} composições
+                            {orcafascioResultados._orcafascio_mix_fallback
+                              ? ' (catálogo agregado — várias tabelas)'
+                              : ' no catálogo ORSE'}
+                            {orcafascioResultados._orcafascio_segment ? (
+                              <span className="opacity-80">
+                                {' · '}
+                                segmento API:{' '}
+                                <code className="text-[10px] font-mono">
+                                  {orcafascioResultados._orcafascio_segment.length > 36
+                                    ? `${orcafascioResultados._orcafascio_segment.slice(0, 18)}…`
+                                    : orcafascioResultados._orcafascio_segment}
+                                </code>
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </span>
+                      {agg && orcafascioResultados._bases && orcafascioResultados._bases.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {orcafascioResultados._bases.map(b => (
+                            <span
+                              key={b.segment}
+                              title={b.segment}
+                              className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-mono bg-gray-100 dark:bg-gray-800/90 text-gray-500 dark:text-gray-400 max-w-[min(100%,240px)] truncate"
+                            >
+                              {rotuloSegmentoOrcafascioApi(b.segment)}: {b.total.toLocaleString('pt-BR')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <span className="block text-[10px] text-gray-400/80 mt-0.5">
+                        {listagemPorTexto
+                          ? 'O número grande é o catálogo completo ORSE: a API costuma não filtrar o texto no servidor — refinamos só entre os itens desta página.'
+                          : agg
+                            ? 'Modo «todas as bases»: só entram bases que o token consegue ler no GET /compositions; cada página usa o mesmo número de página em todas elas.'
+                            : orcafascioResultados._orcafascio_mix_fallback
+                              ? 'Coluna «Banco» é inferida pelo texto — em catálogo misto aparecem várias origens. Configure ORCAFASCIO_ORSE_SEGMENT para listar só ORSE.'
+                              : 'Listagem no segmento ORSE dedicado (Sergipe).'}
+                      </span>
+                    </div>
+                    {showPagination && (
+                      <div className="flex gap-1 shrink-0">
+                        <button
+                          disabled={orcafascioPage <= 1 || orcafascioLoading}
+                          onClick={() => buscarComposicoesOrcafascio(orcafascioPage - 1)}
+                          className="rounded-md p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          disabled={disableNext}
+                          onClick={() => buscarComposicoesOrcafascio(orcafascioPage + 1)}
+                          className="rounded-md p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  );
+                })()}
+              </div>
+
+              {/* Painel de detalhe */}
+              {orcafascioDetalhe && (
+                <div className="w-80 shrink-0 flex flex-col overflow-y-auto">
+                  {orcafascioDetalheLoading ? (
+                    <div className="flex items-center justify-center py-12 text-gray-400">
+                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                      <span className="text-sm">Carregando detalhes…</span>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Cabeçalho do detalhe */}
+                      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                        <span className="inline-flex items-center rounded bg-violet-100 dark:bg-violet-900/60 px-2 py-0.5 text-xs font-mono font-semibold text-violet-700 dark:text-violet-300 mb-1">
+                          {orcafascioDetalhe.code}
+                        </span>
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 leading-snug mt-1">
+                          {orcafascioDetalhe.description}
+                        </p>
+                        <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                          <span><span className="font-medium">Un.:</span> {orcafascioDetalhe.unit}</span>
+                          <span><span className="font-medium">Tipo:</span> {orcafascioDetalhe.type}</span>
+                          {orcafascioDetalhe.is_sicro && <span className="text-blue-500 font-medium">SICRO</span>}
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <div className="rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-100 dark:border-green-900/40 px-3 py-2 text-center">
+                            <p className="text-[10px] text-green-600 dark:text-green-400 font-medium uppercase tracking-wide">Valor Onerado</p>
+                            <p className="text-sm font-semibold text-green-800 dark:text-green-200 mt-0.5">
+                              {orcafascioDetalhe.prices?.pd != null
+                                ? orcafascioDetalhe.prices.pd.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                : '—'}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 px-3 py-2 text-center">
+                            <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium uppercase tracking-wide">Val. Desonerado</p>
+                            <p className="text-sm font-semibold text-blue-800 dark:text-blue-200 mt-0.5">
+                              {orcafascioDetalhe.prices?.pnd != null
+                                ? orcafascioDetalhe.prices.pnd.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                : '—'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Itens da composição */}
+                      <div className="px-4 py-3 flex-1 overflow-y-auto">
+                        <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                          Itens ({orcafascioDetalhe.items.length})
+                        </p>
+                        {orcafascioDetalhe.items.length === 0 ? (
+                          <p className="text-xs text-gray-400">Sem itens cadastrados.</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {orcafascioDetalhe.items.map((item, idx) => (
+                              <div
+                                key={idx}
+                                className={`rounded-lg px-3 py-2 text-xs ${
+                                  item.is_resource
+                                    ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40'
+                                    : 'bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <span className={`text-[10px] font-semibold uppercase mr-1.5 ${item.is_resource ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                                      {item.is_resource ? 'INSUMO' : 'SERVIÇO'}
+                                    </span>
+                                    <span className="font-mono text-[10px] text-gray-500">[{item.banco}·{item.code}]</span>
+                                    <p className="text-gray-700 dark:text-gray-300 mt-0.5 leading-snug">{item.description}</p>
+                                  </div>
+                                  <div className="shrink-0 text-right text-[10px] text-gray-500 dark:text-gray-400">
+                                    <p>{item.unit}</p>
+                                    <p>×{item.coefficient}</p>
+                                    <p className="font-semibold text-gray-700 dark:text-gray-300">
+                                      {item.pnd?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Botão importar */}
+                      <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-800 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => importarComposicaoOrcafascio(orcafascioDetalhe)}
+                          className="w-full flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white hover:bg-violet-700 transition-colors shadow-sm"
+                        >
+                          <DownloadCloud className="w-4 h-4" />
+                          Importar esta composição
+                        </button>
+                        <p className="text-[10px] text-center text-gray-400 mt-2">
+                          Será adicionada ao catálogo de composições do sistema
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {importOrcamentoModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">

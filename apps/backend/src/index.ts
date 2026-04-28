@@ -58,6 +58,9 @@ import fluigRoutes from './routes/fluig';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';
+import driveRoutes from './routes/drive';
+import relatoriosFotograficosRoutes from './routes/relatorios-fotograficos';
+import orcafascioRoutes from './routes/orcafascio';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 
 console.log('🚀 Iniciando aplicação...');
@@ -200,8 +203,8 @@ app.use('/api/auth/me', authLimiter);
 
 // Logging
 app.use(morgan('combined'));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Sempre servir ficheiros gravados em disco (RM, OC/boleto, mensagens, etc.).
 // O uso de S3 para fotos de ponto não impede estes anexos locais.
@@ -253,6 +256,9 @@ app.use('/api/pleitos', pleitoRoutes);
 app.use('/api/fluig', fluigRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/permissions', permissionRoutes);
+app.use('/api/drive', driveRoutes);
+app.use('/api/relatorios-fotograficos', relatoriosFotograficosRoutes);
+app.use('/api/orcafascio', orcafascioRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

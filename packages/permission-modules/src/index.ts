@@ -41,7 +41,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Principal
   { key: pathToModuleKey('/ponto/dashboard'), name: 'Dashboard', href: '/ponto/dashboard', category: 'Principal' },
   { key: pathToModuleKey('/ponto/bi'), name: 'Solicitações Fluig', href: '/ponto/bi', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Conversas WhatsApp', href: '/ponto/conversas-whatsapp', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Central de Atendimentos', href: '/ponto/conversas-whatsapp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/aprovacoes'), name: 'Aprovações', href: '/ponto/aprovacoes', category: 'Principal' },
   // Departamento Pessoal
   { key: pathToModuleKey('/ponto/funcionarios'), name: 'Funcionários', href: '/ponto/funcionarios', category: 'Departamento Pessoal' },
@@ -66,6 +66,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Engenharia
   { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamento', href: '/ponto/orcamento', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos'), name: 'Contratos', href: '/ponto/contratos', category: 'Engenharia' },
+  { key: pathToModuleKey('/ponto/contratos/relatorios'), name: 'Relatórios Fotográficos', href: '/ponto/contratos/relatorios', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos/controle-geral'), name: 'Controle Geral de Contratos', href: '/ponto/contratos/controle-geral', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/andamento-da-os'), name: 'Ordem de Serviço', href: '/ponto/andamento-da-os', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/pleitos-gerados'), name: 'Pleitos Gerados', href: '/ponto/pleitos-gerados', category: 'Engenharia' },

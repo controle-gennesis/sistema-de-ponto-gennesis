@@ -41,7 +41,8 @@ import {
   Cake,
   Calculator,
   ClipboardList,
-  CreditCard
+  CreditCard,
+  HardDrive
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -432,6 +433,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BookPlus,
             description: 'Cadastrar naturezas orçamentárias',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria'))
+          }
+        ]
+      },
+      {
+        id: 'drive',
+        name: 'Drive',
+        icon: HardDrive,
+        items: [
+          {
+            name: 'Meu Drive',
+            href: '/ponto/drive',
+            icon: HardDrive,
+            description: 'Armazenamento de arquivos na nuvem',
+            permission: true
           }
         ]
       },

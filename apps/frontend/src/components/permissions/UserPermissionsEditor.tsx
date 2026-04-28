@@ -168,6 +168,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/orcamento',
       '/ponto/contratos',
       '/ponto/contratos/controle-geral',
+      '/ponto/contratos/relatorios',
       '/ponto/andamento-da-os',
       '/ponto/pleitos-gerados',
     ].some((p) => h === p)

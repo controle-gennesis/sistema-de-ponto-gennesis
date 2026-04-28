@@ -1,8 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { MessageSquare } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Sidebar } from './Sidebar';
 import { ChatWidget } from '../chat/ChatWidget';
+import api from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -13,6 +19,25 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, userRole, userName, onLogout }: MainLayoutProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const pathname = usePathname();
+  const { user } = usePermissions();
+
+  const { data: unreadCount = 0 } = useQuery({
+    queryKey: ['chat-unread-count', user?.id],
+    queryFn: async () => {
+      const res = await api.get('/chats/direct');
+      const chats = (res.data?.data ?? []) as Array<{ messages?: Array<{ isRead: boolean; senderId: string }> }>;
+      const total = chats.reduce((acc, chat) => {
+        const unread = (chat.messages ?? []).filter(
+          (m) => !m.isRead && m.senderId !== user?.id
+        ).length;
+        return acc + unread;
+      }, 0);
+      return total;
+    },
+    enabled: !!user?.id,
+    refetchInterval: 5000,
+  });
 
   // Função para detectar mudanças no estado do menu
   const handleMenuToggle = (collapsed: boolean) => {
@@ -40,6 +65,23 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
 
       {/* Chat Widget */}
       <ChatWidget />
+
+      {/* Botão flutuante de Conversas */}
+      {pathname !== '/ponto/conversas' && (
+        <Link
+          href="/ponto/conversas"
+          className="fixed bottom-5 right-5 z-40 h-14 w-14 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transition-colors inline-flex items-center justify-center lg:bottom-6 lg:right-6"
+          aria-label="Abrir conversas"
+          title="Conversas"
+        >
+          <MessageSquare className="h-6 w-6" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-white text-red-600 text-[11px] font-bold inline-flex items-center justify-center leading-none animate-chat-unread-badge">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </Link>
+      )}
     </div>
   );
 }

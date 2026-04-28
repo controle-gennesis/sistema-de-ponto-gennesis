@@ -19,6 +19,7 @@ import {
   Trash2,
   Percent,
   Calculator,
+  FileImage,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -575,6 +576,7 @@ export default function ContractDetailPage() {
   const contractId =
     typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
   const canAccessOrcamento = isAdministrator || can(pk('/ponto/orcamento'));
+  const canAccessRelatorios = isAdministrator || can(pk('/ponto/contratos/relatorios'));
   const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
   const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
   const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
@@ -2111,6 +2113,15 @@ export default function ContractDetailPage() {
                 >
                   <Calculator className="w-4 h-4 shrink-0" />
                   Orçamento
+                </Link>
+              ) : null}
+              {canAccessRelatorios ? (
+                <Link
+                  href={`/ponto/contratos/${contractId}/relatorios`}
+                  className="h-10 px-4 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+                >
+                  <FileImage className="w-4 h-4 shrink-0" />
+                  Relatórios
                 </Link>
               ) : null}
             </div>
