@@ -4,7 +4,10 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
 import { parseDateInput } from '../utils/dateInput';
-import { resolvePleitoCreateCore } from '../utils/pleitoCreateHelpers';
+import {
+  resolvePleitoCreateCore,
+  type ResolvePleitoContractContext
+} from '../utils/pleitoCreateHelpers';
 
 /** Cópia criada em "Gerar pleito"; distinta da linha principal da OS no contrato. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
@@ -171,9 +174,26 @@ export class PleitoController {
       }
 
       const creationYear = b.creationYear != null && b.creationYear !== '' ? Number(b.creationYear) : null;
+
+      let contractCtx: ResolvePleitoContractContext | undefined;
+      if (b.updatedContractId) {
+        const c = await prisma.contract.findUnique({
+          where: { id: String(b.updatedContractId) },
+          select: { costCenterId: true, startDate: true, endDate: true }
+        });
+        if (c) {
+          contractCtx = {
+            costCenterId: c.costCenterId,
+            contractStartDate: c.startDate,
+            contractEndDate: c.endDate
+          };
+        }
+      }
+
       const core = await resolvePleitoCreateCore(
         b as Record<string, unknown>,
-        Number.isInteger(creationYear) ? creationYear : null
+        Number.isInteger(creationYear) ? creationYear : null,
+        contractCtx
       );
       const data: Prisma.PleitoCreateInput = {
         mes: core.mes,

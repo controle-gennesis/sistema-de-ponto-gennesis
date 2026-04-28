@@ -59,7 +59,12 @@ export class ContractPleitoController {
       const creationYear = b.creationYear != null && b.creationYear !== '' ? Number(b.creationYear) : null;
       const core = await resolvePleitoCreateCore(
         b as Record<string, unknown>,
-        Number.isInteger(creationYear) ? creationYear : null
+        Number.isInteger(creationYear) ? creationYear : null,
+        {
+          costCenterId: contract.costCenterId,
+          contractStartDate: contract.startDate,
+          contractEndDate: contract.endDate
+        }
       );
       const data: Prisma.PleitoCreateInput = {
         mes: core.mes,

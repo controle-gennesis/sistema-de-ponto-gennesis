@@ -1492,6 +1492,7 @@ export default function ContractDetailPage() {
           const source = pleitos.find((p) => p.id === id);
           if (!source) return;
           await api.post(`/contracts/${contractId}/pleitos`, {
+            serviceOrderId: (source as { serviceOrderId?: string }).serviceOrderId,
             creationMonth,
             creationYear,
             startDate: source.startDate,
