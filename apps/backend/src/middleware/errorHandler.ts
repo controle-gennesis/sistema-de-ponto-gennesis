@@ -52,12 +52,32 @@ export const errorHandler = (
   }
 
   if (err.name === 'PrismaClientKnownRequestError') {
-    // P2002 é erro de chave única
-    const message =
-      (err as any).code === 'P2002'
-        ? 'Recurso já existe (violação de chave única)'
-        : 'Erro ao processar a solicitação do banco de dados';
-    error = { message, statusCode: 409 } as AppError;
+    const prisma = err as { code?: string; meta?: Record<string, unknown>; message?: string };
+    const code = prisma.code;
+    console.error('❌ Prisma Known Request:', code, prisma.meta ?? {});
+
+    let message = 'Erro ao processar a solicitação do banco de dados';
+    if (code === 'P2002') {
+      message = 'Recurso já existe (violação de chave única)';
+    } else if (code === 'P2003') {
+      message = 'Referência inválida no banco de dados (vínculo com outro registro inexistente)';
+    } else if (code === 'P2021' || code === 'P2022') {
+      message =
+        'Esquema do banco está desatualizado em relação ao aplicativo. Rode as migrations (prisma migrate deploy) ou contate o suporte.';
+    } else if (code === 'P2011') {
+      message = 'Campo obrigatório não preenchido ou nulo onde o banco exige valor';
+    }
+
+    error = {
+      message,
+      statusCode:
+        code === 'P2021' || code === 'P2022'
+          ? 503
+          : code === 'P2003'
+            ? 400
+            : 409,
+      prismaCode: code
+    } as AppError & { prismaCode?: string };
   }
 
   // 🔸 Registro não encontrado
@@ -99,10 +119,16 @@ export const errorHandler = (
   }
 
   // 🔸 Retorno padronizado
+  const prismaCodePart =
+    'prismaCode' in error && typeof (error as { prismaCode?: string }).prismaCode === 'string'
+      ? { prismaCode: (error as { prismaCode?: string }).prismaCode }
+      : {};
+
   res.status(statusCode).json({
     success: false,
     error: message,
-    message: message, // Incluir também em 'message' para compatibilidade
+    message: message,
+    ...prismaCodePart,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 };
