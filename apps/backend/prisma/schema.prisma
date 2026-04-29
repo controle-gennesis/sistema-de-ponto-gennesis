@@ -20,6 +20,10 @@ model User {
   role         UserRole @default(EMPLOYEE)
   isActive     Boolean  @default(true)
   isFirstLogin Boolean  @default(true)
+  /// URL pública ou relativa (/uploads/...) da foto de perfil
+  profilePhotoUrl  String?
+  /// Chave no S3 (quando usar armazenamento em nuvem)
+  profilePhotoKey  String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

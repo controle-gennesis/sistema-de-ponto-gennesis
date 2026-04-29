@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api, { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import {
   Search,
@@ -43,6 +43,7 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
 import { CircularPhotoCropModal } from '@/components/conversas/CircularPhotoCropModal';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ interface UserBasic {
   id: string;
   name: string;
   email: string;
+  profilePhotoUrl?: string | null;
   employee?: {
     department: string;
     position: string;
@@ -337,25 +339,26 @@ function Avatar({ user, size = 'md' }: { user: UserBasic; size?: 'sm' | 'md' | '
     list: 'w-12 h-12 text-base',
     xl: 'w-24 h-24 text-3xl',
   }[size];
+  const resolved = resolveApiMediaUrl(user.profilePhotoUrl ?? null);
   return (
-    <div className={clsx('rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0', sizeClass, avatarColor(user.id))}>
-      {getInitials(user.name)}
+    <div
+      className={clsx(
+        'rounded-full flex items-center justify-center overflow-hidden text-white font-semibold flex-shrink-0',
+        sizeClass,
+        resolved ? '' : avatarColor(user.id)
+      )}
+    >
+      {resolved ? (
+        <img src={resolved} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+      ) : (
+        getInitials(user.name)
+      )}
     </div>
   );
 }
 
-/** Uploads vindos como `/uploads/...` apontam para o host da API (não do Next.js). */
-function resolveChatMediaUrl(url: string | null | undefined): string | null {
-  if (url == null || String(url).trim() === '') return null;
-  const u = String(url).trim();
-  if (/^https?:\/\//i.test(u)) return u;
-  const origin = API_BASE_URL.replace(/\/api\/?$/i, '').replace(/\/$/, '');
-  if (u.startsWith('/')) return `${origin}${u}`;
-  return u;
-}
-
 function GroupChatAvatar({ avatarUrl, size = 'md' }: { avatarUrl?: string | null; size?: 'md' | 'list' | 'xl' }) {
-  const resolved = resolveChatMediaUrl(avatarUrl ?? null);
+  const resolved = resolveApiMediaUrl(avatarUrl ?? null);
   const box = size === 'xl' ? 'w-24 h-24' : size === 'list' ? 'w-12 h-12' : 'w-10 h-10';
   const iconSize = size === 'xl' ? 40 : size === 'list' ? 20 : 18;
   return (
@@ -2607,9 +2610,9 @@ function ConversasContent() {
                             className="relative block w-32 h-32 rounded-full overflow-hidden focus:outline-none"
                           >
                             <div className="w-32 h-32 rounded-full overflow-hidden bg-green-500 text-white flex items-center justify-center">
-                              {resolveChatMediaUrl(activeChat.groupAvatarUrl) ? (
+                              {resolveApiMediaUrl(activeChat.groupAvatarUrl) ? (
                                 <img
-                                  src={resolveChatMediaUrl(activeChat.groupAvatarUrl)!}
+                                  src={resolveApiMediaUrl(activeChat.groupAvatarUrl)!}
                                   alt=""
                                   className="h-full w-full object-cover"
                                   referrerPolicy="no-referrer"
@@ -2635,7 +2638,7 @@ function ConversasContent() {
                                 onClick={() => setGroupAvatarMenu(false)}
                               />
                               <div className="absolute left-1/2 -translate-x-1/2 top-[calc(100%+8px)] z-[101] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1">
-                                {resolveChatMediaUrl(activeChat.groupAvatarUrl) && (
+                                {resolveApiMediaUrl(activeChat.groupAvatarUrl) && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -2659,7 +2662,7 @@ function ConversasContent() {
                                   <Camera size={15} className="text-gray-500 dark:text-gray-400" />
                                   Carregar foto
                                 </button>
-                                {resolveChatMediaUrl(activeChat.groupAvatarUrl) && (
+                                {resolveApiMediaUrl(activeChat.groupAvatarUrl) && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -3419,7 +3422,7 @@ function ConversasContent() {
     </div>
 
     {/* ── Lightbox: foto do grupo ────────────────────────────────── */}
-    {showGroupAvatarViewer && activeChat && resolveChatMediaUrl(activeChat.groupAvatarUrl) && typeof document !== 'undefined' && createPortal(
+    {showGroupAvatarViewer && activeChat && resolveApiMediaUrl(activeChat.groupAvatarUrl) && typeof document !== 'undefined' && createPortal(
       <div
         className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80"
         onClick={() => setShowGroupAvatarViewer(false)}
@@ -3432,7 +3435,7 @@ function ConversasContent() {
           <X size={22} />
         </button>
         <img
-          src={resolveChatMediaUrl(activeChat.groupAvatarUrl)!}
+          src={resolveApiMediaUrl(activeChat.groupAvatarUrl)!}
           alt={activeChat.groupName || 'Foto do grupo'}
           className="max-w-[90vw] max-h-[90vh] rounded-2xl object-contain shadow-2xl"
           onClick={(e) => e.stopPropagation()}

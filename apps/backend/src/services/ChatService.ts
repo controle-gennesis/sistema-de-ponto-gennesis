@@ -875,6 +875,7 @@ export class ChatService {
     id: true,
     name: true,
     email: true,
+    profilePhotoUrl: true,
     employee: {
       select: {
         department: true,
@@ -938,7 +939,7 @@ export class ChatService {
             take: 1,
             orderBy: { createdAt: 'desc' as const },
             include: {
-              sender: { select: { id: true, name: true } },
+              sender: { select: this.directChatUserInclude },
               attachments: true,
               ...fav
             }
@@ -1512,7 +1513,7 @@ export class ChatService {
         take: 1,
         orderBy: { createdAt: 'desc' },
         include: {
-          sender: { select: { id: true, name: true } },
+          sender: { select: this.directChatUserInclude },
           attachments: true,
           ...fav
         }
@@ -1879,6 +1880,7 @@ export class ChatService {
         id: true,
         name: true,
         email: true,
+        profilePhotoUrl: true,
         employee: {
           select: {
             department: true,

@@ -3,6 +3,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { createPortal } from 'react-dom';
+import { toast } from 'react-hot-toast';
+import api from '@/lib/api';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { CircularPhotoCropModal } from '@/components/conversas/CircularPhotoCropModal';
 import { 
   Home, 
   Users, 
@@ -42,7 +48,12 @@ import {
   Calculator,
   ClipboardList,
   CreditCard,
-  HardDrive
+  HardDrive,
+  Image as ImageIcon,
+  Camera,
+  PencilLine,
+  Trash2,
+  Loader2
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -89,6 +100,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const profileAvatarInputRef = useRef<HTMLInputElement>(null);
+  const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+  const [profileAvatarMenu, setProfileAvatarMenu] = useState(false);
+  const [profilePhotoViewer, setProfilePhotoViewer] = useState(false);
+  const [profileCropSrc, setProfileCropSrc] = useState<string | null>(null);
   
   // Verificar se é administrador
   const isAdministrator = userPosition === 'Administrador';
@@ -116,22 +133,58 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     setShowLogoutConfirm(false);
   };
 
+  const uploadProfilePhotoMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append('profileAvatar', file);
+      await api.patch('/auth/me/photo', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['user'] });
+      toast.success('Foto de perfil atualizada');
+      setProfileCropSrc((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    },
+    onError: () => toast.error('Não foi possível atualizar a foto'),
+  });
+
+  const removeProfilePhotoMutation = useMutation({
+    mutationFn: async () => {
+      await api.delete('/auth/me/photo');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['user'] });
+      toast.success('Foto removida');
+      setProfilePhotoViewer(false);
+      setProfileAvatarMenu(false);
+    },
+    onError: () => toast.error('Não foi possível remover a foto'),
+  });
+
+  const profilePhotoHref = resolveApiMediaUrl(user?.profilePhotoUrl ?? null);
+
   // Fechar menu quando clicar fora dele
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setShowUserMenu(false);
-      }
+      const t = event.target as Node;
+      if (profileAvatarSectionRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setShowUserMenu(false);
+      setProfileAvatarMenu(false);
     };
 
-    if (showUserMenu && isCollapsed) {
+    if (showUserMenu || profileAvatarMenu) {
       document.addEventListener('mousedown', handleClickOutside);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showUserMenu, isCollapsed]);
+  }, [showUserMenu, profileAvatarMenu]);
 
   const isEmployee = userRole === 'EMPLOYEE';
 
@@ -836,13 +889,146 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
           </div>
           
-          <div className="relative">
+          <div className="relative" ref={menuRef}>
             {/* Seção de perfil - sempre visível quando expandida */}
             <div className="bg-white dark:bg-gray-900">
               <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
-                {isCollapsed ? (
-                  /* Quando colapsada: ícone de expandir (setas cima/baixo) */
-                  <div className="flex justify-center">
+                <div
+                  className={
+                    isCollapsed ? 'flex flex-col items-center gap-2' : 'flex items-center space-x-3'
+                  }
+                >
+                  {/* Foto — menu como no grupo (Conversas) */}
+                  <div className={`flex-shrink-0 relative ${!isCollapsed ? '' : ''}`}>
+                    <div ref={profileAvatarSectionRef}>
+                      <button
+                        type="button"
+                        aria-haspopup="true"
+                        aria-expanded={profileAvatarMenu}
+                        aria-label="Opções da foto de perfil"
+                        onClick={() => setProfileAvatarMenu((v) => !v)}
+                        className="group relative block rounded-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                      >
+                        <div
+                          className={`${
+                            isCollapsed ? 'w-11 h-11' : 'w-11 h-11'
+                          } rounded-full overflow-hidden bg-red-600 flex items-center justify-center relative`}
+                        >
+                          {profilePhotoHref ? (
+                            <img
+                              src={profilePhotoHref}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span
+                              className={`font-semibold text-white ${
+                                isCollapsed ? 'text-sm' : 'text-sm'
+                              }`}
+                            >
+                              {getInitials(user?.name || userName || 'U')}
+                            </span>
+                          )}
+                          <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-0.5 pointer-events-none">
+                            <PencilLine size={isCollapsed ? 12 : 14} className="text-white shrink-0" strokeWidth={2} />
+                          </div>
+                          {(uploadProfilePhotoMutation.isPending ||
+                            removeProfilePhotoMutation.isPending) && (
+                            <div className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center">
+                              <Loader2 size={20} className="animate-spin text-white" />
+                            </div>
+                          )}
+                        </div>
+                      </button>
+
+                      <input
+                        ref={profileAvatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          setProfileCropSrc(URL.createObjectURL(file));
+                          setProfileAvatarMenu(false);
+                          e.target.value = '';
+                        }}
+                      />
+
+                      {profileAvatarMenu && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-[100]"
+                            aria-hidden="true"
+                            onClick={() => setProfileAvatarMenu(false)}
+                          />
+                          <div
+                            className={`absolute z-[101] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 ${
+                              isCollapsed
+                                ? 'left-1/2 -translate-x-1/2 top-[calc(100%+8px)]'
+                                : 'left-0 top-[calc(100%+8px)]'
+                            }`}
+                          >
+                            {profilePhotoHref && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProfileAvatarMenu(false);
+                                  setProfilePhotoViewer(true);
+                                }}
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                              >
+                                <ImageIcon size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                                Mostrar foto
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProfileAvatarMenu(false);
+                                profileAvatarInputRef.current?.click();
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              <Camera size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                              Carregar foto
+                            </button>
+                            {profilePhotoHref && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProfileAvatarMenu(false);
+                                  removeProfilePhotoMutation.mutate();
+                                }}
+                                disabled={removeProfilePhotoMutation.isPending}
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+                              >
+                                <Trash2 size={15} className="shrink-0" />
+                                Remover foto
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {!isCollapsed && (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                        {isAdministrator ? 'Administrador' : user?.name || userName || 'Usuário'}
+                      </p>
+                      {!isAdministrator && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          {(user as { employee?: { position?: string } } | undefined)?.employee
+                            ?.position || userPosition}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="relative shrink-0">
                     <button
                       type="button"
                       onClick={() => setShowUserMenu(!showUserMenu)}
@@ -858,57 +1044,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       )}
                     </button>
                   </div>
-                ) : (
-                  /* Quando expandida: foto, nome, cargo e botão de menu */
-                  <div className="flex items-center space-x-3">
-                    {/* Foto do perfil */}
-                    <div className="flex-shrink-0 relative">
-                      {user?.photo ? (
-                        <img 
-                          src={user.photo} 
-                          alt={user?.name || userName} 
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-transparent border-2 border-red-500 flex items-center justify-center">
-                          <span className="text-sm font-semibold text-red-500">
-                            {getInitials(user?.name || userName || 'U')}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Informações do usuário */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {isAdministrator ? 'Administrador' : (user?.name || userName || 'Usuário')}
-                      </p>
-                      {!isAdministrator && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {user?.position || userPosition}
-                        </p>
-                      )}
-                    </div>
-                    
-                    {/* Botão de menu (setas cima/baixo — indica expandir/recolher) */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowUserMenu(!showUserMenu)}
-                        className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        title={showUserMenu ? 'Fechar menu (descer)' : 'Abrir menu (subir)'}
-                        aria-expanded={showUserMenu}
-                        aria-label={showUserMenu ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
-                      >
-                        {showUserMenu ? (
-                          <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                        ) : (
-                          <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
             </div>
             
@@ -1034,6 +1170,52 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           </div>
         </div>
       )}
+
+      <CircularPhotoCropModal
+        open={!!profileCropSrc}
+        imageSrc={profileCropSrc ?? ''}
+        onClose={() => {
+          if (profileCropSrc) URL.revokeObjectURL(profileCropSrc);
+          setProfileCropSrc(null);
+        }}
+        onConfirm={async (file: File) => {
+          await uploadProfilePhotoMutation.mutateAsync(file);
+        }}
+        onPickReplacement={(file) => {
+          if (profileCropSrc) URL.revokeObjectURL(profileCropSrc);
+          setProfileCropSrc(URL.createObjectURL(file));
+        }}
+      />
+
+      {typeof document !== 'undefined' &&
+        profilePhotoViewer &&
+        profilePhotoHref &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[10060] flex cursor-zoom-out flex-col bg-black/90 p-6"
+            onClick={() => setProfilePhotoViewer(false)}
+            role="presentation"
+          >
+            <button
+              type="button"
+              className="absolute top-4 right-4 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20"
+              onClick={() => setProfilePhotoViewer(false)}
+              aria-label="Fechar"
+            >
+              <X className="h-7 w-7" strokeWidth={2} />
+            </button>
+            <div className="flex flex-1 items-center justify-center min-h-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={profilePhotoHref}
+                alt=""
+                className="max-h-full max-w-full rounded-lg object-contain shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>,
+          document.body
+        )}
     </>
   );
 }
