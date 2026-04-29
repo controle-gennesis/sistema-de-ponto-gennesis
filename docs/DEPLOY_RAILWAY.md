@@ -143,10 +143,12 @@ Este guia te ajudará a fazer o deploy do Sistema de Ponto Genesis no Railway se
    - Verifique se todas as dependências estão no `package.json`
    - Confirme se o Node.js está na versão 18+
 
-2. **Toast “Esquema do banco está desatualizado” ou Drive/chat com erro ao carregar (`P2021` / `P2022`):**
-   - O **PostgreSQL está atrás das migrations Prisma**. O código do backend já inclui migrações no processo de subida (`resolve-migrations.js` + deploy); confira nos **logs do serviço de API** se `prisma migrate deploy` aparece como concluído.
-   - Garanta que o serviço do **backend** usa a **`DATABASE_URL` do Postgres do projeto** (variable reference na Railway, não uma URL velha copiada).
-   - **Correção imediata (uma vez):** no terminal do projeto (local, com `.env` de produção) ou pelo **Railway Shell** na raiz `apps/backend`: `npx prisma migrate deploy`.
+2. **Toast “Esquema do banco está desatualizado” ou erro 503 ao salvar aditivo de contrato (`P2021` / `P2022`):**
+   - A tabela `contract_addenda` (ou outra criada por migration) não existe no PostgreSQL — as migrations não foram aplicadas nesse banco.
+   - O backend passa a **criar automaticamente** `contract_addenda` ao subir, se estiver ausente (`ensureContractAddendaSchema`), mas o correto é alinhar o histórico: confira nos **logs** se `prisma migrate deploy` conclui sem erro.
+   - **No Railway**, em *Settings → Deploy*: use **Pre-Deploy Command**: `cd apps/backend && npx prisma migrate deploy` (recomendado), ou garanta que o **Start Command** é `cd apps/backend && npm run start` sem sobrescrever para só `node dist/index.js`.
+   - Garanta `DATABASE_URL` apontando para o Postgres correto da stack.
+   - **Correção manual (uma vez):** Railway Shell ou máquina com `.env` de produção, na pasta `apps/backend`: `npx prisma migrate deploy`.
 
 3. **Erro de Variáveis de Ambiente:**
    - Confirme se todas as variáveis obrigatórias estão configuradas

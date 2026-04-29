@@ -62,6 +62,8 @@ import driveRoutes from './routes/drive';
 import relatoriosFotograficosRoutes from './routes/relatorios-fotograficos';
 import orcafascioRoutes from './routes/orcafascio';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
+import { prisma } from './lib/prisma';
+import { ensureContractAddendaTable } from './lib/ensureContractAddendaSchema';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -274,6 +276,7 @@ try {
   app.listen(PORT, '0.0.0.0', () => {
     void (async () => {
       try {
+        await ensureContractAddendaTable(prisma);
         const { removed } = await removeOrphanUserPermissions();
         if (removed > 0) {
           console.log(`🧹 Permissões de módulos removidos do registro: ${removed} registro(s) limpo(s).`);
