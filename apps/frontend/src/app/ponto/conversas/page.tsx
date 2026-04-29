@@ -617,6 +617,9 @@ function ConversasContent() {
 
   useEffect(() => {
     setContactDetailsUser(null);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '44px';
+    }
   }, [selectedChatId]);
 
   // Auto-scroll
@@ -853,7 +856,7 @@ function ConversasContent() {
       setMessageInput('');
       setAttachedFiles([]);
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = '44px';
       }
     },
     onError: () => toast.error('Erro ao enviar mensagem'),
@@ -1131,8 +1134,11 @@ function ConversasContent() {
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessageInput(e.target.value);
-    e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+    const ta = e.target;
+    ta.style.height = 'auto';
+    /** Mínimo 44px (= size-11 dos botões): evita pílula “puxando” só para baixo quando scrollHeight é ímpar / fracionário */
+    const h = Math.round(Math.min(Math.max(ta.scrollHeight, 44), 120));
+    ta.style.height = `${h}px`;
   };
 
   const insertEmoji = (emoji: string) => {
@@ -1151,7 +1157,8 @@ function ConversasContent() {
       const pos = start + emoji.length;
       ta.setSelectionRange(pos, pos);
       ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+      const h = Math.round(Math.min(Math.max(ta.scrollHeight, 44), 120));
+      ta.style.height = `${h}px`;
     });
   };
 
@@ -2304,9 +2311,9 @@ function ConversasContent() {
                         {/* Mesma “pílula” do composer principal: bordas circulares, campo + emoji + salvar */}
                         <div
                           className={clsx(
-                            'flex min-h-[52px] min-w-0 w-full items-center gap-2 rounded-full',
+                            'flex min-h-[52px] min-w-0 w-full items-center gap-1 rounded-full',
                             'border border-gray-200/80 dark:border-gray-600/50',
-                            'bg-white dark:bg-gray-900 py-1.5 pl-4 pr-2.5'
+                            'bg-white px-1.5 py-1.5 dark:bg-gray-900'
                           )}
                         >
                           <input
@@ -2322,18 +2329,18 @@ function ConversasContent() {
                               }
                             }}
                             placeholder="Digite uma mensagem"
-                            className="min-h-0 min-w-0 flex-1 bg-transparent py-1 text-base leading-6 text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-400/90"
+                            className="min-h-[44px] min-w-0 flex-1 bg-transparent px-2 py-2 text-base leading-6 text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-400/90"
                           />
-                          <div className="flex shrink-0 items-center gap-0.5">
-                            <div ref={editModalEmojiWrapRef} className="relative flex shrink-0 items-center">
+                          <div className="flex h-11 shrink-0 items-center gap-0.5">
+                            <div ref={editModalEmojiWrapRef} className="relative flex h-11 shrink-0 items-center justify-center">
                               <button
                                 type="button"
                                 onClick={() => setShowEditModalEmojiPicker((v) => !v)}
-                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-black/[0.06] dark:text-gray-200 dark:hover:bg-white/10 sm:h-11 sm:w-11"
+                                className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors hover:bg-black/[0.06] dark:text-gray-200 dark:hover:bg-white/10"
                                 title="Emojis"
                                 aria-label="Emojis"
                               >
-                                <Smile size={24} strokeWidth={1.9} />
+                                <Smile size={22} strokeWidth={2} className="shrink-0" />
                               </button>
                               {showEditModalEmojiPicker && (
                                 <div
@@ -2360,14 +2367,14 @@ function ConversasContent() {
                             type="button"
                             disabled={editMessageMutation.isPending}
                             onClick={commitEditMessage}
-                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#25D366] text-white shadow-sm transition-colors hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"
+                            className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent bg-[#25D366] text-white shadow-sm transition-colors hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-50"
                             title="Salvar"
                             aria-label="Salvar edição"
                           >
                             {editMessageMutation.isPending ? (
-                              <Loader2 size={22} className="animate-spin text-white" />
+                              <Loader2 size={22} className="animate-spin text-white shrink-0" />
                             ) : (
-                              <Check size={24} strokeWidth={2.5} />
+                              <Check size={22} strokeWidth={2.5} className="shrink-0" />
                             )}
                           </button>
                           </div>
@@ -2396,52 +2403,57 @@ function ConversasContent() {
 
                 <div
                   className={clsx(
-                    'flex w-full min-w-0 min-h-[52px] items-center rounded-full',
+                    'flex min-h-[52px] w-full min-w-0 flex-nowrap items-center gap-1 rounded-full px-1.5 py-1.5',
                     'border border-gray-200/80 dark:border-gray-600/50',
-                    'bg-white dark:bg-gray-900 pl-1.5 pr-1.5 py-1'
+                    'bg-white dark:bg-gray-900'
                   )}
                 >
                   <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileChange} />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex-shrink-0 h-11 w-11 inline-flex items-center justify-center rounded-full text-gray-600 dark:text-gray-200 hover:bg-black/[0.06] dark:hover:bg-white/10 transition-colors"
-                    title="Anexar"
-                    aria-label="Anexar arquivo"
-                  >
-                    <Plus size={24} strokeWidth={1.9} />
-                  </button>
-                  <div className="relative flex-shrink-0" ref={emojiContainerRef}>
+
+                  {/* Bloco fixo à esquerda: mesma altura visual que os botões direitos — centro optico alinhado à curva */}
+                  <div className="flex h-11 shrink-0 items-center gap-0.5">
                     <button
                       type="button"
-                      onClick={() => setShowEmojiPicker(s => !s)}
-                      className="h-11 w-11 inline-flex items-center justify-center rounded-full text-gray-600 dark:text-gray-200 hover:bg-black/[0.06] dark:hover:bg-white/10 transition-colors"
-                      title="Emojis"
-                      aria-label="Emojis"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors [backface-visibility:hidden] hover:bg-black/[0.06] dark:text-gray-200 dark:hover:bg-white/10"
+                      title="Anexar"
+                      aria-label="Anexar arquivo"
                     >
-                      <Smile size={24} strokeWidth={1.9} />
+                      <Plus size={22} strokeWidth={2} className="shrink-0" />
                     </button>
-                    {showEmojiPicker && (
-                      <div
-                        className="absolute bottom-full left-0 mb-2 p-2 rounded-xl bg-white dark:bg-[#1f2c33] border border-gray-200 dark:border-gray-700 shadow-lg z-50 flex flex-wrap gap-1.5 w-[200px]"
-                        role="listbox"
+                    <div className="relative flex h-11 shrink-0 items-center justify-center" ref={emojiContainerRef}>
+                      <button
+                        type="button"
+                        onClick={() => setShowEmojiPicker(s => !s)}
+                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors hover:bg-black/[0.06] dark:text-gray-200 dark:hover:bg-white/10"
+                        title="Emojis"
+                        aria-label="Emojis"
                       >
-                        {['👍', '😀', '😂', '❤️', '🔥', '👏', '🎉', '😮', '😢', '🙏', '✅', '👋'].map(e => (
-                          <button
-                            key={e}
-                            type="button"
-                            className="text-xl leading-none p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10"
-                            onClick={() => {
-                              insertEmoji(e);
-                              setShowEmojiPicker(false);
-                            }}
-                          >
-                            {e}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                        <Smile size={22} strokeWidth={2} className="shrink-0" />
+                      </button>
+                      {showEmojiPicker && (
+                        <div
+                          className="absolute bottom-full left-0 mb-2 p-2 rounded-xl bg-white dark:bg-[#1f2c33] border border-gray-200 dark:border-gray-700 shadow-lg z-50 flex flex-wrap gap-1.5 w-[200px]"
+                          role="listbox"
+                        >
+                          {['👍', '😀', '😂', '❤️', '🔥', '👏', '🎉', '😮', '😢', '🙏', '✅', '👋'].map(e => (
+                            <button
+                              key={e}
+                              type="button"
+                              className="text-xl leading-none p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10"
+                              onClick={() => {
+                                insertEmoji(e);
+                                setShowEmojiPicker(false);
+                              }}
+                            >
+                              {e}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
+
                   <textarea
                     ref={textareaRef}
                     value={messageInput}
@@ -2449,35 +2461,39 @@ function ConversasContent() {
                     onKeyDown={handleKeyDown}
                     placeholder="Digite uma mensagem"
                     rows={1}
-                    className="chat-composer-input ml-1.5 min-h-[28px] max-h-[120px] resize-none"
-                    style={{ height: 'auto' }}
+                    className="chat-composer-input min-h-[44px] max-h-[120px] flex-1 resize-none border-0 bg-transparent px-1.5 py-2 leading-6"
+                    style={{ height: '44px', minHeight: '44px' }}
                   />
-                  {messageInput.trim() || attachedFiles.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={handleSend}
-                      disabled={sendMutation.isPending}
-                      className="flex-shrink-0 h-11 w-11 inline-flex items-center justify-center rounded-full bg-[#25D366] text-white hover:bg-[#20bd5a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      title="Enviar"
-                      aria-label="Enviar mensagem"
-                    >
-                      {sendMutation.isPending ? (
-                        <Loader2 size={24} className="animate-spin" />
-                      ) : (
-                        <Send size={24} strokeWidth={1.9} />
-                      )}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="flex-shrink-0 h-11 w-11 inline-flex items-center justify-center rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200/80 dark:hover:bg-white/10 transition-colors"
-                      title="Mensagem de voz (em breve)"
-                      aria-label="Mensagem de voz"
-                      onClick={() => toast('Gravação de áudio em breve')}
-                    >
-                      <Mic size={24} strokeWidth={1.9} />
-                    </button>
-                  )}
+
+                  {/* Bloco fixo à direita: sempre h-11 alinhado ao esquerdo */}
+                  <div className="flex h-11 shrink-0 items-center justify-center">
+                    {messageInput.trim() || attachedFiles.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={handleSend}
+                        disabled={sendMutation.isPending}
+                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent bg-[#25D366] text-white transition-colors hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Enviar"
+                        aria-label="Enviar mensagem"
+                      >
+                        {sendMutation.isPending ? (
+                          <Loader2 size={22} className="animate-spin shrink-0" />
+                        ) : (
+                          <Send size={22} strokeWidth={2} className="shrink-0" />
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors hover:bg-gray-200/80 dark:text-gray-300 dark:hover:bg-white/10"
+                        title="Mensagem de voz (em breve)"
+                        aria-label="Mensagem de voz"
+                        onClick={() => toast('Gravação de áudio em breve')}
+                      >
+                        <Mic size={22} strokeWidth={2} className="shrink-0" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
