@@ -5,8 +5,7 @@
     "buildCommand": "cd apps/backend && npm install && npx prisma generate && npm run build"
   },
   "deploy": {
-    "preDeployCommand": "cd apps/backend && node scripts/resolve-migrations.js",
-    "startCommand": "cd apps/backend && node dist/index.js",
+    "startCommand": "cd apps/backend && npm run start",
     "healthcheckPath": "/health", 
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
