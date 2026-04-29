@@ -1,9 +1,9 @@
 import { Response, NextFunction } from 'express';
+import { Decimal } from '@prisma/client/runtime/library';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { assertContractAccess } from '../lib/contractAccess';
-import { randomUUID } from 'crypto';
 
 function toNum(v: unknown): number {
   const n = Number(v);
@@ -19,24 +19,24 @@ export class ContractAddendumController {
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
 
-      const rows = await (prisma as any).contract_additives.findMany({
-        where: { costCenterId: contract.costCenterId },
-        orderBy: [{ dataAditivo: 'asc' }, { createdAt: 'asc' }],
+      const rows = await prisma.contractAddendum.findMany({
+        where: { contractId },
+        orderBy: [{ effectiveDate: 'asc' }, { createdAt: 'asc' }],
       });
 
       res.json({
         success: true,
-        data: rows.map((r: any) => ({
+        data: rows.map((r) => ({
           id: r.id,
-          contractId,
-          effectiveDate: r.dataAditivo,
-          amount: toNum(r.valor),
-          note: r.descricao ?? null,
+          contractId: r.contractId,
+          effectiveDate: r.effectiveDate,
+          amount: toNum(r.amount),
+          note: r.note ?? null,
           createdAt: r.createdAt,
         })),
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 
@@ -60,13 +60,12 @@ export class ContractAddendumController {
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
 
-      const created = await (prisma as any).contract_additives.create({
+      const created = await prisma.contractAddendum.create({
         data: {
-          id: randomUUID(),
-          costCenterId: contract.costCenterId,
-          dataAditivo: dt,
-          valor: num,
-          descricao: note?.trim() || null,
+          contractId,
+          effectiveDate: dt,
+          amount: new Decimal(num),
+          note: note?.trim() || null,
         },
       });
 
@@ -74,16 +73,16 @@ export class ContractAddendumController {
         success: true,
         data: {
           id: created.id,
-          contractId,
-          effectiveDate: created.dataAditivo,
-          amount: toNum(created.valor),
-          note: created.descricao ?? null,
+          contractId: created.contractId,
+          effectiveDate: created.effectiveDate,
+          amount: toNum(created.amount),
+          note: created.note ?? null,
           createdAt: created.createdAt,
         },
         message: 'Aditivo registrado com sucesso',
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 
@@ -95,15 +94,17 @@ export class ContractAddendumController {
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
 
-      const row = await (prisma as any).contract_additives.findUnique({ where: { id } });
-      if (!row || row.costCenterId !== contract.costCenterId) {
+      const row = await prisma.contractAddendum.findFirst({
+        where: { id, contractId },
+      });
+      if (!row) {
         throw createError('Aditivo não encontrado', 404);
       }
 
-      await (prisma as any).contract_additives.delete({ where: { id } });
+      await prisma.contractAddendum.delete({ where: { id } });
       res.json({ success: true, message: 'Aditivo removido com sucesso' });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 }
