@@ -1719,6 +1719,11 @@ model UserContractPermission {
   id         String   @id @default(cuid())
   userId     String
   contractId String
+  /// Recursos por contrato (aba Permissões). Se false, o usuário não acessa esse bloco dentro do contrato.
+  accessOrcamento       Boolean  @default(true)
+  accessRelatorios      Boolean  @default(true)
+  accessOrdemServico    Boolean  @default(true)
+  accessProducaoSemanal Boolean  @default(true)
   updatedBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -1754,12 +1759,14 @@ model UserDpApprovalContract {
 
 /// Template de permissões por cargo (nome do campo `Employee.position`). Usado como padrão na tela Permissões.
 model PositionPermissionTemplate {
-  id                     String   @id @default(cuid())
-  position               String   @unique
-  permissions            Json
-  allowedContractIds     Json     @default("[]")
-  dpApprovalContractIds  Json     @default("[]")
-  updatedAt              DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  position              String   @unique
+  permissions           Json
+  allowedContractIds    Json     @default("[]")
+  dpApprovalContractIds Json     @default("[]")
+  /// Map contractId -> { orcamento, relatorios, ordemServico, producaoSemanal }
+  contractModuleFlags   Json     @default("{}")
+  updatedAt             DateTime @updatedAt
 
   @@map("position_permission_templates")
 }

@@ -84,6 +84,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     userDepartment,
     can,
     canAccessDpApproverPages,
+    canAccessOsRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -160,11 +161,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
           },
           {
-            name: 'Solicitações Fluig',
-            href: '/ponto/bi',
+            name: 'Painel de solicitações',
+            href: '/ponto/financeiro/gestao-solicitacoes',
             icon: BarChart3,
-            description: 'Dashboard com dados dos datasets do Fluig',
-            permission: isAdministrator || can(pk('/ponto/bi'))
+            description: 'Solicitações do Fluig na visão financeira',
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes'))
+          },
+          {
+            name: 'Meu Drive',
+            href: '/ponto/drive',
+            icon: HardDrive,
+            description: 'Armazenamento de arquivos na nuvem',
+            permission: true
           },
           {
             name: 'Central de Atendimentos',
@@ -216,17 +224,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados'))
           },
           {
-            name: 'Solicitações',
+            name: 'Alterações de ponto',
             href: '/ponto/solicitacoes',
             icon: MailPlus,
-            description: 'Minhas solicitações de correção',
+            description: 'Solicitar e acompanhar alterações de marcação do ponto',
             permission: isAdministrator || can(pk('/ponto/solicitacoes'))
           },
           {
-            name: 'Gerenciar Solicitações',
+            name: 'Gerenciar alterações de ponto',
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
-            description: 'Aprovar solicitações de correção',
+            description: 'Analisar e aprovar alterações de marcação dos colaboradores',
             permission: isAdministrator || can(pk('/ponto/gerenciar-solicitacoes'))
           },
           {
@@ -315,13 +323,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Importar e validar extratos bancários',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           },
-          {
-            name: 'Gestão de Solicitações',
-            href: '/ponto/financeiro/gestao-solicitacoes',
-            icon: BarChart3,
-            description: 'Acompanhar solicitações do Fluig na visão financeira',
-            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes'))
-          }
         ]
       },
       {
@@ -348,7 +349,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/andamento-da-os',
             icon: ClipboardList,
             description: 'Acompanhamento e controle das ordens de serviço',
-            permission: isAdministrator || can(pk('/ponto/andamento-da-os'))
+            permission: canAccessOsRoutePage
           },
           {
             name: 'Pleitos Gerados',
@@ -433,20 +434,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BookPlus,
             description: 'Cadastrar naturezas orçamentárias',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria'))
-          }
-        ]
-      },
-      {
-        id: 'drive',
-        name: 'Drive',
-        icon: HardDrive,
-        items: [
-          {
-            name: 'Meu Drive',
-            href: '/ponto/drive',
-            icon: HardDrive,
-            description: 'Armazenamento de arquivos na nuvem',
-            permission: true
           }
         ]
       },

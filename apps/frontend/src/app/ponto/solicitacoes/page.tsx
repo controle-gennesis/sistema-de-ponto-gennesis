@@ -61,8 +61,8 @@ export default function SolicitacoesPage() {
         <div className="space-y-6">
           {/* Cabeçalho */}
           <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Correção de Ponto</h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Gerencie suas solicitações de correção de ponto</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Alterações de ponto</h1>
+            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Solicite e acompanhe alterações de marcação do seu ponto</p>
           </div>
 
           {/* Navegação no topo */}
@@ -77,7 +77,7 @@ export default function SolicitacoesPage() {
                 }`}
               >
                 <List className="w-4 h-4" />
-                Minhas Solicitações
+                Minhas alterações
               </button>
               <button
                 onClick={() => setActiveTab('new')}
@@ -88,7 +88,7 @@ export default function SolicitacoesPage() {
                 }`}
               >
                 <Plus className="w-4 h-4" />
-                Nova Solicitação
+                Nova alteração
               </button>
             </nav>
           </div>
@@ -103,10 +103,10 @@ export default function SolicitacoesPage() {
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {activeTab === 'list' ? 'Minhas Solicitações' : 'Nova Solicitação'}
+                      {activeTab === 'list' ? 'Minhas alterações' : 'Nova alteração'}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {activeTab === 'list' ? 'Visualize e gerencie suas solicitações de correção' : 'Preencha os dados para criar uma nova solicitação'}
+                      {activeTab === 'list' ? 'Visualize o status das suas alterações de ponto' : 'Preencha os dados para solicitar uma nova alteração'}
                     </p>
                   </div>
                 </div>

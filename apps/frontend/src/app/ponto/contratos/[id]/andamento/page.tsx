@@ -5,7 +5,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
-import { ArrowLeft, ClipboardList, Edit2, FileDown, Percent, Plus, X } from 'lucide-react';
+import { ArrowLeft, AlertCircle, ClipboardList, Edit2, FileDown, Percent, Plus, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -21,6 +21,7 @@ import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import { formatOsSePasta, formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
 import toast from 'react-hot-toast';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface ContractPleito {
   id: string;
@@ -190,6 +191,9 @@ export default function AndamentoListPage() {
   const contractId =
     typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
 
+  const { canAccessContractOrdemServicoTab, isLoading: loadingPermissions } = usePermissions();
+  const canAccessOsTab = contractId ? canAccessContractOrdemServicoTab(contractId) : false;
+
   const queryClient = useQueryClient();
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -258,7 +262,7 @@ export default function AndamentoListPage() {
       const res = await api.get(`/contracts/${contractId}/pleitos`);
       return res.data;
     },
-    enabled: !!contractId
+    enabled: !!contractId && canAccessOsTab
   });
 
   const { data: billingsData } = useQuery({
@@ -276,7 +280,7 @@ export default function AndamentoListPage() {
       const res = await api.get(`/pleitos/${selectedPleitoId}`);
       return res.data;
     },
-    enabled: !!selectedPleitoId
+    enabled: !!selectedPleitoId && canAccessOsTab
   });
 
   const allPleitos = (Array.isArray(pleitosData) ? pleitosData : (pleitosData as { data?: ContractPleito[] })?.data) || [];
@@ -901,7 +905,7 @@ export default function AndamentoListPage() {
     return <Loading message="Carregando..." fullScreen size="lg" />;
   }
 
-  if (loadingContract || !contractId) {
+  if (!contractId || loadingContract || loadingPermissions) {
     return (
       <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
@@ -911,7 +915,36 @@ export default function AndamentoListPage() {
     );
   }
 
-  return (
+  if (!canAccessOsTab) {
+    return (
+      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+        <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+          <div className="w-full max-w-lg mx-auto px-4 sm:px-6 py-8">
+            <Card className="border-red-200 dark:border-red-800">
+              <CardContent className="p-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400 shrink-0 mt-1" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-red-800 dark:text-red-200 mb-2">Acesso negado</h3>
+                    <p className="text-sm text-red-700 dark:text-red-300 mb-4">
+                      Você não tem permissão para Ordem de Serviço neste contrato. Peça ao administrador para marcar a permissão nas configurações do usuário.
+                    </p>
+                    <Link
+                      href={`/ponto/contratos/${contractId}`}
+                      className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Voltar ao contrato
+                    </Link>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </MainLayout>
+      </ProtectedRoute>
+    );
+  }
+    return (
     <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div ref={containerRef} className="w-full max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-8">

@@ -4,7 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
 import { parseDateInput } from '../utils/dateInput';
-import { assertContractAccess } from '../lib/contractAccess';
+import { assertContractModulePermission } from '../lib/contractAccess';
 import { resolvePleitoCreateCore } from '../utils/pleitoCreateHelpers';
 const toDec = (v: unknown): number | null => {
   if (v === null || v === undefined || v === '') return null;
@@ -29,7 +29,7 @@ export class ContractPleitoController {
   async getPleitosByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractAccess(req, contractId);
+      await assertContractModulePermission(req, contractId, 'ordemServico');
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
@@ -48,7 +48,7 @@ export class ContractPleitoController {
   async createPleito(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractAccess(req, contractId);
+      await assertContractModulePermission(req, contractId, 'ordemServico');
 
       const b = req.body;
 

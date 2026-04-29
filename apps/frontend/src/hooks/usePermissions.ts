@@ -48,7 +48,21 @@ export function usePermissions() {
   const dpApprovalContractIds: string[] = permissionData?.dpApprovalContractIds ?? [];
   const dpApprovalContractIdSet = new Set(dpApprovalContractIds);
 
-  /** Acesso total ao submenu (módulo) identificado pela chave do registro central. */
+  type ContractModuleFlagRow = {
+    orcamento: boolean;
+    relatorios: boolean;
+    ordemServico: boolean;
+    producaoSemanal: boolean;
+  };
+  const contractModuleFlags: Record<string, ContractModuleFlagRow> =
+    (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};
+
+  const hasOrcamentoViaAnyAllowedContract =
+    Object.values(contractModuleFlags).some((f) => f?.orcamento === true);
+  const hasOrdemServicoViaAnyAllowedContract = Object.values(contractModuleFlags).some(
+    (f) => f?.ordemServico === true
+  );
+
   const can = (moduleKey: string) => {
     if (isAdministrator || permissionData?.isAdmin) {
       return true;
@@ -126,6 +140,44 @@ export function usePermissions() {
     dpApprovalContractIds.length > 0 ||
     can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
 
+  /** Lista de orçamentos: módulo Contratos + permissão checklist «Orçamento» em pelo menos um contrato. */
+  const canAccessOrcamentoRoutePage =
+    isElevatedUser ||
+    (can(pk('/ponto/contratos')) && hasOrcamentoViaAnyAllowedContract);
+
+  /** Tela global «Ordem de Serviço»: módulo Contratos + checklist OS em pelo menos um contrato. */
+  const canAccessOsRoutePage =
+    isElevatedUser ||
+    (can(pk('/ponto/contratos')) && hasOrdemServicoViaAnyAllowedContract);
+
+  const canAccessContractOrdemServicoTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return (
+      canAccessContract(contractId) && contractModuleFlags[contractId]?.ordemServico === true
+    );
+  };
+
+  const canAccessContractProducaoSemanalTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return (
+      canAccessContract(contractId) && contractModuleFlags[contractId]?.producaoSemanal === true
+    );
+  };
+
+  const canAccessContractOrcamentoTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return (
+      canAccessContract(contractId) && contractModuleFlags[contractId]?.orcamento === true
+    );
+  };
+
+  const canAccessContractRelatoriosTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return (
+      canAccessContract(contractId) && contractModuleFlags[contractId]?.relatorios === true
+    );
+  };
+
   const finalPermissions = {
     canAccessPayroll: can(pk('/ponto/folha-pagamento')) || can(pk('/relatorios/alocacao')),
     /** Acesso ao módulo Funcionários (inclui granularidade definida na tela de permissões). */
@@ -167,6 +219,13 @@ export function usePermissions() {
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
     canAccessContract,
+    contractModuleFlags,
+    canAccessOrcamentoRoutePage,
+    canAccessOsRoutePage,
+    canAccessContractOrcamentoTab,
+    canAccessContractRelatoriosTab,
+    canAccessContractOrdemServicoTab,
+    canAccessContractProducaoSemanalTab,
     isLoading,
     canAccessPayroll: finalPermissions.canAccessPayroll,
     canManageEmployees: finalPermissions.canManageEmployees,
@@ -198,6 +257,8 @@ export function useRoutePermission(route: string) {
     userPosition,
     can,
     dpApprovalContractIds,
+    canAccessOrcamentoRoutePage,
+    canAccessOsRoutePage,
   } = usePermissions();
 
   if (isLoading) {
@@ -233,9 +294,8 @@ export function useRoutePermission(route: string) {
     '/relatorios/alocacao': isAdministrator || isDepartmentPessoal || permissions.canAccessPayroll,
     '/ponto/centros-custo': isAdministrator || isDepartmentPessoal || can(pk('/ponto/centros-custo')),
     '/ponto/materiais-construcao': isAdministrator || isDepartmentPessoal || can(pk('/ponto/materiais-construcao')),
-    '/ponto/andamento-da-os': isAdministrator || can(pk('/ponto/andamento-da-os')),
+    '/ponto/andamento-da-os': canAccessOsRoutePage,
     '/ponto/permissoes': true,
-    '/ponto/bi': isAdministrator || can(pk('/ponto/bi')),
     '/ponto/conversas-whatsapp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp')),
     '/ponto/financeiro': isAdministrator || can(pk('/ponto/financeiro')),
     '/ponto/financeiro/analise': isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise')),
@@ -243,7 +303,7 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato')),
     '/ponto/financeiro/gestao-solicitacoes':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes')),
-    '/ponto/orcamento': isAdministrator || can(pk('/ponto/orcamento')),
+    '/ponto/orcamento': canAccessOrcamentoRoutePage,
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),

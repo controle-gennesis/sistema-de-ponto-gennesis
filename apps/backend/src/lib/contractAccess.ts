@@ -48,3 +48,66 @@ export async function assertContractAccess(req: AuthRequest, contractId: string)
     throw createError('Sem permissão para este contrato', 403);
   }
 }
+
+/** Flags da aba «Contratos» em permissões (orçamento, relatórios, OS, produção semanal). */
+export type ContractScopedModuleFlag = 'orcamento' | 'relatorios' | 'ordemServico' | 'producaoSemanal';
+
+export async function assertContractModulePermission(
+  req: AuthRequest,
+  contractId: string,
+  module: ContractScopedModuleFlag
+): Promise<void> {
+  await assertContractAccess(req, contractId);
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+  if (req.user.isAdmin) return;
+
+  const row = await prisma.userContractPermission.findUnique({
+    where: {
+      userId_contractId: { userId: req.user.id, contractId },
+    },
+    select: {
+      accessOrcamento: true,
+      accessRelatorios: true,
+      accessOrdemServico: true,
+      accessProducaoSemanal: true,
+    },
+  });
+
+  const ok =
+    module === 'orcamento'
+      ? row?.accessOrcamento === true
+      : module === 'relatorios'
+        ? row?.accessRelatorios === true
+        : module === 'ordemServico'
+          ? row?.accessOrdemServico === true
+          : row?.accessProducaoSemanal === true;
+
+  if (!ok) {
+    const msg =
+      module === 'producaoSemanal'
+        ? 'Sem permissão de Produção Semanal neste contrato'
+        : module === 'ordemServico'
+          ? 'Sem permissão de Ordem de Serviço neste contrato'
+          : module === 'relatorios'
+            ? 'Sem permissão de Relatórios neste contrato'
+            : 'Sem permissão de Orçamento neste contrato';
+    throw createError(msg, 403);
+  }
+}
+
+/** Contratos: garante que usuário não-admin pode criar (ação granular `criar`). Administradores passam sempre. */
+export async function assertUserCanCreateContract(userId: string, isAdmin: boolean): Promise<void> {
+  if (isAdmin) return;
+  const can = await prisma.userPermission.findFirst({
+    where: {
+      userId,
+      module: CONTRACTS_MODULE_KEY,
+      action: 'criar',
+      allowed: true,
+    },
+    select: { id: true },
+  });
+  if (!can) {
+    throw createError('Sem permissão para criar contratos', 403);
+  }
+}

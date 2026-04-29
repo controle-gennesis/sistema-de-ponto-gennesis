@@ -571,12 +571,22 @@ export default function ContractDetailPage() {
   const router = useRouter();
   const params = useParams();
   const queryClient = useQueryClient();
-  const { isAdministrator, can, canAction } = usePermissions();
+  const {
+    isAdministrator,
+    can,
+    canAction,
+    canAccessContractOrcamentoTab,
+    canAccessContractRelatoriosTab,
+    canAccessContractOrdemServicoTab,
+    canAccessContractProducaoSemanalTab
+  } = usePermissions();
   const idParam = params?.id;
   const contractId =
     typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
-  const canAccessOrcamento = isAdministrator || can(pk('/ponto/orcamento'));
-  const canAccessRelatorios = isAdministrator || can(pk('/ponto/contratos/relatorios'));
+  const canAccessOrcamento = canAccessContractOrcamentoTab(contractId);
+  const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
+  const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
+  const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
   const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
   const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
   const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
@@ -677,7 +687,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/contracts/${contractId}/pleitos`);
       return res.data;
     },
-    enabled: !!contractId
+    enabled: !!contractId && canAccessOrdemServicoModulo
   });
 
   const { data: productionsData, isLoading: loadingProductions } = useQuery({
@@ -686,7 +696,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/contracts/${contractId}/weekly-productions`);
       return res.data;
     },
-    enabled: !!contractId
+    enabled: !!contractId && canAccessProducaoSemanalModulo
   });
 
   const { data: annualValuesResponse } = useQuery({
@@ -716,7 +726,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/pleitos/${selectedPleitoId}`);
       return res.data;
     },
-    enabled: !!selectedPleitoId
+    enabled: !!selectedPleitoId && canAccessOrdemServicoModulo
   });
 
   const createBillingMutation = useMutation({
@@ -2088,25 +2098,29 @@ export default function ContractDetailPage() {
 
             {/* Barra de ações */}
             <div className="flex flex-wrap items-center gap-3 p-4 sm:p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setShowPleitoModal(true)}
-                disabled={!canCreateContrato}
-                className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-              >
-                <ClipboardList className="w-4 h-4 shrink-0" />
-                Ordem de Serviço
-              </button>
-              <button
-                onClick={() => {
-                  setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
-                  setShowProductionModal(true);
-                }}
-                disabled={!canCreateContrato}
-                className="h-10 px-4 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-              >
-                <BarChart3 className="w-4 h-4 shrink-0" />
-                Produção Semanal
-              </button>
+              {canAccessOrdemServicoModulo ? (
+                <button
+                  onClick={() => setShowPleitoModal(true)}
+                  disabled={!canCreateContrato}
+                  className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+                >
+                  <ClipboardList className="w-4 h-4 shrink-0" />
+                  Ordem de Serviço
+                </button>
+              ) : null}
+              {canAccessProducaoSemanalModulo ? (
+                <button
+                  onClick={() => {
+                    setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
+                    setShowProductionModal(true);
+                  }}
+                  disabled={!canCreateContrato}
+                  className="h-10 px-4 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+                >
+                  <BarChart3 className="w-4 h-4 shrink-0" />
+                  Produção Semanal
+                </button>
+              ) : null}
               {canAccessOrcamento ? (
                 <Link
                   href={`/ponto/contratos/${contractId}/orcamento`}
@@ -2533,6 +2547,8 @@ export default function ContractDetailPage() {
             </CardContent>
           </Card>
 
+          {canAccessOrdemServicoModulo ? (
+          <>
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
           <Card>
             <CardHeader className="border-b border-gray-200 dark:border-gray-700">
@@ -2840,7 +2856,11 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
           </Card>
+          </>
+          ) : null}
 
+          {canAccessProducaoSemanalModulo ? (
+          <>
           {/* Produção Semanal */}
           <Card>
             <CardHeader className="border-b border-gray-200 dark:border-gray-700">
@@ -2960,6 +2980,8 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
           </Card>
+          </>
+          ) : null}
 
           {/* Faturamento - Lista de notas */}
           <Card>
