@@ -19,8 +19,19 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, userRole, userName, onLogout }: MainLayoutProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  /** Esconder o FAB de Conversas enquanto o modal de recorte de foto está aberto (mesmo ícone pode confundir). */
+  const [hideConversasFabOverlay, setHideConversasFabOverlay] = useState(false);
   const pathname = usePathname();
   const { user } = usePermissions();
+
+  useEffect(() => {
+    const onFabVis = (e: Event) => {
+      const detail = (e as CustomEvent<{ hidden?: boolean }>).detail;
+      setHideConversasFabOverlay(!!detail?.hidden);
+    };
+    window.addEventListener('conversas-fab-visibility', onFabVis as EventListener);
+    return () => window.removeEventListener('conversas-fab-visibility', onFabVis as EventListener);
+  }, []);
 
   const { data: unreadCount = 0 } = useQuery({
     queryKey: ['chat-unread-count', user?.id],
@@ -66,11 +77,11 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
       {/* Chat Widget */}
       <ChatWidget />
 
-      {/* Botão flutuante de Conversas */}
-      {pathname !== '/ponto/conversas' && (
+      {/* Atalho flutuante de Conversas — oculto durante ajuste de foto (modal de recorte) */}
+      {pathname !== '/ponto/conversas' && !hideConversasFabOverlay && (
         <Link
           href="/ponto/conversas"
-          className="fixed bottom-5 right-5 z-40 h-14 w-14 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transition-colors inline-flex items-center justify-center lg:bottom-6 lg:right-6"
+          className="fixed bottom-6 left-5 z-[30] flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-lg transition-colors hover:bg-red-700 lg:bottom-8 lg:left-6"
           aria-label="Abrir conversas"
           title="Conversas"
         >

@@ -630,7 +630,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0 lg:fixed ${
           isCollapsed ? 'w-20' : 'w-72'
-        } flex flex-col ${isCollapsed ? 'overflow-visible' : 'overflow-hidden'}`}
+        } flex flex-col ${isCollapsed ? 'overflow-visible' : 'overflow-x-hidden overflow-y-visible'}`}
       >
         {/* Header */}
         <div className={`${isCollapsed ? 'p-4' : 'p-4'} overflow-hidden`}>
@@ -883,7 +883,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         </nav>
 
         {/* Perfil do usuário */}
-        <div className={`flex-shrink-0 relative ${isCollapsed ? 'overflow-visible' : 'overflow-hidden'}`}>
+        <div className="flex-shrink-0 relative z-20 overflow-visible">
           {/* Linha separadora acima do perfil */}
           <div className="mx-4">
             <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
@@ -964,10 +964,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                             onClick={() => setProfileAvatarMenu(false)}
                           />
                           <div
-                            className={`absolute z-[101] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 ${
+                            className={`absolute z-[120] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 ${
                               isCollapsed
                                 ? 'left-1/2 -translate-x-1/2 top-[calc(100%+8px)]'
-                                : 'left-0 top-[calc(100%+8px)]'
+                                : 'left-0 bottom-full mb-2'
                             }`}
                           >
                             {profilePhotoHref && (

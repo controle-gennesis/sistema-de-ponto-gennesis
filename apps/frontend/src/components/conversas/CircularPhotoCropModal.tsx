@@ -37,6 +37,17 @@ export function CircularPhotoCropModal({
     setCroppedPixels(null);
   }, [open, imageSrc]);
 
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.dispatchEvent(new CustomEvent('conversas-fab-visibility', { detail: { hidden: true } }));
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.dispatchEvent(new CustomEvent('conversas-fab-visibility', { detail: { hidden: false } }));
+    };
+  }, [open]);
+
   const onCropComplete = useCallback((_area: Area, areaPixels: Area) => {
     setCroppedPixels(areaPixels);
   }, []);
@@ -68,7 +79,7 @@ export function CircularPhotoCropModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10050] flex flex-col bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[200050] flex min-h-[100vh] flex-col bg-black/80 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="crop-photo-title"
@@ -106,8 +117,8 @@ export function CircularPhotoCropModal({
         </button>
       </div>
 
-      <div className="relative mx-auto w-full max-w-[min(440px,95vw)] flex-1 flex flex-col min-h-0 px-2 pb-2">
-        <div className="relative flex-1 min-h-[min(62vh,420px)] rounded-2xl overflow-hidden bg-[#1a1a1a]">
+      <div className="relative mx-auto flex w-full max-w-[min(440px,95vw)] min-h-[min(260px,50svh)] flex-1 flex-col px-2 pb-2">
+        <div className="relative min-h-[min(62vh,420px)] w-full flex-1 rounded-2xl overflow-hidden bg-[#1a1a1a]">
           <Cropper
             image={imageSrc}
             crop={crop}
@@ -143,7 +154,7 @@ export function CircularPhotoCropModal({
         </div>
       </div>
 
-      <div className="flex shrink-0 justify-end px-5 pb-[max(20px,env(safe-area-inset-bottom))] pt-4">
+      <div className="flex shrink-0 justify-center px-5 pt-4 pb-[calc(96px+env(safe-area-inset-bottom))] sm:justify-end sm:pb-[max(20px,env(safe-area-inset-bottom))]">
         <button
           type="button"
           onClick={handleConfirm}
