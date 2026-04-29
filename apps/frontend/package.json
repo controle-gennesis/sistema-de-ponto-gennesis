@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start -p $PORT",
+    "build": "node --max-old-space-size=6144 ./node_modules/next/dist/bin/next build",
+    "start": "next start -H 0.0.0.0",
     "start:frontend": "npm run build && npm run start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
