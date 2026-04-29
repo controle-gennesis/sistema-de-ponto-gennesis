@@ -42,7 +42,7 @@ export class ContractPleitoController {
 
       res.json({ success: true, data: rows.map(serializePleito) });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 
@@ -165,7 +165,7 @@ export class ContractPleitoController {
         message: 'Andamento da OS cadastrado com sucesso'
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 }
