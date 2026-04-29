@@ -294,9 +294,11 @@ export default function ContratosPage() {
       const res = await api.post('/contracts', data);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] });
       queryClient.invalidateQueries({ queryKey: ['permission-contracts-list'] });
+      /** Novo contrato entra em allowedContractIds no backend; sem refetch o ProtectedRoute nega o acesso até F5. */
+      await queryClient.refetchQueries({ queryKey: ['me-permissions'] });
       setShowForm(false);
       resetForm();
       toast.success('Contrato criado com sucesso!');
