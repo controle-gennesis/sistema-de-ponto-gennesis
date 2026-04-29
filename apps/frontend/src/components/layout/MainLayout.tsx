@@ -77,11 +77,11 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
       {/* Chat Widget */}
       <ChatWidget />
 
-      {/* Atalho flutuante de Conversas — oculto durante ajuste de foto (modal de recorte) */}
+      {/* Atalho flutuante Conversas — oculto durante modal de recorte da foto (CircularPhotoCropModal) */}
       {pathname !== '/ponto/conversas' && !hideConversasFabOverlay && (
         <Link
           href="/ponto/conversas"
-          className="fixed bottom-6 left-5 z-[30] flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-lg transition-colors hover:bg-red-700 lg:bottom-8 lg:left-6"
+          className="fixed bottom-6 right-6 z-[51] flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-lg transition-colors hover:bg-red-700 lg:bottom-8 lg:right-8"
           aria-label="Abrir conversas"
           title="Conversas"
         >

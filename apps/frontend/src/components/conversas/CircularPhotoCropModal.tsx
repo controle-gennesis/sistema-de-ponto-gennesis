@@ -7,6 +7,17 @@ import { X, RotateCcw, Plus, Minus, Check, Loader2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { getCroppedImageBlob } from '@/lib/getCroppedImg';
 
+/** Sidebar e página Conversas podem cada uma ter um modal; usa contagem para não “liberar” o FAB antes da hora. */
+let cropModalsFabSuppressionDepth = 0;
+
+function broadcastConversasFabHidden() {
+  window.dispatchEvent(
+    new CustomEvent('conversas-fab-visibility', {
+      detail: { hidden: cropModalsFabSuppressionDepth > 0 },
+    })
+  );
+}
+
 export interface CircularPhotoCropModalProps {
   open: boolean;
   imageSrc: string;
@@ -41,10 +52,12 @@ export function CircularPhotoCropModal({
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    window.dispatchEvent(new CustomEvent('conversas-fab-visibility', { detail: { hidden: true } }));
+    cropModalsFabSuppressionDepth += 1;
+    broadcastConversasFabHidden();
     return () => {
       document.body.style.overflow = prevOverflow;
-      window.dispatchEvent(new CustomEvent('conversas-fab-visibility', { detail: { hidden: false } }));
+      cropModalsFabSuppressionDepth = Math.max(0, cropModalsFabSuppressionDepth - 1);
+      broadcastConversasFabHidden();
     };
   }, [open]);
 
