@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
+import { CircularPhotoCropModal } from '@/components/conversas/CircularPhotoCropModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -431,6 +432,13 @@ export default function ConversasPage() {
   );
 }
 
+interface GroupPhotoCropState {
+  imageSrc: string;
+  intent:
+    | { kind: 'new-group' }
+    | { kind: 'group-avatar'; chatId: string };
+}
+
 function ConversasContent() {
   const MIN_LEFT_PANEL_WIDTH = 320;
   const MIN_RIGHT_PANEL_WIDTH = 480;
@@ -496,6 +504,43 @@ function ConversasContent() {
   const emojiContainerRef = useRef<HTMLDivElement>(null);
   const newGroupPhotoInputRef = useRef<HTMLInputElement>(null);
   const groupAvatarInputRef = useRef<HTMLInputElement>(null);
+  const [groupPhotoCrop, setGroupPhotoCrop] = useState<GroupPhotoCropState | null>(null);
+
+  const closeGroupPhotoCrop = useCallback(() => {
+    setGroupPhotoCrop((prev) => {
+      if (prev?.imageSrc.startsWith('blob:')) URL.revokeObjectURL(prev.imageSrc);
+      return null;
+    });
+  }, []);
+
+  const handleGroupPhotoCropConfirm = async (file: File) => {
+    if (!groupPhotoCrop) return;
+    const { intent } = groupPhotoCrop;
+    if (groupPhotoCrop.imageSrc.startsWith('blob:')) {
+      URL.revokeObjectURL(groupPhotoCrop.imageSrc);
+    }
+    setGroupPhotoCrop(null);
+
+    if (intent.kind === 'new-group') {
+      setNewGroupPhotoFile(file);
+      const url = URL.createObjectURL(file);
+      setNewGroupPhotoPreview((prev) => {
+        if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } else {
+      uploadGroupAvatarMutation.mutate({ chatId: intent.chatId, file });
+    }
+  };
+
+  const handleGroupPhotoReplaceSource = useCallback((picked: File) => {
+    setGroupPhotoCrop((prev) => {
+      if (prev?.imageSrc.startsWith('blob:')) URL.revokeObjectURL(prev.imageSrc);
+      if (!prev) return null;
+      return { ...prev, imageSrc: URL.createObjectURL(picked) };
+    });
+  }, []);
+
   const [groupAvatarMenu, setGroupAvatarMenu] = useState(false);
   const [showGroupAvatarViewer, setShowGroupAvatarViewer] = useState(false);
   const groupAvatarMenuRef = useRef<HTMLDivElement>(null);
@@ -658,9 +703,16 @@ function ConversasContent() {
     setNewGroupName('');
     setNewGroupDescription('');
     setNewGroupPhotoFile(null);
-    setNewGroupPhotoPreview(null);
+    setNewGroupPhotoPreview((prev) => {
+      if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return null;
+    });
     setNewGroupMemberSearch('');
     setGroupMembers([]);
+    setGroupPhotoCrop((prev) => {
+      if (prev?.imageSrc.startsWith('blob:')) URL.revokeObjectURL(prev.imageSrc);
+      return null;
+    });
   }, []);
 
   const createGroupMutation = useMutation({
@@ -1414,7 +1466,10 @@ function ConversasContent() {
                       setNewGroupName('');
                       setNewGroupDescription('');
                       setNewGroupPhotoFile(null);
-                      setNewGroupPhotoPreview(null);
+                      setNewGroupPhotoPreview((prev) => {
+                        if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
+                        return null;
+                      });
                       setNewGroupMemberSearch('');
                       setShowNewGroupModal(true);
                     }}
@@ -2630,8 +2685,11 @@ function ConversasContent() {
                             className="hidden"
                             onChange={(e) => {
                               const file = e.target.files?.[0];
-                              if (!file) return;
-                              uploadGroupAvatarMutation.mutate({ chatId: activeChat.id, file });
+                              if (!file || !activeChat) return;
+                              setGroupPhotoCrop({
+                                imageSrc: URL.createObjectURL(file),
+                                intent: { kind: 'group-avatar', chatId: activeChat.id },
+                              });
                               e.target.value = '';
                             }}
                           />
@@ -3450,10 +3508,10 @@ function ConversasContent() {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    setNewGroupPhotoFile(file);
-                    const reader = new FileReader();
-                    reader.onload = (ev) => setNewGroupPhotoPreview(ev.target?.result as string);
-                    reader.readAsDataURL(file);
+                    setGroupPhotoCrop({
+                      imageSrc: URL.createObjectURL(file),
+                      intent: { kind: 'new-group' },
+                    });
                     e.target.value = '';
                   }}
                 />
@@ -3462,7 +3520,13 @@ function ConversasContent() {
                 <div className="flex justify-center -mt-2">
                   <button
                     type="button"
-                    onClick={() => { setNewGroupPhotoFile(null); setNewGroupPhotoPreview(null); }}
+                    onClick={() => {
+                      setNewGroupPhotoFile(null);
+                      setNewGroupPhotoPreview((prev) => {
+                        if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
+                        return null;
+                      });
+                    }}
                     className="text-xs text-red-500 hover:underline"
                   >
                     Remover foto
@@ -3630,6 +3694,16 @@ function ConversasContent() {
         </div>
       </div>,
       document.body
+    )}
+
+    {groupPhotoCrop && (
+      <CircularPhotoCropModal
+        open
+        imageSrc={groupPhotoCrop.imageSrc}
+        onClose={closeGroupPhotoCrop}
+        onConfirm={handleGroupPhotoCropConfirm}
+        onPickReplacement={handleGroupPhotoReplaceSource}
+      />
     )}
     </>
   );
