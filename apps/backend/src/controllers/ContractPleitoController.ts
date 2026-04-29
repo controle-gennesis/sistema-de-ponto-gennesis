@@ -114,7 +114,7 @@ export class ContractPleitoController {
 
       if (existing) {
         /** Já existe pleito nesta mesma OS + competência (único no BD). Gerar novamente acumula valor pleiteado. */
-        const incrementoBR = data.billingRequest != null ? new Decimal(data.billingRequest) : new Decimal(0);
+        const incrementoBR = new Decimal(toDec(b.billingRequest) ?? 0);
         const baseBR =
           existing.billingRequest != null ? new Decimal(existing.billingRequest.toString()) : new Decimal(0);
         const row = await prisma.pleito.update({
@@ -159,7 +159,7 @@ export class ContractPleitoController {
       }
 
       const row = await prisma.pleito.create({ data });
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         data: serializePleito(row),
         message: 'Andamento da OS cadastrado com sucesso'
