@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import axios from 'axios';
 import { OrcafascioService } from '../services/OrcafascioService';
 
 const service = new OrcafascioService();
@@ -56,6 +57,69 @@ export class OrcafascioController {
         return res.status(404).json({ error: 'Composição não encontrada' });
       }
       return next(err);
+    }
+  }
+
+  // GET /api/orcafascio/orcamentos/:id/analitico — composições analíticas com preço unitário
+  async buscarAnaliticoOrcamento(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Parâmetro "id" é obrigatório' });
+      const data = await service.buscarAnaliticoOrcamento(id);
+      return res.json(data);
+    } catch (err: any) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
+        return res.status(404).json({ error: 'Orçamento não encontrado' });
+      }
+      return next(err);
+    }
+  }
+
+  // GET /api/orcafascio/orcamentos/:id/sintetico — relatório sintético
+  async buscarSinteticoOrcamento(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Parâmetro "id" é obrigatório' });
+      const data = await service.buscarSinteticoOrcamento(id);
+      return res.json(data);
+    } catch (err: any) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
+        return res.status(404).json({ error: 'Orçamento não encontrado' });
+      }
+      return next(err);
+    }
+  }
+
+  // GET /api/orcafascio/orcamentos/:id — detalhe + itens do orçamento
+  async buscarDetalheOrcamento(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Parâmetro "id" é obrigatório' });
+      const data = await service.buscarDetalheOrcamento(id);
+      return res.json(data);
+    } catch (err: any) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
+        return res.status(404).json({ error: 'Orçamento não encontrado' });
+      }
+      return next(err);
+    }
+  }
+
+  // GET /api/orcafascio/orcamentos?page=1&order_type=Asc&order_name=description
+  async listarOrcamentos(req: Request, res: Response, next: NextFunction) {
+    try {
+      const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
+      const perPageRaw = parseInt((req.query.per_page as string) || '0', 10);
+      const perPage = Number.isFinite(perPageRaw) && perPageRaw > 0
+        ? Math.min(5000, perPageRaw)
+        : undefined;
+      const search = (req.query.search as string) || undefined;
+      const orderType = (req.query.order_type as string) || undefined;
+      const orderName = (req.query.order_name as string) || undefined;
+      const data = await service.listarOrcamentos(page, orderType, orderName, perPage, search);
+      res.json(data);
+    } catch (err) {
+      next(err);
     }
   }
 

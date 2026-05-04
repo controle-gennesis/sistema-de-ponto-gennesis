@@ -18,6 +18,12 @@ router.get('/composicoes/:id', (req, res, next) =>
   controller.buscarComposicaoPorId(req, res, next)
 );
 
+// Orçamentos Orçafascio
+router.get('/orcamentos/:id/analitico', (req, res, next) => controller.buscarAnaliticoOrcamento(req, res, next));
+router.get('/orcamentos/:id/sintetico', (req, res, next) => controller.buscarSinteticoOrcamento(req, res, next));
+router.get('/orcamentos/:id', (req, res, next) => controller.buscarDetalheOrcamento(req, res, next));
+router.get('/orcamentos', (req, res, next) => controller.listarOrcamentos(req, res, next));
+
 // Insumos
 router.get('/insumos', (req, res, next) => controller.listarInsumos(req, res, next));
 

@@ -117,6 +117,15 @@ export class ContractPleitoController {
         const incrementoBR = new Decimal(toDec(b.billingRequest) ?? 0);
         const baseBR =
           existing.billingRequest != null ? new Decimal(existing.billingRequest.toString()) : new Decimal(0);
+        const requestedReportsBilling = typeof data.reportsBilling === 'string' ? data.reportsBilling : null;
+        const existingReportsBilling = existing.reportsBilling || null;
+        const requestedIsGerado100 = requestedReportsBilling === '__PLEITO_HISTORICO__GERADO_100__';
+        const reportsBillingToPersist =
+          requestedIsGerado100
+            ? requestedReportsBilling
+            : existingReportsBilling === '__PLEITO_HISTORICO__' || existingReportsBilling === '__PLEITO_HISTORICO__GERADO_100__'
+            ? requestedReportsBilling
+            : existingReportsBilling;
         const row = await prisma.pleito.update({
           where: { id: existing.id },
           data: {
@@ -145,7 +154,7 @@ export class ContractPleitoController {
             budgetAmount4: data.budgetAmount4,
             pv: data.pv,
             ipi: data.ipi,
-            reportsBilling: data.reportsBilling,
+            reportsBilling: reportsBillingToPersist,
             engineer: data.engineer,
             supervisor: data.supervisor,
             updatedContract: { connect: { id: contractId } },

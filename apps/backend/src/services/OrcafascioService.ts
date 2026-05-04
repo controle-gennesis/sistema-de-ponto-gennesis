@@ -778,6 +778,26 @@ export class OrcafascioService {
     return process.env.ORCAFASCIO_ORSE_STATE?.trim() || 'SE';
   }
 
+  /** Gera variações tolerantes do código para lookup por código/listagem. */
+  private variantesCodigoBusca(raw: string): string[] {
+    const base = String(raw ?? '').trim();
+    if (!base) return [];
+    const out: string[] = [];
+    const add = (v?: string | null) => {
+      const t = typeof v === 'string' ? v.trim() : '';
+      if (!t || out.includes(t)) return;
+      out.push(t);
+    };
+    const semPrefixo = base.replace(/^(os|orc|orcamento|orçamento)\s+/i, '');
+    const semEspaco = semPrefixo.replace(/\s+/g, '');
+    const apenasDigitos = semPrefixo.replace(/[^\d]/g, '');
+    add(base);
+    add(semPrefixo);
+    add(semEspaco);
+    add(apenasDigitos.length >= 5 ? apenasDigitos : null);
+    return out;
+  }
+
   /**
    * Quando `find_by_code` retorna 404 em todos os segmentos (slug «orse» nem sempre existe na API),
    * localiza o código em GET …/compositions (várias páginas) e abre o detalhe por ID.
@@ -786,6 +806,12 @@ export class OrcafascioService {
     token: string,
     codeNorm: string
   ): Promise<OrcafascioComposicaoDetalhe> {
+    const variantes = this.variantesCodigoBusca(codeNorm);
+    const digitsSet = new Set(
+      variantes
+        .map((v) => v.replace(/[^\d]/g, ''))
+        .filter((v) => v.length >= 5)
+    );
     const segments = this.segmentosComposicaoOrsePrioridade();
     const maxPages = Math.min(
       150,
@@ -800,10 +826,16 @@ export class OrcafascioService {
         } catch {
           break;
         }
-        const hit = data.records.find(r => String(r.code).trim() === codeNorm);
+        const hit = data.records.find((r) => {
+          const rc = String(r.code ?? '').trim();
+          if (!rc) return false;
+          if (variantes.includes(rc)) return true;
+          const rcDigits = rc.replace(/[^\d]/g, '');
+          return rcDigits.length >= 5 && digitsSet.has(rcDigits);
+        });
         if (hit) {
           console.log(
-            `[Orçafascio] Código ${codeNorm} resolvido pela listagem (base=${seg}, página ${page})`
+            `[Orçafascio] Código ${codeNorm} resolvido pela listagem (base=${seg}, página ${page}, hit=${hit.code})`
           );
           return this.buscarComposicaoPorId(hit.id, seg);
         }
@@ -1070,6 +1102,10 @@ export class OrcafascioService {
     if (!rawCode) {
       throw new Error('Orçafascio: código da composição vazio.');
     }
+    const variantesCodigo = this.variantesCodigoBusca(rawCode);
+    if (!variantesCodigo.length) {
+      throw new Error('Orçafascio: código da composição inválido.');
+    }
     const { token } = await this.authenticate();
     const ufPreferida = state?.trim() || this.estadoPadraoOrse();
     /** Muitos catálogos «Oficiais» usam SP como UF de referência mesmo para ORSE no front */
@@ -1080,20 +1116,22 @@ export class OrcafascioService {
 
     for (const segment of segments) {
       const path = `/v1/base/${encodeURIComponent(segment)}/compositions/find_by_code`;
-      for (const st of ufs) {
-        for (const authH of authModes) {
-          try {
-            console.log(`[Orçafascio] find_by_code base=${segment} state=${st}`);
-            const res = await this.client.get<OrcafascioComposicaoDetalhe>(path, {
-              headers: { Authorization: authH },
-              params: { code: rawCode, state: st },
-            });
-            return res.data;
-          } catch (e) {
-            lastErr = e;
-            const stHttp = axios.isAxiosError(e) ? e.response?.status : undefined;
-            if (stHttp === 404 || stHttp === 403) continue;
-            if (axios.isAxiosError(e) && !e.response) throw this.wrapAxiosError(e, 'Composição por código');
+      for (const codeTry of variantesCodigo) {
+        for (const st of ufs) {
+          for (const authH of authModes) {
+            try {
+              console.log(`[Orçafascio] find_by_code base=${segment} state=${st} code=${codeTry}`);
+              const res = await this.client.get<OrcafascioComposicaoDetalhe>(path, {
+                headers: { Authorization: authH },
+                params: { code: codeTry, state: st },
+              });
+              return res.data;
+            } catch (e) {
+              lastErr = e;
+              const stHttp = axios.isAxiosError(e) ? e.response?.status : undefined;
+              if (stHttp === 404 || stHttp === 403) continue;
+              if (axios.isAxiosError(e) && !e.response) throw this.wrapAxiosError(e, 'Composição por código');
+            }
           }
         }
       }
@@ -1103,7 +1141,9 @@ export class OrcafascioService {
     try {
       return await this.buscarComposicaoPorCodigoViaListagem(token, rawCode);
     } catch (eList) {
-      if (lastErr) throw this.wrapAxiosError(lastErr, 'Composição por código');
+      if (lastErr && axios.isAxiosError(lastErr) && (lastErr.response?.status ?? 0) >= 500) {
+        throw this.wrapAxiosError(lastErr, 'Composição por código');
+      }
       throw eList instanceof Error ? eList : new Error(String(eList));
     }
   }
@@ -1120,6 +1160,280 @@ export class OrcafascioService {
       token,
       [`/v1/base/${b}/compositions/${encodeURIComponent(composicaoId)}`]
     );
+  }
+
+  // ── Orçamentos ─────────────────────────────────────────────────────────────
+
+  async listarOrcamentos(
+    page = 1,
+    orderType?: string,
+    orderName?: string,
+    perPage?: number,
+    search?: string
+  ): Promise<{ budgets: Record<string, unknown>[]; total?: number; current_page?: number; per_page?: number }> {
+    const { token } = await this.authenticate();
+    const authModes = OrcafascioService.authorizationVariants(token);
+    const params: Record<string, unknown> = { page };
+    if (orderType) params.order_type = orderType;
+    if (orderName) params.order_name = orderName;
+    if (perPage && Number.isFinite(perPage) && perPage > 0) params.per_page = Math.min(5000, perPage);
+    if (search?.trim()) params.search = search.trim();
+
+    let lastErr: unknown;
+    for (const authH of authModes) {
+      try {
+        const res = await this.client.get<{ budgets: Record<string, unknown>[] }>(
+          '/v1/bud/budgets/list',
+          { headers: { Authorization: authH }, params }
+        );
+        const raw = res.data ?? {};
+        const budgets = Array.isArray((raw as any).budgets)
+          ? (raw as any).budgets
+          : Array.isArray(raw)
+            ? raw
+            : [];
+        return {
+          budgets,
+          total: (raw as any).total,
+          current_page: (raw as any).current_page ?? page,
+          per_page: (raw as any).per_page,
+        };
+      } catch (e) {
+        lastErr = e;
+        const st = axios.isAxiosError(e) ? e.response?.status : undefined;
+        if (st === 401 || st === 403) continue;
+        throw this.wrapAxiosError(e, 'Listar orçamentos Orçafascio');
+      }
+    }
+    throw lastErr
+      ? this.wrapAxiosError(lastErr, 'Listar orçamentos Orçafascio (todas as variantes de auth falharam)')
+      : new Error('Orçafascio: falha ao listar orçamentos');
+  }
+
+
+  /** Junta todas as listas “linhas de orçamento” no mesmo objeto (várias chaves podem coexistir na API). */
+  private coletarArraysRelatorioNoObjeto(o: Record<string, unknown>): unknown[] {
+    const chaves = [
+      'records',
+      'items',
+      'rows',
+      'list',
+      'compositions',
+      'services',
+      'budget_items',
+      'budget_items_services',
+      'budget_lines',
+      'synthetic',
+      'lines',
+      'budget_services',
+      'analytical',
+      'analytical_with_unit_price',
+      'results',
+      'children',
+      'chapters',
+      'works',
+    ];
+    const out: unknown[] = [];
+    for (const k of chaves) {
+      const v = o[k];
+      if (!Array.isArray(v) || v.length === 0) continue;
+      const first = v[0];
+      if (first !== null && typeof first === 'object' && !Array.isArray(first)) out.push(...v);
+    }
+    return out;
+  }
+
+  /**
+   * Resposta pode ser array direto ou objeto com listas em chaves típicas; às vezes tudo está em data → budget → …
+   */
+  private extrairArrayDeRelatorioOrcamento(payload: unknown, depth = 0): unknown[] {
+    if (payload == null || depth > 8) return [];
+    if (Array.isArray(payload)) return payload;
+
+    if (typeof payload !== 'object') return [];
+    const o = payload as Record<string, unknown>;
+
+    const mergedTop = this.coletarArraysRelatorioNoObjeto(o);
+    if (mergedTop.length > 0) return mergedTop;
+
+    const nestedData = o.data;
+    if (nestedData !== undefined && nestedData !== null) {
+      const inner = this.extrairArrayDeRelatorioOrcamento(nestedData, depth + 1);
+      if (inner.length > 0) return inner;
+    }
+
+    for (const v of Object.values(o)) {
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        const inner = this.extrairArrayDeRelatorioOrcamento(v, depth + 1);
+        if (inner.length > 0) return inner;
+      }
+    }
+
+    let best: unknown[] = [];
+    for (const v of Object.values(o)) {
+      if (!Array.isArray(v) || v.length === 0) continue;
+      const first = v[0];
+      if (first !== null && typeof first === 'object' && !Array.isArray(first) && v.length > best.length) {
+        best = v;
+      }
+    }
+    return best;
+  }
+
+  /** GET relatório analítico — tenta variantes de path usadas pela API Orçafascio. */
+  async buscarAnaliticoOrcamento(id: string): Promise<unknown[]> {
+    const { token } = await this.authenticate();
+    const authModes = OrcafascioService.authorizationVariants(token);
+    const enc = encodeURIComponent(id);
+    const paths = [
+      `/v1/bud/budgets/${enc}/analytical_with_unit_price`,
+      `/v1/bud/budget/${enc}/analytical_with_unit_price`,
+      `/v1/bud/budgets/${enc}/analytical`,
+      `/v1/bud/budget/${enc}/analytical`,
+    ];
+
+    let lastErr: unknown;
+    let lastResult: unknown[] = [];
+
+    for (const path of paths) {
+      for (const authH of authModes) {
+        try {
+          const res = await this.client.get<unknown>(path, {
+            headers: { Authorization: authH },
+            timeout: 120000,
+          });
+          lastResult = this.extrairArrayDeRelatorioOrcamento(res.data);
+          lastErr = undefined;
+          if (lastResult.length > 0) return lastResult;
+          console.log(`[Orçafascio] Analítico ${id} ${path} → 200, 0 linhas`);
+          break;
+        } catch (e) {
+          lastErr = e;
+          const st = axios.isAxiosError(e) ? e.response?.status : undefined;
+          console.log(`[Orçafascio] Analítico orçamento ${id} ${path} → HTTP ${st ?? '?'}`);
+          if (st === 401 || st === 403) continue;
+          if (axios.isAxiosError(e) && !e.response) throw this.wrapAxiosError(e, 'Analítico orçamento');
+          if (st !== 404) throw this.wrapAxiosError(e, `Analítico orçamento ${id}`);
+          break;
+        }
+      }
+    }
+
+    if (lastResult.length > 0) return lastResult;
+    if (lastErr)
+      throw this.wrapAxiosError(lastErr, `Analítico orçamento ${id}`);
+    return [];
+  }
+
+  /** GET relatório sintético — tenta variantes de path. */
+  async buscarSinteticoOrcamento(id: string): Promise<unknown[]> {
+    const { token } = await this.authenticate();
+    const authModes = OrcafascioService.authorizationVariants(token);
+    const enc = encodeURIComponent(id);
+    const paths = [`/v1/bud/budgets/${enc}/synthetic`, `/v1/bud/budget/${enc}/synthetic`];
+
+    let lastErr: unknown;
+    let lastResult: unknown[] = [];
+
+    for (const path of paths) {
+      for (const authH of authModes) {
+        try {
+          const res = await this.client.get<unknown>(path, {
+            headers: { Authorization: authH },
+            timeout: 120000,
+          });
+          lastResult = this.extrairArrayDeRelatorioOrcamento(res.data);
+          lastErr = undefined;
+          if (lastResult.length > 0) return lastResult;
+          console.log(`[Orçafascio] Sintético ${id} ${path} → 200, 0 linhas`);
+          break;
+        } catch (e) {
+          lastErr = e;
+          const st = axios.isAxiosError(e) ? e.response?.status : undefined;
+          console.log(`[Orçafascio] Sintético orçamento ${id} ${path} → HTTP ${st ?? '?'}`);
+          if (st === 401 || st === 403) continue;
+          if (axios.isAxiosError(e) && !e.response) throw this.wrapAxiosError(e, 'Sintético orçamento');
+          if (st !== 404) throw this.wrapAxiosError(e, `Sintético orçamento ${id}`);
+          break;
+        }
+      }
+    }
+
+    if (lastResult.length > 0) return lastResult;
+    if (lastErr) throw this.wrapAxiosError(lastErr, `Sintético orçamento ${id}`);
+    return [];
+  }
+
+  async buscarDetalheOrcamento(id: string): Promise<Record<string, unknown>> {
+    const { token } = await this.authenticate();
+    const authModes = OrcafascioService.authorizationVariants(token);
+    const enc = encodeURIComponent(id);
+
+    // Tenta variantes comuns da API até obter 200
+    const pathsBase = [
+      `/v1/bud/budgets/${enc}`,
+      `/v1/bud/budget/${enc}`,
+    ];
+    const pathsItems = [
+      `/v1/bud/budgets/${enc}/items`,
+      `/v1/bud/budget/${enc}/items`,
+      `/v1/bud/budgets/${enc}/compositions`,
+      `/v1/bud/budget/${enc}/compositions`,
+      `/v1/bud/budgets/${enc}/services`,
+      `/v1/bud/budget/${enc}/services`,
+    ];
+
+    let budgetData: Record<string, unknown> | null = null;
+    let lastErr: unknown;
+
+    // 1. Tenta buscar o detalhe do orçamento
+    for (const path of pathsBase) {
+      for (const authH of authModes) {
+        try {
+          const res = await this.client.get<Record<string, unknown>>(path, {
+            headers: { Authorization: authH },
+          });
+          budgetData = res.data ?? {};
+          console.log(`[Orçafascio] Detalhe orçamento → ${path} → 200`);
+          break;
+        } catch (e) {
+          lastErr = e;
+          const st = axios.isAxiosError(e) ? e.response?.status : undefined;
+          console.log(`[Orçafascio] Detalhe orçamento ${path} → HTTP ${st ?? '?'}`);
+          if (axios.isAxiosError(e) && !e.response) throw this.wrapAxiosError(e, 'Detalhe orçamento');
+        }
+      }
+      if (budgetData !== null) break;
+    }
+
+    // 2. Tenta buscar os itens/composições do orçamento
+    let itemsData: unknown = null;
+    for (const path of pathsItems) {
+      for (const authH of authModes) {
+        try {
+          const res = await this.client.get<unknown>(path, {
+            headers: { Authorization: authH },
+          });
+          itemsData = res.data;
+          console.log(`[Orçafascio] Itens orçamento → ${path} → 200`);
+          break;
+        } catch (e) {
+          const st = axios.isAxiosError(e) ? e.response?.status : undefined;
+          console.log(`[Orçafascio] Itens orçamento ${path} → HTTP ${st ?? '?'}`);
+        }
+      }
+      if (itemsData !== null) break;
+    }
+
+    if (budgetData === null && itemsData === null) {
+      if (lastErr) throw this.wrapAxiosError(lastErr, `Detalhe do orçamento ${id}`);
+      throw new Error(`Orçafascio: não foi possível obter detalhe do orçamento ${id}`);
+    }
+
+    return {
+      ...(budgetData ?? { id }),
+      _items: itemsData,
+    };
   }
 
   // ── Insumos ────────────────────────────────────────────────────────────────

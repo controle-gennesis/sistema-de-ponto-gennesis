@@ -629,6 +629,7 @@ export default function ContractDetailPage() {
   const [showPleitoValoresModal, setShowPleitoValoresModal] = useState(false);
   const [showPleitoResumoModal, setShowPleitoResumoModal] = useState(false);
   const [showHistoricoPleitosModal, setShowHistoricoPleitosModal] = useState(false);
+  const [showHistoricoOsModal, setShowHistoricoOsModal] = useState(false);
   const [histYearFilter, setHistYearFilter] = useState('all');
   const [histMonthFilter, setHistMonthFilter] = useState('all');
   const [histOsFilter, setHistOsFilter] = useState('');
@@ -1621,7 +1622,7 @@ export default function ContractDetailPage() {
     if (filterStatusExecucao) p.set('statusExecucao', filterStatusExecucao);
     if (filterStatusFaturamento) p.set('statusFaturamento', filterStatusFaturamento);
     p.set('selectedIds', ids.join(','));
-    window.open(`/ponto/contratos/${contractId}/andamento?${p.toString()}`, '_blank', 'noopener,noreferrer');
+    router.push(`/ponto/contratos/${contractId}/andamento?${p.toString()}`);
   };
 
   const handleGerarCronogramaMensal = () => {
@@ -1732,6 +1733,10 @@ export default function ContractDetailPage() {
         isPleitoHistorico(p) ||
         ((p.billingRequest != null ? Number(p.billingRequest) : 0) > 0)
       ),
+    [allPleitos]
+  );
+  const historicoOsList = useMemo(
+    () => allPleitos.filter((p) => isPleitoHistorico(p)),
     [allPleitos]
   );
   const historicoYears = useMemo(() => {
@@ -2613,13 +2618,21 @@ export default function ContractDetailPage() {
                         </>
                       )}
                     </div>
-                    {!loadingPleitos && pleitos.length > 0 && (
-                      <button
-                        onClick={() => setShowHistoricoPleitosModal(true)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors shrink-0"
-                      >
-                        Histórico de Pleitos
-                      </button>
+                    {!loadingPleitos && allPleitos.length > 0 && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setShowHistoricoOsModal(true)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
+                        >
+                          Histórico de OS
+                        </button>
+                        <button
+                          onClick={() => setShowHistoricoPleitosModal(true)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors"
+                        >
+                          Histórico de Pleitos
+                        </button>
+                      </div>
                     )}
                   </div>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -4031,6 +4044,71 @@ export default function ContractDetailPage() {
                         </tbody>
                       </table>
                     </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          {showHistoricoOsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+              <div className="absolute inset-0" onClick={() => setShowHistoricoOsModal(false)} />
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Histórico de OS</h3>
+                  <button onClick={() => setShowHistoricoOsModal(false)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-6">
+                  {historicoOsList.length === 0 ? (
+                    <div className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhuma OS movida para histórico até o momento.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[900px]">
+                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Etiqueta</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Orçamento</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor pleiteado</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Preenchimento</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:border-gray-700">
+                          {historicoOsList.map((p) => {
+                            const etiqueta = getHistoricoEtiqueta(p);
+                            const valorPleito = p.billingRequest ? Number(p.billingRequest) : 0;
+                            return (
+                              <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                  {etiqueta ? (
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5 text-xs font-medium">
+                                      {etiqueta}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={p.serviceDescription}>
+                                  {p.serviceDescription || '-'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">
+                                  {p.budget ? formatCurrency(Number(p.budget)) : '-'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">
+                                  {formatCurrency(valorPleito)}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                  {formatDateTime(p.createdAt || '')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>

@@ -59,6 +59,8 @@ export type OrcamentoPageProps = {
   lockedCostCenterId?: string | null;
   /** Contrato para permissão `ProtectedRoute` e link “voltar”. */
   embeddedContractId?: string | null;
+  /** Id do orçamento na URL (`/contratos/:id/orcamento/:orcamentoId`); lista quando omitido. */
+  embeddedOrcamentoIdFromRoute?: string | null;
 };
 
 // Tipos
@@ -128,6 +130,8 @@ export interface OrcafascioComposicaoDetalhe {
   code: string;
   second_code: string | null;
   description: string;
+  /** Base de referência da composição (ex.: SINAPI, ORSE, SEINFRA). */
+  base?: string;
   type: string;
   unit: string;
   is_sicro: boolean;
@@ -136,6 +140,471 @@ export interface OrcafascioComposicaoDetalhe {
   prices: { pnd: number; pd: number };
   items: OrcafascioComposicaoItem[];
   created_at: string;
+}
+
+export interface OrcafascioOrcamentoItem {
+  id: string;
+  description?: string;
+  code?: string;
+  created_at?: string;
+  updated_at?: string;
+  department_id?: string;
+  company_id?: string;
+  [key: string]: unknown;
+}
+
+export interface OrcafascioOrcamentosResponse {
+  budgets: OrcafascioOrcamentoItem[];
+  total?: number;
+  current_page?: number;
+  per_page?: number;
+}
+
+/** Descrição em linhas de relatório Orçafascio (`descr` vs `desc` conforme endpoint). */
+function textoDescricaoOrcafascio(row: Record<string, unknown>): string {
+  const raw =
+    row.descr ??
+    row.Descr ??
+    row.desc ??
+    row.text ??
+    row.Text ??
+    row.label ??
+    row.description ??
+    row.Description ??
+    row.descricao ??
+    row.Descricao ??
+    row.note ??
+    row.name ??
+    '';
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw.trim() || '';
+  return String(raw);
+}
+
+/** Converte texto numérico da API (BR ou float) ou número para um valor finito ou null */
+function valorNumericoOrcafascio(val: unknown): number | null {
+  if (val == null || val === '') return null;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+  if (typeof val === 'boolean') return null;
+  if (typeof val === 'string') {
+    const t = val.trim().replace(/\s+/g, '');
+    if (!t) return null;
+    if (/^-?\d+([.,]\d+)?$/.test(t)) {
+      let s = t;
+      const lastComma = s.lastIndexOf(',');
+      const lastDot = s.lastIndexOf('.');
+      if (lastComma !== -1 && lastDot !== -1) {
+        const decSep = lastComma > lastDot ? ',' : '.';
+        if (decSep === ',') s = s.replace(/\./g, '').replace(',', '.');
+      } else if (lastComma !== -1 && /^-?\d{1,3}(\.\d{3})*,\d+$/.test(s.replace(/^-/, ''))) {
+        s = s.replace(/\./g, '').replace(',', '.');
+      } else if (/^-?\d+,\d{2}$/.test(s)) {
+        s = s.replace(',', '.');
+      }
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : null;
+    }
+    const n = Number(t.replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** Primeiro campo numérico não nulo dentro de objeto (exceto só zeros se houver outros) */
+function extrairValorDeObjPrecos(obj: Record<string, unknown>): number | null {
+  const prefs = [
+    'plus_bdi',
+    'Plus_bdi',
+    'plus_bi',
+    'price_plus_bdi',
+    'with_bdi',
+    'unit_price_with_bdi',
+    'without_bdi',
+    'without',
+    'bdi',
+    'unit_price',
+    'pd',
+    'pnd',
+    'valor',
+    'value',
+    'total',
+  ];
+  let bestNonZero: number | null = null;
+  let bestZero: number | null = null;
+  for (const k of prefs) {
+    if (!(k in obj)) continue;
+    const n = valorNumericoOrcafascio(obj[k]);
+    if (n == null || !Number.isFinite(n)) continue;
+    if (n !== 0) {
+      bestNonZero = n;
+      break;
+    }
+    if (bestZero === null) bestZero = n;
+  }
+  if (bestNonZero != null) return bestNonZero;
+  if (bestZero !== null && bestZero === 0) {
+    // Varre o restante (nomes diferentes na API)
+    for (const [, v] of Object.entries(obj)) {
+      const n =
+        typeof v === 'object' && v !== null && !Array.isArray(v)
+          ? extrairValorDeObjPrecos(v as Record<string, unknown>)
+          : valorNumericoOrcafascio(v);
+      if (n != null && n !== 0) return n;
+    }
+  }
+  return bestZero;
+}
+
+/** Preço unitário visível na aba analítica (prioriza valores != 0 dentro de prices). */
+function precoOrcafascioAnalitico(row: Record<string, unknown>): number | null {
+  const direto =
+    valorNumericoOrcafascio(row.unit_price_with_bdi) ??
+    valorNumericoOrcafascio(row.unit_price) ??
+    valorNumericoOrcafascio(row.price) ??
+    valorNumericoOrcafascio(row.total_price);
+  if (direto != null && direto !== 0) return direto;
+  const p = row.prices;
+  if (p && typeof p === 'object' && !Array.isArray(p)) {
+    const n = extrairValorDeObjPrecos(p as Record<string, unknown>);
+    if (n != null) return n;
+  }
+  if (direto != null) return direto;
+  return valorNumericoOrcafascio(row.total_price);
+}
+
+/** Id enviado aos endpoints /orcamentos/:id (lista pode trazer só `_id` ou `budget_id`). */
+function idOrcamentoOrcafascioParaApi(item: OrcafascioOrcamentoItem): string {
+  const o = item as Record<string, unknown>;
+  const raw = item.id ?? o._id ?? o.budget_id;
+  return raw != null ? String(raw).trim() : '';
+}
+
+/** Código para buscar a composição no catálogo a partir de uma linha sintético/analítico do orçamento. */
+function codigoCatalogoLinhaOrcamentoOrcafascio(row: Record<string, unknown>): string | null {
+  const raw =
+    row.code ??
+    row.Code ??
+    row.composition_code ??
+    row.Composition_code ??
+    row.reference_code ??
+    row.catalog_code ??
+    row.service_code ??
+    row.composition_number ??
+    row.codigo ??
+    row.Código ??
+    row.Codigo ??
+    row.number ??
+    row.numero ??
+    row.second_code ??
+    row.secondCode;
+  const code = raw != null ? String(raw).trim() : '';
+  if (!code || code === '—') return null;
+  const kind = String(row.kind ?? row.type ?? '').toLowerCase();
+  if (kind && /^(group|chapter|divider|titulo|etapa|cabeça|cabeca|stage)$/.test(kind)) return null;
+  return code;
+}
+
+function variantesCodigoOrcafascio(code: string): string[] {
+  const base = String(code ?? '').trim();
+  if (!base) return [];
+  const out: string[] = [];
+  const add = (v?: string | null) => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    if (!t || out.includes(t)) return;
+    out.push(t);
+  };
+  const semPrefixo = base.replace(/^(os|orc|orcamento|orçamento)\s+/i, '');
+  const semEspacos = semPrefixo.replace(/\s+/g, '');
+  const apenasDigitos = semPrefixo.replace(/[^\d]/g, '');
+  add(base);
+  add(semPrefixo);
+  add(semEspacos);
+  if (apenasDigitos.length >= 5) {
+    add(apenasDigitos);
+    const semZeros = apenasDigitos.replace(/^0+/, '') || '0';
+    if (semZeros !== apenasDigitos) add(semZeros);
+  }
+  return out;
+}
+
+function normalizarCodigoOrcamentoMatchNorm(raw: string): string {
+  return String(raw ?? '').replace(/[^\dA-Za-z]/g, '').toLowerCase();
+}
+
+/** Código na linha do analítico (campos variam por endpoint). */
+function codigoLinhaRelatorioAnaliticoOrcamento(aa: Record<string, unknown>): string {
+  const raw =
+    aa.code ??
+    aa.Code ??
+    aa.composition_code ??
+    aa.service_code ??
+    aa.reference_code ??
+    aa.catalog_code ??
+    aa.composition_number ??
+    aa.codigo ??
+    aa.number ??
+    aa.numero;
+  return raw != null ? String(raw).trim() : '';
+}
+
+/**
+ * Cruza linha do sintético com o analítico do orçamento fixo.
+ * Trata: build_item_id, zeros à esquerda no código, base vazia no analítico vs base preenchida no sintético.
+ */
+function encontrarLinhaAnaliticoParaComposicaoOrcamentoFixo(
+  row: Record<string, unknown>,
+  analitico: Record<string, unknown>[]
+): Record<string, unknown> | undefined {
+  const lista = analitico?.length ? analitico : [];
+  const code = codigoCatalogoLinhaOrcamentoOrcafascio(row) ?? '';
+  const buildItemIdRaw = row.build_item_id != null ? String(row.build_item_id).trim() : '';
+  const rowBase = String(row.base ?? '').trim().toLowerCase();
+
+  const variantesBuildItemId = (() => {
+    const raw = String(buildItemIdRaw || '').trim();
+    if (!raw) return [] as string[];
+    const out = new Set<string>();
+    out.add(raw);
+    out.add(raw.replace(/[^\d]/g, ''));
+    out.add(raw.replace(/\.0+$/, ''));
+    return Array.from(out).filter(Boolean);
+  })();
+
+  const variantesCode = variantesCodigoOrcafascio(code);
+  const codeNormSet = new Set(
+    variantesCode.map((v) => normalizarCodigoOrcamentoMatchNorm(v)).filter(Boolean)
+  );
+
+  if (buildItemIdRaw) {
+    const porId = lista.find((a) => {
+      const aa = a as Record<string, unknown>;
+      const candidatos = [aa.id, aa.build_item_id, aa.buildId, aa.build_id, aa.item_id, aa.itemId]
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean);
+      if (candidatos.length === 0) return false;
+      return candidatos.some((cand) => {
+        const candDigits = cand.replace(/[^\d]/g, '');
+        return variantesBuildItemId.some((v) => v === cand || (Boolean(candDigits) && v === candDigits));
+      });
+    });
+    if (porId) return porId as Record<string, unknown>;
+  }
+
+  if (codeNormSet.size === 0) return undefined;
+
+  const candidatos = lista.filter((a) => {
+    const aCodeNorm = normalizarCodigoOrcamentoMatchNorm(codigoLinhaRelatorioAnaliticoOrcamento(a as Record<string, unknown>));
+    return !!aCodeNorm && codeNormSet.has(aCodeNorm);
+  });
+
+  if (candidatos.length === 0) return undefined;
+
+  if (rowBase) {
+    const mesmoBase = candidatos.filter((a) => {
+      const aBase = String((a as Record<string, unknown>).base ?? '').trim().toLowerCase();
+      return aBase === rowBase;
+    });
+    if (mesmoBase.length > 0) return mesmoBase[0] as Record<string, unknown>;
+
+    const baseAnaliticoVazia = candidatos.filter((a) => {
+      const aBase = String((a as Record<string, unknown>).base ?? '').trim().toLowerCase();
+      return !aBase;
+    });
+    if (baseAnaliticoVazia.length > 0) return baseAnaliticoVazia[0] as Record<string, unknown>;
+  }
+
+  // Fallback por descrição quando o código existe em mais de uma base/linha.
+  const rowDesc = normalizarTextoBusca(textoDescricaoOrcafascio(row));
+  if (rowDesc) {
+    const porDescricao = candidatos.filter((a) => {
+      const desc = normalizarTextoBusca(textoDescricaoOrcafascio(a as Record<string, unknown>));
+      return !!desc && (desc === rowDesc || desc.includes(rowDesc) || rowDesc.includes(desc));
+    });
+    if (porDescricao.length === 1) return porDescricao[0] as Record<string, unknown>;
+  }
+
+  if (candidatos.length === 1) return candidatos[0] as Record<string, unknown>;
+
+  return undefined;
+}
+
+/** Todas as listas de linhas no mesmo objeto (espelha o backend `coletarArraysRelatorio`). */
+function colecionarArraysOrcamentoNoObjeto(o: Record<string, unknown>): Record<string, unknown>[] {
+  const chaves = [
+    'records',
+    'items',
+    'rows',
+    'list',
+    'compositions',
+    'services',
+    'budget_items',
+    'budget_items_services',
+    'budget_lines',
+    'synthetic',
+    'lines',
+    'budget_services',
+    'analytical',
+    'analytical_with_unit_price',
+    'results',
+    'children',
+    'chapters',
+    'works',
+  ];
+  const out: Record<string, unknown>[] = [];
+  for (const k of chaves) {
+    const v = o[k];
+    if (!Array.isArray(v) || v.length === 0) continue;
+    const first = v[0];
+    if (first !== null && typeof first === 'object' && !Array.isArray(first))
+      out.push(...(v as Record<string, unknown>[]));
+  }
+  return out;
+}
+
+/** Primeira lista de objetos “linha de orçamento” dentro de payloads aninhados da API Orçafascio */
+function extrairPrimeiroArrayOrcamento(body: unknown, depth = 0): Record<string, unknown>[] {
+  if (body == null || depth > 8) return [];
+  if (Array.isArray(body)) {
+    return body.filter(x => x !== null && typeof x === 'object' && !Array.isArray(x)) as Record<string, unknown>[];
+  }
+  if (typeof body !== 'object') return [];
+  const o = body as Record<string, unknown>;
+
+  const mergedTop = colecionarArraysOrcamentoNoObjeto(o);
+  if (mergedTop.length > 0) return mergedTop;
+
+  const nestedData = o.data;
+  if (nestedData !== undefined && nestedData !== null) {
+    const inner = extrairPrimeiroArrayOrcamento(nestedData, depth + 1);
+    if (inner.length > 0) return inner;
+  }
+  for (const v of Object.values(o)) {
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      const inner = extrairPrimeiroArrayOrcamento(v, depth + 1);
+      if (inner.length > 0) return inner;
+    }
+  }
+  let best: Record<string, unknown>[] = [];
+  for (const v of Object.values(o)) {
+    if (!Array.isArray(v) || v.length === 0) continue;
+    const first = v[0];
+    if (first !== null && typeof first === 'object' && !Array.isArray(first) && v.length > best.length) {
+      best = v as Record<string, unknown>[];
+    }
+  }
+  return best;
+}
+
+/** Lista vinda dos endpoints sintético/analítico ou do detalhe (array ou objeto envelopado). */
+function normalizarListaApiOrcamento(body: unknown): Record<string, unknown>[] {
+  return extrairPrimeiroArrayOrcamento(body);
+}
+
+function textoItemizacaoOrcafascio(row: Record<string, unknown>): string {
+  const raw = row.itemization ?? row.original_itemization ?? row.order ?? row.sequence;
+  if (raw == null) return '—';
+  const s = String(raw).trim();
+  return s || '—';
+}
+
+function textoKindOrcafascio(row: Record<string, unknown>): string {
+  const raw = row.kind ?? row.type ?? row.category;
+  if (raw == null) return '—';
+  const s = String(raw).trim();
+  return s || '—';
+}
+
+function textoVersaoBaseOrcafascio(row: Record<string, unknown>): string {
+  const raw = row.base_version ?? row.version ?? row.versoin;
+  if (raw == null) return '—';
+  const s = String(raw).trim();
+  return s || '—';
+}
+
+/** Filhos da composição no JSON analítico: objeto ou array (API variável). */
+function colecionarObjetosSubitensAnaliticoOrcamento(row: Record<string, unknown>): Record<string, unknown>[] {
+  const chaves = ['subitems', 'sub_items', 'items', 'children', 'insumos'] as const;
+  for (const key of chaves) {
+    const sub = row[key];
+    if (sub == null) continue;
+    if (Array.isArray(sub)) {
+      const objs = sub.filter(
+        (x) => x !== null && typeof x === 'object' && !Array.isArray(x)
+      ) as Record<string, unknown>[];
+      if (objs.length > 0) return objs;
+      continue;
+    }
+    if (typeof sub === 'object') {
+      const objs = Object.values(sub as Record<string, unknown>).filter(
+        (x) => x !== null && typeof x === 'object' && !Array.isArray(x)
+      ) as Record<string, unknown>[];
+      if (objs.length > 0) return objs;
+    }
+  }
+  return [];
+}
+
+function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>): OrcafascioComposicaoDetalhe {
+  const itemsRaw = colecionarObjetosSubitensAnaliticoOrcamento(row);
+  const items = itemsRaw.map((it) => {
+    const s = it as Record<string, unknown>;
+    const prices =
+      s.prices && typeof s.prices === 'object' && !Array.isArray(s.prices)
+        ? (s.prices as Record<string, unknown>)
+        : {};
+    const p = valorNumericoOrcafascio(prices.plus_ls ?? prices.plus_ls_qty ?? prices.type_mat ?? prices.type_mdo);
+    return {
+      banco: String(s.base ?? row.base ?? '—'),
+      code: String(s.code ?? '—'),
+      description: textoDescricaoOrcafascio(s),
+      type: String(s.type ?? ''),
+      unit: String(s.unity ?? s.unit ?? '—'),
+      unitary_pnd: p ?? 0,
+      unitary_pd: p ?? 0,
+      coefficient: valorNumericoOrcafascio(s.qty ?? 0) ?? 0,
+      pnd: p ?? 0,
+      pd: p ?? 0,
+      is_resource: String(s.kind ?? '').toLowerCase() === 'resource',
+    };
+  });
+  return {
+    id: String(row.id ?? ''),
+    code: String(row.code ?? '—'),
+    second_code: (row.code_2 as string) ?? null,
+    description: textoDescricaoOrcafascio(row),
+    base: String(row.base ?? row.base_name ?? row.reference_base ?? '').trim() || undefined,
+    type: String(row.type ?? ''),
+    unit: String(row.unity ?? row.unit ?? '—'),
+    is_sicro: false,
+    labor: Boolean(row.mdo),
+    calculation_method: { type: 0, description: '' },
+    prices: { pnd: precoOrcafascioAnalitico(row) ?? 0, pd: precoOrcafascioAnalitico(row) ?? 0 },
+    items,
+    created_at: '',
+  };
+}
+
+/** Preferir linhas que tenham código de composição no catálogo; senão manter todas (evita zerar a lista). */
+function priorizarLinhasComposicaoDoOrcamento(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  if (rows.length === 0) return rows;
+  const comCodigo = rows.filter((r) => !!codigoCatalogoLinhaOrcamentoOrcafascio(r));
+  if (comCodigo.length > 0) return comCodigo;
+  return rows;
+}
+
+/** Junta todas as listas candidatas do endpoint de detalhe (`_items`, `budget`, raiz…). */
+function colecionarListasOrcamentoDetalheResposta(body: unknown): Record<string, unknown>[] {
+  const acc: Record<string, unknown>[] = [];
+  acc.push(...normalizarListaApiOrcamento(body));
+  if (body && typeof body === 'object') {
+    const o = body as Record<string, unknown>;
+    if ('_items' in o && o._items !== undefined) acc.push(...normalizarListaApiOrcamento(o._items));
+    const bud = o.budget;
+    if (bud !== null && typeof bud === 'object') acc.push(...normalizarListaApiOrcamento(bud));
+    const comps = o.compositions ?? o.services;
+    if (comps !== undefined) acc.push(...normalizarListaApiOrcamento(comps));
+  }
+  return acc;
 }
 
 export interface OrcafascioListResponse<T> {
@@ -240,6 +709,35 @@ function categoriaOrcafascioItem(item: OrcafascioComposicaoItem): 'MATERIAL' | '
   return 'MATERIAL';
 }
 
+const TIPO_INSUMO_LABEL_POR_CODIGO: Record<number, string> = {
+  0: 'Mão de obra',
+  1: 'Equipamento',
+  2: 'Equipamento para Aquisição Permanente',
+  3: 'Mão de obra',
+  4: 'Material',
+  5: 'Serviços',
+  6: 'Taxas',
+  7: 'Outros',
+  8: 'Franquia',
+  9: 'Administração',
+  10: 'Aluguel',
+  11: 'Verba',
+  12: 'Consultoria',
+  13: 'Transporte',
+  14: 'Despesas Complementares',
+};
+
+function tipoInsumoCodigoParaDescricao(tipo: unknown): string {
+  if (tipo == null) return '—';
+  const s = String(tipo).trim();
+  if (!s) return '—';
+  if (/^\d+(\.0+)?$/.test(s)) {
+    const codigo = Math.trunc(Number(s));
+    return TIPO_INSUMO_LABEL_POR_CODIGO[codigo] || s;
+  }
+  return s;
+}
+
 /** Converte a resposta detalhada do Orçafascio para o formato ComposicaoItem do sistema. */
 function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): ComposicaoItem {
   const analiticoLinhas: LinhaAnaliticoComposicao[] = comp.items.map(item => ({
@@ -251,7 +749,7 @@ function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): Composic
     total: item.pnd,
     codigo: item.code,
     banco: item.banco,
-    tipoLabel: item.type,
+    tipoLabel: tipoInsumoCodigoParaDescricao(item.type),
   }));
 
   const maoDeObraUnitario = analiticoLinhas
@@ -262,10 +760,11 @@ function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): Composic
     .filter(l => l.categoria === 'MATERIAL')
     .reduce((s, l) => s + (l.total ?? 0), 0);
 
+  const banco = String(comp.base ?? '').trim() || 'Orçafascio';
   return {
     codigo: comp.code,
-    banco: 'Orçafascio',
-    chave: comp.code,
+    banco,
+    chave: normalizarChave(String(comp.code ?? ''), banco),
     descricao: comp.description,
     unidade: comp.unit,
     precoUnitario: comp.prices?.pnd ?? 0,
@@ -297,6 +796,10 @@ export interface ItemServico {
   precoUnitario?: number;
   maoDeObraUnitario?: number;
   materialUnitario?: number;
+  /** Unidade da composição (ex. Orçafascio); persiste com a linha. */
+  unidade?: string;
+  /** Analítico gravado na linha ao incluir a composição — sobrevive ao F5 sem depender do catálogo global. */
+  analiticoLinhas?: LinhaAnaliticoComposicao[];
   /** Só leitura na importação da planilha; removido antes de persistir. */
   quantidadePlanilha?: number;
 }
@@ -324,14 +827,110 @@ function servicosSemQuantidadePlanilha(servicos: ServicoPadrao[]): ServicoPadrao
   }));
 }
 
+/** Só campos persistíveis — remove propriedades extras que inflam o JSON no localStorage. */
+function servicosParaLocalStorage(servicos: ServicoPadrao[]): ServicoPadrao[] {
+  return servicos.map((svc) => ({
+    id: String(svc.id ?? ''),
+    nome: String(svc.nome ?? ''),
+    subtitulos: (svc.subtitulos ?? []).map((sub) => ({
+      id: String(sub.id ?? ''),
+      nome: String(sub.nome ?? ''),
+      itens: (sub.itens ?? []).map((it) => {
+        const row: ItemServico = {
+          chave: String(it.chave ?? ''),
+          codigo: String(it.codigo ?? ''),
+          banco: String(it.banco ?? ''),
+          descricao: String(it.descricao ?? '')
+        };
+        if (it.precoUnitario != null) row.precoUnitario = it.precoUnitario;
+        if (it.maoDeObraUnitario != null) row.maoDeObraUnitario = it.maoDeObraUnitario;
+        if (it.materialUnitario != null) row.materialUnitario = it.materialUnitario;
+        const u = it.unidade != null ? String(it.unidade).trim() : '';
+        if (u) row.unidade = u;
+        if (Array.isArray(it.analiticoLinhas) && it.analiticoLinhas.length > 0) {
+          row.analiticoLinhas = it.analiticoLinhas.map((ln) => ({
+            categoria: ln.categoria === 'MÃO DE OBRA' ? 'MÃO DE OBRA' : 'MATERIAL',
+            descricao: String(ln.descricao ?? ''),
+            unidade: String(ln.unidade ?? ''),
+            quantidade: Number(ln.quantidade) || 0,
+            precoUnitario: Number(ln.precoUnitario) || 0,
+            total: Number(ln.total) || 0,
+            ...(ln.codigo != null && String(ln.codigo).trim() ? { codigo: String(ln.codigo).trim() } : {}),
+            ...(ln.banco != null && String(ln.banco).trim() ? { banco: String(ln.banco).trim() } : {}),
+            ...(ln.tipoLabel != null ? { tipoLabel: ln.tipoLabel } : {})
+          }));
+        }
+        return row;
+      })
+    }))
+  }));
+}
+
+/**
+ * Snapshot já grava `servicos` — omitir `servicosDocumento` evita duplicar a árvore inteira (planilha importada).
+ * Recuperação usa `snapshot.servicos` com `setServicos`.
+ */
+function sessaoOrcamentoParaSnapshot(sessao: SessaoOrcamentoPersist): SessaoOrcamentoPersist {
+  const { servicosDocumento: _dup, ...rest } = sessao;
+  return rest;
+}
+
 const STORAGE_PREFIX = 'orcamento';
 const STORAGE_IMPORTS = 'orcamento-imports';
+/** Histórico local de recuperação: cada entrada repete serviços + sessão — manter poucos para não estourar quota. */
+const ORCAMENTO_SNAPSHOT_MAX = 4;
 
 /** `orcamentoId` só para dados do orçamento (serviços, imports, sessão); composições não usam. */
 function storageKey(centroCustoId: string, base: string, orcamentoId?: string | null) {
   const suffix = orcamentoId ? `-${orcamentoId}` : '';
   return `${STORAGE_PREFIX}-${base}-${centroCustoId}${suffix}`;
 }
+
+function isLocalStorageQuotaError(err: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' &&
+      err instanceof DOMException &&
+      (err.name === 'QuotaExceededError' || err.code === 22)) ||
+    (err instanceof Error && err.name === 'QuotaExceededError')
+  );
+}
+
+/** Libera espaço para rascunho: nível 1 = snapshots; 2 = + cortar histórico de imports; 3 = + cache de composições locais. */
+function evictOrcamentoDraftStorage(centroCustoId: string, level: 1 | 2 | 3): void {
+  if (typeof window === 'undefined') return;
+  const snapPrefix = `${STORAGE_PREFIX}-snapshots-${centroCustoId}-`;
+  const toRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(snapPrefix)) toRemove.push(k);
+  }
+  toRemove.forEach((k) => localStorage.removeItem(k));
+
+  if (level >= 2) {
+    try {
+      const ik = storageKey(centroCustoId, 'imports');
+      const raw = localStorage.getItem(ik);
+      if (raw) {
+        const list = JSON.parse(raw) as unknown;
+        if (Array.isArray(list) && list.length > 5) {
+          localStorage.setItem(ik, JSON.stringify(list.slice(0, 5)));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (level >= 3) {
+    try {
+      localStorage.removeItem(storageKey(centroCustoId, 'composicoes'));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+let servicosLocalStorageQuotaWarnAt = 0;
 
 export interface ImportRecord {
   id: string;
@@ -390,6 +989,16 @@ function normalizarNomeServicoOrcamento(nome: string): string {
 
 /** Marca subtítulo sem composições na seleção do dropdown (valor sintético da chave). */
 const DROPDOWN_BLOCO_SEM_ITENS = '__bloco_sem_itens__';
+const ORCAFASCIO_ORCAMENTO_FIXO_ID = '69f264ca90dfe2e71e80a328';
+
+/** Caixa do ícone em estados vazios e cabeçalhos (fundo vermelho suave + anel leve). */
+const ORCAMENTO_ICON_SOFT_BOX =
+  'flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-red-600/[0.12] dark:bg-red-500/15 ring-1 ring-red-600/20 dark:ring-red-500/25';
+const ORCAMENTO_ICON_SOFT_GLYPH = 'h-7 w-7 shrink-0 text-red-600 dark:text-red-400';
+
+/** Cartão de estado vazio (Memória de cálculo, Orçamento sem itens, etc.). */
+const ORCAMENTO_SECAO_VAZIA_SHELL =
+  'flex flex-col items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-12 sm:py-14 text-center';
 
 function buildItemKeyOrcamento(blocoKey: string, chave: string) {
   return `${blocoKey}|${chave}`;
@@ -403,6 +1012,12 @@ function parseItemKeyOrcamento(itemKey: string): { blocoKey: string; chave: stri
   const subtituloId = parts[parts.length - 2]!;
   const servicoId = parts.slice(0, -2).join('|');
   return { blocoKey: `${servicoId}|${subtituloId}`, chave };
+}
+
+function parseBlocoKeyOrcamento(blocoKey: string): { servicoId: string; subtituloId: string } | null {
+  const i = blocoKey.lastIndexOf('|');
+  if (i <= 0 || i >= blocoKey.length - 1) return null;
+  return { servicoId: blocoKey.slice(0, i), subtituloId: blocoKey.slice(i + 1) };
 }
 
 function findSubtituloPorBlocoKey(list: ServicoPadrao[], blocoKey: string): Subtitulo | null {
@@ -736,6 +1351,19 @@ function sessaoTemDados(s: SessaoOrcamentoPersist | null | undefined): boolean {
   );
 }
 
+/** Evita tratar o catálogo do contrato como árvore do documento importado após reload. */
+function arvoreServicosPareceCatalogoContrato(
+  arvore: ServicoPadrao[],
+  catalogo: ServicoPadrao[]
+): boolean {
+  if (arvore.length === 0 || catalogo.length === 0) return false;
+  try {
+    return JSON.stringify(arvore) === JSON.stringify(catalogo);
+  } catch {
+    return false;
+  }
+}
+
 function loadOrcamentoSnapshots(centroCustoId: string | null, orcamentoId: string | null): OrcamentoRecoverySnapshot[] {
   if (typeof window === 'undefined' || !centroCustoId || !orcamentoId) return [];
   try {
@@ -759,12 +1387,12 @@ function saveOrcamentoSnapshot(
       ...current,
       {
         createdAt: new Date().toISOString(),
-        servicos: payload.servicos,
+        servicos: servicosParaLocalStorage(servicosSemQuantidadePlanilha(payload.servicos)),
         imports: payload.imports,
-        sessaoOrcamento: payload.sessaoOrcamento
+        sessaoOrcamento: sessaoOrcamentoParaSnapshot(payload.sessaoOrcamento)
       }
     ];
-    const limited = next.slice(-12);
+    const limited = next.slice(-ORCAMENTO_SNAPSHOT_MAX);
     localStorage.setItem(storageKey(centroCustoId, 'snapshots', orcamentoId), JSON.stringify(limited));
   } catch {
     /* quota */
@@ -824,10 +1452,39 @@ function loadServicos(centroCustoId: string | null): ServicoPadrao[] {
 }
 
 function saveServicos(centroCustoId: string, servicos: ServicoPadrao[]) {
+  if (typeof window === 'undefined') return;
+  const key = storageKey(centroCustoId, 'servicos');
+  const payload = servicosParaLocalStorage(servicosSemQuantidadePlanilha(servicos));
+  const tryWrite = () => localStorage.setItem(key, JSON.stringify(payload));
+
   try {
-    localStorage.setItem(storageKey(centroCustoId, 'servicos'), JSON.stringify(servicos));
+    tryWrite();
+    return;
   } catch (err) {
-    console.warn('Não foi possível salvar serviços no armazenamento local:', err);
+    if (!isLocalStorageQuotaError(err)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Não foi possível salvar serviços no armazenamento local:', err);
+      }
+      return;
+    }
+  }
+
+  for (const level of [1, 2, 3] as const) {
+    evictOrcamentoDraftStorage(centroCustoId, level);
+    try {
+      tryWrite();
+      return;
+    } catch {
+      /* tenta nível seguinte */
+    }
+  }
+
+  const now = Date.now();
+  if (now - servicosLocalStorageQuotaWarnAt > 60_000) {
+    servicosLocalStorageQuotaWarnAt = now;
+    console.warn(
+      'Armazenamento local cheio: rascunho dos serviços não coube. Os snapshots de recuperação e parte do cache local foram limpos; use Salvar no servidor para não perder dados. Se o aviso voltar, limpe dados do site ou reduza o tamanho do orçamento.'
+    );
   }
 }
 
@@ -853,11 +1510,6 @@ function addImport(centroCustoId: string, record: Omit<ImportRecord, 'id'>) {
   } catch (err) {
     console.warn('Não foi possível salvar histórico de importações no armazenamento local:', err);
   }
-}
-
-function temImportacaoOrcamentoPerfeito(imports: ImportRecord[] | null | undefined): boolean {
-  if (!Array.isArray(imports) || imports.length === 0) return false;
-  return imports.some((imp) => imp.origem === 'orcamento-perfeito');
 }
 
 async function fetchOrcamentosLista(centroCustoId: string): Promise<{
@@ -947,7 +1599,11 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
   }
 }
 
-/** Monta o body do PUT: orçamentos importados não enviam `servicos` (evita sobrescrever o catálogo do contrato). */
+/**
+ * Monta o body do PUT. Orçamentos importados enviam `servicos` só no **arquivo deste orçamento**
+ * (espelho de `servicosDocumento`), para `getOrcamento` não preencher `servicos` com o catálogo
+ * do contrato quando a chave root não existia — caso em que o F5 mostrava a base e “sumiam” as composições.
+ */
 function montarPayloadSalvarOrcamento(
   servicos: ServicoPadrao[],
   imports: ImportRecord[],
@@ -958,11 +1614,13 @@ function montarPayloadSalvarOrcamento(
   sessaoOrcamento?: SessaoOrcamentoPersist | null;
 } {
   if (sessao.meta?.importadoPlanilha === true) {
+    const doc = servicosSemQuantidadePlanilha(servicos);
     return {
       imports,
+      servicos: doc,
       sessaoOrcamento: {
         ...sessao,
-        servicosDocumento: servicosSemQuantidadePlanilha(servicos)
+        servicosDocumento: doc
       }
     };
   }
@@ -1817,9 +2475,13 @@ function chavesParaBusca(codigo: string, banco: string, chave: string): string[]
   const codigoNorm = c.replace(/[\s.]+/g, '').toUpperCase();
   const bancoBase = b.split('/')[0]?.trim() || '';
   const bancoBaseNorm = bancoBase.replace(/[\s.]+/g, '').toUpperCase();
+  const nk = normalizarChave(c, b);
   const uniq = new Set<string>();
-  if (k) uniq.add(k);
-  uniq.add(normalizarChave(c, b));
+  // `codigo+banco` primeiro: evita casar só o número com outra base no mapa (analítico trocado após F5).
+  uniq.add(nk);
+  const kNorm = k.replace(/[\s.]+/g, '').toUpperCase();
+  const chaveLegadaSoCodigo = Boolean(k && codigoNorm && kNorm === codigoNorm);
+  if (k && k !== nk && !chaveLegadaSoCodigo) uniq.add(k);
   uniq.add(`${c}${b}`.replace(/[\s.]+/g, '')); // sem pontos/espaços (ex: 1680097FDE)
   uniq.add(`${c}_${b}`);
   uniq.add(`${c}-${b}`);
@@ -1829,13 +2491,52 @@ function chavesParaBusca(codigo: string, banco: string, chave: string): string[]
     uniq.add(`${c}_${bancoBase}`);
     uniq.add(`${c}-${bancoBase}`);
   }
-  // Fallback importante para reconciliar composições quando o código é igual,
-  // mas o banco difere entre as abas (ex.: CPOS x CPOS/CH).
-  if (codigoNorm) {
+  if (codigoNorm && bancoBaseNorm) {
+    uniq.add(`${codigoNorm}${bancoBaseNorm}`);
+  }
+  if (codigoNorm && !b) {
     uniq.add(codigoNorm);
-    if (bancoBaseNorm) uniq.add(`${codigoNorm}${bancoBaseNorm}`);
   }
   return Array.from(uniq);
+}
+
+function contagemAnaliticoComposicao(c: ComposicaoItem): number {
+  return c.analiticoLinhas?.length ?? 0;
+}
+
+/** Evita que alias genéricos (ex.: só dígitos) troquem a composição certa por outra sem analítico. */
+function escolherComposicaoParaChaveMapa(prev: ComposicaoItem, next: ComposicaoItem): ComposicaoItem {
+  const np = contagemAnaliticoComposicao(prev);
+  const nn = contagemAnaliticoComposicao(next);
+  if (nn > np) return next;
+  if (nn < np) return prev;
+  return prev;
+}
+
+/** Catálogo global ou snapshot gravado na linha do orçamento (prioridade ao snapshot). */
+function composicaoResolvidaDoItemServico(
+  item: ItemServico,
+  mapa: Record<string, ComposicaoItem>
+): ComposicaoItem | null {
+  if (item.analiticoLinhas && item.analiticoLinhas.length > 0) {
+    return {
+      codigo: item.codigo,
+      banco: item.banco,
+      chave: item.chave,
+      descricao: item.descricao,
+      precoUnitario: item.precoUnitario ?? 0,
+      maoDeObraUnitario: item.maoDeObraUnitario,
+      materialUnitario: item.materialUnitario,
+      unidade: item.unidade,
+      analiticoLinhas: item.analiticoLinhas
+    };
+  }
+  const chaves = chavesParaBusca(item.codigo, item.banco, item.chave);
+  for (const k of chaves) {
+    const c = mapa[k];
+    if (c) return c;
+  }
+  return null;
 }
 
 /** Converte UND da planilha (M, M², M2, M³, M3, M^3, M**3, UN, …) para TipoUnidadeFormula */
@@ -1887,6 +2588,86 @@ function ehComposicaoCacamba4m3(descricao: string | undefined): boolean {
   if (!descricao) return false;
   const d = normalizarTextoBusca(descricao).replace(/\s/g, '');
   return d.includes('cacamba') && d.includes('entulho') && (d.includes('4m3') || d.includes('4m³'));
+}
+
+type AppendComposicaoAoSubtituloResult =
+  | { ok: true; next: ServicoPadrao[] }
+  | { ok: false; reason: 'no-subtitle' | 'duplicate' };
+
+/** Uma etapa de inclusão no subtítulo; encadear com o estado mais recente ao adicionar vários itens de uma vez. */
+function appendComposicaoItemAoSubtitulo(
+  servicos: ServicoPadrao[],
+  servicoId: string,
+  subtituloId: string,
+  item: ComposicaoItem,
+  catalogoComposicoes: ComposicaoItem[]
+): AppendComposicaoAoSubtituloResult {
+  const svc = servicos.find(s => s.id === servicoId);
+  const sub = svc?.subtitulos.find(sb => sb.id === subtituloId);
+  if (!sub) return { ok: false, reason: 'no-subtitle' };
+  const existe = sub.itens.some(
+    i => i.chave === item.chave || (i.codigo === item.codigo && i.banco === item.banco)
+  );
+  if (existe) return { ok: false, reason: 'duplicate' };
+
+  const novoItem: ItemServico = {
+    chave: item.chave || normalizarChave(item.codigo, item.banco),
+    codigo: item.codigo,
+    banco: item.banco,
+    descricao: item.descricao
+  };
+  if (item.precoUnitario != null && Number.isFinite(item.precoUnitario)) {
+    novoItem.precoUnitario = item.precoUnitario;
+  }
+  if (item.maoDeObraUnitario != null && Number.isFinite(item.maoDeObraUnitario)) {
+    novoItem.maoDeObraUnitario = item.maoDeObraUnitario;
+  }
+  if (item.materialUnitario != null && Number.isFinite(item.materialUnitario)) {
+    novoItem.materialUnitario = item.materialUnitario;
+  }
+  const und = item.unidade != null ? String(item.unidade).trim() : '';
+  if (und) novoItem.unidade = und;
+  if (item.analiticoLinhas && item.analiticoLinhas.length > 0) {
+    novoItem.analiticoLinhas = item.analiticoLinhas;
+  }
+  let updated = servicos.map(s => {
+    if (s.id !== servicoId) return s;
+    return {
+      ...s,
+      subtitulos: s.subtitulos.map(sb =>
+        sb.id === subtituloId ? { ...sb, itens: [...sb.itens, novoItem] } : sb
+      )
+    };
+  });
+  if (ehItemDemolicaoOuRemocao(item.descricao)) {
+    const cargaEntulho = catalogoComposicoes.find(c => ehComposicaoCargaEntulho(c.descricao));
+    if (cargaEntulho) {
+      const subAtualizado = updated.find(s => s.id === servicoId)?.subtitulos.find(sb => sb.id === subtituloId);
+      const cargaJaExiste = subAtualizado?.itens.some(
+        i =>
+          i.chave === cargaEntulho.chave ||
+          (i.codigo === cargaEntulho.codigo && i.banco === cargaEntulho.banco)
+      );
+      if (!cargaJaExiste) {
+        const itemCarga: ItemServico = {
+          chave: cargaEntulho.chave || normalizarChave(cargaEntulho.codigo, cargaEntulho.banco),
+          codigo: cargaEntulho.codigo,
+          banco: cargaEntulho.banco,
+          descricao: cargaEntulho.descricao
+        };
+        updated = updated.map(s => {
+          if (s.id !== servicoId) return s;
+          return {
+            ...s,
+            subtitulos: s.subtitulos.map(sb =>
+              sb.id === subtituloId ? { ...sb, itens: [...sb.itens, itemCarga] } : sb
+            )
+          };
+        });
+      }
+    }
+  }
+  return { ok: true, next: updated };
 }
 
 /** Fator (40%) aplicado ao valor unit. estimado e ao custo estimado na planilha analítica. */
@@ -2099,12 +2880,9 @@ function OrcamentoSecaoVazia({
   onIrOrcamento: () => void;
 }) {
   return (
-    <div
-      role="status"
-      className="flex flex-col items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-12 sm:py-14 text-center"
-    >
-      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-lg bg-red-600/[0.12] dark:bg-red-500/15 ring-1 ring-red-600/20 dark:ring-red-500/25">
-        <Icon className="h-7 w-7 text-red-600 dark:text-red-400" aria-hidden />
+    <div role="status" className={ORCAMENTO_SECAO_VAZIA_SHELL}>
+      <div className={`mb-5 ${ORCAMENTO_ICON_SOFT_BOX}`}>
+        <Icon className={ORCAMENTO_ICON_SOFT_GLYPH} aria-hidden />
       </div>
       <h3 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-50">{titulo}</h3>
       <p className="mt-2 max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">{texto}</p>
@@ -2350,7 +3128,8 @@ const ORCAMENTO_LISTA_MENU_WIDTH_PX = 224;
 
 export function OrcamentoPageView({
   lockedCostCenterId = null,
-  embeddedContractId = null
+  embeddedContractId = null,
+  embeddedOrcamentoIdFromRoute = null
 }: OrcamentoPageProps = {}) {
   const router = useRouter();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
@@ -2358,6 +3137,9 @@ export function OrcamentoPageView({
   const [activeTab, setActiveTab] = useState<'importacoes' | 'orcamento'>('orcamento');
   const [composicoes, setComposicoes] = useState<ComposicaoItem[]>([]);
   const [servicos, setServicos] = useState<ServicoPadrao[]>([]);
+  /** Evita falha em lote no Strict Mode: o updater de setServicos pode rodar 2× com o mesmo prev e marcar duplicata. */
+  const servicosRef = useRef<ServicoPadrao[]>(servicos);
+  servicosRef.current = servicos;
   /** Catálogo base do contrato (API); usado para listar todos os serviços no dropdown quando o doc. é importado. */
   const [servicosPadraoContrato, setServicosPadraoContrato] = useState<ServicoPadrao[]>([]);
   const [imports, setImports] = useState<ImportRecord[]>([]);
@@ -2381,11 +3163,48 @@ export function OrcamentoPageView({
 
   // ── Orçafascio API ──────────────────────────────────────────────────────────
   const [orcafascioModalOpen, setOrcafascioModalOpen] = useState(false);
+  const [orcafascioModalTab, setOrcafascioModalTab] = useState<'composicoes' | 'orcamentos'>('composicoes');
+  const [orcafascioModalOrcamentosSearch, setOrcafascioModalOrcamentosSearch] = useState('');
+  const [orcafascioOrcamentos, setOrcafascioOrcamentos] = useState<OrcafascioOrcamentoItem[] | null>(null);
+  const [orcafascioOrcamentosLoading, setOrcafascioOrcamentosLoading] = useState(false);
+  const [orcafascioOrcamentosPage, setOrcafascioOrcamentosPage] = useState(1);
+  const [orcafascioOrcamentosTotal, setOrcafascioOrcamentosTotal] = useState<number | null>(null);
+  const [orcafascioOrcamentoDetalhe, setOrcafascioOrcamentoDetalhe] = useState<OrcafascioOrcamentoItem | null>(null);
+  /** Linhas de composição do orçamento (sintético com fallback para detalhe). */
+  const [orcafascioOrcamentoComposicoes, setOrcafascioOrcamentoComposicoes] =
+    useState<Record<string, unknown>[] | null>(null);
+  const [orcafascioOrcamentoComposicoesLoading, setOrcafascioOrcamentoComposicoesLoading] = useState(false);
+  /** Linhas do relatório analítico do orçamento. */
+  const [orcafascioOrcamentoAnalitico, setOrcafascioOrcamentoAnalitico] =
+    useState<Record<string, unknown>[] | null>(null);
+  const [orcafascioOrcamentoAnaliticoLoading, setOrcafascioOrcamentoAnaliticoLoading] = useState(false);
+  /** Ao clicar numa linha da lista: detalhe de composição do catálogo (insumos/serviços). */
+  const [orcafascioOrcamentoLinhaCatalogo, setOrcafascioOrcamentoLinhaCatalogo] =
+    useState<OrcafascioComposicaoDetalhe | null>(null);
+  const [orcafascioOrcamentoLinhaCatalogoLoading, setOrcafascioOrcamentoLinhaCatalogoLoading] =
+    useState(false);
+  const [orcafascioOrcamentoLinhaChave, setOrcafascioOrcamentoLinhaChave] = useState<string | null>(null);
+  const [orcafascioAddCompModalOpen, setOrcafascioAddCompModalOpen] = useState(false);
+  const [orcafascioAddCompTargetBlocoKey, setOrcafascioAddCompTargetBlocoKey] = useState<string | null>(null);
+  const [orcafascioAddCompSearch, setOrcafascioAddCompSearch] = useState('');
+  const [orcafascioAddCompLoading, setOrcafascioAddCompLoading] = useState(false);
+  const [orcafascioAddCompComposicoes, setOrcafascioAddCompComposicoes] = useState<Record<string, unknown>[]>([]);
+  const [orcafascioAddCompAnalitico, setOrcafascioAddCompAnalitico] = useState<Record<string, unknown>[]>([]);
+  const [orcafascioAddCompAddingKey, setOrcafascioAddCompAddingKey] = useState<string | null>(null);
+  const [orcafascioAddCompSelecionadas, setOrcafascioAddCompSelecionadas] = useState<Set<string>>(new Set());
+  const [novoBlocoModalOpen, setNovoBlocoModalOpen] = useState(false);
+  const [novoBlocoModalMode, setNovoBlocoModalMode] = useState<'titulo' | 'subtitulo'>('titulo');
+  const [novoBlocoModalServicoId, setNovoBlocoModalServicoId] = useState<string | null>(null);
+  const [novoBlocoTituloNome, setNovoBlocoTituloNome] = useState('');
+  const [novoBlocoSubtituloNome, setNovoBlocoSubtituloNome] = useState('');
   const [orcafascioSearch, setOrcafascioSearch] = useState('');
   const [orcafascioPage, setOrcafascioPage] = useState(1);
   const [orcafascioLoading, setOrcafascioLoading] = useState(false);
   const [orcafascioResultados, setOrcafascioResultados] = useState<OrcafascioListResponse<OrcafascioComposicaoListItem> | null>(null);
   const [orcafascioDetalhe, setOrcafascioDetalhe] = useState<OrcafascioComposicaoDetalhe | null>(null);
+  /** Subpainel dentro do detalhe da composição: cartões ou tabela analítica (mesmos itens da API). */
+  const [orcafascioComposicaoDetalheTab, setOrcafascioComposicaoDetalheTab] =
+    useState<'itens' | 'analitico'>('itens');
   const [orcafascioDetalheLoading, setOrcafascioDetalheLoading] = useState(false);
   /** UF Sergipe — catálogo ORSE (find_by_code no backend usa SE por padrão). */
   const orcafascioUfOrse = 'SE';
@@ -2440,9 +3259,12 @@ export function OrcamentoPageView({
     | { kind: 'composicao'; left: number; top: number; composicaoKey: string }
     | null
   >(null);
-  const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(null);
+  const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(() =>
+    embeddedContractId ? embeddedOrcamentoIdFromRoute ?? null : null
+  );
   const [listaOrcamentos, setListaOrcamentos] = useState<{ id: string; nome: string; updatedAt: string }[]>([]);
-  const [carregandoListaOrcamentos, setCarregandoListaOrcamentos] = useState(false);
+  /** Com contrato fixo na rota, começa em “carregando” para não restaurar URL com lista ainda vazia no 1º efeito. */
+  const [carregandoListaOrcamentos, setCarregandoListaOrcamentos] = useState(() => Boolean(lockedCostCenterId));
   const [nomeOrcamentoRascunho, setNomeOrcamentoRascunho] = useState('');
   const [orcamentosSearch, setOrcamentosSearch] = useState('');
   const [isCreatingOrcamento, setIsCreatingOrcamento] = useState(false);
@@ -2470,6 +3292,24 @@ export function OrcamentoPageView({
     hadData: false
   });
   const autosaveProtecaoAvisadaRef = useRef<string | null>(null);
+
+  const embeddedOrcamentoBasePath = embeddedContractId
+    ? `/ponto/contratos/${embeddedContractId}/orcamento`
+    : null;
+
+  const navigateEmbeddedOrcamentoPath = useCallback(
+    (orcamentoId: string | null) => {
+      if (!embeddedOrcamentoBasePath) return;
+      const target = orcamentoId ? `${embeddedOrcamentoBasePath}/${orcamentoId}` : embeddedOrcamentoBasePath;
+      router.replace(target, { scroll: false });
+    },
+    [embeddedOrcamentoBasePath, router]
+  );
+
+  useEffect(() => {
+    if (!embeddedContractId || !centroCustoId) return;
+    setOrcamentoAtivoId(embeddedOrcamentoIdFromRoute ?? null);
+  }, [embeddedContractId, embeddedOrcamentoIdFromRoute, centroCustoId]);
 
   const filteredListaOrcamentos = useMemo(() => {
     const q = orcamentosSearch.trim().toLowerCase();
@@ -2509,17 +3349,16 @@ export function OrcamentoPageView({
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
   const [novoOrcamentoMetaOpen, setNovoOrcamentoMetaOpen] = useState(false);
   const [novoOrcamentoStep, setNovoOrcamentoStep] = useState<1 | 2 | 3>(1);
-  const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta>(() =>
-    metaNovoOrcamentoPadrao()
+  const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta & { nomeOrcamento: string }>(
+    () => ({ ...metaNovoOrcamentoPadrao(), nomeOrcamento: '' })
   );
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [loadingEmployeeOptions, setLoadingEmployeeOptions] = useState(false);
   const [currentUserName, setCurrentUserName] = useState('');
 
   /**
-   * Fonte do dropdown: catálogo da planilha perfeita + itens do orçamento/importação atual.
-   * Orçamento importado: usa só `servicos` (documento), com os mesmos UUIDs de `subtitulosNoOrcamento`.
-   * Mesclar com o catálogo removia blocos “iguais” ao contrato e deixava a aba Montagem em branco.
+   * Estrutura mesclada (catálogo + grupos só do documento) para resolver nomes de blocos,
+   * labels e limpeza de chaves — não usar como lista do seletor “Adicionar serviços”.
    */
   const servicosParaDropdown = useMemo(() => {
     if (meta.importadoPlanilha) {
@@ -2530,6 +3369,22 @@ export function OrcamentoPageView({
     }
     return servicos;
   }, [meta.importadoPlanilha, servicosPadraoContrato, servicos]);
+
+  /**
+   * Só o catálogo do contrato (GET servicos-padrao). Nunca usar `servicos` do documento aqui:
+   * senão títulos/subtítulos criados na montagem aparecem no seletor. Sem catálogo na API, lista fica vazia.
+   * Só há “base” de orçamento perfeito com histórico (`origem: orcamento-perfeito`); serviços órfãos no JSON
+   * sem import registrado não devem aparecer aqui (alinha com a aba Importações).
+   */
+  const servicosCatalogoDropdown = useMemo(() => {
+    if (meta.importadoPlanilha) {
+      return servicos;
+    }
+    if (historicoOrcamentoPerfeito.length === 0) {
+      return [];
+    }
+    return servicosPadraoContrato;
+  }, [meta.importadoPlanilha, servicosPadraoContrato, servicos, historicoOrcamentoPerfeito]);
 
   useEffect(() => {
     if (!orcamentoListaActionMenu) return;
@@ -2596,18 +3451,21 @@ export function OrcamentoPageView({
     };
   }, []);
 
+  /**
+   * Catálogo global (S3): depende do contrato e re-roda ao trocar orçamento.
+   * Antes rodava só no mount — após F5 a API podia responder antes da sessão ou fora de ordem e o mapa ficava sem analítico.
+   */
   useEffect(() => {
+    if (!centroCustoId) return;
     let cancelled = false;
-    fetchComposicoesGeral().then(items => {
+    fetchComposicoesGeral().then((items) => {
       if (cancelled) return;
-      if (items.length > 0) {
-        setComposicoes(items);
-      } else {
-        setComposicoes([]);
-      }
+      setComposicoes(Array.isArray(items) ? items : []);
     });
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [centroCustoId, orcamentoAtivoId]);
 
   useEffect(() => {
     if (!centroCustoId) {
@@ -2617,7 +3475,9 @@ export function OrcamentoPageView({
       setImports([]);
       return;
     }
-    setOrcamentoAtivoId(null);
+    if (!embeddedContractId) {
+      setOrcamentoAtivoId(null);
+    }
     setServicos([]);
     setImports(loadImports(centroCustoId));
     let cancelled = false;
@@ -2636,7 +3496,13 @@ export function OrcamentoPageView({
     return () => {
       cancelled = true;
     };
-  }, [centroCustoId]);
+  }, [centroCustoId, embeddedContractId]);
+
+  useEffect(() => {
+    if (!orcamentoAtivoId || !embeddedContractId) return;
+    const meta = listaOrcamentos.find(o => o.id === orcamentoAtivoId);
+    if (meta?.nome) setNomeOrcamentoRascunho(meta.nome);
+  }, [orcamentoAtivoId, listaOrcamentos, embeddedContractId]);
 
   /** Com contrato selecionado e sem orçamento aberto: lista de documentos vem do armazenamento compartilhado (API + local). */
   useEffect(() => {
@@ -2709,14 +3575,19 @@ export function OrcamentoPageView({
               : servicosDoOrcamento;
           setServicosPadraoContrato(catalogoContrato);
           const doc = sessaoApi?.servicosDocumento;
+          const rootDoc =
+            servicosDoOrcamento.length > 0 &&
+            !arvoreServicosPareceCatalogoContrato(servicosDoOrcamento, catalogoContrato)
+              ? servicosDoOrcamento
+              : null;
           if (Array.isArray(doc) && doc.length > 0) {
             setServicos(doc);
             saveServicos(centroCustoId, doc);
             setServicosExpandidos(new Set([doc[0].id]));
-          } else if (servicosDoOrcamento.length > 0) {
-            setServicos(servicosDoOrcamento);
-            saveServicos(centroCustoId, servicosDoOrcamento);
-            setServicosExpandidos(new Set([servicosDoOrcamento[0].id]));
+          } else if (rootDoc) {
+            setServicos(rootDoc);
+            saveServicos(centroCustoId, rootDoc);
+            setServicosExpandidos(new Set([rootDoc[0].id]));
           } else {
             const local = loadServicos(centroCustoId);
             if (local.length > 0) {
@@ -2737,10 +3608,9 @@ export function OrcamentoPageView({
         } else {
           const padraoContrato = await fetchServicosPadraoFromApi(centroCustoId);
           if (cancelled) return;
-          const contratoTemOrcamentoPerfeito = temImportacaoOrcamentoPerfeito(padraoContrato?.imports);
           setServicosPadraoContrato(
-            contratoTemOrcamentoPerfeito && Array.isArray(padraoContrato?.servicos)
-              ? padraoContrato!.servicos
+            Array.isArray(padraoContrato?.servicos) && padraoContrato.servicos.length > 0
+              ? padraoContrato.servicos
               : []
           );
           if (servicosDoOrcamento.length > 0) {
@@ -2772,10 +3642,8 @@ export function OrcamentoPageView({
             aplicarSessao(snapshot.sessaoOrcamento ?? null);
             sessaoFinal = snapshot.sessaoOrcamento ?? null;
             recuperadoDoSnapshot = true;
-            if (sessaoFinal?.meta?.importadoPlanilha === true) {
-              const pad = await fetchServicosPadraoFromApi(centroCustoId);
-              if (!cancelled && pad?.servicos?.length) setServicosPadraoContrato(pad.servicos);
-            }
+            const padSnap = await fetchServicosPadraoFromApi(centroCustoId);
+            if (!cancelled && padSnap?.servicos?.length) setServicosPadraoContrato(padSnap.servicos);
             toast.error(
               `Recuperação automática aplicada a partir do backup local de ${new Date(snapshot.createdAt).toLocaleString('pt-BR')}.`
             );
@@ -2795,11 +3663,10 @@ export function OrcamentoPageView({
         if (svcs.length > 0) setServicosExpandidos(new Set([svcs[0].id]));
         aplicarSessao(sessaoLocal);
         let sessaoFinal: SessaoOrcamentoPersist | null = sessaoLocal;
-        if (importadoLocal) {
-          const pad = await fetchServicosPadraoFromApi(centroCustoId);
-          if (!cancelled && pad?.servicos?.length) setServicosPadraoContrato(pad.servicos);
-          else setServicosPadraoContrato([]);
-        } else {
+        const padOffline = await fetchServicosPadraoFromApi(centroCustoId);
+        if (!cancelled && padOffline?.servicos?.length) {
+          setServicosPadraoContrato(padOffline.servicos);
+        } else if (!cancelled) {
           setServicosPadraoContrato([]);
         }
         const docLoc = Array.isArray(sessaoLocal?.servicosDocumento) ? sessaoLocal!.servicosDocumento!.length : 0;
@@ -2813,10 +3680,8 @@ export function OrcamentoPageView({
             aplicarSessao(snapshot.sessaoOrcamento ?? null);
             sessaoFinal = snapshot.sessaoOrcamento ?? null;
             recuperadoDoSnapshot = true;
-            if (sessaoFinal?.meta?.importadoPlanilha === true) {
-              const pad = await fetchServicosPadraoFromApi(centroCustoId);
-              if (!cancelled && pad?.servicos?.length) setServicosPadraoContrato(pad.servicos);
-            }
+            const padSnap2 = await fetchServicosPadraoFromApi(centroCustoId);
+            if (!cancelled && padSnap2?.servicos?.length) setServicosPadraoContrato(padSnap2.servicos);
             toast.error(
               `Recuperação automática aplicada a partir do backup local de ${new Date(snapshot.createdAt).toLocaleString('pt-BR')}.`
             );
@@ -2988,9 +3853,10 @@ export function OrcamentoPageView({
     if (!centroCustoId || !orcamentoAtivoId) return;
     const sessao =
       (sessaoOverride !== undefined ? sessaoOverride : sessaoRef.current) ?? sessaoVazia();
-    saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, montarPayloadSalvarOrcamento(s, i, sessao)).catch(err =>
-      console.warn('Erro ao salvar orçamento no servidor:', err)
-    );
+    saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, montarPayloadSalvarOrcamento(s, i, sessao)).catch(err => {
+      console.warn('Erro ao salvar orçamento no servidor:', err);
+      toast.error('Não foi possível salvar o orçamento no servidor. Verifique a conexão e tente de novo.');
+    });
   };
 
   /** Remove um registro do histórico de importações (lista de documentos do contrato). */
@@ -3029,6 +3895,7 @@ export function OrcamentoPageView({
   };
 
   const voltarParaListaOrcamentos = () => {
+    navigateEmbeddedOrcamentoPath(null);
     setOrcamentoAtivoId(null);
     setOrcamentoViewTab('montagem');
     setNomeOrcamentoRascunho('');
@@ -3038,15 +3905,21 @@ export function OrcamentoPageView({
 
   const criarNovoOrcamento = async () => {
     if (!centroCustoId) return;
-    setNovoOrcamentoMetaDraft(metaNovoOrcamentoPadrao());
+    setNovoOrcamentoMetaDraft({ ...metaNovoOrcamentoPadrao(), nomeOrcamento: '' });
     setNovoOrcamentoStep(1);
     setNovoOrcamentoMetaOpen(true);
   };
 
   const confirmarCriacaoNovoOrcamento = async () => {
     if (!centroCustoId || isCreatingOrcamento) return;
+    const nomeTrim = novoOrcamentoMetaDraft.nomeOrcamento.trim();
+    if (!nomeTrim) {
+      toast.error('Informe o nome do orçamento.');
+      return;
+    }
+    const { nomeOrcamento: _omitNome, ...metaRest } = novoOrcamentoMetaDraft;
     const d = {
-      ...novoOrcamentoMetaDraft,
+      ...metaRest,
       osNumeroPasta: novoOrcamentoMetaDraft.osNumeroPasta.trim(),
       responsavelOrcamento: novoOrcamentoMetaDraft.responsavelOrcamento.trim(),
       descricao: novoOrcamentoMetaDraft.descricao.trim(),
@@ -3067,10 +3940,11 @@ export function OrcamentoPageView({
     }
     try {
       setIsCreatingOrcamento(true);
-      const entry = await criarOrcamentoApi(centroCustoId);
+      const entry = await criarOrcamentoApi(centroCustoId, nomeTrim);
       setListaOrcamentos(prev => [entry, ...prev.filter(o => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(entry.nome);
       setOrcamentoAtivoId(entry.id);
+      navigateEmbeddedOrcamentoPath(entry.id);
       setActiveTab('orcamento');
       setMeta({ ...d, revisaoCount: 0 });
       // salva imediatamente os metadados (a revisão continua "Sem revisão" até o primeiro salvar)
@@ -3095,6 +3969,7 @@ export function OrcamentoPageView({
   const podeAvancarNovoOrcamento = (step: 1 | 2 | 3) => {
     if (step === 1) {
       return (
+        novoOrcamentoMetaDraft.nomeOrcamento.trim().length > 0 &&
         novoOrcamentoMetaDraft.osNumeroPasta.trim().length > 0 &&
         (novoOrcamentoMetaDraft.dataAbertura || '').trim().length > 0
       );
@@ -3110,6 +3985,7 @@ export function OrcamentoPageView({
     setOrcamentoViewTab('montagem');
     setNomeOrcamentoRascunho(meta?.nome ?? '');
     setOrcamentoAtivoId(id);
+    navigateEmbeddedOrcamentoPath(id);
     setActiveTab('orcamento');
   };
 
@@ -3121,6 +3997,7 @@ export function OrcamentoPageView({
       localStorage.removeItem(storageKey(centroCustoId, 'sessao', id));
       setListaOrcamentos(prev => prev.filter(o => o.id !== id));
       if (orcamentoAtivoId === id) {
+        navigateEmbeddedOrcamentoPath(null);
         setOrcamentoAtivoId(null);
         setNomeOrcamentoRascunho('');
         setServicos([]);
@@ -3413,7 +4290,366 @@ export function OrcamentoPageView({
     }
   };
 
+  const buscarOrcamentosOrcafascio = async (page = 1) => {
+    setOrcafascioOrcamentosLoading(true);
+    const q = orcafascioModalOrcamentosSearch.trim();
+    try {
+      const res = await api.get<OrcafascioOrcamentosResponse>(
+        '/orcafascio/orcamentos',
+        { params: { page, ...(q ? { search: q } : {}) }, timeout: 60000 }
+      );
+      const data = res.data;
+      setOrcafascioOrcamentos(data.budgets ?? []);
+      setOrcafascioOrcamentosTotal(data.total ?? null);
+      setOrcafascioOrcamentosPage(page);
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Erro ao buscar orçamentos';
+      toast.error(`Orçafascio: ${msg}`);
+    } finally {
+      setOrcafascioOrcamentosLoading(false);
+    }
+  };
+
+  const verDetalheOrcamentoOrcafascio = async (orcamento: OrcafascioOrcamentoItem) => {
+    const bid = idOrcamentoOrcafascioParaApi(orcamento);
+    const detalheAtualId = orcafascioOrcamentoDetalhe ? idOrcamentoOrcafascioParaApi(orcafascioOrcamentoDetalhe) : '';
+    if (!bid) {
+      toast.error('Este orçamento não tem id para consulta na API.');
+      return;
+    }
+    if (detalheAtualId === bid) {
+      setOrcafascioOrcamentoDetalhe(null);
+      setOrcafascioOrcamentoComposicoes(null);
+      setOrcafascioOrcamentoAnalitico(null);
+      setOrcafascioOrcamentoLinhaCatalogo(null);
+      setOrcafascioOrcamentoLinhaChave(null);
+      return;
+    }
+    setOrcafascioOrcamentoDetalhe(orcamento);
+    setOrcafascioOrcamentoComposicoes(null);
+    setOrcafascioOrcamentoAnalitico(null);
+    setOrcafascioOrcamentoLinhaCatalogo(null);
+    setOrcafascioOrcamentoLinhaChave(null);
+    setOrcafascioOrcamentoComposicoesLoading(true);
+    setOrcafascioOrcamentoAnaliticoLoading(true);
+    const enc = encodeURIComponent(bid);
+    try {
+      let listComp: Record<string, unknown>[] = [];
+      try {
+        const sint = await api.get(`/orcafascio/orcamentos/${enc}/sintetico`, { timeout: 120000 });
+        listComp = normalizarListaApiOrcamento(sint.data);
+      } catch {
+        listComp = [];
+      }
+      if (listComp.length === 0) {
+        try {
+          const det = await api.get(`/orcafascio/orcamentos/${enc}`, { timeout: 120000 });
+          listComp = colecionarListasOrcamentoDetalheResposta(det.data);
+        } catch {
+          /* só tentativa extra */
+        }
+      }
+      setOrcafascioOrcamentoComposicoes(listComp);
+      setOrcafascioOrcamentoComposicoesLoading(false);
+
+      try {
+        const ana = await api.get(`/orcafascio/orcamentos/${enc}/analitico`, { timeout: 120000 });
+        setOrcafascioOrcamentoAnalitico(normalizarListaApiOrcamento(ana.data));
+      } catch {
+        setOrcafascioOrcamentoAnalitico([]);
+      }
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Erro ao carregar composições do orçamento';
+      toast.error(`Orçafascio: ${msg}`);
+      setOrcafascioOrcamentoComposicoes([]);
+      setOrcafascioOrcamentoAnalitico([]);
+    } finally {
+      setOrcafascioOrcamentoComposicoesLoading(false);
+      setOrcafascioOrcamentoAnaliticoLoading(false);
+    }
+  };
+
+  /** Clica na linha do orçamento: abre o analítico da composição no catálogo Orçafascio (mesma API da aba Composições). */
+  const abrirCatalogoPorLinhaOrcamento = async (
+    row: Record<string, unknown>,
+    linhaIdx: number,
+    scope: 'orcamento-composicoes'
+  ) => {
+    const code = codigoCatalogoLinhaOrcamentoOrcafascio(row) ?? '';
+    const bid = orcafascioOrcamentoDetalhe ? idOrcamentoOrcafascioParaApi(orcafascioOrcamentoDetalhe) : '';
+    const buildItemIdRaw = row.build_item_id != null ? String(row.build_item_id).trim() : '';
+    const linhaKeyBase = buildItemIdRaw || code || String(row.id ?? linhaIdx);
+    const linhaKey = `${scope}-${bid}-${linhaIdx}-${linhaKeyBase}`;
+    if (orcafascioOrcamentoLinhaChave === linhaKey && orcafascioOrcamentoLinhaCatalogo) {
+      setOrcafascioOrcamentoLinhaCatalogo(null);
+      setOrcafascioOrcamentoLinhaChave(null);
+      return;
+    }
+    setOrcafascioOrcamentoLinhaChave(linhaKey);
+    setOrcafascioOrcamentoLinhaCatalogoLoading(true);
+    setOrcafascioOrcamentoLinhaCatalogo(null);
+    try {
+      const analiticoRows = orcafascioOrcamentoAnalitico ?? [];
+      const analiticoMatch = encontrarLinhaAnaliticoParaComposicaoOrcamentoFixo(row, analiticoRows);
+
+      if (analiticoMatch) {
+        setOrcafascioOrcamentoLinhaCatalogo(
+          detalheCatalogoAPartirAnaliticoOrcamento(analiticoMatch as Record<string, unknown>)
+        );
+        return;
+      }
+      toast.error('Não foi possível vincular esta composição ao analítico do orçamento (build_item_id/id).');
+    } finally {
+      setOrcafascioOrcamentoLinhaCatalogoLoading(false);
+    }
+  };
+
+  const carregarComposicoesOrcamentoFixoOrcafascio = useCallback(async () => {
+    setOrcafascioAddCompLoading(true);
+    try {
+      const enc = encodeURIComponent(ORCAFASCIO_ORCAMENTO_FIXO_ID);
+      let listComp: Record<string, unknown>[] = [];
+      try {
+        const sint = await api.get(`/orcafascio/orcamentos/${enc}/sintetico`, { timeout: 120000 });
+        listComp = normalizarListaApiOrcamento(sint.data);
+      } catch {
+        listComp = [];
+      }
+      if (listComp.length === 0) {
+        try {
+          const det = await api.get(`/orcafascio/orcamentos/${enc}`, { timeout: 120000 });
+          listComp = colecionarListasOrcamentoDetalheResposta(det.data);
+        } catch {
+          /* tentativa extra */
+        }
+      }
+      let listAna: Record<string, unknown>[] = [];
+      try {
+        const ana = await api.get(`/orcafascio/orcamentos/${enc}/analitico`, { timeout: 120000 });
+        listAna = normalizarListaApiOrcamento(ana.data);
+      } catch {
+        listAna = [];
+      }
+      setOrcafascioAddCompComposicoes(listComp);
+      setOrcafascioAddCompAnalitico(listAna);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Erro ao carregar orçamento fixo do Orçafascio';
+      toast.error(`Orçafascio: ${msg}`);
+      setOrcafascioAddCompComposicoes([]);
+      setOrcafascioAddCompAnalitico([]);
+    } finally {
+      setOrcafascioAddCompLoading(false);
+    }
+  }, []);
+
+  const abrirModalAdicionarComposicaoOrcafascioNoBloco = useCallback((blocoKey: string) => {
+    if (!blocoKey || blocoKey.lastIndexOf('|') <= 0) {
+      toast.error('Não foi possível identificar o subtítulo para adicionar a composição.');
+      return;
+    }
+    setOrcafascioAddCompTargetBlocoKey(blocoKey);
+    setOrcafascioAddCompSearch('');
+    setOrcafascioAddCompSelecionadas(new Set());
+    setOrcafascioAddCompModalOpen(true);
+    void carregarComposicoesOrcamentoFixoOrcafascio();
+  }, [carregarComposicoesOrcamentoFixoOrcafascio]);
+
+  const abrirModalAdicionarComposicaoOrcafascio = useCallback((composicaoKey: string) => {
+    const parsed = parseItemKeyOrcamento(composicaoKey);
+    if (!parsed) {
+      toast.error('Não foi possível identificar o subtítulo para adicionar a composição.');
+      return;
+    }
+    abrirModalAdicionarComposicaoOrcafascioNoBloco(parsed.blocoKey);
+  }, [abrirModalAdicionarComposicaoOrcafascioNoBloco]);
+
+  const chaveLinhaAdicionarComp = useCallback((row: Record<string, unknown>, idx: number): string => {
+    const code = codigoCatalogoLinhaOrcamentoOrcafascio(row) ?? '';
+    const buildItemIdRaw = row.build_item_id != null ? String(row.build_item_id).trim() : '';
+    return `add-fixo-${idx}-${buildItemIdRaw || code || String(row.id ?? '')}`;
+  }, []);
+
+  type AddComposicaoNoBlocoResult =
+    | { ok: true; codigo: string }
+    | { ok: false; codigo: string; reason: 'invalid-target' | 'not-found-analitico' | 'duplicate' };
+
+  async function adicionarComposicaoOrcafascioNoBloco(
+    row: Record<string, unknown>,
+    idx: number,
+    options?: { emLote?: boolean }
+  ): Promise<AddComposicaoNoBlocoResult> {
+    const emLote = options?.emLote ?? false;
+    const blocoKey = orcafascioAddCompTargetBlocoKey;
+    const code = codigoCatalogoLinhaOrcamentoOrcafascio(row) ?? '';
+    if (!blocoKey) return { ok: false, codigo: code, reason: 'invalid-target' };
+    const parsedBloco = parseBlocoKeyOrcamento(blocoKey);
+    if (!parsedBloco) {
+      toast.error('Subtítulo de destino inválido.');
+      return { ok: false, codigo: code, reason: 'invalid-target' };
+    }
+    const { servicoId, subtituloId } = parsedBloco;
+    const rowBase = String(row.base ?? '').trim();
+    const analiticoMatch = encontrarLinhaAnaliticoParaComposicaoOrcamentoFixo(row, orcafascioAddCompAnalitico ?? []);
+    if (!analiticoMatch) {
+      const baseMsg = rowBase ? ` · base ${rowBase}` : '';
+      if (!emLote) {
+        toast.error(
+          `Esta composição não foi encontrada no analítico do orçamento fixo (código ${code || '—'}${baseMsg}).`
+        );
+      }
+      return { ok: false, codigo: code, reason: 'not-found-analitico' };
+    }
+    const detalhe = detalheCatalogoAPartirAnaliticoOrcamento(analiticoMatch as Record<string, unknown>);
+    const novaComp = orcafascioToComposicaoItem(detalhe);
+    const rowKey = chaveLinhaAdicionarComp(row, idx);
+    if (!emLote) setOrcafascioAddCompAddingKey(rowKey);
+    try {
+      let precisaSalvarCatalogo = false;
+      let catalogSnapshot: ComposicaoItem[] = composicoes;
+      setComposicoes((prev) => {
+        precisaSalvarCatalogo = false;
+        const idxExistente = prev.findIndex((c) => c.codigo === novaComp.codigo && c.banco === novaComp.banco);
+        if (idxExistente >= 0) {
+          const atual = prev[idxExistente];
+          const atualTemAnalitico = !!atual?.analiticoLinhas?.length;
+          const novoTemAnalitico = !!novaComp.analiticoLinhas?.length;
+          if (!novoTemAnalitico) {
+            catalogSnapshot = prev;
+            return prev;
+          }
+          const next = [...prev];
+          next[idxExistente] = novaComp;
+          catalogSnapshot = next;
+          precisaSalvarCatalogo =
+            !atualTemAnalitico ||
+            JSON.stringify(atual.analiticoLinhas ?? []) !== JSON.stringify(novaComp.analiticoLinhas ?? []);
+          return next;
+        }
+        precisaSalvarCatalogo = true;
+        catalogSnapshot = [...prev, novaComp];
+        return catalogSnapshot;
+      });
+      if (precisaSalvarCatalogo) {
+        await saveComposicoesGeralToApi(catalogSnapshot);
+      }
+      const addResult = addItemToServico(servicoId, subtituloId, novaComp, catalogSnapshot);
+      if (!addResult.ok) {
+        if (addResult.reason === 'duplicate' && !emLote) {
+          toast.error('Este item já está no subtítulo');
+        }
+        return { ok: false, codigo: code || novaComp.codigo, reason: 'duplicate' };
+      }
+      if (!emLote) {
+        toast.success(`Composição ${novaComp.codigo} adicionada ao orçamento.`);
+      }
+      return { ok: true, codigo: code || novaComp.codigo };
+    } finally {
+      if (!emLote) setOrcafascioAddCompAddingKey(null);
+    }
+  }
+
+  const orcafascioAddCompFiltradas = useMemo(() => {
+    const somenteComposicoes = orcafascioAddCompComposicoes.filter((row) => {
+      const r = row as Record<string, unknown>;
+      const codeRaw = codigoCatalogoLinhaOrcamentoOrcafascio(r);
+      const code = String(codeRaw ?? '').trim();
+      return !!code && code !== '-' && code !== '—';
+    });
+    const q = orcafascioAddCompSearch.trim().toLowerCase();
+    if (!q) return somenteComposicoes;
+    return somenteComposicoes.filter((row) => {
+      const r = row as Record<string, unknown>;
+      const code = String(codigoCatalogoLinhaOrcamentoOrcafascio(r) ?? '').toLowerCase();
+      const desc = textoDescricaoOrcafascio(r).toLowerCase();
+      return `${code} ${desc}`.includes(q);
+    });
+  }, [orcafascioAddCompComposicoes, orcafascioAddCompSearch]);
+
+  const orcafascioAddCompDestinoLabel = useMemo(() => {
+    const bk = orcafascioAddCompTargetBlocoKey;
+    if (!bk) return 'Subtítulo';
+    const p = parseBlocoKeyOrcamento(bk);
+    if (!p) return bk;
+    const svc = servicos.find((s) => s.id === p.servicoId) ?? servicosParaDropdown.find((s) => s.id === p.servicoId);
+    const sub = svc?.subtitulos.find((sb) => sb.id === p.subtituloId);
+    if (!svc || !sub) return bk;
+    return `${svc.nome} > ${sub.nome}`;
+  }, [orcafascioAddCompTargetBlocoKey, servicos, servicosParaDropdown]);
+
+  const toggleSelecaoAdicionarComp = useCallback((key: string) => {
+    setOrcafascioAddCompSelecionadas((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  async function adicionarComposicoesOrcafascioSelecionadas() {
+    if (orcafascioAddCompSelecionadas.size === 0) {
+      toast('Selecione ao menos uma composição.');
+      return;
+    }
+    const rowsSelecionadas = orcafascioAddCompFiltradas
+      .map((row, idx) => ({ row, idx, key: chaveLinhaAdicionarComp(row, idx) }))
+      .filter((x) => orcafascioAddCompSelecionadas.has(x.key));
+    if (rowsSelecionadas.length === 0) {
+      toast('Nenhuma composição selecionada nesta lista filtrada.');
+      return;
+    }
+    setOrcafascioAddCompAddingKey('batch');
+    let ok = 0;
+    let falhasNaoEncontrado = 0;
+    let falhasDuplicado = 0;
+    let falhasDestino = 0;
+    try {
+      for (const x of rowsSelecionadas) {
+        try {
+          const result = await adicionarComposicaoOrcafascioNoBloco(x.row as Record<string, unknown>, x.idx, {
+            emLote: true,
+          });
+          if (result.ok) {
+            ok += 1;
+          } else if (result.reason === 'not-found-analitico') {
+            falhasNaoEncontrado += 1;
+          } else if (result.reason === 'duplicate') {
+            falhasDuplicado += 1;
+          } else {
+            falhasDestino += 1;
+          }
+        } catch {
+          // Continua lote mesmo se alguma falhar.
+        }
+      }
+      if (ok > 0) {
+        const extras: string[] = [];
+        if (falhasNaoEncontrado > 0) extras.push(`${falhasNaoEncontrado} sem vínculo no analítico`);
+        if (falhasDuplicado > 0) extras.push(`${falhasDuplicado} duplicada(s)`);
+        if (falhasDestino > 0) extras.push(`${falhasDestino} com destino inválido`);
+        toast.success(
+          `${ok} composição(ões) adicionada(s) ao orçamento.${extras.length ? ` (${extras.join(' | ')})` : ''}`
+        );
+      } else {
+        toast.error(
+          `Nenhuma composição foi adicionada.${falhasNaoEncontrado > 0 ? ` ${falhasNaoEncontrado} não foram encontradas no analítico.` : ''}${falhasDuplicado > 0 ? ` ${falhasDuplicado} já estavam no subtítulo.` : ''}`
+        );
+      }
+    } finally {
+      setOrcafascioAddCompAddingKey(null);
+      setOrcafascioAddCompSelecionadas(new Set());
+    }
+  }
+
   const verDetalheComposicaoOrcafascio = async (comp: OrcafascioComposicaoListItem) => {
+    setOrcafascioComposicaoDetalheTab('itens');
     setOrcafascioDetalheLoading(true);
     try {
       const res = await api.get<OrcafascioComposicaoDetalhe>(
@@ -3498,6 +4734,95 @@ export function OrcamentoPageView({
     toast.success('Serviço criado. Na aba Importações, importe o orçamento perfeito para preencher a estrutura.');
   };
 
+  const adicionarTituloNoOrcamentoViaMenu = (tituloRaw: string, subtituloRaw: string) => {
+    const titulo = tituloRaw.trim();
+    if (!titulo) return;
+    const subtituloInicial = subtituloRaw.trim();
+    if (!subtituloInicial) return;
+    const novoServicoId = crypto.randomUUID();
+    const novoSubId = crypto.randomUUID();
+    const novo: ServicoPadrao = {
+      id: novoServicoId,
+      nome: titulo,
+      subtitulos: [{ id: novoSubId, nome: subtituloInicial, itens: [] }]
+    };
+    const updated = [...servicos, novo];
+    setServicos(updated);
+    if (centroCustoId && orcamentoAtivoId) {
+      saveServicos(centroCustoId, updated);
+      persistToApi(updated, imports);
+    }
+    setSubtitulosNoOrcamento((prev) => {
+      const bk = `${novoServicoId}|${novoSubId}`;
+      if (prev.includes(bk)) return prev;
+      return [...prev, bk];
+    });
+    toast.success(`Serviço "${titulo}" adicionado.`);
+  };
+
+  const adicionarSubtituloNoOrcamentoViaMenu = (servicoId: string, subtituloNomeRaw: string) => {
+    const subtituloNome = subtituloNomeRaw.trim();
+    if (!subtituloNome) return;
+    const novoSubId = crypto.randomUUID();
+    const updated = servicos.map((s) =>
+      s.id === servicoId
+        ? { ...s, subtitulos: [...s.subtitulos, { id: novoSubId, nome: subtituloNome, itens: [] }] }
+        : s
+    );
+    setServicos(updated);
+    if (centroCustoId && orcamentoAtivoId) {
+      saveServicos(centroCustoId, updated);
+      persistToApi(updated, imports);
+    }
+    setSubtitulosNoOrcamento((prev) => {
+      const bk = `${servicoId}|${novoSubId}`;
+      if (prev.includes(bk)) return prev;
+      return [...prev, bk];
+    });
+    toast.success(`Subtítulo "${subtituloNome}" adicionado.`);
+  };
+
+  const abrirModalNovoTituloViaMenu = () => {
+    setNovoBlocoModalMode('titulo');
+    setNovoBlocoModalServicoId(null);
+    setNovoBlocoTituloNome('');
+    setNovoBlocoSubtituloNome('');
+    setNovoBlocoModalOpen(true);
+  };
+
+  const abrirModalNovoSubtituloViaMenu = (servicoId: string) => {
+    setNovoBlocoModalMode('subtitulo');
+    setNovoBlocoModalServicoId(servicoId);
+    setNovoBlocoSubtituloNome('');
+    setNovoBlocoModalOpen(true);
+  };
+
+  const confirmarNovoBlocoModal = () => {
+    if (novoBlocoModalMode === 'titulo') {
+      if (!novoBlocoTituloNome.trim()) {
+        toast.error('Informe o nome do serviço.');
+        return;
+      }
+      if (!novoBlocoSubtituloNome.trim()) {
+        toast.error('Informe o subtítulo do serviço.');
+        return;
+      }
+      adicionarTituloNoOrcamentoViaMenu(novoBlocoTituloNome, novoBlocoSubtituloNome);
+      setNovoBlocoModalOpen(false);
+      return;
+    }
+    if (!novoBlocoModalServicoId) {
+      toast.error('Não foi possível identificar o título para incluir o subtítulo.');
+      return;
+    }
+    if (!novoBlocoSubtituloNome.trim()) {
+      toast.error('Informe o nome do subtítulo.');
+      return;
+    }
+    adicionarSubtituloNoOrcamentoViaMenu(novoBlocoModalServicoId, novoBlocoSubtituloNome);
+    setNovoBlocoModalOpen(false);
+  };
+
   const removeServico = (id: string) => {
     const updated = servicos.filter(s => s.id !== id);
     setServicos(updated);
@@ -3515,63 +4840,27 @@ export function OrcamentoPageView({
     });
   };
 
-  const addItemToServico = (servicoId: string, subtituloId: string, item: ComposicaoItem) => {
-    const svc = servicos.find(s => s.id === servicoId);
-    const sub = svc?.subtitulos.find(sb => sb.id === subtituloId);
-    if (!sub) return;
-    const existe = sub.itens.some(i => i.chave === item.chave || (i.codigo === item.codigo && i.banco === item.banco));
-    if (existe) {
-      toast.error('Este item já está no subtítulo');
-      return;
-    }
-    const novoItem: ItemServico = {
-      chave: item.chave || normalizarChave(item.codigo, item.banco),
-      codigo: item.codigo,
-      banco: item.banco,
-      descricao: item.descricao
-    };
-    let updated = servicos.map(s => {
-      if (s.id !== servicoId) return s;
-      return {
-        ...s,
-        subtitulos: s.subtitulos.map(sb =>
-          sb.id === subtituloId ? { ...sb, itens: [...sb.itens, novoItem] } : sb
-        )
-      };
-    });
-    // Se for item de demolição/remoção, adiciona Carga de Entulho no mesmo subtítulo se ainda não existir
-    if (ehItemDemolicaoOuRemocao(item.descricao)) {
-      const cargaEntulho = composicoes.find(c => ehComposicaoCargaEntulho(c.descricao));
-      if (cargaEntulho) {
-        const subAtualizado = updated.find(s => s.id === servicoId)?.subtitulos.find(sb => sb.id === subtituloId);
-        const cargaJaExiste = subAtualizado?.itens.some(i =>
-          i.chave === cargaEntulho.chave || (i.codigo === cargaEntulho.codigo && i.banco === cargaEntulho.banco)
-        );
-        if (!cargaJaExiste) {
-          const itemCarga: ItemServico = {
-            chave: cargaEntulho.chave || normalizarChave(cargaEntulho.codigo, cargaEntulho.banco),
-            codigo: cargaEntulho.codigo,
-            banco: cargaEntulho.banco,
-            descricao: cargaEntulho.descricao
-          };
-          updated = updated.map(s => {
-            if (s.id !== servicoId) return s;
-            return {
-              ...s,
-              subtitulos: s.subtitulos.map(sb =>
-                sb.id === subtituloId ? { ...sb, itens: [...sb.itens, itemCarga] } : sb
-              )
-            };
-          });
-        }
-      }
-    }
-    setServicos(updated);
+  const addItemToServico = (
+    servicoId: string,
+    subtituloId: string,
+    item: ComposicaoItem,
+    catalogoComposicoes: ComposicaoItem[]
+  ): AppendComposicaoAoSubtituloResult => {
+    const r = appendComposicaoItemAoSubtitulo(
+      servicosRef.current,
+      servicoId,
+      subtituloId,
+      item,
+      catalogoComposicoes
+    );
+    if (!r.ok) return r;
+    servicosRef.current = r.next;
+    setServicos(r.next);
     if (centroCustoId && orcamentoAtivoId) {
-      saveServicos(centroCustoId, updated);
-      persistToApi(updated, imports);
+      saveServicos(centroCustoId, r.next);
+      persistToApi(r.next, imports);
     }
-    toast.success('Item adicionado');
+    return r;
   };
 
   /** Orçamento perfeito na aba Importações: atualiza base do contrato (e o orçamento aberto, se houver). */
@@ -3695,6 +4984,7 @@ export function OrcamentoPageView({
 
       await saveOrcamentoToApi(centroCustoId, entry.id, {
         imports: importsMesclados,
+        servicos: servicosParaApi,
         sessaoOrcamento: {
           ...base,
           subtitulosNoOrcamento,
@@ -3709,6 +4999,7 @@ export function OrcamentoPageView({
       setListaOrcamentos(prev => [entryAtualizado, ...prev.filter(o => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(nomeLista);
       setOrcamentoAtivoId(entry.id);
+      navigateEmbeddedOrcamentoPath(entry.id);
       setActiveTab('orcamento');
       setOrcamentoViewTab('montagem');
       toast.success(
@@ -3821,12 +5112,12 @@ export function OrcamentoPageView({
         if (sep <= 0) return null;
         const servicoId = key.slice(0, sep);
         const subtituloId = key.slice(sep + 1);
-        const svc = servicosParaDropdown.find(s => s.id === servicoId);
+        const svc = servicos.find(s => s.id === servicoId) ?? servicosParaDropdown.find(s => s.id === servicoId);
         const sub = svc?.subtitulos.find(sb => sb.id === subtituloId);
         return sub ? { key, servicoNome: svc!.nome, subtituloNome: sub.nome, itens: sub.itens } : null;
       })
       .filter(Boolean) as { key: string; servicoNome: string; subtituloNome: string; itens: ItemServico[] }[];
-  }, [subtitulosNoOrcamento, servicosParaDropdown]);
+  }, [subtitulosNoOrcamento, servicos, servicosParaDropdown]);
 
   const assinaturasItensVisiveisNoOrcamento = useMemo(() => {
     const s = new Set<string>();
@@ -3843,17 +5134,15 @@ export function OrcamentoPageView({
   /** Retira do orçamento blocos já sem nenhuma composição visível (ex.: tudo em itens ocultos ou subtítulo órfão). */
   useEffect(() => {
     if (loadingFromApi || servicos.length === 0) return;
-    const ocultosSet = new Set(itensOcultosNoOrcamento);
     const keysToRemove = subtitulosNoOrcamento.filter(blocoKey => {
       const sep = blocoKey.lastIndexOf('|');
       if (sep <= 0) return true;
       const servicoId = blocoKey.slice(0, sep);
       const subtituloId = blocoKey.slice(sep + 1);
-      const svc = servicosParaDropdown.find(s => s.id === servicoId);
+      const svc = servicos.find(s => s.id === servicoId) ?? servicosParaDropdown.find(s => s.id === servicoId);
       const sub = svc?.subtitulos.find(sb => sb.id === subtituloId);
-      if (!sub) return true;
-      if (sub.itens.length === 0) return true;
-      return sub.itens.every(i => ocultosSet.has(`${blocoKey}|${i.chave}`));
+      // Mantém subtítulos vazios/criados manualmente; remove apenas referências órfãs.
+      return !sub;
     });
     if (keysToRemove.length === 0) return;
     setSubtitulosNoOrcamento(prev => prev.filter(k => !keysToRemove.includes(k)));
@@ -3878,7 +5167,7 @@ export function OrcamentoPageView({
       });
       return next;
     });
-  }, [loadingFromApi, subtitulosNoOrcamento, itensOcultosNoOrcamento, servicosParaDropdown]);
+  }, [loadingFromApi, subtitulosNoOrcamento, itensOcultosNoOrcamento, servicos, servicosParaDropdown]);
 
   useLayoutEffect(() => {
     const el = montagemOrcamentoTableRef.current;
@@ -3892,7 +5181,7 @@ export function OrcamentoPageView({
       e.stopPropagation();
       const kind = tr.getAttribute('data-orc-ctx-montagem');
       const mw = 224;
-      const mh = 48;
+      const mh = 188;
       let left = e.clientX;
       let top = e.clientY;
       left = Math.min(left, window.innerWidth - mw - 8);
@@ -3914,7 +5203,7 @@ export function OrcamentoPageView({
 
   const todosSubtitulos = useMemo(() => {
     const list: { key: string; servicoNome: string; subtituloNome: string; itens: ItemServico[] }[] = [];
-    servicosParaDropdown.forEach(s =>
+    servicosCatalogoDropdown.forEach(s =>
       s.subtitulos.forEach(sub =>
         list.push({
           key: `${s.id}|${sub.id}`,
@@ -3925,7 +5214,21 @@ export function OrcamentoPageView({
       )
     );
     return list;
-  }, [servicosParaDropdown]);
+  }, [servicosCatalogoDropdown]);
+
+  const todosSubtitulosFiltradosPesquisa = useMemo(() => {
+    const q = servicosSearch.trim().toLowerCase();
+    if (!q) return todosSubtitulos;
+    return todosSubtitulos.filter(t => {
+      const label = `${t.servicoNome} › ${t.subtituloNome}`.toLowerCase();
+      if (label.includes(q)) return true;
+      return t.itens.some(
+        i =>
+          (i.codigo || '').toLowerCase().includes(q) ||
+          (i.descricao || '').toLowerCase().includes(q)
+      );
+    });
+  }, [todosSubtitulos, servicosSearch]);
 
   const linhasDisponiveisDropdown = useMemo(() => {
     const keys = new Set<string>();
@@ -4026,7 +5329,7 @@ export function OrcamentoPageView({
     }
     const servicosParaSalvar =
       novosBlocos.length > 0
-        ? incorporarNovosBlocosNoEstadoServicos(servicos, novosBlocos, servicosParaDropdown)
+        ? incorporarNovosBlocosNoEstadoServicos(servicos, novosBlocos, servicosCatalogoDropdown)
         : servicos;
     if (novosBlocos.length > 0) {
       setServicos(servicosParaSalvar);
@@ -4036,7 +5339,7 @@ export function OrcamentoPageView({
       let next = prev.filter(k => !restaurarKeys.includes(k));
       for (const blocoKey of novosBlocos) {
         const chavesSel = porBlocoNovo.get(blocoKey);
-        const sub = findSubtituloPorBlocoKey(servicosParaDropdown, blocoKey);
+        const sub = findSubtituloPorBlocoKey(servicosCatalogoDropdown, blocoKey);
         next = next.filter(k => !k.startsWith(`${blocoKey}|`));
         if (!sub || sub.itens.length === 0) continue;
         if (chavesSel?.has(DROPDOWN_BLOCO_SEM_ITENS)) continue;
@@ -4055,7 +5358,7 @@ export function OrcamentoPageView({
       n = n.filter(k => !restaurarKeys.includes(k));
       for (const blocoKey of novosBlocos) {
         const chavesSel = porBlocoNovo.get(blocoKey);
-        const sub = findSubtituloPorBlocoKey(servicosParaDropdown, blocoKey);
+        const sub = findSubtituloPorBlocoKey(servicosCatalogoDropdown, blocoKey);
         n = n.filter(k => !k.startsWith(`${blocoKey}|`));
         if (!sub || sub.itens.length === 0) continue;
         if (chavesSel?.has(DROPDOWN_BLOCO_SEM_ITENS)) continue;
@@ -4103,10 +5406,12 @@ export function OrcamentoPageView({
 
   const mapaComposicoes = useMemo(() => {
     const m: Record<string, ComposicaoItem> = {};
-    composicoes.forEach(c => {
+    composicoes.forEach((c) => {
       const chaves = chavesParaBusca(c.codigo, c.banco, c.chave);
-      chaves.forEach(k => {
-        if (k) m[k] = c;
+      chaves.forEach((k) => {
+        if (!k) return;
+        const prev = m[k];
+        m[k] = prev ? escolherComposicaoParaChaveMapa(prev, c) : c;
       });
     });
     return m;
@@ -4136,21 +5441,13 @@ export function OrcamentoPageView({
       for (const i of bloco.itens) {
         const itemKey = `${bloco.key}|${i.chave}`;
         if (ocultosSet.has(itemKey)) continue;
-        const chaves = chavesParaBusca(i.codigo, i.banco, i.chave);
-        let composicao: ComposicaoItem | null = null;
-        for (const k of chaves) {
-          const c = mapaComposicoes[k];
-          if (c) {
-            composicao = c;
-            break;
-          }
-        }
+        const composicao = composicaoResolvidaDoItemServico(i, mapaComposicoes);
         const preco = i.precoUnitario ?? composicao?.precoUnitario ?? 0;
         const maoDeObraUnitario = i.maoDeObraUnitario ?? composicao?.maoDeObraUnitario ?? 0;
         const materialUnitario = i.materialUnitario ?? composicao?.materialUnitario ?? 0;
         const dim = dimensoesPorItem[itemKey];
         const tipoAuto = inferirTipoUnidadePorDimensao(dim?.linhas);
-        const tipoDaComp = parseUnidadeComposicao(composicao?.unidade);
+        const tipoDaComp = parseUnidadeComposicao(composicao?.unidade ?? i.unidade);
         const tipoUnidade: TipoUnidadeFormula = (tipoDaComp && tipoDaComp !== 'un') ? tipoDaComp : tipoAuto;
         let qtd = 0;
         if (tipoUnidade === 'un') {
@@ -4316,16 +5613,8 @@ export function OrcamentoPageView({
       for (let compIdx = 0; compIdx < rowsDoBloco.length; compIdx++) {
         const row = rowsDoBloco[compIdx];
         const itemComp = `${main}.${subIdx}.${compIdx + 1}`;
-        const chaves = chavesParaBusca(row.item.codigo, row.item.banco, row.item.chave);
-        let comp: ComposicaoItem | null = null;
-        for (const k of chaves) {
-          const c = mapaComposicoes[k];
-          if (c) {
-            comp = c;
-            break;
-          }
-        }
-        const und = (row.unidadeComposicao || comp?.unidade || '').trim() || '—';
+        const comp = composicaoResolvidaDoItemServico(row.item, mapaComposicoes);
+        const und = (row.unidadeComposicao || comp?.unidade || row.item.unidade || '').trim() || '—';
         const key = row.key;
         const valorUnit = row.quantidade > 0 ? row.total / row.quantidade : (row.precoUnitario ?? 0);
         out.push({
@@ -4370,7 +5659,7 @@ export function OrcamentoPageView({
             item: `${itemComp}.${i + 1}`,
             codigo: ln.codigo ?? '',
             banco: ln.banco ?? row.item.banco ?? '',
-            tipo: ln.tipoLabel || 'Insumo',
+            tipo: ln.tipoLabel ? tipoInsumoCodigoParaDescricao(ln.tipoLabel) : 'Insumo',
             categoria: ln.categoria,
             descricao: ln.descricao,
             und: ln.unidade,
@@ -5763,14 +7052,7 @@ export function OrcamentoPageView({
       const item: ItemServico = linha?.item;
       if (!item) return null;
 
-      const composicaoDaLinha = (() => {
-        const chaves = chavesParaBusca(item.codigo, item.banco, item.chave);
-        for (const k of chaves) {
-          const c = mapaComposicoes[k];
-          if (c) return c;
-        }
-        return null;
-      })();
+      const composicaoDaLinha = composicaoResolvidaDoItemServico(item, mapaComposicoes);
 
       const info = {
         codigo: item.codigo,
@@ -5865,14 +7147,7 @@ export function OrcamentoPageView({
       const materialUnitario = Number(linha.materialUnitario ?? 0);
       const maoDeObraUnitario = Number(linha.maoDeObraUnitario ?? 0);
       const seedKey = `${item.codigo}|${item.banco}|${item.chave || ''}`;
-      const composicaoDaLinha = (() => {
-        const chaves = chavesParaBusca(item.codigo, item.banco, item.chave);
-        for (const k of chaves) {
-          const c = mapaComposicoes[k];
-          if (c) return c;
-        }
-        return null;
-      })();
+      const composicaoDaLinha = composicaoResolvidaDoItemServico(item, mapaComposicoes);
 
       const unitAnalitico = ehComposicaoCacamba4m3(item.descricao)
         ? gerarAnaliticoCacamba4m3(materialUnitario, maoDeObraUnitario)
@@ -5890,7 +7165,7 @@ export function OrcamentoPageView({
           item.codigo,
           item.banco,
           item.descricao || '',
-          l.tipoLabel || l.categoria,
+          l.tipoLabel ? tipoInsumoCodigoParaDescricao(l.tipoLabel) : l.categoria,
           l.descricao,
           l.unidade,
           roundTo(l.quantidade * quantidadeItem, 4),
@@ -6513,8 +7788,8 @@ export function OrcamentoPageView({
                 <CardHeader className="border-b-0 pb-1">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 items-center space-x-3">
-                      <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-                        <Calculator className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                      <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                        <Calculator className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
                       </div>
                       <div className="min-w-0">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Orçamentos</h3>
@@ -6975,7 +8250,7 @@ export function OrcamentoPageView({
                                     <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-50">
                                       {l.item}
                                     </td>
-                                    <td className="px-3 py-2.5 text-center text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
+                                    <td className="px-3 py-2.5 text-center text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">{tipoInsumoCodigoParaDescricao(l.tipo)}</td>
                                     <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
                                     <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco}</td>
                                     <td className="px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
@@ -7040,7 +8315,7 @@ export function OrcamentoPageView({
                                 <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm tabular-nums text-gray-700 dark:text-gray-300">
                                   {l.item}
                                 </td>
-                                <td className="px-3 py-2.5 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">{l.tipo}</td>
+                                <td className="px-3 py-2.5 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">{tipoInsumoCodigoParaDescricao(l.tipo)}</td>
                                 <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo || '---'}</td>
                                 <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco || '---'}</td>
                                 <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"><div className="truncate max-w-[min(520px,55vw)]">{l.descricao}</div></td>
@@ -8311,8 +9586,8 @@ export function OrcamentoPageView({
                         onChange={(e) => setServicosSearch(e.target.value)}
                         className="mb-3 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500/80 dark:focus:ring-red-400/80"
                       />
-                      {todosSubtitulos.length > 0 && (
-                        <div className="mb-2 pb-2 border-b border-gray-200 dark:border-gray-600/80">
+                      {todosSubtitulosFiltradosPesquisa.length > 0 && (
+                        <div className="mb-2">
                           {(() => {
                             const allKeys = Array.from(linhasDisponiveisDropdown);
                             const allChecked =
@@ -8339,20 +9614,12 @@ export function OrcamentoPageView({
                           <p className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">
                             Nenhum serviço disponível. Importe o orçamento perfeito na aba Importações.
                           </p>
+                        ) : todosSubtitulosFiltradosPesquisa.length === 0 ? (
+                          <p className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">
+                            Nenhum resultado encontrado para esta pesquisa.
+                          </p>
                         ) : (
-                          todosSubtitulos
-                            .filter(t => {
-                              const q = servicosSearch.trim().toLowerCase();
-                              const label = `${t.servicoNome} › ${t.subtituloNome}`.toLowerCase();
-                              if (!q) return true;
-                              if (label.includes(q)) return true;
-                              return t.itens.some(
-                                i =>
-                                  (i.codigo || '').toLowerCase().includes(q) ||
-                                  (i.descricao || '').toLowerCase().includes(q)
-                              );
-                            })
-                            .map(t => {
+                          todosSubtitulosFiltradosPesquisa.map(t => {
                               const blocoPorKey = subtitulosNoOrcamento.includes(t.key);
                               const blocoTemItensNoOrcamento =
                                 t.itens.length > 0
@@ -8482,6 +9749,32 @@ export function OrcamentoPageView({
                   </p>
                 )}
                 </>
+                )}
+
+                {subtitulosAdicionados.length === 0 && !loadingFromApi && (
+                  <div role="status" className={ORCAMENTO_SECAO_VAZIA_SHELL}>
+                    <div className={`mb-5 ${ORCAMENTO_ICON_SOFT_BOX}`}>
+                      <ClipboardList className={ORCAMENTO_ICON_SOFT_GLYPH} aria-hidden />
+                    </div>
+                    <h3 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-50">
+                      Orçamento ainda sem itens
+                    </h3>
+                    <p className="mt-2 max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                      {!meta.importadoPlanilha && todosSubtitulos.length > 0
+                        ? 'Comece criando um serviço e um subtítulo em branco, ou selecione linhas no campo acima para trazer do catálogo.'
+                        : !meta.importadoPlanilha && todosSubtitulos.length === 0
+                          ? 'Não há serviços no catálogo ainda. Importe o orçamento perfeito na aba Importações ou crie a estrutura manualmente aqui.'
+                          : 'Crie o primeiro serviço e subtítulo para montar o orçamento; depois adicione composições pelo menu da linha ou importe dados quando precisar.'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => abrirModalNovoTituloViaMenu()}
+                      className="mt-6 inline-flex items-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-red-900/15 transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
+                    >
+                      <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                      Criar primeiro serviço
+                    </button>
+                  </div>
                 )}
 
                 {subtitulosAdicionados.length > 0 && (
@@ -8681,6 +9974,62 @@ export function OrcamentoPageView({
                             style={{ left: menuCtxMontagem.left, top: menuCtxMontagem.top }}
                             onClick={e => e.stopPropagation()}
                           >
+                            {menuCtxMontagem.kind === 'composicao' && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60"
+                                onClick={() => {
+                                  setMenuCtxMontagem(null);
+                                  abrirModalNovoTituloViaMenu();
+                                }}
+                              >
+                                <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                                Adicionar título
+                              </button>
+                            )}
+                            {menuCtxMontagem.kind === 'composicao' && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60"
+                                onClick={() => {
+                                  const parsedItem = parseItemKeyOrcamento(menuCtxMontagem.composicaoKey);
+                                  const parsedBloco = parsedItem ? parseBlocoKeyOrcamento(parsedItem.blocoKey) : null;
+                                  const servicoId = parsedBloco?.servicoId ?? null;
+                                  setMenuCtxMontagem(null);
+                                  if (!servicoId) {
+                                    toast.error('Não foi possível identificar o título para incluir o subtítulo.');
+                                    return;
+                                  }
+                                  abrirModalNovoSubtituloViaMenu(servicoId);
+                                }}
+                              >
+                                <ListPlus className="h-4 w-4 shrink-0" aria-hidden />
+                                Adicionar subtítulo
+                              </button>
+                            )}
+                            {(menuCtxMontagem.kind === 'subtitulo' || menuCtxMontagem.kind === 'composicao') && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-violet-700 hover:bg-violet-50 dark:text-violet-300 dark:hover:bg-violet-950/30"
+                                onClick={() => {
+                                  if (menuCtxMontagem.kind === 'subtitulo') {
+                                    const blocoKey = menuCtxMontagem.blocoKey;
+                                    setMenuCtxMontagem(null);
+                                    abrirModalAdicionarComposicaoOrcafascioNoBloco(blocoKey);
+                                    return;
+                                  }
+                                  const key = menuCtxMontagem.composicaoKey;
+                                  setMenuCtxMontagem(null);
+                                  abrirModalAdicionarComposicaoOrcafascio(key);
+                                }}
+                              >
+                                <ListPlus className="h-4 w-4 shrink-0" aria-hidden />
+                                Adicionar composição Orçafascio
+                              </button>
+                            )}
                             <button
                               type="button"
                               role="menuitem"
@@ -8860,6 +10209,8 @@ export function OrcamentoPageView({
                         type="button"
                         onClick={() => {
                           setOrcafascioModalOpen(true);
+                          setOrcafascioModalTab('composicoes');
+                          setOrcafascioModalOrcamentosSearch('');
                           setOrcafascioResultados(null);
                           setOrcafascioDetalhe(null);
                           setOrcafascioSearch('');
@@ -8952,9 +10303,13 @@ export function OrcamentoPageView({
                   <DownloadCloud className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Importar do Orçafascio</h2>
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                    {orcafascioModalTab === 'orcamentos' ? 'Orçamentos' : 'Importar do Orçafascio'}
+                  </h2>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Catálogo ORSE (Sergipe) — busca por código ou descrição
+                    {orcafascioModalTab === 'orcamentos'
+                      ? 'Lista de orçamentos salvos neste sistema'
+                      : 'Catálogo ORSE (Sergipe) — busca por código ou descrição'}
                   </p>
                 </div>
               </div>
@@ -8965,6 +10320,347 @@ export function OrcamentoPageView({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Abas */}
+            <div className="flex gap-0 border-b border-gray-200 dark:border-gray-700 shrink-0 px-6">
+              <button
+                type="button"
+                onClick={() => setOrcafascioModalTab('composicoes')}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  orcafascioModalTab === 'composicoes'
+                    ? 'border-violet-600 text-violet-600 dark:text-violet-400 dark:border-violet-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                }`}
+              >
+                Composições
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrcafascioModalTab('orcamentos')}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  orcafascioModalTab === 'orcamentos'
+                    ? 'border-violet-600 text-violet-600 dark:text-violet-400 dark:border-violet-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                }`}
+              >
+                Orçamentos
+              </button>
+            </div>
+
+            {/* ── Aba Orçamentos (API Orçafascio) ────────────────────────────── */}
+            {orcafascioModalTab === 'orcamentos' && (
+              <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                {/* Barra superior: filtro + botão buscar */}
+                <div className="px-6 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0 flex flex-wrap gap-3 items-end">
+                  <div className="flex-1 min-w-[200px]">
+                    <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5">
+                      <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                      <input
+                        type="text"
+                        placeholder="Filtrar por descrição ou código…"
+                        value={orcafascioModalOrcamentosSearch}
+                        onChange={e => setOrcafascioModalOrcamentosSearch(e.target.value)}
+                        className="flex-1 text-sm bg-transparent outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      buscarOrcamentosOrcafascio(1);
+                      setOrcafascioOrcamentoDetalhe(null);
+                      setOrcafascioOrcamentoComposicoes(null);
+                      setOrcafascioOrcamentoAnalitico(null);
+                      setOrcafascioOrcamentoLinhaCatalogo(null);
+                      setOrcafascioOrcamentoLinhaChave(null);
+                    }}
+                    disabled={orcafascioOrcamentosLoading}
+                    className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {orcafascioOrcamentosLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    Buscar
+                  </button>
+                </div>
+
+                {/* Fluxo em telas: Lista -> Composições -> Insumos */}
+                <div className="flex flex-1 min-h-0 overflow-hidden">
+                  {!orcafascioOrcamentoDetalhe && (
+                    <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+                      <div className="flex-1 overflow-auto">
+                        {orcafascioOrcamentosLoading && (
+                          <div className="flex items-center justify-center py-12 text-gray-400">
+                            <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                            <span className="text-sm">Carregando orçamentos…</span>
+                          </div>
+                        )}
+                        {!orcafascioOrcamentosLoading && orcafascioOrcamentos === null && (
+                          <div className="flex flex-col items-center justify-center py-12 text-gray-400 px-6 text-center">
+                            <DownloadCloud className="w-10 h-10 mb-2 opacity-40" />
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Clique em <strong className="font-medium text-gray-600 dark:text-gray-300">Buscar</strong> para carregar os orçamentos do Orçafascio.
+                            </p>
+                          </div>
+                        )}
+                        {!orcafascioOrcamentosLoading && orcafascioOrcamentos !== null && (() => {
+                          if (orcafascioOrcamentos.length === 0) {
+                            return (
+                              <div className="flex flex-col items-center justify-center py-10 px-6 text-center">
+                                <p className="text-sm text-gray-400">
+                                  {orcafascioModalOrcamentosSearch.trim()
+                                    ? `Nenhum resultado para «${orcafascioModalOrcamentosSearch}».`
+                                    : 'Nenhum orçamento encontrado na API.'}
+                                </p>
+                              </div>
+                            );
+                          }
+                          return (
+                            <table className="w-full text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-gray-50 dark:bg-gray-800/70 sticky top-0 z-10">
+                                  <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Código</th>
+                                  <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Descrição</th>
+                                  <th className="text-left px-3 py-2.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] whitespace-nowrap border-b border-gray-200 dark:border-gray-700">Atualizado</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {orcafascioOrcamentos.map(o => (
+                                  <tr
+                                    key={o.id}
+                                    onClick={() => verDetalheOrcamentoOrcafascio(o)}
+                                    className="cursor-pointer border-b border-gray-50 dark:border-gray-800/60 transition-colors hover:bg-violet-50 dark:hover:bg-violet-950/20"
+                                  >
+                                    <td className="px-3 py-2 font-mono font-semibold text-gray-800 dark:text-gray-200 text-[11px] whitespace-nowrap">
+                                      {o.code || '—'}
+                                    </td>
+                                    <td className="px-3 py-2 text-gray-700 dark:text-gray-300 max-w-[360px]">
+                                      <span className="line-clamp-2 leading-snug">{o.description || '—'}</span>
+                                    </td>
+                                    <td className="px-3 py-2 text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums text-[11px]">
+                                      {o.updated_at ? new Date(o.updated_at as string).toLocaleDateString('pt-BR') : '—'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          );
+                        })()}
+                      </div>
+                      {orcafascioOrcamentos !== null && !orcafascioOrcamentosLoading && (
+                        <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 dark:border-gray-800 shrink-0 gap-2 flex-wrap">
+                          <span className="text-xs text-gray-400">
+                            Pág. {orcafascioOrcamentosPage}
+                            {orcafascioOrcamentosTotal != null && <> · {orcafascioOrcamentosTotal.toLocaleString('pt-BR')} total</>}
+                            {' · '}{orcafascioOrcamentos.length} nesta página
+                          </span>
+                          <div className="flex gap-1 shrink-0">
+                            <button
+                              disabled={orcafascioOrcamentosPage <= 1}
+                              onClick={() => buscarOrcamentosOrcafascio(orcafascioOrcamentosPage - 1)}
+                              className="rounded-md p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <button
+                              disabled={
+                                orcafascioOrcamentos.length === 0 ||
+                                (orcafascioOrcamentosTotal != null &&
+                                  orcafascioOrcamentosPage * (orcafascioOrcamentos.length || 1) >= orcafascioOrcamentosTotal)
+                              }
+                              onClick={() => buscarOrcamentosOrcafascio(orcafascioOrcamentosPage + 1)}
+                              className="rounded-md p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoLinhaCatalogo && (
+                    <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0 flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">Orçamento selecionado</p>
+                          <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 leading-snug">
+                            {(orcafascioOrcamentoDetalhe.description as string) || 'Orçamento'}
+                          </p>
+                          <p className="text-[10px] text-gray-500 mt-1">
+                            {(orcafascioOrcamentoDetalhe.code as string) || '—'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOrcafascioOrcamentoDetalhe(null);
+                            setOrcafascioOrcamentoComposicoes(null);
+                            setOrcafascioOrcamentoAnalitico(null);
+                            setOrcafascioOrcamentoLinhaCatalogo(null);
+                            setOrcafascioOrcamentoLinhaChave(null);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-950/40"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          Voltar para lista
+                        </button>
+                      </div>
+                      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/30 text-[10px] text-gray-500">
+                        Composições: {(orcafascioOrcamentoComposicoes?.length ?? 0).toLocaleString('pt-BR')} · Analíticos disponíveis: {(orcafascioOrcamentoAnalitico?.length ?? 0).toLocaleString('pt-BR')}
+                      </div>
+                      <div className="flex-1 overflow-auto min-h-0">
+                        {orcafascioOrcamentoComposicoesLoading && (
+                          <div className="flex items-center justify-center py-10 text-gray-400">
+                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                            <span className="text-sm">Carregando composições…</span>
+                          </div>
+                        )}
+                        {!orcafascioOrcamentoComposicoesLoading && orcafascioOrcamentoComposicoes !== null && (
+                          orcafascioOrcamentoComposicoes.length === 0 ? (
+                            <p className="text-xs text-gray-400 py-8 text-center px-4">
+                              Nenhuma composição encontrada neste orçamento.
+                            </p>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[980px] text-xs border-collapse">
+                                <thead>
+                                  <tr className="bg-gray-50 dark:bg-gray-800/70 sticky top-0 z-10">
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Item</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Tipo</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Base</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Código</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Descrição</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Un.</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Versão</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Qtd</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Unit.</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {orcafascioOrcamentoComposicoes.map((item, idx) => {
+                                    const row = item as Record<string, unknown>;
+                                    const descr = textoDescricaoOrcafascio(row);
+                                    const qty = valorNumericoOrcafascio(row.qty ?? row.quantity ?? null);
+                                    const total = valorNumericoOrcafascio(
+                                      row.total_price_plus_bdi ?? row.total_price ?? row.total ?? row.total_price_synthetic
+                                    );
+                                    const precUni = valorNumericoOrcafascio(
+                                      row.price_plus_bdi ?? row.price_of_bdi ?? row.price ?? row.unit_price
+                                    ) ?? precoOrcafascioAnalitico(row);
+                                    const bid = idOrcamentoOrcafascioParaApi(orcafascioOrcamentoDetalhe);
+                                    const cc = codigoCatalogoLinhaOrcamentoOrcafascio(row);
+                                    const linhaKey = cc ? `orcamento-composicoes-${bid}-${idx}-${cc}` : '';
+                                    const sel = cc && orcafascioOrcamentoLinhaChave === linhaKey;
+                                    return (
+                                      <tr
+                                        key={(row.id as string) ?? idx}
+                                        onClick={() => void abrirCatalogoPorLinhaOrcamento(row, idx, 'orcamento-composicoes')}
+                                        className={`border-b border-gray-50 dark:border-gray-800/60 transition-colors ${
+                                          cc ? 'cursor-pointer hover:bg-violet-50/60 dark:hover:bg-violet-950/10' : 'cursor-default opacity-90'
+                                        } ${sel ? 'bg-violet-50 dark:bg-violet-950/30' : ''}`}
+                                      >
+                                        <td className="px-3 py-2 whitespace-nowrap text-gray-600 dark:text-gray-300 font-mono text-[11px]">{textoItemizacaoOrcafascio(row)}</td>
+                                        <td className="px-3 py-2 whitespace-nowrap">
+                                          <span className="inline-flex items-center rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                                            {textoKindOrcafascio(row)}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-2 whitespace-nowrap">
+                                          <span className="inline-flex items-center rounded bg-violet-100 dark:bg-violet-900/50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+                                            {`${(row.base as string) || '—'}${row.base_locals ? `/${String(row.base_locals)}` : ''}`}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-2 font-mono font-semibold text-gray-800 dark:text-gray-200 text-[11px] whitespace-nowrap">{(row.code as string) || '—'}</td>
+                                        <td className="px-3 py-2 text-gray-700 dark:text-gray-300 max-w-[320px]"><span className="line-clamp-2 leading-snug">{descr || '—'}</span></td>
+                                        <td className="px-3 py-2 text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono text-[11px]">{(row.unity as string) || (row.unit as string) || '—'}</td>
+                                        <td className="px-3 py-2 text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono text-[11px]">{textoVersaoBaseOrcafascio(row)}</td>
+                                        <td className="px-3 py-2 text-right text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums text-[11px]">{qty != null ? qty.toLocaleString('pt-BR') : '—'}</td>
+                                        <td className="px-3 py-2 text-right text-gray-700 dark:text-gray-300 font-semibold whitespace-nowrap tabular-nums text-[11px]">
+                                          {precUni != null && precUni !== 0 ? precUni.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : precUni === 0 ? 'R$ 0,00' : '—'}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-gray-700 dark:text-gray-300 font-semibold whitespace-nowrap tabular-nums text-[11px]">
+                                          {total != null && total !== 0 ? total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : total === 0 ? 'R$ 0,00' : '—'}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {orcafascioOrcamentoDetalhe && orcafascioOrcamentoLinhaCatalogo && (
+                    <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">Analítico da composição</p>
+                          <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 leading-snug">
+                            {orcafascioOrcamentoLinhaCatalogo.code} · {orcafascioOrcamentoLinhaCatalogo.description}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setOrcafascioOrcamentoLinhaCatalogo(null); setOrcafascioOrcamentoLinhaChave(null); }}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-950/40"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          Voltar para composições
+                        </button>
+                      </div>
+                      <div className="flex-1 overflow-auto min-h-0 px-4 py-3">
+                        {orcafascioOrcamentoLinhaCatalogoLoading && (
+                          <div className="flex items-center justify-center py-8 text-gray-500">
+                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                            <span className="text-sm">Carregando insumos…</span>
+                          </div>
+                        )}
+                        {!orcafascioOrcamentoLinhaCatalogoLoading && (
+                          orcafascioOrcamentoLinhaCatalogo.items.length === 0 ? (
+                            <p className="text-xs text-gray-400 py-6 text-center">Sem insumos/serviços nesta composição.</p>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[900px] text-xs border-collapse">
+                                <thead>
+                                  <tr className="bg-gray-50 dark:bg-gray-800/70 sticky top-0 z-10">
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Tipo</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Base</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Código</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Descrição</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Coef.</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Deson.</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px] border-b border-gray-200 dark:border-gray-700">Oner.</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {orcafascioOrcamentoLinhaCatalogo.items.map((it, j) => (
+                                    <tr key={j} className="border-b border-gray-100 dark:border-gray-800/80">
+                                      <td className="px-3 py-2 whitespace-nowrap">{it.is_resource ? 'Insumo' : 'Serviço'}</td>
+                                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-violet-700 dark:text-violet-300">{it.banco}</td>
+                                      <td className="px-3 py-2 font-mono">{it.code}</td>
+                                      <td className="px-3 py-2 max-w-[520px]"><span className="line-clamp-2">{it.description}</span></td>
+                                      <td className="px-3 py-2 text-right tabular-nums">{it.coefficient != null ? it.coefficient.toLocaleString('pt-BR') : '—'}</td>
+                                      <td className="px-3 py-2 text-right tabular-nums">{it.pnd != null ? it.pnd.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}</td>
+                                      <td className="px-3 py-2 text-right tabular-nums">{it.pd != null ? it.pd.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Aba Composições ────────────────────────────────────────────── */}
+            {orcafascioModalTab === 'composicoes' && <>
 
             {/* Busca (somente ORSE no backend) */}
             <div className="px-6 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0 flex flex-wrap gap-3 items-end">
@@ -9270,9 +10966,9 @@ export function OrcamentoPageView({
                 })()}
               </div>
 
-              {/* Painel de detalhe */}
+              {/* Painel de detalhe da composição (itens em cartões ou visão analítica em tabela) */}
               {orcafascioDetalhe && (
-                <div className="w-80 shrink-0 flex flex-col overflow-y-auto">
+                <div className="w-[min(100%,32rem)] max-w-[100vw] shrink-0 flex flex-col min-h-0 overflow-hidden border-l border-gray-100 dark:border-gray-800">
                   {orcafascioDetalheLoading ? (
                     <div className="flex items-center justify-center py-12 text-gray-400">
                       <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -9281,7 +10977,7 @@ export function OrcamentoPageView({
                   ) : (
                     <>
                       {/* Cabeçalho do detalhe */}
-                      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
                         <span className="inline-flex items-center rounded bg-violet-100 dark:bg-violet-900/60 px-2 py-0.5 text-xs font-mono font-semibold text-violet-700 dark:text-violet-300 mb-1">
                           {orcafascioDetalhe.code}
                         </span>
@@ -9313,42 +11009,139 @@ export function OrcamentoPageView({
                         </div>
                       </div>
 
-                      {/* Itens da composição */}
-                      <div className="px-4 py-3 flex-1 overflow-y-auto">
-                        <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                          Itens ({orcafascioDetalhe.items.length})
-                        </p>
-                        {orcafascioDetalhe.items.length === 0 ? (
-                          <p className="text-xs text-gray-400">Sem itens cadastrados.</p>
-                        ) : (
-                          <div className="space-y-1.5">
-                            {orcafascioDetalhe.items.map((item, idx) => (
-                              <div
-                                key={idx}
-                                className={`rounded-lg px-3 py-2 text-xs ${
-                                  item.is_resource
-                                    ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40'
-                                    : 'bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40'
-                                }`}
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <span className={`text-[10px] font-semibold uppercase mr-1.5 ${item.is_resource ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'}`}>
-                                      {item.is_resource ? 'INSUMO' : 'SERVIÇO'}
-                                    </span>
-                                    <span className="font-mono text-[10px] text-gray-500">[{item.banco}·{item.code}]</span>
-                                    <p className="text-gray-700 dark:text-gray-300 mt-0.5 leading-snug">{item.description}</p>
+                      {/* Sub-abas: conteúdo da composição */}
+                      <div className="flex border-b border-gray-100 dark:border-gray-800 shrink-0 px-2">
+                        <button
+                          type="button"
+                          onClick={() => setOrcafascioComposicaoDetalheTab('itens')}
+                          className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                            orcafascioComposicaoDetalheTab === 'itens'
+                              ? 'border-violet-600 text-violet-600 dark:text-violet-400 dark:border-violet-400'
+                              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                          }`}
+                        >
+                          Itens
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOrcafascioComposicaoDetalheTab('analitico')}
+                          className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                            orcafascioComposicaoDetalheTab === 'analitico'
+                              ? 'border-violet-600 text-violet-600 dark:text-violet-400 dark:border-violet-400'
+                              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                          }`}
+                          title="Mesmos insumos e serviços da composição em formato de tabela (visão analítica)"
+                        >
+                          Analítico
+                        </button>
+                      </div>
+
+                      <div className="flex-1 min-h-0 overflow-y-auto">
+                        {orcafascioComposicaoDetalheTab === 'itens' && (
+                          <div className="px-4 py-3">
+                            <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                              Itens ({orcafascioDetalhe.items.length})
+                            </p>
+                            {orcafascioDetalhe.items.length === 0 ? (
+                              <p className="text-xs text-gray-400">Sem itens cadastrados.</p>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {orcafascioDetalhe.items.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    className={`rounded-lg px-3 py-2 text-xs ${
+                                      item.is_resource
+                                        ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40'
+                                        : 'bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <span className={`text-[10px] font-semibold uppercase mr-1.5 ${item.is_resource ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                                          {item.is_resource ? 'INSUMO' : 'SERVIÇO'}
+                                        </span>
+                                        <span className="font-mono text-[10px] text-gray-500">[{item.banco}·{item.code}]</span>
+                                        <p className="text-gray-700 dark:text-gray-300 mt-0.5 leading-snug">{item.description}</p>
+                                      </div>
+                                      <div className="shrink-0 text-right text-[10px] text-gray-500 dark:text-gray-400">
+                                        <p>{item.unit}</p>
+                                        <p>×{item.coefficient}</p>
+                                        <p className="font-semibold text-gray-700 dark:text-gray-300">
+                                          {item.pnd?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </p>
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div className="shrink-0 text-right text-[10px] text-gray-500 dark:text-gray-400">
-                                    <p>{item.unit}</p>
-                                    <p>×{item.coefficient}</p>
-                                    <p className="font-semibold text-gray-700 dark:text-gray-300">
-                                      {item.pnd?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </p>
-                                  </div>
-                                </div>
+                                ))}
                               </div>
-                            ))}
+                            )}
+                          </div>
+                        )}
+
+                        {orcafascioComposicaoDetalheTab === 'analitico' && (
+                          <div className="px-2 py-2">
+                            <p className="text-[10px] text-gray-500 dark:text-gray-400 px-2 pb-2 leading-snug">
+                              Analítico da composição: insumos e serviços com preço unitário (origem catálogo Orçafascio).
+                            </p>
+                            {orcafascioDetalhe.items.length === 0 ? (
+                              <p className="text-xs text-gray-400 px-2">Sem linhas analíticas.</p>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-[11px] border-collapse min-w-[280px]">
+                                  <thead>
+                                    <tr className="bg-gray-50 dark:bg-gray-800/70 sticky top-0 z-10">
+                                      <th className="text-left px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Tipo</th>
+                                      <th className="text-left px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Base</th>
+                                      <th className="text-left px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Cód.</th>
+                                      <th className="text-left px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700">Descrição</th>
+                                      <th className="text-left px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Un.</th>
+                                      <th className="text-right px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Coef.</th>
+                                      <th className="text-right px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Deson.</th>
+                                      <th className="text-right px-2 py-1.5 font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">Oner.</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {orcafascioDetalhe.items.map((item, idx) => (
+                                      <tr
+                                        key={idx}
+                                        className={`border-b border-gray-50 dark:border-gray-800/60 ${
+                                          item.is_resource
+                                            ? 'bg-amber-50/50 dark:bg-amber-950/10'
+                                            : 'bg-blue-50/40 dark:bg-blue-950/10'
+                                        }`}
+                                      >
+                                        <td className="px-2 py-1.5 whitespace-nowrap text-[9px] font-semibold uppercase text-gray-600 dark:text-gray-300">
+                                          {item.is_resource ? 'Ins.' : 'Serv.'}
+                                        </td>
+                                        <td className="px-2 py-1.5 whitespace-nowrap">
+                                          <span className="inline-flex rounded bg-violet-100 dark:bg-violet-900/50 px-1 py-0.5 text-[9px] font-semibold text-violet-700 dark:text-violet-300">
+                                            {item.banco}
+                                          </span>
+                                        </td>
+                                        <td className="px-2 py-1.5 font-mono text-[10px] text-gray-800 dark:text-gray-200 whitespace-nowrap">
+                                          {item.code}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-gray-700 dark:text-gray-300 max-w-[140px]">
+                                          <span className="line-clamp-2 leading-snug">{item.description}</span>
+                                        </td>
+                                        <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">{item.unit}</td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">{item.coefficient}</td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200 font-medium">
+                                          {item.pnd != null
+                                            ? item.pnd.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                            : '—'}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200 font-medium">
+                                          {item.pd != null
+                                            ? item.pd.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                            : '—'}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -9372,6 +11165,8 @@ export function OrcamentoPageView({
                 </div>
               )}
             </div>
+
+            </>}
           </div>
         </div>
       )}
@@ -9570,6 +11365,192 @@ export function OrcamentoPageView({
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={orcafascioAddCompModalOpen}
+        onClose={() => {
+          if (orcafascioAddCompAddingKey) return;
+          setOrcafascioAddCompModalOpen(false);
+          setOrcafascioAddCompSelecionadas(new Set());
+        }}
+        title={`Adicionar composição (${orcafascioAddCompDestinoLabel})`}
+        size="xl"
+        closeOnOverlayClick={!orcafascioAddCompAddingKey}
+      >
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+              <input
+                type="text"
+                value={orcafascioAddCompSearch}
+                onChange={(e) => setOrcafascioAddCompSearch(e.target.value)}
+                placeholder="Filtrar por código ou descrição..."
+                className="w-full bg-transparent text-sm outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void carregarComposicoesOrcamentoFixoOrcafascio()}
+              disabled={orcafascioAddCompLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              {orcafascioAddCompLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              Atualizar
+            </button>
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            {orcafascioAddCompComposicoes.length.toLocaleString('pt-BR')} composições carregadas ·{' '}
+            {(orcafascioAddCompAnalitico?.length ?? 0).toLocaleString('pt-BR')} analíticos disponíveis ·{' '}
+            {orcafascioAddCompSelecionadas.size.toLocaleString('pt-BR')} selecionada(s)
+          </div>
+          {!orcafascioAddCompLoading && orcafascioAddCompFiltradas.length > 0 && (
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setOrcafascioAddCompSelecionadas(new Set(orcafascioAddCompFiltradas.map((r, i) => chaveLinhaAdicionarComp(r as Record<string, unknown>, i))))}
+                disabled={!!orcafascioAddCompAddingKey}
+                className="text-xs rounded-md border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Selecionar todos (filtro)
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOrcafascioAddCompSelecionadas(new Set())}
+                  disabled={!!orcafascioAddCompAddingKey}
+                  className="text-xs rounded-md border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                >
+                  Limpar seleção
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void adicionarComposicoesOrcafascioSelecionadas()}
+                  disabled={!!orcafascioAddCompAddingKey || orcafascioAddCompSelecionadas.size === 0}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                >
+                  {orcafascioAddCompAddingKey === 'batch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListPlus className="h-3.5 w-3.5" />}
+                  Adicionar selecionadas
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="max-h-[55vh] overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+            {orcafascioAddCompLoading ? (
+              <div className="flex items-center justify-center py-10 text-sm text-gray-500 dark:text-gray-400">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Carregando composições...
+              </div>
+            ) : orcafascioAddCompFiltradas.length === 0 ? (
+              <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                Nenhuma composição encontrada para o filtro informado.
+              </div>
+            ) : (
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/80">
+                    <th className="w-10 px-2 py-2 text-center font-semibold text-gray-600 dark:text-gray-300 uppercase">Sel.</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 uppercase">Código</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 uppercase">Descrição</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 uppercase">Base</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-300 uppercase">Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orcafascioAddCompFiltradas.map((row, idx) => {
+                    const r = row as Record<string, unknown>;
+                    const code = codigoCatalogoLinhaOrcamentoOrcafascio(r) ?? '—';
+                    const desc = textoDescricaoOrcafascio(r) || '—';
+                    const base = String(r.base ?? '—');
+                    const key = chaveLinhaAdicionarComp(r, idx);
+                    const adding = orcafascioAddCompAddingKey === key;
+                    const selected = orcafascioAddCompSelecionadas.has(key);
+                    return (
+                      <tr key={key} className="border-t border-gray-100 dark:border-gray-800">
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleSelecaoAdicionarComp(key)}
+                            disabled={!!orcafascioAddCompAddingKey}
+                            className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-mono text-[11px] text-gray-800 dark:text-gray-200">{code}</td>
+                        <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{desc}</td>
+                        <td className="px-3 py-2 text-gray-500 dark:text-gray-400">{base}</td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => void adicionarComposicaoOrcafascioNoBloco(r, idx)}
+                            disabled={!!orcafascioAddCompAddingKey}
+                            className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                          >
+                            {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                            Adicionar
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={novoBlocoModalOpen}
+        onClose={() => setNovoBlocoModalOpen(false)}
+        title={novoBlocoModalMode === 'titulo' ? 'Adicionar serviço' : 'Adicionar novo subtítulo'}
+        size="md"
+        closeOnOverlayClick
+      >
+        <div className="space-y-4">
+          {novoBlocoModalMode === 'titulo' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Nome do serviço
+              </label>
+              <input
+                value={novoBlocoTituloNome}
+                onChange={(e) => setNovoBlocoTituloNome(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-500/35 dark:focus:border-red-500 dark:focus:ring-red-500/30"
+                placeholder="Ex.: CANTEIRO DE OBRAS"
+                autoFocus
+              />
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Subtítulo do serviço
+            </label>
+            <input
+              value={novoBlocoSubtituloNome}
+              onChange={(e) => setNovoBlocoSubtituloNome(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-500/35 dark:focus:border-red-500 dark:focus:ring-red-500/30"
+              placeholder="Ex.: SERVIÇOS PRELIMINARES"
+              autoFocus={novoBlocoModalMode === 'subtitulo'}
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setNovoBlocoModalOpen(false)}
+              className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmarNovoBlocoModal}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-sm font-medium"
+            >
+              Adicionar
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={editarDadosOpen}
@@ -9816,6 +11797,18 @@ export function OrcamentoPageView({
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Informações iniciais do orçamento</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Nome do orçamento *
+                </label>
+                <input
+                  value={novoOrcamentoMetaDraft.nomeOrcamento}
+                  onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, nomeOrcamento: e.target.value }))}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  placeholder="Ex: Orçamento reforma bloco A"
+                  disabled={isCreatingOrcamento}
+                />
+              </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS/Nº da pasta *</label>
                 <input
@@ -9846,19 +11839,6 @@ export function OrcamentoPageView({
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   disabled={isCreatingOrcamento}
                 />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de envio</label>
-                <input
-                  type="date"
-                  value={novoOrcamentoMetaDraft.dataEnvio}
-                  onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataEnvio: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                  disabled={isCreatingOrcamento}
-                />
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Observação: ao salvar, a data de envio será atualizada automaticamente.
-                </div>
               </div>
             </div>
             </div>
@@ -9992,6 +11972,7 @@ export function OrcamentoPageView({
                 />
               </div>
               <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-sm text-gray-700 dark:text-gray-200">
+                <p><strong>Nome:</strong> {novoOrcamentoMetaDraft.nomeOrcamento.trim() || '—'}</p>
                 <p><strong>OS/Nº da pasta:</strong> {novoOrcamentoMetaDraft.osNumeroPasta || '—'}</p>
                 <p><strong>Data de abertura:</strong> {novoOrcamentoMetaDraft.dataAbertura || '—'}</p>
                 <p><strong>Responsável:</strong> {novoOrcamentoMetaDraft.responsavelOrcamento || '—'}</p>
