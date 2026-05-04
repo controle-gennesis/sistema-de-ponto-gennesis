@@ -20,6 +20,10 @@ model User {
   role         UserRole @default(EMPLOYEE)
   isActive     Boolean  @default(true)
   isFirstLogin Boolean  @default(true)
+  /// URL pública ou relativa (/uploads/...) da foto de perfil
+  profilePhotoUrl  String?
+  /// Chave no S3 (quando usar armazenamento em nuvem)
+  profilePhotoKey  String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -39,6 +43,8 @@ model User {
   initiatedChats    Chat[]                          @relation("ChatInitiator")
   acceptedChats     Chat[]                          @relation("ChatAccepter")
   closedChats       Chat[]                          @relation("ChatCloser")
+  receivedChats     Chat[]                          @relation("ChatRecipient")
+  chatParticipants  ChatParticipant[]
   finalizedPayrolls PayrollStatus[]                 @relation("PayrollFinalizer")
   materialRequestsRequested MaterialRequest[]       @relation("MaterialRequestRequester")
   materialRequestsApproved  MaterialRequest[]       @relation("MaterialRequestApprover")
@@ -56,6 +62,13 @@ model User {
   updatedDpApprovalContracts UserDpApprovalContract[] @relation("UserDpApprovalContractUpdatedBy")
   stockMovements            StockMovement[]
   stockShortfallsResolved   StockShortfall[] @relation("StockShortfallResolver")
+  driveFolders              DriveFolder[]            @relation("DriveFolderOwner")
+  driveFiles                DriveFile[]              @relation("DriveFileOwner")
+  driveFolderShares         DriveFolderShare[]       @relation("DriveFolderShareUser")
+  driveFolderSharesCreated  DriveFolderShare[]       @relation("DriveFolderShareCreatedBy")
+  messageFavorites         MessageFavorite[]
+  chatUserPrivacy          ChatUserPrivacy[]
+  messageHiddenForUser     MessageHiddenForUser[]
 
   @@map("users")
 }
@@ -690,38 +703,70 @@ enum HolidayType {
 // Modelo de Chat/Conversa entre Setores
 model Chat {
   id                  String          @id @default(cuid())
+  chatType            ChatType        @default(DEPARTMENT)
   initiatorId         String          // Quem iniciou a conversa
-  recipientDepartment String          // Setor destinatário
+  groupName           String?         // Nome do grupo (para tipo GROUP)
+  groupDescription    String?         // Descrição do grupo (opcional)
+  groupAvatarUrl      String?         // Avatar do grupo (opcional)
+  recipientDepartment String?         // Setor destinatário (para tipo DEPARTMENT)
+  recipientId         String?         // Usuário destinatário (para tipo DIRECT)
   status              ChatStatus      @default(PENDING) // PENDING, ACCEPTED, CLOSED
   acceptedBy          String?         // Quem aceitou a conversa
   acceptedAt          DateTime?       // Quando foi aceita
   closedBy            String?         // Quem encerrou
   closedAt            DateTime?       // Quando foi encerrada
   lastMessageAt       DateTime?       // Última mensagem enviada
+  pinnedMessageId     String?         // Mensagem fixada no topo
   
   // Mensagens da conversa
   messages            Message[]
+  participants        ChatParticipant[]
   
   // Relacionamentos
   initiator           User            @relation("ChatInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
   accepter            User?           @relation("ChatAccepter", fields: [acceptedBy], references: [id], onDelete: SetNull)
   closer              User?           @relation("ChatCloser", fields: [closedBy], references: [id], onDelete: SetNull)
+  recipient           User?           @relation("ChatRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
+  pinnedMessage       Message?        @relation("ChatPinnedMessage", fields: [pinnedMessageId], references: [id], onDelete: SetNull)
+  userPrivacySettings ChatUserPrivacy[]
   
   @@index([initiatorId])
   @@index([recipientDepartment])
+  @@index([recipientId])
+  @@index([chatType])
+  @@index([groupName])
   @@index([status])
   @@index([lastMessageAt])
   @@map("chats")
+}
+
+model ChatParticipant {
+  id        String   @id @default(cuid())
+  chatId    String
+  userId    String
+  isAdmin   Boolean  @default(false)
+  joinedAt  DateTime @default(now())
+
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@index([chatId])
+  @@index([userId])
+  @@map("chat_participants")
 }
 
 // Modelo de Mensagens dentro de um Chat
 model Message {
   id              String            @id @default(cuid())
   chatId          String            // Chat ao qual pertence
-  senderId        String            // Quem enviou
+  senderId        String            // Quem enviou (ou quem realizou a ação, nas mensagens de sistema)
   content         String            // Conteúdo da mensagem
+  isSystem        Boolean           @default(false) // Eventos de grupo/fixar/etc. — exibidos como texto centralizado
   isRead          Boolean           @default(false)
   readAt          DateTime?         // Quando foi lida
+  editedAt        DateTime?         // Última edição (texto)
+  deletedAt       DateTime?         // Soft delete: mensagem apagada pelo remetente
   
   // Anexos
   attachments     MessageAttachment[]
@@ -733,12 +778,65 @@ model Message {
   // Relacionamentos
   chat            Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender          User              @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  favorites       MessageFavorite[]
+  pinnedInChats   Chat[]            @relation("ChatPinnedMessage")
+  hiddenForUsers  MessageHiddenForUser[]
   
   @@index([chatId])
   @@index([senderId])
   @@index([isRead])
   @@index([createdAt])
   @@map("messages")
+}
+
+// Favoritar mensagem (por usuário; cada um tem seus favoritos)
+model MessageFavorite {
+  id         String   @id @default(cuid())
+  userId     String
+  messageId  String
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@index([userId])
+  @@index([messageId])
+  @@map("message_favorites")
+}
+
+/// Limpar conversa "só pra mim" (estilo WhatsApp): oculta mensagens com createdAt <= clearedAt
+model ChatUserPrivacy {
+  id        String    @id @default(cuid())
+  userId    String
+  chatId    String
+  clearedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chatId])
+  @@index([userId])
+  @@index([chatId])
+  @@map("chat_user_privacy")
+}
+
+/// Apagar mensagem "só pra mim" — oculta no histórico deste usuário apenas
+model MessageHiddenForUser {
+  id        String   @id @default(cuid())
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@index([userId])
+  @@index([messageId])
+  @@map("message_hidden_for_user")
 }
 
 // Modelo de Anexos de Mensagens
@@ -763,6 +861,12 @@ enum ChatStatus {
   PENDING     // Aguardando aceitação
   ACCEPTED     // Aceito e ativo
   CLOSED       // Encerrado
+}
+
+enum ChatType {
+  DEPARTMENT  // Chat com setor (modelo antigo)
+  DIRECT      // Chat direto entre usuários (estilo WhatsApp)
+  GROUP       // Chat em grupo
 }
 
 // Modelo de Status da Folha de Pagamento
@@ -795,11 +899,6 @@ model CostCenter {
   state       String?  // Estado (DF, GO, etc.)
   polo        String?  // Polo (BRASÍLIA, GOIÁS, etc.)
   company     String?  // Empresa (ABRASIL, GÊNNESIS, MÉTRICA, etc.)
-  dataFim     DateTime?
-  dataInicio  DateTime?
-  orgao       String?
-  prazoMeses  Int?
-  valorTotal  Decimal? @db.Decimal(14, 2)
   isActive    Boolean  @default(true) // Se está ativo
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1691,6 +1790,11 @@ model UserContractPermission {
   id         String   @id @default(cuid())
   userId     String
   contractId String
+  /// Recursos por contrato (aba Permissões). Se false, o usuário não acessa esse bloco dentro do contrato.
+  accessOrcamento       Boolean  @default(true)
+  accessRelatorios      Boolean  @default(true)
+  accessOrdemServico    Boolean  @default(true)
+  accessProducaoSemanal Boolean  @default(true)
   updatedBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -1726,14 +1830,81 @@ model UserDpApprovalContract {
 
 /// Template de permissões por cargo (nome do campo `Employee.position`). Usado como padrão na tela Permissões.
 model PositionPermissionTemplate {
-  id                     String   @id @default(cuid())
-  position               String   @unique
-  permissions            Json
-  allowedContractIds     Json     @default("[]")
-  dpApprovalContractIds  Json     @default("[]")
-  updatedAt              DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  position              String   @unique
+  permissions           Json
+  allowedContractIds    Json     @default("[]")
+  dpApprovalContractIds Json     @default("[]")
+  /// Map contractId -> { orcamento, relatorios, ordemServico, producaoSemanal }
+  contractModuleFlags   Json     @default("{}")
+  updatedAt             DateTime @updatedAt
 
   @@map("position_permission_templates")
+}
+
+// Drive — pastas e arquivos armazenados no S3
+model DriveFolder {
+  id        String   @id @default(cuid())
+  name      String
+  parentId  String?
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   DriveFolder?  @relation("FolderChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children DriveFolder[] @relation("FolderChildren")
+  files    DriveFile[]
+  shares   DriveFolderShare[]
+  owner    User                 @relation("DriveFolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([parentId])
+  @@index([ownerId])
+  @@map("drive_folders")
+}
+
+enum DriveFolderSharePermission {
+  READ
+  READ_WRITE
+}
+
+/// Quem tem acesso a qual pasta (além do dono). Acesso a subpastas/arquivos segue a pasta compartilhada.
+model DriveFolderShare {
+  id         String                     @id @default(cuid())
+  folderId   String
+  userId     String
+  permission DriveFolderSharePermission   @default(READ)
+  createdAt  DateTime                   @default(now())
+  updatedAt  DateTime                   @updatedAt
+  createdBy  String?
+
+  folder  DriveFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  user    User        @relation("DriveFolderShareUser", fields: [userId], references: [id], onDelete: Cascade)
+  creator User?       @relation("DriveFolderShareCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([folderId, userId])
+  @@index([userId])
+  @@index([folderId])
+  @@map("drive_folder_shares")
+}
+
+model DriveFile {
+  id           String   @id @default(cuid())
+  name         String
+  originalName String
+  s3Key        String
+  size         Int
+  mimeType     String
+  folderId     String?
+  ownerId      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  folder DriveFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  owner  User         @relation("DriveFileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([folderId])
+  @@index([ownerId])
+  @@map("drive_files")
 }
 
 // Conversas do chatbot WhatsApp (Meta Cloud API)

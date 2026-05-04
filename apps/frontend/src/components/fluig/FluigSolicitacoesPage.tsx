@@ -937,39 +937,17 @@ export function FluigSolicitacoesPage({
     return () => document.removeEventListener('click', handler);
   }, []);
 
-  // Marcar todos os filtros por padrão apenas quando a lista de opções muda (troca de dataset/dados), não quando o usuário altera a seleção
+  // Resetar todos os filtros APENAS quando o dataset mudar (troca de aba/dataset),
+  // nunca quando o usuário alterar seleções (evita loop infinito por referência de array)
   useEffect(() => {
-    if (filiais.length > 0) {
-      setSelectedFiliais(filiais);
-    } else {
-      setSelectedFiliais([]);
-    }
-    if (centrosCusto.length > 0) {
-      setSelectedCCs(centrosCusto);
-    } else {
-      setSelectedCCs([]);
-    }
-    if (setoresSolicitantes.length > 0) {
-      setSelectedSetoresSolicitantes(setoresSolicitantes);
-    } else {
-      setSelectedSetoresSolicitantes([]);
-    }
-    if (urgencias.length > 0) {
-      setSelectedUrgencias(urgencias);
-    } else {
-      setSelectedUrgencias([]);
-    }
-    if (fornecedores.length > 0) {
-      setSelectedFornecedores(fornecedores);
-    } else {
-      setSelectedFornecedores([]);
-    }
-    if (naturezasOrcamentarias.length > 0) {
-      setSelectedNaturezasOrcamentarias(naturezasOrcamentarias);
-    } else {
-      setSelectedNaturezasOrcamentarias([]);
-    }
-  }, [filiais, centrosCusto, setoresSolicitantes, urgencias, fornecedores, naturezasOrcamentarias]);
+    setSelectedFiliais(filiais);
+    setSelectedCCs(centrosCusto);
+    setSelectedSetoresSolicitantes(setoresSolicitantes);
+    setSelectedUrgencias(urgencias);
+    setSelectedFornecedores(fornecedores);
+    setSelectedNaturezasOrcamentarias(naturezasOrcamentarias);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datasetId]);
 
   const hasActiveFilters =
     searchText.trim() !== '' ||
@@ -1121,7 +1099,7 @@ export function FluigSolicitacoesPage({
         {/* Header */}
         <div className="text-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-            {config?.title ?? 'Solicitações Fluig'}
+            {config?.title ?? 'Painel de solicitações'}
           </h1>
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
             {config?.subtitle ?? 'Veja em qual etapa está cada solicitação e acompanhe o andamento em tempo real'}

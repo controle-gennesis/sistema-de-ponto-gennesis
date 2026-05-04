@@ -40,5 +40,15 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
+// Garante que o @prisma/client inclui o Drive (se faltar, reinicie o backend após `npx prisma generate`)
+const p = prisma as { driveFolder?: unknown; driveFile?: unknown };
+if (!p.driveFolder || !p.driveFile) {
+  console.error(
+    '❌ @prisma/client sem modelos Drive. Rode na pasta apps/backend: npx prisma generate e reinicie o servidor.',
+  );
+} else if (process.env.NODE_ENV === 'development') {
+  console.log('✅ Prisma: modelos Drive (drive_folders / drive_files) carregados.');
+}
+
 export { prisma };
 

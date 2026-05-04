@@ -3,7 +3,11 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { parseDateInput } from '../utils/dateInput';
-import { assertContractAccess, getContractAccessForUser } from '../lib/contractAccess';
+import {
+  assertContractAccess,
+  assertUserCanCreateContract,
+  getContractAccessForUser
+} from '../lib/contractAccess';
 
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
@@ -139,6 +143,9 @@ export class ContractController {
    */
   async createContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      await assertUserCanCreateContract(req.user.id, req.user.isAdmin);
+
       const { name, number, startDate, endDate, validityCycle, costCenterId, valuePlusAddenda } = req.body;
 
       if (!name?.trim()) {
@@ -182,20 +189,45 @@ export class ContractController {
         throw createError('Data de fim da vigência deve ser posterior à data de início', 400);
       }
 
-      const contract = await prisma.contract.create({
-        data: {
-          name: name.trim(),
-          number: String(number).trim(),
-          startDate: start,
-          endDate: end,
-          costCenterId,
-          valuePlusAddenda: value
-        },
-        include: {
-          costCenter: {
-            select: { id: true, code: true, name: true }
+      const creatorId = req.user.id;
+      const isAdminCreator = req.user.isAdmin;
+
+      const contract = await prisma.$transaction(async (tx) => {
+        const created = await tx.contract.create({
+          data: {
+            name: name.trim(),
+            number: String(number).trim(),
+            startDate: start,
+            endDate: end,
+            costCenterId,
+            valuePlusAddenda: value
+          },
+          include: {
+            costCenter: {
+              select: { id: true, code: true, name: true }
+            }
           }
+        });
+
+        if (!isAdminCreator) {
+          await tx.userContractPermission.upsert({
+            where: {
+              userId_contractId: { userId: creatorId, contractId: created.id }
+            },
+            create: {
+              userId: creatorId,
+              contractId: created.id,
+              accessOrcamento: true,
+              accessRelatorios: true,
+              accessOrdemServico: true,
+              accessProducaoSemanal: true,
+              updatedBy: creatorId
+            },
+            update: { updatedBy: creatorId }
+          });
         }
+
+        return created;
       });
 
       res.status(201).json({

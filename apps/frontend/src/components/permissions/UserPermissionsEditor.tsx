@@ -23,6 +23,7 @@ import {
 import {
   PERMISSION_ACCESS_ACTION,
   PERMISSION_CONTROLE_CATEGORY,
+  PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
   PERMISSION_MODULES,
   pathToModuleKey,
   type PermissionModuleDef,
@@ -31,7 +32,17 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 
+/** Orçamento e relatórios fotográficos: só pela aba «Contratos», não pela matriz «Acesso». */
+const HIDDEN_FROM_ACCESS_MATRIX = new Set(PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX);
+
 type PermissionItem = { module: string; action: string };
+
+type ContractModuleFlags = {
+  orcamento: boolean;
+  relatorios: boolean;
+  ordemServico: boolean;
+  producaoSemanal: boolean;
+};
 
 type UserPermissionPayload = {
   user: { id: string; name: string; email: string; employee?: { position?: string | null } };
@@ -39,6 +50,7 @@ type UserPermissionPayload = {
   permissions: PermissionItem[];
   allowedContractIds: string[];
   dpApprovalContractIds?: string[];
+  contractModuleFlags?: Record<string, ContractModuleFlags>;
 };
 type PermissionUserListItem = {
   id: string;
@@ -73,14 +85,25 @@ function serializeContractIds(s: Set<string>): string {
   return Array.from(s).sort().join(',');
 }
 
+function serializeModuleFlags(flags: Record<string, ContractModuleFlags>): string {
+  return Object.keys(flags)
+    .sort()
+    .map((id) => {
+      const f = flags[id];
+      return `${id}:${f.orcamento ? 1 : 0}${f.relatorios ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}`;
+    })
+    .join(',');
+}
+
 function serializeFullBaseline(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
   contractIds: Set<string>,
   employeeActions: Set<ContractAction>,
-  dpApprovalContractIds: Set<string>
+  dpApprovalContractIds: Set<string>,
+  moduleFlags: Record<string, ContractModuleFlags>
 ): string {
-  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}`;
+  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}|mf:${serializeModuleFlags(moduleFlags)}`;
 }
 
 /** Mesmo formato retornado por GET /permissions/users/:id (alinha cache do React Query ao PUT). */
@@ -139,7 +162,13 @@ const CATEGORY_ORDER = [
 function inferCategoryFromHref(href: string): string {
   const h = href.replace(/\/$/, '') || '/';
   if (
-    ['/ponto/dashboard', '/ponto/bi', '/ponto/conversas-whatsapp'].some((p) => h === p)
+    [
+      '/ponto/dashboard',
+      '/ponto/conversas-whatsapp',
+      '/ponto/aprovacoes',
+      '/ponto/financeiro/gestao-solicitacoes',
+      '/ponto/drive',
+    ].some((p) => h === p)
   ) {
     return 'Principal';
   }
@@ -168,6 +197,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/orcamento',
       '/ponto/contratos',
       '/ponto/contratos/controle-geral',
+      '/ponto/contratos/relatorios',
       '/ponto/andamento-da-os',
       '/ponto/pleitos-gerados',
     ].some((p) => h === p)
@@ -456,6 +486,7 @@ export function UserPermissionsEditor({
   const [employeeActionsSet, setEmployeeActionsSet] = useState<Set<ContractAction>>(new Set());
   const [selectedContractIds, setSelectedContractIds] = useState<Set<string>>(new Set());
   const [selectedDpApprovalContractIds, setSelectedDpApprovalContractIds] = useState<Set<string>>(new Set());
+  const [contractModuleFlags, setContractModuleFlags] = useState<Record<string, ContractModuleFlags>>({});
   const [copyFromUserIdGeneral, setCopyFromUserIdGeneral] = useState('');
   const [copyFromUserIdContracts, setCopyFromUserIdContracts] = useState('');
   const [copyGeneralSearch, setCopyGeneralSearch] = useState('');
@@ -476,6 +507,8 @@ export function UserPermissionsEditor({
   employeeActionsRef.current = employeeActionsSet;
   const selectedDpApprovalContractIdsRef = useRef(selectedDpApprovalContractIds);
   selectedDpApprovalContractIdsRef.current = selectedDpApprovalContractIds;
+  const contractModuleFlagsRef = useRef(contractModuleFlags);
+  contractModuleFlagsRef.current = contractModuleFlags;
 
   /** Serialização estável para comparar com o último estado vindo do servidor (evita PUT na hidratação). */
   const baselineSerializedRef = useRef<string | null>(null);
@@ -493,6 +526,8 @@ export function UserPermissionsEditor({
           position: string;
           permissions: UserPermissionPayload['permissions'];
           allowedContractIds: string[];
+          dpApprovalContractIds?: string[];
+          contractModuleFlags?: Record<string, ContractModuleFlags>;
         };
         return {
           user: {
@@ -504,7 +539,8 @@ export function UserPermissionsEditor({
           isAdmin: false,
           permissions: d.permissions ?? [],
           allowedContractIds: d.allowedContractIds ?? [],
-          dpApprovalContractIds: (d as { dpApprovalContractIds?: string[] }).dpApprovalContractIds ?? [],
+          dpApprovalContractIds: d.dpApprovalContractIds ?? [],
+          contractModuleFlags: d.contractModuleFlags ?? {},
         } as UserPermissionPayload;
       }
       return (await api.get(`/permissions/users/${userId}`)).data?.data as UserPermissionPayload;
@@ -545,12 +581,14 @@ export function UserPermissionsEditor({
       setEmployeeActionsSet(new Set());
       setSelectedContractIds(new Set());
       setSelectedDpApprovalContractIds(new Set());
+      setContractModuleFlags({});
       baselineSerializedRef.current = serializeFullBaseline(
         new Set(),
         new Set(),
         new Set(),
         new Set(),
-        new Set()
+        new Set(),
+        {}
       );
       return;
     }
@@ -559,6 +597,7 @@ export function UserPermissionsEditor({
       perms.filter((p) => p.action === PERMISSION_ACCESS_ACTION).map((p) => p.module)
     );
     next.delete(DEPRECATED_DP_APPROVE_CONTROLE_KEY);
+    PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX.forEach((k) => next.delete(k));
     const nextContract = new Set<ContractAction>();
     const nextEmployee = new Set<ContractAction>();
     for (const p of perms) {
@@ -572,17 +611,30 @@ export function UserPermissionsEditor({
     const nextContractIds = new Set(userPermissionData.allowedContractIds ?? []);
     const rawDp = new Set(userPermissionData.dpApprovalContractIds ?? []);
     const nextDpApproval = new Set(Array.from(rawDp).filter((id) => nextContractIds.has(id)));
+    const rawFlags = userPermissionData.contractModuleFlags ?? {};
+    const emptyFlags = (): ContractModuleFlags => ({
+      orcamento: false,
+      relatorios: false,
+      ordemServico: false,
+      producaoSemanal: false,
+    });
+    const nextFlags: Record<string, ContractModuleFlags> = {};
+    for (const id of Array.from(nextContractIds)) {
+      nextFlags[id] = rawFlags[id] ?? emptyFlags();
+    }
     setSelectedSet(next);
     setContractActionsSet(nextContract);
     setEmployeeActionsSet(nextEmployee);
     setSelectedContractIds(nextContractIds);
     setSelectedDpApprovalContractIds(nextDpApproval);
+    setContractModuleFlags(nextFlags);
     baselineSerializedRef.current = serializeFullBaseline(
       next,
       nextContract,
       nextContractIds,
       nextEmployee,
-      nextDpApproval
+      nextDpApproval,
+      nextFlags
     );
   }, [userPermissionData]);
 
@@ -619,18 +671,21 @@ export function UserPermissionsEditor({
       const permissions = [...basePermissions, ...contractActionPermissions, ...employeeActionPermissions];
       const allowedContractIds = currentContractIds;
       const dpApprovalContractIds = Array.from(selectedDpApprovalContractIdsRef.current);
+      const contractModuleFlagsPayload = contractModuleFlagsRef.current;
       if (isPositionMode) {
         await api.put('/permissions/position-template', {
           position: positionTemplate,
           permissions,
           allowedContractIds,
           dpApprovalContractIds,
+          contractModuleFlags: contractModuleFlagsPayload,
         });
       } else {
         await api.put(`/permissions/users/${userId}`, {
           permissions,
           allowedContractIds,
           dpApprovalContractIds,
+          contractModuleFlags: contractModuleFlagsPayload,
         });
       }
     },
@@ -641,7 +696,8 @@ export function UserPermissionsEditor({
         contractActionsRef.current,
         selectedContractIdsRef.current,
         employeeActionsRef.current,
-        selectedDpApprovalContractIdsRef.current
+        selectedDpApprovalContractIdsRef.current,
+        contractModuleFlagsRef.current
       );
       await queryClient.invalidateQueries({ queryKey: ['permission-users'] });
       await queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
@@ -660,11 +716,13 @@ export function UserPermissionsEditor({
         );
         queryClient.setQueryData<UserPermissionPayload | undefined>(['permission-user', userId], (old) => {
           if (!old) return old;
+          const updatedFlags = contractModuleFlagsRef.current;
           return {
             ...old,
             permissions: snapshot,
             allowedContractIds: Array.from(selectedContractIdsRef.current),
             dpApprovalContractIds: Array.from(selectedDpApprovalContractIdsRef.current),
+            contractModuleFlags: updatedFlags,
           };
         });
       }
@@ -691,7 +749,8 @@ export function UserPermissionsEditor({
       contractActionsSet,
       selectedContractIds,
       employeeActionsSet,
-      selectedDpApprovalContractIds
+      selectedDpApprovalContractIds,
+      contractModuleFlags
     );
     if (serialized === baselineSerializedRef.current) return;
 
@@ -701,7 +760,8 @@ export function UserPermissionsEditor({
         contractActionsRef.current,
         selectedContractIdsRef.current,
         employeeActionsRef.current,
-        selectedDpApprovalContractIdsRef.current
+        selectedDpApprovalContractIdsRef.current,
+        contractModuleFlagsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       persistPermissions();
@@ -714,6 +774,7 @@ export function UserPermissionsEditor({
     employeeActionsSet,
     selectedContractIds,
     selectedDpApprovalContractIds,
+    contractModuleFlags,
     loadingPermissions,
     permissionError,
     persistPermissions,
@@ -729,7 +790,8 @@ export function UserPermissionsEditor({
         contractActionsRef.current,
         selectedContractIdsRef.current,
         employeeActionsRef.current,
-        selectedDpApprovalContractIdsRef.current
+        selectedDpApprovalContractIdsRef.current,
+        contractModuleFlagsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       persistPermissions();
@@ -741,6 +803,7 @@ export function UserPermissionsEditor({
     for (const m of PERMISSION_MODULES) {
       const cat = moduleCategory(m);
       if (cat === PERMISSION_CONTROLE_CATEGORY) continue;
+      if (HIDDEN_FROM_ACCESS_MATRIX.has(m.key)) continue;
       const list = map.get(cat) ?? [];
       list.push(m);
       map.set(cat, list);
@@ -847,10 +910,39 @@ export function UserPermissionsEditor({
           d.delete(contractId);
           return d;
         });
+        setContractModuleFlags((f) => {
+          const next = { ...f };
+          delete next[contractId];
+          return next;
+        });
       } else {
         n.add(contractId);
+        setContractModuleFlags((f) => ({
+          ...f,
+          [contractId]: f[contractId] ?? {
+            orcamento: false,
+            relatorios: false,
+            ordemServico: false,
+            producaoSemanal: false,
+          },
+        }));
       }
       return n;
+    });
+  };
+
+  const setContractModuleFlag = (contractId: string, key: keyof ContractModuleFlags, value: boolean) => {
+    if (value) {
+      setSelectedContractIds((prev) => new Set(prev).add(contractId));
+    }
+    setContractModuleFlags((prev) => {
+      const current = prev[contractId] ?? {
+        orcamento: false,
+        relatorios: false,
+        ordemServico: false,
+        producaoSemanal: false,
+      };
+      return { ...prev, [contractId]: { ...current, [key]: value } };
     });
   };
 
@@ -889,6 +981,7 @@ export function UserPermissionsEditor({
           .map((p) => p.module)
       );
       nextGeneral.delete(DEPRECATED_DP_APPROVE_CONTROLE_KEY);
+      PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX.forEach((k) => nextGeneral.delete(k));
       const nextContractActions = new Set<ContractAction>();
       const nextEmployeeActions = new Set<ContractAction>();
       for (const p of source.permissions || []) {
@@ -946,9 +1039,21 @@ export function UserPermissionsEditor({
       const rawDp = new Set(source.dpApprovalContractIds || []);
       const nextDp = new Set(Array.from(rawDp).filter((id) => nextContractIds.has(id)));
       const sourceHasContractsModule = (source.permissions || []).some((p) => p.module === CONTRACTS_MODULE_KEY);
+      const srcFlags = (source as UserPermissionPayload).contractModuleFlags ?? {};
+      const defaultFlags: ContractModuleFlags = {
+        orcamento: false,
+        relatorios: false,
+        ordemServico: false,
+        producaoSemanal: false,
+      };
+      const nextFlags: Record<string, ContractModuleFlags> = {};
+      for (const id of Array.from(nextContractIds)) {
+        nextFlags[id] = srcFlags[id] ?? { ...defaultFlags };
+      }
       setContractActionsSet(nextContract);
       setSelectedContractIds(nextContractIds);
       setSelectedDpApprovalContractIds(nextDp);
+      setContractModuleFlags(nextFlags);
       setSelectedSet((prev) => {
         const next = new Set(prev);
         if (sourceHasContractsModule || nextContract.size > 0 || nextContractIds.size > 0) {
@@ -983,7 +1088,8 @@ export function UserPermissionsEditor({
       contractActionsSet,
       selectedContractIds,
       employeeActionsSet,
-      selectedDpApprovalContractIds
+      selectedDpApprovalContractIds,
+      contractModuleFlags
     ) !== baselineSerializedRef.current;
 
   const handleBackWithSave = async () => {
@@ -1440,22 +1546,50 @@ export function UserPermissionsEditor({
                       <tr className="border-b border-gray-100 align-bottom dark:border-gray-700/80">
                         <th
                           scope="col"
-                          className="w-[52%] pb-3 pl-1 pr-4 text-left text-lg font-bold leading-tight tracking-tight text-gray-900 dark:text-gray-100"
+                          className="w-[30%] pb-3 pl-1 pr-4 text-left text-lg font-bold leading-tight tracking-tight text-gray-900 dark:text-gray-100"
                         >
                           Contratos
                         </th>
                         <th
                           scope="col"
-                          className="w-[24%] px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
                         >
                           Liberado
                         </th>
                         <th
                           scope="col"
-                          className="w-[24%] px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
                           title="Aprovar solicitações ao DP, criar rescisão/alteração de função-salário neste contrato"
                         >
                           Gestor
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à aba Orçamento neste contrato"
+                        >
+                          Orçamento
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à aba Relatórios neste contrato"
+                        >
+                          Relatórios
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso às Ordens de Serviço neste contrato"
+                        >
+                          O.S.
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à Produção Semanal neste contrato"
+                        >
+                          Prod. Sem.
                         </th>
                       </tr>
                     </thead>
@@ -1463,6 +1597,12 @@ export function UserPermissionsEditor({
                       {contractsList.map((c) => {
                         const liberado = selectedContractIds.has(c.id);
                         const gestorDp = selectedDpApprovalContractIds.has(c.id);
+                        const flags = contractModuleFlags[c.id] ?? {
+                          orcamento: false,
+                          relatorios: false,
+                          ordemServico: false,
+                          producaoSemanal: false,
+                        };
                         return (
                           <tr
                             key={c.id}
@@ -1507,6 +1647,42 @@ export function UserPermissionsEditor({
                                     }
                                   }}
                                   aria-label={`Gestor — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.orcamento}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'orcamento', next)}
+                                  aria-label={`Orçamento — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.relatorios}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'relatorios', next)}
+                                  aria-label={`Relatórios — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.ordemServico}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'ordemServico', next)}
+                                  aria-label={`Ordem de Serviço — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.producaoSemanal}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'producaoSemanal', next)}
+                                  aria-label={`Produção Semanal — ${c.name}`}
                                 />
                               </div>
                             </td>

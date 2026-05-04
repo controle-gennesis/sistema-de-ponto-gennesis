@@ -44,9 +44,16 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     
-    // Se for FormData, não definir Content-Type (deixar o browser definir)
+    // FormData: o browser/axios precisa adicionar `multipart/form-data; boundary=...`
     if (config.data instanceof FormData) {
-      delete config.headers['Content-Type'];
+      const h = config.headers;
+      if (h && typeof (h as { delete?: (k: string) => void }).delete === 'function') {
+        (h as { delete: (k: string) => void }).delete('Content-Type');
+        (h as { delete: (k: string) => void }).delete('content-type');
+      } else {
+        delete (h as Record<string, unknown>)['Content-Type'];
+        delete (h as Record<string, unknown>)['content-type'];
+      }
     } else {
       // Para outros tipos, usar application/json
       config.headers['Content-Type'] = 'application/json';

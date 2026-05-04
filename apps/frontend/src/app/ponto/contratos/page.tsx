@@ -1,10 +1,23 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Plus, Trash2, Search, X, AlertCircle, Shield, MoreVertical, Eye } from 'lucide-react';
+import {
+  ArrowLeft,
+  FileText,
+  Plus,
+  Trash2,
+  Search,
+  X,
+  AlertCircle,
+  Shield,
+  MoreVertical,
+  Eye,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -281,9 +294,11 @@ export default function ContratosPage() {
       const res = await api.post('/contracts', data);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] });
       queryClient.invalidateQueries({ queryKey: ['permission-contracts-list'] });
+      /** Novo contrato entra em allowedContractIds no backend; sem refetch o ProtectedRoute nega o acesso até F5. */
+      await queryClient.refetchQueries({ queryKey: ['me-permissions'] });
       setShowForm(false);
       resetForm();
       toast.success('Contrato criado com sucesso!');
@@ -1000,11 +1015,174 @@ function ContractFormModal({
   costCenters: CostCenter[];
   loadingCostCenters: boolean;
 }) {
+  const ccList = Array.isArray(costCenters) ? costCenters : [];
+  const [ccDropdownOpen, setCcDropdownOpen] = useState(false);
+  const [ccSearch, setCcSearch] = useState('');
+  const ccSearchInputRef = useRef<HTMLInputElement>(null);
+  const ccTriggerRef = useRef<HTMLButtonElement>(null);
+  const ccPopoverRef = useRef<HTMLDivElement>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const syncCcDropdownPlacement = useCallback(() => {
+    const el = ccTriggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const gap = 4;
+    let top = r.bottom + gap;
+    /** altura disponível até o fim da viewport (popover fica sempre visível) */
+    const maxPopoverH = 320;
+    const spaceBelow = window.innerHeight - top - 12;
+    if (spaceBelow < 120) {
+      const above = Math.max(8, r.top - gap - maxPopoverH);
+      top = above;
+    }
+    setDropdownPos({
+      top,
+      left: r.left,
+      width: Math.max(r.width, 280),
+    });
+  }, []);
+
+  const filteredCostCenters = useMemo(() => {
+    const q = ccSearch.trim().toLowerCase();
+    if (!q) return ccList;
+    return ccList.filter((cc) => {
+      const label = `${cc.code ? `${cc.code} - ` : ''}${cc.name || 'Sem nome'}`.toLowerCase();
+      return label.includes(q);
+    });
+  }, [ccList, ccSearch]);
+
+  useLayoutEffect(() => {
+    if (!ccDropdownOpen) return;
+    syncCcDropdownPlacement();
+    window.addEventListener('resize', syncCcDropdownPlacement);
+    window.addEventListener('scroll', syncCcDropdownPlacement, true);
+    return () => {
+      window.removeEventListener('resize', syncCcDropdownPlacement);
+      window.removeEventListener('scroll', syncCcDropdownPlacement, true);
+    };
+  }, [ccDropdownOpen, syncCcDropdownPlacement]);
+
+  useEffect(() => {
+    if (!ccDropdownOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ccTriggerRef.current?.contains(t)) return;
+      if (ccPopoverRef.current?.contains(t)) return;
+      setCcDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [ccDropdownOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setCcDropdownOpen(false);
+      setCcSearch('');
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!ccDropdownOpen) return;
+    const id = window.requestAnimationFrame(() => ccSearchInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(id);
+  }, [ccDropdownOpen]);
+
+  useEffect(() => {
+    if (!ccDropdownOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCcDropdownOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [ccDropdownOpen]);
+
+  function costCenterDisplayLabel(cc: CostCenter): string {
+    return `${cc.code ? `${cc.code} - ` : ''}${cc.name || 'Sem nome'}`;
+  }
+
   if (!isOpen) return null;
 
-  const ccList = Array.isArray(costCenters) ? costCenters : [];
+  const ccDropdownPanel =
+    ccDropdownOpen && !loadingCostCenters && dropdownPos ? (
+      <div
+        ref={ccPopoverRef}
+        role="listbox"
+        className="fixed z-[9999] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg flex flex-col overflow-hidden"
+        style={{
+          top: dropdownPos.top,
+          left: dropdownPos.left,
+          width: dropdownPos.width,
+          maxHeight: Math.min(320, typeof window !== 'undefined' ? window.innerHeight - dropdownPos.top - 12 : 320),
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="shrink-0 border-b border-gray-100 dark:border-gray-700 px-3 pt-2 pb-2 bg-white dark:bg-gray-800">
+          <div className="relative">
+            <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              ref={ccSearchInputRef}
+              type="search"
+              value={ccSearch}
+              onChange={(e) => setCcSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setCcDropdownOpen(false);
+              }}
+              placeholder="Pesquisar centro de custo..."
+              autoComplete="off"
+              className="w-full pl-9 pr-3 py-2 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-red-500/70 focus:border-red-500 dark:focus:border-red-500"
+            />
+          </div>
+        </div>
+        <div className="overflow-y-auto min-h-0 flex-1 py-1 max-h-52">
+          {ccSearch.trim() === '' && (
+            <button
+              type="button"
+              className={`w-full px-4 py-2.5 text-left text-sm ${
+                !formData.costCenterId
+                  ? 'bg-red-600 text-white'
+                  : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white dark:hover:bg-red-600 dark:hover:text-white'
+              }`}
+              onClick={() => {
+                setFormData({ ...formData, costCenterId: '' });
+                setCcDropdownOpen(false);
+              }}
+            >
+              {!formData.costCenterId ? 'Selecione o centro de custo' : 'Limpar seleção'}
+            </button>
+          )}
+          {filteredCostCenters.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">Nenhum centro encontrado.</div>
+          ) : (
+            filteredCostCenters.map((cc) => (
+              <button
+                key={cc.id}
+                type="button"
+                className={`w-full px-4 py-2.5 text-left text-sm ${
+                  formData.costCenterId === cc.id
+                    ? 'bg-red-600 text-white'
+                    : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white dark:hover:bg-red-600 dark:hover:text-white'
+                }`}
+                onClick={() => {
+                  setFormData({ ...formData, costCenterId: cc.id });
+                  setCcDropdownOpen(false);
+                  setCcSearch('');
+                }}
+              >
+                {costCenterDisplayLabel(cc)}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    ) : null;
 
   return (
+    <>
+      {typeof document !== 'undefined' && ccDropdownPanel
+        ? createPortal(ccDropdownPanel, document.body)
+        : null}
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -1078,20 +1256,39 @@ function ContractFormModal({
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Centro de Custo *
                 </label>
-                <select
-                  required
-                  value={formData.costCenterId}
-                  onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
-                  disabled={loadingCostCenters}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50"
-                >
-                  <option value="">Selecione o centro de custo</option>
-                  {ccList.map((cc) => (
-                    <option key={cc.id} value={cc.id}>
-                      {cc.code ? `${cc.code} - ` : ''}{cc.name || 'Sem nome'}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <button
+                    ref={ccTriggerRef}
+                    type="button"
+                    disabled={loadingCostCenters}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (ccDropdownOpen) {
+                        setCcDropdownOpen(false);
+                        return;
+                      }
+                      syncCcDropdownPlacement();
+                      setCcDropdownOpen(true);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-left flex items-center justify-between gap-2 disabled:opacity-50 outline-none focus:ring-2 focus:ring-red-500/80 dark:focus:ring-red-500/70 focus:border-red-500 dark:focus:border-red-500"
+                  >
+                    <span className="truncate min-w-0">
+                      {loadingCostCenters
+                        ? 'Carregando...'
+                        : (() => {
+                            if (!formData.costCenterId) return 'Selecione o centro de custo';
+                            const cc = ccList.find((c) => c.id === formData.costCenterId);
+                            if (!cc) return 'Selecione o centro de custo';
+                            return costCenterDisplayLabel(cc);
+                          })()}
+                    </span>
+                    {ccDropdownOpen ? (
+                      <ChevronUp className="w-4 h-4 shrink-0 opacity-60" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 shrink-0 opacity-60" />
+                    )}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1169,5 +1366,6 @@ function ContractFormModal({
         </div>
       </div>
     </div>
+    </>
   );
 }

@@ -6,6 +6,24 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { emailService } from '../services/EmailService';
+import { ChatService } from '../services/ChatService';
+
+const chatUploadService = new ChatService();
+
+const userMeSelect = {
+  id: true,
+  email: true,
+  name: true,
+  cpf: true,
+  role: true,
+  isActive: true,
+  isFirstLogin: true,
+  profilePhotoUrl: true,
+  profilePhotoKey: true,
+  createdAt: true,
+  updatedAt: true,
+  employee: true,
+} as const;
 
 export class AuthController {
   async register(req: Request, res: Response, next: NextFunction) {
@@ -142,9 +160,7 @@ export class AuthController {
 
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },
-        include: {
-          employee: true,
-        },
+        select: userMeSelect,
       });
 
       if (!user) {
@@ -464,6 +480,49 @@ export class AuthController {
       return res.json({
         success: true,
         message: 'Senha alterada com sucesso'
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /** Upload foto de perfil (mesmo armazenamento que anexos de chat). */
+  async uploadProfilePhoto(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const file = (req as unknown as Express.Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer) throw createError('Nenhuma imagem enviada', 400);
+      const uploadResult = await chatUploadService.uploadFile(file, userId);
+      const updated = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          profilePhotoUrl: uploadResult.url,
+          profilePhotoKey: uploadResult.key,
+        },
+        select: userMeSelect,
+      });
+      return res.json({
+        success: true,
+        data: updated,
+        message: 'Foto de perfil atualizada',
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async removeProfilePhoto(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const updated = await prisma.user.update({
+        where: { id: userId },
+        data: { profilePhotoUrl: null, profilePhotoKey: null },
+        select: userMeSelect,
+      });
+      return res.json({
+        success: true,
+        data: updated,
+        message: 'Foto de perfil removida',
       });
     } catch (error) {
       return next(error);

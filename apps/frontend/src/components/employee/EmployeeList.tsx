@@ -25,6 +25,7 @@ import { EditEmployeeForm } from './EditEmployeeForm';
 import { usePermissions } from '@/hooks/usePermissions';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData, SalaryDiscount, CreateDiscountData, UpdateDiscountData } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -39,6 +40,8 @@ interface Employee {
   cpf: string;
   role: string;
   isActive: boolean;
+  /** URL da foto de perfil (mesmo campo da tabela `users`) */
+  profilePhotoUrl?: string | null;
   createdAt?: string;
   employee?: {
     id: string;
@@ -1151,6 +1154,12 @@ export function EmployeeList({
     return employees.find((e) => e.id === employeeActionMenu.employeeId) ?? null;
   }, [employeeActionMenu, employees]);
 
+  const selectedEmployeePhotoHref = useMemo(
+    () =>
+      selectedEmployee ? resolveApiMediaUrl(selectedEmployee.profilePhotoUrl ?? null) : null,
+    [selectedEmployee?.id, selectedEmployee?.profilePhotoUrl]
+  );
+
   useEffect(() => {
     if (!employeeActionMenu) return;
     const close = () => setEmployeeActionMenu(null);
@@ -1661,6 +1670,7 @@ export function EmployeeList({
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {paginatedEmployees.map((employee: Employee) => {
                     const initials = employee.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+                    const profilePhotoHref = resolveApiMediaUrl(employee.profilePhotoUrl ?? null);
                     const addedAt = employee.createdAt || employee.employee?.hireDate;
                     return (
                       <tr
@@ -1669,8 +1679,22 @@ export function EmployeeList({
                       >
                         <td className="px-3 sm:px-6 py-3 align-middle text-left">
                           <div className="flex items-center gap-3">
-                            <div className="w-11 h-11 border-2 border-blue-500 dark:border-blue-400 rounded-full flex items-center justify-center shrink-0">
-                              <span className="text-blue-600 dark:text-blue-400 font-semibold">{initials}</span>
+                            <div
+                              className="w-11 h-11 rounded-full shrink-0 flex items-center justify-center overflow-hidden bg-red-600"
+                            >
+                              {profilePhotoHref ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={profilePhotoHref}
+                                  alt=""
+                                  className="h-full w-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <span className="text-white font-semibold text-sm">
+                                  {initials}
+                                </span>
+                              )}
                             </div>
                             <div className="min-w-0 text-left">
                               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{employee.name}</p>
@@ -2066,8 +2090,23 @@ export function EmployeeList({
                 <div className="px-6 pt-6">
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-5 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4 min-w-0">
-                      <div className="w-14 h-14 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center font-bold">
-                        {selectedEmployee.name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase()}
+                      <div className="w-14 h-14 rounded-full border-2 border-blue-400 dark:border-blue-500 overflow-hidden shrink-0 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center font-bold">
+                        {selectedEmployeePhotoHref ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={selectedEmployeePhotoHref}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          selectedEmployee.name
+                            .split(' ')
+                            .map((n) => n[0])
+                            .join('')
+                            .slice(0, 2)
+                            .toUpperCase()
+                        )}
                   </div>
                       <div className="min-w-0">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">{selectedEmployee.name}</h3>

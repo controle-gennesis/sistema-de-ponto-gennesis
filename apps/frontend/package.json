@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start -p $PORT",
+    "build": "node --max-old-space-size=6144 ./node_modules/next/dist/bin/next build",
+    "start": "next start -H 0.0.0.0",
     "start:frontend": "npm run build && npm run start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
@@ -31,6 +31,7 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-dropzone": "^14.2.3",
+    "react-easy-crop": "^5.5.7",
     "react-hook-form": "^7.48.2",
     "react-hot-toast": "^2.6.0",
     "react-webcam": "^7.2.0",

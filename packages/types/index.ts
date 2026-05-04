@@ -7,6 +7,7 @@ export interface User {
   cpf: string;
   role: UserRole;
   isActive: boolean;
+  profilePhotoUrl?: string | null;
   createdAt: string;
   updatedAt: string;
   employee?: Employee;
