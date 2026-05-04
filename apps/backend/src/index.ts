@@ -58,6 +58,7 @@ import fluigRoutes from './routes/fluig';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';
+import stockRoutes from './routes/stock';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 
 console.log('🚀 Iniciando aplicação...');
@@ -253,6 +254,7 @@ app.use('/api/pleitos', pleitoRoutes);
 app.use('/api/fluig', fluigRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/permissions', permissionRoutes);
+app.use('/api/stock', stockRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

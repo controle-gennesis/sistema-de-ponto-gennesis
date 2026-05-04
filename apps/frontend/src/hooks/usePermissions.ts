@@ -251,6 +251,13 @@ export function useRoutePermission(route: string) {
     '/ponto/gerenciar-materiais': isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais')),
     '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),
     '/ponto/ordem-de-compra': isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra')),
+    '/ponto/estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
+    '/ponto/ajuste-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
+    '/ponto/furo-estoque':
+      isAdministrator ||
+      isDepartmentCompras ||
+      can(pk('/ponto/estoque')) ||
+      can(pk('/ponto/furo-estoque')),
     '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
     '/ponto/condicoes-pagamento':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),

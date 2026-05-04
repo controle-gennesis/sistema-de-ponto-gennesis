@@ -14,6 +14,13 @@ const VALID_PERMISSION_ACTIONS = new Set<string>([
   'excluir',
 ]);
 
+function isDatabaseUnreachableError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  if (e.name === 'PrismaClientInitializationError') return true;
+  const m = e.message.toLowerCase();
+  return m.includes("can't reach database server") || m.includes('could not connect');
+}
+
 /** Remove linhas de permissão cujo módulo não existe mais no registro central. */
 export async function removeOrphanUserPermissions(): Promise<{ removed: number }> {
   try {
@@ -26,6 +33,12 @@ export async function removeOrphanUserPermissions(): Promise<{ removed: number }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2021') {
       console.warn(
         'Tabela user_permissions não encontrada. Aplique as migrações: cd apps/backend && npx prisma migrate deploy'
+      );
+      return { removed: 0 };
+    }
+    if (isDatabaseUnreachableError(e)) {
+      console.warn(
+        'PostgreSQL indisponível; limpeza de permissões órfãs ignorada. Verifique se o servidor está em execução (ex.: docker compose up -d na raiz do monorepo) e se DATABASE_URL no .env aponta para o host/porta corretos.'
       );
       return { removed: 0 };
     }

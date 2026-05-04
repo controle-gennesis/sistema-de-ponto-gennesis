@@ -4,6 +4,46 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 
 export class ConstructionMaterialController {
+  private buildMaterialData(body: any) {
+    const {
+      name,
+      sinapiCode,
+      description,
+      unit,
+      isActive,
+      category,
+      dimensions,
+      productImageUrl,
+      productImageName
+    } = body;
+
+    const descTrim = description?.trim() || '';
+    const materialName =
+      ((name || sinapiCode)?.trim() || (descTrim ? descTrim.slice(0, 255) : '')).toUpperCase();
+
+    return {
+      materialName,
+      descTrim,
+      unitTrim: unit?.trim(),
+      fullData: {
+        name: materialName,
+        description: descTrim,
+        unit: unit?.trim(),
+        category: category?.trim() || null,
+        dimensions: dimensions?.trim() || null,
+        productImageUrl: productImageUrl?.trim() || null,
+        productImageName: productImageName?.trim() || null,
+        isActive: isActive !== undefined ? Boolean(isActive) : true
+      } as any
+    };
+  }
+
+  private isUnknownFieldPrismaError(error: any) {
+    if (!error) return false;
+    const msg = String(error?.message || '');
+    return error.name === 'PrismaClientValidationError' && /Unknown argument|Argument .+ is missing/i.test(msg);
+  }
+
   /**
    * Listar todos os materiais de construção
    */
@@ -17,7 +57,8 @@ export class ConstructionMaterialController {
         where.OR = [
           { name: { contains: search as string, mode: 'insensitive' } },
           { description: { contains: search as string, mode: 'insensitive' } },
-          { unit: { contains: search as string, mode: 'insensitive' } }
+          { unit: { contains: search as string, mode: 'insensitive' } },
+          { category: { contains: search as string, mode: 'insensitive' } }
         ];
       }
 
@@ -97,19 +138,14 @@ export class ConstructionMaterialController {
     try {
       console.log('📦 Dados recebidos para criar material:', req.body);
       
-      const { name, sinapiCode, description, unit, isActive } = req.body;
-
-      // Nome no banco: name, sinapiCode (legado) ou descrição
-      const descTrim = description?.trim() || '';
-      const materialName =
-        (name || sinapiCode)?.trim() || (descTrim ? descTrim.slice(0, 255) : '');
+      const { materialName, descTrim, unitTrim, fullData } = this.buildMaterialData(req.body);
 
       // Validar campos obrigatórios
       if (!materialName) {
         throw createError('Descrição é obrigatória', 400);
       }
 
-      if (!unit || !unit.trim()) {
+      if (!unitTrim) {
         throw createError('Unidade de medida é obrigatória', 400);
       }
 
@@ -117,19 +153,26 @@ export class ConstructionMaterialController {
         throw createError('Descrição é obrigatória', 400);
       }
 
-      // Preparar dados para criação
-      const materialData: any = {
-        name: materialName,
-        description: descTrim,
-        unit: unit.trim(),
-        isActive: isActive !== undefined ? Boolean(isActive) : true
-      };
+      console.log('✅ Validação passou. Criando material com:', fullData);
 
-      console.log('✅ Validação passou. Criando material com:', materialData);
+      let material: any;
+      try {
+        material = await prisma.constructionMaterial.create({
+          data: fullData
+        });
+      } catch (error: any) {
+        // Fallback: se o banco/cliente ainda não tiver as novas colunas, salva os campos legados.
+        if (!this.isUnknownFieldPrismaError(error)) throw error;
 
-      const material = await prisma.constructionMaterial.create({
-        data: materialData
-      });
+        material = await prisma.constructionMaterial.create({
+          data: {
+            name: fullData.name,
+            description: fullData.description,
+            unit: fullData.unit,
+            isActive: fullData.isActive
+          }
+        });
+      }
 
       // Criar correspondente em EngineeringMaterial para aparecer em Solicitar Materiais
       try {
@@ -191,7 +234,17 @@ export class ConstructionMaterialController {
   async updateMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { name, sinapiCode, description, unit, isActive } = req.body;
+      const {
+        name,
+        sinapiCode,
+        description,
+        unit,
+        isActive,
+        category,
+        dimensions,
+        productImageUrl,
+        productImageName
+      } = req.body;
 
       // Verificar se o material existe
       const existing = await prisma.constructionMaterial.findUnique({
@@ -202,19 +255,44 @@ export class ConstructionMaterialController {
         throw createError('Material não encontrado', 404);
       }
 
-      const materialName = (name || sinapiCode)?.trim();
+      const materialName = (name || sinapiCode)?.trim().toUpperCase();
 
-      const material = await prisma.constructionMaterial.update({
-        where: { id },
-        data: {
+      const updateData: any = {
+        ...(materialName && { name: materialName }),
+        ...(description !== undefined && {
+          description: typeof description === 'string' ? description.trim() : description
+        }),
+        ...(unit && { unit }),
+        ...(category !== undefined && { category: category?.trim() || null }),
+        ...(dimensions !== undefined && { dimensions: dimensions?.trim() || null }),
+        ...(productImageUrl !== undefined && { productImageUrl: productImageUrl?.trim() || null }),
+        ...(productImageName !== undefined && { productImageName: productImageName?.trim() || null }),
+        ...(isActive !== undefined && { isActive })
+      };
+      let material: any;
+      try {
+        material = await prisma.constructionMaterial.update({
+          where: { id },
+          data: updateData
+        });
+      } catch (error: any) {
+        // Fallback para ambientes sem as novas colunas.
+        if (!this.isUnknownFieldPrismaError(error)) throw error;
+
+        const fallbackData: any = {
           ...(materialName && { name: materialName }),
           ...(description !== undefined && {
             description: typeof description === 'string' ? description.trim() : description
           }),
           ...(unit && { unit }),
           ...(isActive !== undefined && { isActive })
-        }
-      });
+        };
+
+        material = await prisma.constructionMaterial.update({
+          where: { id },
+          data: fallbackData
+        });
+      }
 
       // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
       const mappedMaterial = {

@@ -133,6 +133,40 @@ export interface PurchaseOrder {
   }>;
 }
 
+interface StockMovementForOcTag {
+  id: string;
+  type: 'IN' | 'OUT';
+  notes?: string | null;
+  createdAt: string;
+}
+
+type OcMovementTag = {
+  label: string;
+  colorClass: string;
+};
+
+type OcMovementAttachmentTag = {
+  key: string;
+  label: string;
+  colorClass: string;
+  url?: string;
+  /** Tooltip: na listagem o rótulo é curto; detalhes da OC trazem arquivo, valores e vencimentos. */
+  titleHint?: string;
+};
+
+type StockMovementAttachmentItem = {
+  name: string;
+  url: string;
+  amount?: string;
+  dueDate?: string;
+};
+
+type StockMovementAttachmentBundle = {
+  nf: StockMovementAttachmentItem | null;
+  withdrawalSheet: StockMovementAttachmentItem | null;
+  paymentSlips: StockMovementAttachmentItem[];
+};
+
 const OC_PAYMENT_TYPE_LABELS: Record<string, string> = {
   AVISTA: 'À vista',
   BOLETO: 'Boleto'
@@ -199,6 +233,174 @@ function orderFreightValue(o: Pick<PurchaseOrder, 'freightAmount' | 'amountToPay
   return 0;
 }
 
+function parseOcMovementInfoFromNotes(notes?: string | null): { ocNumber: string; split: 'TOTAL' | 'PARCIAL' | '' } | null {
+  if (!notes) return null;
+  const ocMatch = notes.match(/Nº OC:\s*([^\n|]+)/i);
+  if (!ocMatch?.[1]) return null;
+
+  const rawSplit = notes.match(/Tipo:\s*(TOTAL|PARCIAL)/i)?.[1]?.toUpperCase() ?? '';
+  const split = rawSplit === 'TOTAL' || rawSplit === 'PARCIAL' ? rawSplit : '';
+
+  return {
+    ocNumber: ocMatch[1].trim(),
+    split
+  };
+}
+
+function buildOcTagFromMovement(mov: StockMovementForOcTag): OcMovementTag {
+  const split = parseOcMovementInfoFromNotes(mov.notes)?.split || 'TOTAL';
+  if (mov.type === 'IN') {
+    return {
+      label: `RECEBIDA - ${split}`,
+      colorClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+    };
+  }
+
+  return {
+    label: `ENVIADO PARA OBRA - ${split}`,
+    colorClass: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300'
+  };
+}
+
+function parseAttachmentTagFromLine(
+  line: string,
+  keyPrefix: string,
+  labelPrefix: string,
+  colorClass: string
+): OcMovementAttachmentTag | null {
+  const match = line.match(/^(.*?)\s*\|\s*URL:\s*([^\s|]+)\s*$/i);
+  if (!match?.[1] || !match?.[2]) return null;
+  const name = match[1].trim();
+  const url = match[2].trim();
+  if (!name || !url) return null;
+  return {
+    key: `${keyPrefix}-${name}-${url}`,
+    label: `${labelPrefix}: ${name}`,
+    colorClass,
+    url
+  };
+}
+
+function parseOcAttachmentTagsFromNotes(notes?: string | null): OcMovementAttachmentTag[] {
+  if (!notes) return [];
+  const tags: OcMovementAttachmentTag[] = [];
+  const detailHint = 'Dados completos nos detalhes da OC';
+
+  const nfMatch = notes.match(/NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  if (nfMatch?.[1] && nfMatch?.[2]) {
+    const url = nfMatch[2].trim();
+    tags.push({
+      key: `nf-${url}`,
+      label: 'NF 1',
+      colorClass: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+      url,
+      titleHint: detailHint
+    });
+  }
+
+  const withdrawalMatch = notes.match(/Ficha de Retirada:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  if (withdrawalMatch?.[1] && withdrawalMatch?.[2]) {
+    const url = withdrawalMatch[2].trim();
+    tags.push({
+      key: `withdrawal-${url}`,
+      label: 'Ficha 1',
+      colorClass: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+      url,
+      titleHint: detailHint
+    });
+  }
+
+  const boletoSection = notes.match(/Boletos:\s*([\s\S]*)/i)?.[1] || '';
+  if (boletoSection) {
+    const lines = boletoSection
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    lines.forEach((line, idx) => {
+      const n = idx + 1;
+      const normalized = line.replace(/^\d+\)\s*/, '');
+      const full = normalized.match(
+        /^(.*?)\s*\|\s*Valor:\s*(.*?)\s*\|\s*Vencimento:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)\s*$/i
+      );
+      if (full?.[4]) {
+        const url = full[4].trim();
+        tags.push({
+          key: `boleto-${url}-${n}`,
+          label: `boleto ${n}`,
+          colorClass: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
+          url,
+          titleHint: detailHint
+        });
+        return;
+      }
+      const simple = normalized.match(/^(.*?)\s*\|\s*URL:\s*([^\s|]+)\s*$/i);
+      if (simple?.[2]) {
+        const url = simple[2].trim();
+        tags.push({
+          key: `boleto-${url}-${n}`,
+          label: `boleto ${n}`,
+          colorClass: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
+          url,
+          titleHint: detailHint
+        });
+      }
+    });
+  }
+
+  return tags;
+}
+
+function parseStockMovementAttachmentsFromNotes(notes?: string | null): StockMovementAttachmentBundle {
+  const bundle: StockMovementAttachmentBundle = {
+    nf: null,
+    withdrawalSheet: null,
+    paymentSlips: []
+  };
+  if (!notes) return bundle;
+
+  const nfMatch = notes.match(/NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  if (nfMatch?.[1] && nfMatch?.[2]) {
+    bundle.nf = { name: nfMatch[1].trim(), url: nfMatch[2].trim() };
+  }
+
+  const withdrawalMatch = notes.match(/Ficha de Retirada:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  if (withdrawalMatch?.[1] && withdrawalMatch?.[2]) {
+    bundle.withdrawalSheet = { name: withdrawalMatch[1].trim(), url: withdrawalMatch[2].trim() };
+  }
+
+  const boletoSection = notes.match(/Boletos:\s*([\s\S]*)/i)?.[1] || '';
+  if (boletoSection) {
+    boletoSection
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => {
+        const normalized = line.replace(/^\d+\)\s*/, '');
+        const full = normalized.match(
+          /^(.*?)\s*\|\s*Valor:\s*(.*?)\s*\|\s*Vencimento:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)\s*$/i
+        );
+        if (full?.[1] && full?.[4]) {
+          bundle.paymentSlips.push({
+            name: full[1].trim(),
+            amount: full[2]?.trim() || '',
+            dueDate: full[3]?.trim() || '',
+            url: full[4].trim()
+          });
+          return;
+        }
+        const fallback = parseAttachmentTagFromLine(normalized, 'boleto', 'Boleto', '');
+        if (fallback?.url) {
+          bundle.paymentSlips.push({
+            name: fallback.label.replace(/^Boleto:\s*/i, '').trim(),
+            url: fallback.url
+          });
+        }
+      });
+  }
+
+  return bundle;
+}
+
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
   PENDING_COMPRAS: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300',
@@ -237,12 +439,22 @@ export type OcPurchaseOrdersPanelProps = {
   hideTabs?: boolean;
   /** Aba OC ativa quando `hideTabs` (controlado pelo pai). */
   activeTab?: OcTab;
+  /** Busca textual aplicada na listagem de OCs. */
+  searchTerm?: string;
 };
+
+const normalizeOcSearch = (value?: string | null) =>
+  (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 
 export function OcPurchaseOrdersPanel({
   embedded = false,
   hideTabs = false,
-  activeTab: activeTabProp
+  activeTab: activeTabProp,
+  searchTerm = ''
 }: OcPurchaseOrdersPanelProps) {
   const queryClient = useQueryClient();
   const [internalActiveTab, setInternalActiveTab] = useState<OcTab>('compras');
@@ -350,6 +562,14 @@ export function OcPurchaseOrdersPanel({
     queryKey: ['purchase-orders', 'list-full'],
     queryFn: async () => {
       const res = await api.get('/purchase-orders', { params: { limit: 500 } });
+      return res.data;
+    }
+  });
+
+  const { data: stockMovementsData } = useQuery({
+    queryKey: ['stock-movements-oc-tags'],
+    queryFn: async () => {
+      const res = await api.get('/stock/movements', { params: { limit: 1000 } });
       return res.data;
     }
   });
@@ -664,6 +884,33 @@ export function OcPurchaseOrdersPanel({
   });
 
   const allOrders: PurchaseOrder[] = ordersData?.data || [];
+  const stockMovementsForOcTag: StockMovementForOcTag[] = stockMovementsData?.data || [];
+
+  const latestOcMovementByOrderNumber = useMemo(() => {
+    const latestByOc = new Map<string, StockMovementForOcTag>();
+
+    stockMovementsForOcTag.forEach((mov) => {
+      const parsed = parseOcMovementInfoFromNotes(mov.notes);
+      if (!parsed?.ocNumber) return;
+
+      const current = latestByOc.get(parsed.ocNumber);
+      if (!current || new Date(mov.createdAt).getTime() > new Date(current.createdAt).getTime()) {
+        latestByOc.set(parsed.ocNumber, mov);
+      }
+    });
+
+    return latestByOc;
+  }, [stockMovementsForOcTag]);
+
+  const selectedOrderLatestStockMovement = useMemo(
+    () => (selectedOrder ? latestOcMovementByOrderNumber.get(selectedOrder.orderNumber) || null : null),
+    [selectedOrder, latestOcMovementByOrderNumber]
+  );
+
+  const selectedOrderStockAttachments = useMemo(
+    () => parseStockMovementAttachmentsFromNotes(selectedOrderLatestStockMovement?.notes),
+    [selectedOrderLatestStockMovement]
+  );
 
   const tabCounts = useMemo(() => {
     const compras = allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT').length;
@@ -769,6 +1016,28 @@ export function OcPurchaseOrdersPanel({
     return allOrders;
   }, [allOrders, activeTab]);
 
+  const filteredOrdersBySearch = useMemo(() => {
+    const normalizedSearchTerm = normalizeOcSearch(searchTerm);
+    if (!normalizedSearchTerm) return orders;
+
+    return orders.filter((order) => {
+      const searchableParts = [
+        order.orderNumber,
+        order.status,
+        order.materialRequest?.requestNumber,
+        order.materialRequest?.serviceOrder,
+        order.materialRequest?.description,
+        order.materialRequest?.costCenter?.code,
+        order.materialRequest?.costCenter?.name,
+        order.supplier?.name,
+        order.supplier?.code,
+        order.creator?.name
+      ];
+
+      return searchableParts.some((part) => normalizeOcSearch(part).includes(normalizedSearchTerm));
+    });
+  }, [orders, searchTerm]);
+
   const { data: finalizedTotal = 0 } = useQuery({
     queryKey: ['purchase-orders', 'finalized-total'],
     queryFn: async () => {
@@ -833,7 +1102,7 @@ export function OcPurchaseOrdersPanel({
     | { page: number; limit: number; total: number; totalPages: number }
     | undefined;
 
-  const displayedOrders = activeTab === 'FINALIZADAS' ? finalizedOrders : orders;
+  const displayedOrders = activeTab === 'FINALIZADAS' ? finalizedOrders : filteredOrdersBySearch;
 
   const currentUserId = userData?.data?.id as string | undefined;
   const userEmployee = userData?.data?.employee as
@@ -1364,7 +1633,11 @@ export function OcPurchaseOrdersPanel({
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {displayedOrders.map((o: PurchaseOrder) => (
+                    {displayedOrders.map((o: PurchaseOrder) => {
+                      const latestMovement = latestOcMovementByOrderNumber.get(o.orderNumber);
+                      const ocMovementTag = latestMovement ? buildOcTagFromMovement(latestMovement) : null;
+                      const ocAttachmentTags = parseOcAttachmentTagsFromNotes(latestMovement?.notes);
+                      return (
                       <tr key={o.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                         {activeTab === 'APPROVED' && (
                           <td className="px-2 sm:px-3 py-4 text-center align-middle">
@@ -1393,14 +1666,43 @@ export function OcPurchaseOrdersPanel({
                           {formatCurrency(orderGrandTotal(o))}
                         </td>
                         <td className="px-3 sm:px-6 py-4 text-center">
-                          <span
-                            className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                              STATUS_COLORS[o.status] ||
-                              'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
-                            }`}
-                          >
-                            {purchaseOrderPhaseLabel(o.status)}
-                          </span>
+                          <div className="flex flex-col items-center gap-1">
+                            <span
+                              className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                                STATUS_COLORS[o.status] ||
+                                'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                              }`}
+                            >
+                              {purchaseOrderPhaseLabel(o.status)}
+                            </span>
+                            {ocMovementTag && (
+                              <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-semibold ${ocMovementTag.colorClass}`}>
+                                {ocMovementTag.label}
+                              </span>
+                            )}
+                            {ocAttachmentTags.map((attachmentTag) =>
+                              attachmentTag.url ? (
+                                <a
+                                  key={attachmentTag.key}
+                                  href={absoluteUploadUrl(attachmentTag.url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`inline-flex max-w-[9rem] px-2 py-1 rounded-full text-[10px] font-semibold hover:opacity-90 whitespace-nowrap ${attachmentTag.colorClass}`}
+                                  title={attachmentTag.titleHint ?? attachmentTag.label}
+                                >
+                                  {attachmentTag.label}
+                                </a>
+                              ) : (
+                                <span
+                                  key={attachmentTag.key}
+                                  className={`inline-flex max-w-[9rem] px-2 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap ${attachmentTag.colorClass}`}
+                                  title={attachmentTag.titleHint ?? attachmentTag.label}
+                                >
+                                  {attachmentTag.label}
+                                </span>
+                              )
+                            )}
+                          </div>
                         </td>
                         {activeTab === 'ATTACH_BOLETO' && (
                           <td className="px-3 sm:px-6 py-4 align-middle">
@@ -1693,7 +1995,7 @@ export function OcPurchaseOrdersPanel({
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
                 {activeTab === 'FINALIZADAS' &&
@@ -2627,6 +2929,89 @@ export function OcPurchaseOrdersPanel({
                       ))}
                     </ul>
                   </div>
+                )}
+              </div>
+              <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 space-y-2">
+                <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
+                  Documentos da movimentação de estoque
+                </p>
+                {selectedOrderLatestStockMovement ? (
+                  <>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Última movimentação:{' '}
+                      <span className="font-medium text-gray-700 dark:text-gray-300">
+                        {selectedOrderLatestStockMovement.type === 'IN' ? 'Entrada' : 'Saída'}
+                      </span>{' '}
+                      em {new Date(selectedOrderLatestStockMovement.createdAt).toLocaleString('pt-BR')}
+                    </p>
+                    <div className="text-sm space-y-2">
+                      <p>
+                        <span className="font-medium text-gray-700 dark:text-gray-300">Nota fiscal:</span>{' '}
+                        {selectedOrderStockAttachments.nf ? (
+                          <a
+                            href={absoluteUploadUrl(selectedOrderStockAttachments.nf.url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            {selectedOrderStockAttachments.nf.name || 'Abrir arquivo'}
+                          </a>
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
+                        )}
+                      </p>
+                      <p>
+                        <span className="font-medium text-gray-700 dark:text-gray-300">Ficha de retirada:</span>{' '}
+                        {selectedOrderStockAttachments.withdrawalSheet ? (
+                          <a
+                            href={absoluteUploadUrl(selectedOrderStockAttachments.withdrawalSheet.url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            {selectedOrderStockAttachments.withdrawalSheet.name || 'Abrir arquivo'}
+                          </a>
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
+                        )}
+                      </p>
+                      <div>
+                        <span className="font-medium text-gray-700 dark:text-gray-300">Boletos:</span>
+                        {selectedOrderStockAttachments.paymentSlips.length === 0 ? (
+                          <span className="ml-1 text-gray-500 dark:text-gray-400">Não anexados</span>
+                        ) : (
+                          <div className="mt-1 space-y-1">
+                            {selectedOrderStockAttachments.paymentSlips.map((slip, idx) => (
+                              <div key={`${slip.url}-${idx}`} className="text-xs sm:text-sm">
+                                <a
+                                  href={absoluteUploadUrl(slip.url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
+                                >
+                                  <Banknote className="w-3.5 h-3.5" />
+                                  {slip.name || `Boleto ${idx + 1}`}
+                                </a>
+                                {(slip.amount || slip.dueDate) && (
+                                  <span className="text-gray-600 dark:text-gray-400">
+                                    {' '}
+                                    — {slip.amount || 'Valor não informado'}
+                                    {slip.dueDate ? ` | Vencimento: ${slip.dueDate}` : ''}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Nenhuma movimentação de estoque vinculada a esta OC.
+                  </p>
                 )}
               </div>
               {selectedOrder.status === 'APPROVED' &&

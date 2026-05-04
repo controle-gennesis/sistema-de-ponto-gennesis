@@ -225,6 +225,10 @@ function SolicitarMateriaisPage() {
     null
   );
   const [uploadingDemandSheetAttachment, setUploadingDemandSheetAttachment] = useState<'new' | 'edit' | null>(null);
+  const [newItemMaterialSearch, setNewItemMaterialSearch] = useState<string[]>(['']);
+  const [editItemMaterialSearch, setEditItemMaterialSearch] = useState<string[]>(['']);
+  const [activeNewMaterialDropdownIndex, setActiveNewMaterialDropdownIndex] = useState<number | null>(null);
+  const [activeEditMaterialDropdownIndex, setActiveEditMaterialDropdownIndex] = useState<number | null>(null);
 
   const [rmListSearch, setRmListSearch] = useState('');
   /** '' | `rm:PENDING` | `oc:APPROVED` … — fase da SC ou de alguma OC */
@@ -262,7 +266,7 @@ function SolicitarMateriaisPage() {
   });
 
   // Buscar requisições do usuário
-  const { data: requestsData, isLoading: loadingRequests } = useQuery({
+  const { data: requestsData, isLoading: loadingRequests, isError: hasRequestsError, error: requestsError } = useQuery({
     queryKey: ['material-requests'],
     queryFn: async () => {
       const res = await api.get('/material-requests', {
@@ -378,6 +382,15 @@ function SolicitarMateriaisPage() {
   });
 
   const requests = requestsData?.data?.requests || requestsData?.data || [];
+  const materials = (materialsData?.data || []) as Array<{
+    id: string;
+    description?: string;
+    name?: string;
+    unit?: string;
+  }>;
+
+  const getMaterialLabel = (material?: { description?: string; name?: string } | null) =>
+    material?.description || material?.name || 'Material sem nome';
 
   const obraOptionsFromRequests = useMemo(() => {
     const set = new Set<string>();
@@ -498,6 +511,30 @@ function SolicitarMateriaisPage() {
     });
   }, [correctionEditId, correctionRmDetail, requests]);
 
+  useEffect(() => {
+    setNewItemMaterialSearch((prev) =>
+      formData.items.map((item, index) => {
+        if (item.materialId) {
+          const selected = materials.find((m) => m.id === item.materialId);
+          return selected ? getMaterialLabel(selected) : prev[index] || '';
+        }
+        return prev[index] || '';
+      })
+    );
+  }, [formData.items, materials]);
+
+  useEffect(() => {
+    setEditItemMaterialSearch((prev) =>
+      editFormData.items.map((item, index) => {
+        if (item.materialId) {
+          const selected = materials.find((m) => m.id === item.materialId);
+          return selected ? getMaterialLabel(selected) : prev[index] || '';
+        }
+        return prev[index] || '';
+      })
+    );
+  }, [editFormData.items, materials]);
+
   const user = userData?.data || {
     name: 'Usuário',
     role: 'EMPLOYEE'
@@ -521,6 +558,7 @@ function SolicitarMateriaisPage() {
         { materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }
       ]
     });
+    setNewItemMaterialSearch((prev) => [...prev, '']);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -528,6 +566,7 @@ function SolicitarMateriaisPage() {
       ...formData,
       items: formData.items.filter((_, i) => i !== index)
     });
+    setNewItemMaterialSearch((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleItemChange = (index: number, field: string, value: any) => {
@@ -542,6 +581,24 @@ function SolicitarMateriaisPage() {
       }
     }
     setFormData({ ...formData, items: newItems });
+  };
+
+  const handleNewItemMaterialSearchChange = (index: number, value: string) => {
+    setNewItemMaterialSearch((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+
+    const normalized = value.trim().toLowerCase();
+    const exactMatch = materials.find((material) => getMaterialLabel(material).trim().toLowerCase() === normalized);
+
+    if (!normalized || !exactMatch) {
+      handleItemChange(index, 'materialId', '');
+      return;
+    }
+
+    handleItemChange(index, 'materialId', exactMatch.id);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -574,6 +631,7 @@ function SolicitarMateriaisPage() {
         { materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }
       ]
     }));
+    setEditItemMaterialSearch((prev) => [...prev, '']);
   };
 
   const handleItemAttachmentFile = async (form: 'new' | 'edit', index: number, file: File | null) => {
@@ -683,6 +741,7 @@ function SolicitarMateriaisPage() {
       ...prev,
       items: prev.items.filter((_, i) => i !== index)
     }));
+    setEditItemMaterialSearch((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleEditItemChange = (index: number, field: string, value: unknown) => {
@@ -697,6 +756,24 @@ function SolicitarMateriaisPage() {
       }
       return { ...prev, items: newItems };
     });
+  };
+
+  const handleEditItemMaterialSearchChange = (index: number, value: string) => {
+    setEditItemMaterialSearch((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+
+    const normalized = value.trim().toLowerCase();
+    const exactMatch = materials.find((material) => getMaterialLabel(material).trim().toLowerCase() === normalized);
+
+    if (!normalized || !exactMatch) {
+      handleEditItemChange(index, 'materialId', '');
+      return;
+    }
+
+    handleEditItemChange(index, 'materialId', exactMatch.id);
   };
 
   const submitCorrectionEdit = (submitForApproval: boolean) => {
@@ -782,6 +859,16 @@ function SolicitarMateriaisPage() {
                   {loadingRequests ? (
                     <div className="text-center py-8">
                       <Loading message="Carregando solicitações..." />
+                    </div>
+                  ) : hasRequestsError ? (
+                    <div className="text-center py-8">
+                      <p className="text-red-600 dark:text-red-400">
+                        Não foi possível carregar suas solicitações.
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {(requestsError as any)?.response?.data?.message ||
+                          'Verifique se as migrations do backend foram aplicadas e tente novamente.'}
+                      </p>
                     </div>
                   ) : requests.length === 0 ? (
                     <div className="text-center py-8">
@@ -1217,19 +1304,49 @@ function SolicitarMateriaisPage() {
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Material *
                               </label>
-                              <select
-                                required
-                                value={item.materialId}
-                                onChange={(e) => handleItemChange(index, 'materialId', e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
-                              >
-                                <option value="">Selecione um material</option>
-                                {(materialsData?.data || []).map((material: any) => (
-                                  <option key={material.id} value={material.id}>
-                                    {material.description || material.name}
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  required
+                                  value={newItemMaterialSearch[index] || ''}
+                                  onFocus={() => setActiveNewMaterialDropdownIndex(index)}
+                                  onBlur={() => {
+                                    setTimeout(() => {
+                                      setActiveNewMaterialDropdownIndex((prev) => (prev === index ? null : prev));
+                                    }, 120);
+                                  }}
+                                  onChange={(e) => handleNewItemMaterialSearchChange(index, e.target.value)}
+                                  placeholder="Digite para buscar material..."
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                />
+                                <input type="hidden" required value={item.materialId} readOnly />
+                                {activeNewMaterialDropdownIndex === index && (
+                                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg">
+                                    {materials
+                                      .filter((material) => {
+                                        const q = (newItemMaterialSearch[index] || '').trim().toLowerCase();
+                                        if (!q) return true;
+                                        const label = getMaterialLabel(material).toLowerCase();
+                                        return label.includes(q);
+                                      })
+                                      .slice(0, 50)
+                                      .map((material) => (
+                                        <button
+                                          key={material.id}
+                                          type="button"
+                                          onClick={() => {
+                                            handleItemChange(index, 'materialId', material.id);
+                                            handleNewItemMaterialSearchChange(index, getMaterialLabel(material));
+                                            setActiveNewMaterialDropdownIndex(null);
+                                          }}
+                                          className="w-full px-3 py-2 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                        >
+                                          {getMaterialLabel(material)}
+                                        </button>
+                                      ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                             <div>
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
@@ -1689,18 +1806,47 @@ function SolicitarMateriaisPage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Material *</label>
-                            <select
-                              value={item.materialId}
-                              onChange={(e) => handleEditItemChange(index, 'materialId', e.target.value)}
-                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
-                            >
-                              <option value="">Selecione</option>
-                              {(materialsData?.data || []).map((m: { id: string; description?: string; name?: string }) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.description || m.name}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={editItemMaterialSearch[index] || ''}
+                                onFocus={() => setActiveEditMaterialDropdownIndex(index)}
+                                onBlur={() => {
+                                  setTimeout(() => {
+                                    setActiveEditMaterialDropdownIndex((prev) => (prev === index ? null : prev));
+                                  }, 120);
+                                }}
+                                onChange={(e) => handleEditItemMaterialSearchChange(index, e.target.value)}
+                                placeholder="Digite para buscar material..."
+                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
+                              />
+                              {activeEditMaterialDropdownIndex === index && (
+                                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg">
+                                  {materials
+                                    .filter((material) => {
+                                      const q = (editItemMaterialSearch[index] || '').trim().toLowerCase();
+                                      if (!q) return true;
+                                      const label = getMaterialLabel(material).toLowerCase();
+                                      return label.includes(q);
+                                    })
+                                    .slice(0, 50)
+                                    .map((material) => (
+                                      <button
+                                        key={material.id}
+                                        type="button"
+                                        onClick={() => {
+                                          handleEditItemChange(index, 'materialId', material.id);
+                                          handleEditItemMaterialSearchChange(index, getMaterialLabel(material));
+                                          setActiveEditMaterialDropdownIndex(null);
+                                        }}
+                                        className="w-full px-2 py-1.5 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                      >
+                                        {getMaterialLabel(material)}
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Quantidade *</label>

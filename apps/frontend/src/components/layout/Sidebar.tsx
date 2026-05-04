@@ -36,6 +36,7 @@ import {
   FileCheck,
   DollarSign,
   Package,
+  PackageX,
   ShoppingCart,
   Building2,
   Cake,
@@ -359,6 +360,27 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         ]
       },
       {
+        id: 'contratos-licitacoes',
+        name: 'Contrações e Licitações',
+        icon: FileText,
+        items: [
+          {
+            name: 'Espelho NF',
+            href: '/ponto/espelho-nf',
+            icon: FileSpreadsheet,
+            description: 'Montar espelho base para emissão de nota fiscal',
+            permission: isAdministrator || can(pk('/ponto/espelho-nf'))
+          },
+          {
+            name: 'Licitações',
+            href: '/ponto/licitacoes',
+            icon: ClipboardList,
+            description: 'Acompanhar processos de licitação',
+            permission: isAdministrator || can(pk('/ponto/licitacoes'))
+          }
+        ]
+      },
+      {
         id: 'suprimentos',
         name: 'Suprimentos',
         icon: Package,
@@ -390,6 +412,31 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Listar e gerenciar ordens de compra',
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra'))
+          },
+          {
+            name: 'Estoque',
+            href: '/ponto/estoque',
+            icon: Package,
+            description: 'Gerenciar estoque de materiais',
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque'))
+          },
+          {
+            name: 'Furo de Estoque',
+            href: '/ponto/furo-estoque',
+            icon: PackageX,
+            description: 'Pendências de entrega após recebimento parcial',
+            permission:
+              isAdministrator ||
+              isDepartmentCompras ||
+              can(pk('/ponto/estoque')) ||
+              can(pk('/ponto/furo-estoque'))
+          },
+          {
+            name: 'Ajuste de Estoque',
+            href: '/ponto/ajuste-estoque',
+            icon: Package,
+            description: 'Realizar entradas e saídas de ajuste no estoque',
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque'))
           },
         ]
       },
@@ -556,7 +603,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {/* Botão de menu mobile */}
       <button
         onClick={() => setIsOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white dark:bg-gray-900 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100"
+        className="lg:hidden fixed top-4 left-4 z-[100] p-2 bg-white dark:bg-gray-900 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100"
       >
         <Menu className="w-6 h-6" />
       </button>
@@ -571,7 +618,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
       {/* Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transform transition-all duration-500 ease-in-out z-50 ${
+        className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transform transition-all duration-500 ease-in-out z-[100] ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0 lg:fixed ${
           isCollapsed ? 'w-20' : 'w-72'
@@ -1001,7 +1048,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
       {/* Modal de Confirmação de Logout */}
       {showLogoutConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={handleCancelLogout} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
             <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">
