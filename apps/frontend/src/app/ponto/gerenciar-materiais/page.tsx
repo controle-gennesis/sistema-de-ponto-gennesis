@@ -23,10 +23,16 @@ import {
   OC_TYPE_BOLETO,
   parseCurrencyBR
 } from './_lib/ocAmounts';
-import { GerenciarMateriaisStats } from './_components/GerenciarMateriaisStats';
 import { MaterialsSearchFilter } from './_components/MaterialsSearchFilter';
 import { FluxTabsNav } from './_components/FluxTabsNav';
 import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
+
+const normalizeSearch = (value?: string | null) =>
+  (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 
 export default function GerenciarMateriaisPage() {
   const router = useRouter();
@@ -389,6 +395,8 @@ export default function GerenciarMateriaisPage() {
   const filteredRequests = useMemo(() => {
     if (!fluxTab.startsWith('rm_')) return [];
     const rmKey = fluxTab.replace(/^rm_/, '') as MaterialRequest['status'];
+    const normalizedSearchTerm = normalizeSearch(searchTerm);
+
     return normalizedRequests.filter((request: MaterialRequest) => {
       if (request.status !== rmKey) return false;
 
@@ -400,17 +408,153 @@ export default function GerenciarMateriaisPage() {
         return false;
       }
 
-      if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
-        const matchesName = rmSolicitante(request)?.name?.toLowerCase().includes(searchLower) ?? false;
-        const matchesDescription = request.description?.toLowerCase().includes(searchLower) || false;
-        const matchesCostCenter = request.costCenter?.name?.toLowerCase().includes(searchLower) ?? false;
-        if (!matchesName && !matchesDescription && !matchesCostCenter) return false;
+      if (normalizedSearchTerm) {
+        const searchableParts = [
+          rmSolicitante(request)?.name,
+          request.description,
+          request.requestNumber,
+          request.serviceOrder,
+          request.costCenter?.name,
+          request.costCenter?.id,
+          ...request.items.map((item) => item.material?.name || ''),
+          ...request.items.map((item) => item.material?.description || ''),
+          ...request.items.map((item) => item.material?.sinapiCode || '')
+        ];
+
+        const matchesSearch = searchableParts.some((part) =>
+          normalizeSearch(part).includes(normalizedSearchTerm)
+        );
+
+        if (!matchesSearch) return false;
       }
 
       return true;
     });
   }, [normalizedRequests, fluxTab, searchTerm, materialRequestIdsWithOc]);
+
+  const rmMatchCountsByFluxTab = useMemo(() => {
+    const normalizedSearchTerm = normalizeSearch(searchTerm);
+    const matchesRm = (request: MaterialRequest) => {
+      if (!normalizedSearchTerm) return true;
+      const searchableParts = [
+        rmSolicitante(request)?.name,
+        request.description,
+        request.requestNumber,
+        request.serviceOrder,
+        request.costCenter?.name,
+        request.costCenter?.id,
+        ...request.items.map((item) => item.material?.name || ''),
+        ...request.items.map((item) => item.material?.description || ''),
+        ...request.items.map((item) => item.material?.sinapiCode || '')
+      ];
+      return searchableParts.some((part) => normalizeSearch(part).includes(normalizedSearchTerm));
+    };
+
+    const base = {
+      rm_PENDING: 0,
+      rm_IN_REVIEW: 0,
+      rm_APPROVED: 0,
+      rm_CANCELLED: 0
+    };
+
+    normalizedRequests.forEach((request: MaterialRequest) => {
+      if (request.status === 'APPROVED' && materialRequestIdsWithOc.has(request.id)) return;
+      if (!matchesRm(request)) return;
+
+      if (request.status === 'PENDING') base.rm_PENDING += 1;
+      if (request.status === 'IN_REVIEW') base.rm_IN_REVIEW += 1;
+      if (request.status === 'APPROVED') base.rm_APPROVED += 1;
+      if (request.status === 'CANCELLED') base.rm_CANCELLED += 1;
+    });
+
+    return base;
+  }, [normalizedRequests, searchTerm, materialRequestIdsWithOc]);
+
+  const ocMatchCountsByFluxTab = useMemo(() => {
+    const normalizedSearchTerm = normalizeSearch(searchTerm);
+    const matchesOc = (order: PurchaseOrder) => {
+      if (!normalizedSearchTerm) return true;
+      const searchableParts = [
+        order.orderNumber,
+        order.status,
+        order.materialRequest?.requestNumber,
+        order.materialRequest?.serviceOrder,
+        order.materialRequest?.description,
+        order.materialRequest?.costCenter?.code,
+        order.materialRequest?.costCenter?.name,
+        order.supplier?.name,
+        order.supplier?.code,
+        order.creator?.name
+      ];
+      return searchableParts.some((part) => normalizeSearch(String(part ?? '')).includes(normalizedSearchTerm));
+    };
+
+    const base = {
+      oc_compras: 0,
+      oc_gestor: 0,
+      oc_diretoria: 0,
+      oc_IN_REVIEW: 0,
+      oc_APPROVED: 0,
+      oc_ATTACH_BOLETO: 0,
+      oc_PROOF_VALIDATION: 0,
+      oc_PROOF_CORRECTION: 0,
+      oc_ATTACH_NF: 0,
+      oc_FINALIZADAS: 0
+    };
+
+    allOrders.forEach((order) => {
+      if (!matchesOc(order)) return;
+      if (order.status === 'PENDING_COMPRAS' || order.status === 'DRAFT') base.oc_compras += 1;
+      if (order.status === 'PENDING') base.oc_gestor += 1;
+      if (order.status === 'PENDING_DIRETORIA') base.oc_diretoria += 1;
+      if (order.status === 'IN_REVIEW') base.oc_IN_REVIEW += 1;
+      if (order.status === 'APPROVED' && !orderNeedsFinanceBoleto(order)) base.oc_APPROVED += 1;
+      if (orderNeedsFinanceBoleto(order)) base.oc_ATTACH_BOLETO += 1;
+      if (order.status === 'PENDING_PROOF_VALIDATION') base.oc_PROOF_VALIDATION += 1;
+      if (order.status === 'PENDING_PROOF_CORRECTION') base.oc_PROOF_CORRECTION += 1;
+      if (order.status === 'PENDING_NF_ATTACHMENT') base.oc_ATTACH_NF += 1;
+      if (order.status === 'FINALIZED' || order.status === 'SENT') base.oc_FINALIZADAS += 1;
+    });
+
+    return base;
+  }, [allOrders, searchTerm]);
+
+  useEffect(() => {
+    const normalizedSearchTerm = normalizeSearch(searchTerm);
+    if (!normalizedSearchTerm) return;
+
+    const currentCount =
+      fluxTab.startsWith('rm_')
+        ? rmMatchCountsByFluxTab[fluxTab as keyof typeof rmMatchCountsByFluxTab] || 0
+        : ocMatchCountsByFluxTab[fluxTab as keyof typeof ocMatchCountsByFluxTab] || 0;
+    if (currentCount > 0) return;
+
+    const tabPriority: FluxTab[] = [
+      'rm_PENDING',
+      'rm_IN_REVIEW',
+      'rm_APPROVED',
+      'rm_CANCELLED',
+      'oc_compras',
+      'oc_gestor',
+      'oc_diretoria',
+      'oc_IN_REVIEW',
+      'oc_APPROVED',
+      'oc_ATTACH_BOLETO',
+      'oc_PROOF_VALIDATION',
+      'oc_PROOF_CORRECTION',
+      'oc_ATTACH_NF',
+      'oc_FINALIZADAS'
+    ];
+
+    const nextTab = tabPriority.find((tab) => {
+      if (tab.startsWith('rm_')) return (rmMatchCountsByFluxTab[tab as keyof typeof rmMatchCountsByFluxTab] || 0) > 0;
+      return (ocMatchCountsByFluxTab[tab as keyof typeof ocMatchCountsByFluxTab] || 0) > 0;
+    });
+
+    if (nextTab && nextTab !== fluxTab) {
+      setFluxTab(nextTab);
+    }
+  }, [searchTerm, fluxTab, rmMatchCountsByFluxTab, ocMatchCountsByFluxTab]);
 
   useEffect(() => {
     const group = fluxTab.startsWith('oc_') ? 'oc' : 'rm';
@@ -468,8 +612,6 @@ export default function GerenciarMateriaisPage() {
             </p>
           </div>
 
-          <GerenciarMateriaisStats stats={stats} />
-
           <MaterialsSearchFilter searchTerm={searchTerm} onSearchChange={setSearchTerm} />
 
           <FluxTabsNav
@@ -511,7 +653,7 @@ export default function GerenciarMateriaisPage() {
           </div>
 
           {fluxTab.startsWith('oc_') && (
-            <OcPurchaseOrdersPanel embedded hideTabs activeTab={fluxTabToOcTab(fluxTab)} />
+            <OcPurchaseOrdersPanel embedded hideTabs activeTab={fluxTabToOcTab(fluxTab)} searchTerm={searchTerm} />
           )}
         </div>
 
