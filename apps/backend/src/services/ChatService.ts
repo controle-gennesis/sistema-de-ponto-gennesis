@@ -22,6 +22,8 @@ export interface SendMessageData {
   chatId: string;
   senderId: string;
   content: string;
+  /** ID da mensagem citada (mesmo chat; não pode ser mensagem de sistema) */
+  replyToId?: string | null;
   attachments?: Array<{
     fileName: string;
     fileUrl: string;
@@ -81,6 +83,31 @@ export class ChatService {
     });
 
     this.bucketName = process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos';
+  }
+
+  private saveFileLocally(file: any): {
+    url: string;
+    key: string;
+    size: number;
+    mimeType: string;
+  } {
+    const uploadsDir = path.join(process.cwd(), 'apps', 'backend', 'uploads', 'messages');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const fileExtension = path.extname(file.originalname);
+    const fileName = `${uuidv4()}${fileExtension}`;
+    const filePath = path.join(uploadsDir, fileName);
+
+    fs.writeFileSync(filePath, file.buffer);
+
+    return {
+      url: `/uploads/messages/${fileName}`,
+      key: `messages/${fileName}`,
+      size: file.size,
+      mimeType: file.mimetype || 'application/octet-stream'
+    };
   }
 
   /**
@@ -895,6 +922,24 @@ export class ChatService {
     };
   }
 
+  /** Trecho incluído ao carregar mensagem citada (resposta) */
+  private buildReplyToInclude() {
+    return {
+      select: {
+        id: true,
+        content: true,
+        deletedAt: true,
+        isSystem: true,
+        sender: { select: this.directChatUserInclude },
+        attachments: {
+          select: { id: true, fileName: true, mimeType: true },
+          take: 1,
+          orderBy: { createdAt: 'asc' as const }
+        }
+      }
+    };
+  }
+
   private buildChatIncludeWithoutMessages() {
     return {
       initiator: { select: this.directChatUserInclude },
@@ -908,7 +953,8 @@ export class ChatService {
       pinnedMessage: {
         include: {
           sender: { select: this.directChatUserInclude },
-          attachments: true
+          attachments: true,
+          replyTo: this.buildReplyToInclude()
         }
       }
     };
@@ -930,6 +976,7 @@ export class ChatService {
             include: {
               sender: { select: this.directChatUserInclude },
               attachments: true,
+              replyTo: this.buildReplyToInclude(),
               ...fav
             },
             orderBy: { createdAt: 'asc' as const }
@@ -941,6 +988,7 @@ export class ChatService {
             include: {
               sender: { select: this.directChatUserInclude },
               attachments: true,
+              replyTo: this.buildReplyToInclude(),
               ...fav
             }
           }
@@ -1515,6 +1563,7 @@ export class ChatService {
         include: {
           sender: { select: this.directChatUserInclude },
           attachments: true,
+          replyTo: this.buildReplyToInclude(),
           ...fav
         }
       });
@@ -1596,6 +1645,7 @@ export class ChatService {
       include: {
         sender: { select: this.directChatUserInclude },
         attachments: true,
+        replyTo: this.buildReplyToInclude(),
         ...this.buildMessageFavoriteInclude(userId)
       }
     });
@@ -1647,6 +1697,7 @@ export class ChatService {
       include: {
         sender: { select: this.directChatUserInclude },
         attachments: true,
+        replyTo: this.buildReplyToInclude(),
         ...this.buildMessageFavoriteInclude(userId)
       }
     });
@@ -1684,6 +1735,7 @@ export class ChatService {
       include: {
         sender: { select: this.directChatUserInclude },
         attachments: true,
+        replyTo: this.buildReplyToInclude(),
         ...this.buildMessageFavoriteInclude(userId)
       }
     });
@@ -1695,7 +1747,7 @@ export class ChatService {
    * Envia uma mensagem em um chat direto ou grupo
    */
   async sendDirectMessage(data: SendMessageData) {
-    const { chatId, senderId, content, attachments = [] } = data;
+    const { chatId, senderId, content, attachments = [], replyToId: rawReplyId } = data;
 
     const chat = await prisma.chat.findUnique({ where: { id: chatId } });
 
@@ -1712,12 +1764,29 @@ export class ChatService {
       : chat.initiatorId === senderId || chat.recipientId === senderId;
     if (!canSend) throw new Error('Você não tem permissão para enviar mensagem neste chat');
 
+    let replyToId: string | undefined;
+    const trimmedReply = typeof rawReplyId === 'string' ? rawReplyId.trim() : '';
+    if (trimmedReply) {
+      const parent = await prisma.message.findUnique({
+        where: { id: trimmedReply },
+        select: { id: true, chatId: true, isSystem: true }
+      });
+      if (!parent || parent.chatId !== chatId) {
+        throw new Error('Mensagem citada não encontrada nesta conversa');
+      }
+      if (parent.isSystem) {
+        throw new Error('Não é possível responder a uma mensagem de evento');
+      }
+      replyToId = parent.id;
+    }
+
     const message = await prisma.message.create({
       data: {
         chatId,
         senderId,
         content,
         isRead: false,
+        ...(replyToId ? { replyToId } : {}),
         attachments: {
           create: attachments.map(att => ({
             fileName: att.fileName,
@@ -1731,6 +1800,7 @@ export class ChatService {
       include: {
         sender: { select: this.directChatUserInclude },
         attachments: true,
+        replyTo: this.buildReplyToInclude(),
         ...this.buildMessageFavoriteInclude(senderId)
       }
     });
@@ -1909,25 +1979,7 @@ export class ChatService {
       throw new Error('Arquivo muito grande. Tamanho máximo: 10MB');
     }
 
-    if (this.useLocal || !this.s3) {
-      const uploadsDir = path.join(process.cwd(), 'apps', 'backend', 'uploads', 'messages');
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-
-      const fileExtension = path.extname(file.originalname);
-      const fileName = `${uuidv4()}${fileExtension}`;
-      const filePath = path.join(uploadsDir, fileName);
-
-      fs.writeFileSync(filePath, file.buffer);
-
-      return {
-        url: `/uploads/messages/${fileName}`,
-        key: `messages/${fileName}`,
-        size: file.size,
-        mimeType: file.mimetype || 'application/octet-stream'
-      };
-    }
+    if (this.useLocal || !this.s3) return this.saveFileLocally(file);
 
     const fileExtension = path.extname(file.originalname);
     const fileName = `messages/${userId}/${uuidv4()}${fileExtension}`;
@@ -1940,14 +1992,23 @@ export class ChatService {
       ACL: 'private'
     } as AWS.S3.PutObjectRequest;
 
-    const result = await this.s3.upload(uploadParams).promise();
+    try {
+      const uploadPromise = this.s3.upload(uploadParams).promise();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout ao enviar arquivo para o S3')), 15000);
+      });
+      const result = await Promise.race([uploadPromise, timeoutPromise]) as AWS.S3.ManagedUpload.SendData;
 
-    return {
-      url: result.Location,
-      key: fileName,
-      size: file.size,
-      mimeType: file.mimetype || 'application/octet-stream'
-    };
+      return {
+        url: result.Location,
+        key: fileName,
+        size: file.size,
+        mimeType: file.mimetype || 'application/octet-stream'
+      };
+    } catch (error) {
+      console.warn('[ChatService] Falha no upload S3. Usando armazenamento local.', error);
+      return this.saveFileLocally(file);
+    }
   }
 }
 

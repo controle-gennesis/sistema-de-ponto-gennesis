@@ -17,6 +17,10 @@ const upload = multer({
 });
 
 export class ChatController {
+  private normalizeDownloadFileName(name?: string): string {
+    const base = String(name || 'anexo').trim() || 'anexo';
+    return base.replace(/[\\/:*?"<>|]+/g, '_');
+  }
   /**
    * Cria um novo chat
    */
@@ -573,6 +577,9 @@ export class ChatController {
       const { chatId, content } = req.body;
       if (!chatId || !content) throw createError('ID do chat e conteúdo são obrigatórios', 400);
 
+      const rawReply = req.body.replyToId != null ? String(req.body.replyToId).trim() : '';
+      const replyToId = rawReply.length > 0 ? rawReply : undefined;
+
       const attachments: any[] = [];
       if (req.files && Array.isArray(req.files)) {
         for (const file of req.files as Express.Multer.File[]) {
@@ -591,10 +598,54 @@ export class ChatController {
         chatId,
         senderId: userId,
         content,
-        attachments
+        attachments,
+        replyToId
       });
 
       res.json({ success: true, message: 'Mensagem enviada', data: message });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Faz download de anexo via proxy autenticado
+   */
+  async downloadDirectAttachment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw createError('Usuário não autenticado', 401);
+
+      const rawUrl = String(req.query.url || '').trim();
+      if (!rawUrl) throw createError('URL do anexo é obrigatória', 400);
+
+      const targetUrl = rawUrl.startsWith('/')
+        ? `${req.protocol}://${req.get('host')}${rawUrl}`
+        : rawUrl;
+
+      const upstream = await fetch(targetUrl);
+      if (!upstream.ok) {
+        throw createError(`Não foi possível baixar o anexo (${upstream.status})`, 400);
+      }
+
+      const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+      const fallbackNameFromUrl = (() => {
+        try {
+          const parsed = new URL(targetUrl);
+          const last = parsed.pathname.split('/').filter(Boolean).pop();
+          return last || 'anexo';
+        } catch {
+          return 'anexo';
+        }
+      })();
+      const fileName = this.normalizeDownloadFileName(
+        String(req.query.fileName || fallbackNameFromUrl)
+      );
+
+      const data = Buffer.from(await upstream.arrayBuffer());
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.status(200).send(data);
     } catch (error: any) {
       next(error);
     }

@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, FileImage, Trash2, Pencil, Search, MoreVertical, Eye } from 'lucide-react';
+import { ArrowLeft, Plus, FileImage, Trash2, Pencil, Search, MoreVertical, Eye, Calculator, ChevronDown } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -25,6 +25,11 @@ interface Contract {
   id: string;
   name: string;
   number: string;
+}
+
+interface EmployeeOption {
+  id: string;
+  name: string;
 }
 
 interface CamposData {
@@ -101,6 +106,12 @@ export default function ContratoRelatoriosPage() {
     os2: '',
     lote: '',
   });
+  const [novoSolicitanteOpen, setNovoSolicitanteOpen] = useState(false);
+  const [editarSolicitanteOpen, setEditarSolicitanteOpen] = useState(false);
+  const [novoSolicitanteSearch, setNovoSolicitanteSearch] = useState('');
+  const [editarSolicitanteSearch, setEditarSolicitanteSearch] = useState('');
+  const novoSolicitanteRef = useRef<HTMLDivElement>(null);
+  const editarSolicitanteRef = useRef<HTMLDivElement>(null);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -118,6 +129,37 @@ export default function ContratoRelatoriosPage() {
     queryFn: async () => (await api.get(`/relatorios-fotograficos/${contractId}`)).data,
     enabled: !!contractId,
   });
+
+  const { data: employeesData } = useQuery({
+    queryKey: ['report-employee-options'],
+    queryFn: async () => {
+      const res = await api.get('/users', {
+        params: { page: 1, limit: 10000, status: 'all' },
+      });
+      return res.data;
+    },
+    retry: false,
+  });
+
+  const employeeOptions = useMemo<EmployeeOption[]>(() => {
+    const list = Array.isArray(employeesData?.data) ? employeesData.data : [];
+    return list
+      .map((u: any) => ({ id: String(u.id), name: String(u.name || '').trim() }))
+      .filter((u: EmployeeOption) => !!u.id && !!u.name)
+      .sort((a: EmployeeOption, b: EmployeeOption) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [employeesData]);
+
+  const filteredNovoSolicitantes = useMemo(() => {
+    const q = novoSolicitanteSearch.trim().toLowerCase();
+    if (!q) return employeeOptions;
+    return employeeOptions.filter((u) => u.name.toLowerCase().includes(q));
+  }, [employeeOptions, novoSolicitanteSearch]);
+
+  const filteredEditarSolicitantes = useMemo(() => {
+    const q = editarSolicitanteSearch.trim().toLowerCase();
+    if (!q) return employeeOptions;
+    return employeeOptions.filter((u) => u.name.toLowerCase().includes(q));
+  }, [employeeOptions, editarSolicitanteSearch]);
 
   const criarMutation = useMutation({
     mutationFn: async (payload: { titulo: string; campos: CamposData }) =>
@@ -197,6 +239,20 @@ export default function ContratoRelatoriosPage() {
     setEditarCampos(b.campos);
   }, [relatorioEditarBody, editarModalOpen]);
 
+  useEffect(() => {
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (novoSolicitanteRef.current && !novoSolicitanteRef.current.contains(t)) {
+        setNovoSolicitanteOpen(false);
+      }
+      if (editarSolicitanteRef.current && !editarSolicitanteRef.current.contains(t)) {
+        setEditarSolicitanteOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
   const abrirModalCriacao = () => {
     setNovoTitulo('');
     setNovoCampos({
@@ -208,6 +264,8 @@ export default function ContratoRelatoriosPage() {
       os2: '',
       lote: '',
     });
+    setNovoSolicitanteSearch('');
+    setNovoSolicitanteOpen(false);
     setCreateModalOpen(true);
   };
 
@@ -223,6 +281,8 @@ export default function ContratoRelatoriosPage() {
   const abrirModalEdicao = (id: string, titulo: string) => {
     setEditarRelatorioId(id);
     setEditarTitulo(titulo);
+    setEditarSolicitanteSearch('');
+    setEditarSolicitanteOpen(false);
     setEditarModalOpen(true);
   };
 
@@ -267,35 +327,54 @@ export default function ContratoRelatoriosPage() {
           </div>
 
           <Card className="w-full shadow-none">
-            <CardContent className="pt-6 sm:pt-5">
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end sm:gap-2">
-                {!loadingRelatorios && relatorios.length > 0 && (
-                  <div className="relative min-w-0 w-full sm:w-[280px] sm:flex-none sm:shrink-0">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Buscar relatório..."
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                    />
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center space-x-3">
+                  <div className="rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
+                    <FileImage className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600 dark:text-blue-400" />
                   </div>
-                )}
-                <button
-                  type="button"
-                  onClick={abrirModalCriacao}
-                  className="inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 sm:w-auto"
-                >
-                  <Plus className="h-4 w-4 shrink-0" />
-                  Novo Relatório
-                </button>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Relatórios</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Gestão de relatórios fotográficos do contrato.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex w-full flex-shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+                  {!loadingRelatorios && relatorios.length > 0 && (
+                    <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Buscar relatório..."
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={abrirModalCriacao}
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    Novo Relatório
+                  </button>
+                </div>
               </div>
+            </CardHeader>
+            <CardContent>
 
-              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {loadingRelatorios
-                  ? 'Carregando...'
-                  : `${relatoriosFiltrados.length} de ${relatorios.length} relatório(s)`}
-              </div>
+              {!loadingRelatorios && relatorios.length > 0 && (
+                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                  <span>
+                    Mostrando {relatoriosFiltrados.length > 0 ? 1 : 0} a {relatoriosFiltrados.length} de{' '}
+                    {relatoriosFiltrados.length} {relatoriosFiltrados.length === 1 ? 'relatório' : 'relatórios'}
+                  </span>
+                  <span>Página 1 de 1</span>
+                </div>
+              )}
 
               {loadingRelatorios ? (
                 <div className="mt-4">
@@ -465,12 +544,11 @@ export default function ContratoRelatoriosPage() {
                   { key: 'os' as const, label: 'Ordem de Serviço nº' },
                   { key: 'unidade' as const, label: 'Unidade' },
                   { key: 'tipo' as const, label: 'Tipo de Relatório' },
-                  { key: 'solicitante' as const, label: 'Solicitante' },
                   { key: 'os2' as const, label: 'OS Secundária' },
                   { key: 'lote' as const, label: 'Lote' },
                 ] as const
               ).map(({ key, label }) => (
-                <div key={key} className={key === 'tipo' || key === 'solicitante' ? 'sm:col-span-2' : ''}>
+                <div key={key} className={key === 'tipo' ? 'sm:col-span-2' : ''}>
                   <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
                   <input
                     type="text"
@@ -481,6 +559,70 @@ export default function ContratoRelatoriosPage() {
                   />
                 </div>
               ))}
+              <div className="sm:col-span-2" ref={novoSolicitanteRef}>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Solicitante</label>
+                <button
+                  type="button"
+                  onClick={() => setNovoSolicitanteOpen((v) => !v)}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  disabled={criarMutation.isPending}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className={novoCampos.solicitante ? '' : 'text-gray-400 dark:text-gray-500'}>
+                      {novoCampos.solicitante || 'Selecionar funcionário...'}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-gray-400" />
+                  </span>
+                </button>
+                {novoSolicitanteOpen && (
+                  <div className="relative">
+                    <div className="absolute z-20 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                      <div className="p-2 border-b border-gray-100 dark:border-gray-700">
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                          <input
+                            type="text"
+                            value={novoSolicitanteSearch}
+                            onChange={(e) => setNovoSolicitanteSearch(e.target.value)}
+                            placeholder="Pesquisar funcionário..."
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                          />
+                        </div>
+                      </div>
+                      <div className="max-h-52 overflow-y-auto py-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNovoCampos((prev) => ({ ...prev, solicitante: '' }));
+                            setNovoSolicitanteOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-sm text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          Limpar seleção
+                        </button>
+                        {filteredNovoSolicitantes.map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setNovoCampos((prev) => ({ ...prev, solicitante: opt.name }));
+                              setNovoSolicitanteOpen(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700"
+                          >
+                            {opt.name}
+                          </button>
+                        ))}
+                        {filteredNovoSolicitantes.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                            Nenhum funcionário encontrado.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
@@ -543,12 +685,11 @@ export default function ContratoRelatoriosPage() {
                     { key: 'os' as const, label: 'Ordem de Serviço nº' },
                     { key: 'unidade' as const, label: 'Unidade' },
                     { key: 'tipo' as const, label: 'Tipo de Relatório' },
-                    { key: 'solicitante' as const, label: 'Solicitante' },
                     { key: 'os2' as const, label: 'OS Secundária' },
                     { key: 'lote' as const, label: 'Lote' },
                   ] as const
                 ).map(({ key, label }) => (
-                  <div key={key} className={key === 'tipo' || key === 'solicitante' ? 'sm:col-span-2' : ''}>
+                  <div key={key} className={key === 'tipo' ? 'sm:col-span-2' : ''}>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
                     <input
                       type="text"
@@ -559,6 +700,70 @@ export default function ContratoRelatoriosPage() {
                     />
                   </div>
                 ))}
+                <div className="sm:col-span-2" ref={editarSolicitanteRef}>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Solicitante</label>
+                  <button
+                    type="button"
+                    onClick={() => setEditarSolicitanteOpen((v) => !v)}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    disabled={editarRelatorioMutation.isPending}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className={editarCampos.solicitante ? '' : 'text-gray-400 dark:text-gray-500'}>
+                        {editarCampos.solicitante || 'Selecionar funcionário...'}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-gray-400" />
+                    </span>
+                  </button>
+                  {editarSolicitanteOpen && (
+                    <div className="relative">
+                      <div className="absolute z-20 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                        <div className="p-2 border-b border-gray-100 dark:border-gray-700">
+                          <div className="relative">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                            <input
+                              type="text"
+                              value={editarSolicitanteSearch}
+                              onChange={(e) => setEditarSolicitanteSearch(e.target.value)}
+                              placeholder="Pesquisar funcionário..."
+                              className="h-9 w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-52 overflow-y-auto py-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditarCampos((prev) => ({ ...prev, solicitante: '' }));
+                              setEditarSolicitanteOpen(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-sm text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                          >
+                            Limpar seleção
+                          </button>
+                          {filteredEditarSolicitantes.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => {
+                                setEditarCampos((prev) => ({ ...prev, solicitante: opt.name }));
+                                setEditarSolicitanteOpen(false);
+                              }}
+                              className="w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700"
+                            >
+                              {opt.name}
+                            </button>
+                          ))}
+                          {filteredEditarSolicitantes.length === 0 && (
+                            <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                              Nenhum funcionário encontrado.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">

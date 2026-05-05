@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import jsPDF from 'jspdf';
 import {
   ArrowLeft,
   Download,
@@ -11,11 +12,12 @@ import {
   Upload,
   ImagePlus,
   X,
+  Save,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Card, CardHeader } from '@/components/ui/Card';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 
@@ -74,6 +76,7 @@ const inputFotoClasse =
 export default function RelatorioFotograficoEditorPage() {
   const params = useParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const rawId = params?.id;
   const rawRelId = params?.relatorioId;
@@ -94,8 +97,7 @@ export default function RelatorioFotograficoEditorPage() {
   const [localizacao, setLocalizacao] = useState<string | null>(null);
   const [fotos, setFotos] = useState<FotoItem[]>([]);
   const [dirty, setDirty] = useState(false);
-  const manualSaveRef = useRef(false);
-  const autoSaveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const inputLoteFotosRef = useRef<HTMLInputElement>(null);
 
@@ -105,7 +107,8 @@ export default function RelatorioFotograficoEditorPage() {
     style.textContent = `
       @media print {
         @page { size: A4 portrait; margin: 0 0 18mm 0; }
-        body > * { display: none !important; }
+        /* Não ocultar todos os filhos do body: isso escondia também o próprio relatório
+           por ele estar dentro da árvore principal da página, gerando preview em branco. */
         #relatorio-print-root { display: block !important; }
         .relatorio-page-header { display: none !important; }
         .relatorio-toolbar { display: none !important; }
@@ -118,7 +121,9 @@ export default function RelatorioFotograficoEditorPage() {
           print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
         .relatorio-primeira-folha { width: auto !important; margin: 0 10mm !important; padding: 4mm 0 6mm !important;
           border: none !important; border-radius: 0 !important; page-break-after: always !important; }
+        .relatorio-primeira-folha--empty { display: none !important; }
         .relatorio-grupo-pagina { page-break-before: always !important; padding: 20mm 10mm 0 !important; }
+        .relatorio-grupo-pagina--first { page-break-before: auto !important; }
         .relatorio-grade { gap: 4mm 4mm !important; grid-template-columns: 1fr 1fr !important; }
         .relatorio-foto-card { page-break-inside: avoid !important; border: 1px solid #bbb !important; border-radius: 0 !important; }
         .relatorio-foto-area { height: 48mm !important; aspect-ratio: unset !important; }
@@ -147,56 +152,45 @@ export default function RelatorioFotograficoEditorPage() {
   });
   const contract = contractData?.data as Contract | undefined;
 
-  const { isLoading: loadingRelatorio } = useQuery({
+  const { data: relatorioResponse, isLoading: loadingRelatorio } = useQuery({
     queryKey: ['relatorio-fotografico', contractId, relatorioId],
     queryFn: async () => {
       const res = await api.get(`/relatorios-fotograficos/${contractId}/${relatorioId}`);
       return res.data;
     },
     enabled: !!contractId && !!relatorioId,
-    onSuccess: (res: { data: RelatorioData }) => {
-      const d = res.data;
-      if (d.campos) setCampos(d.campos);
-      setLogo(d.logo ?? null);
-      setCroqui(d.croqui ?? null);
-      setLocalizacao(d.localizacao ?? null);
-      setFotos(d.fotos ?? []);
-    },
   } as Parameters<typeof useQuery>[0]);
+
+  useEffect(() => {
+    const d = (relatorioResponse as { data?: RelatorioData } | undefined)?.data;
+    if (!d) return;
+    if (d.campos) setCampos(d.campos);
+    setLogo(d.logo ?? null);
+    setCroqui(d.croqui ?? null);
+    setLocalizacao(d.localizacao ?? null);
+    setFotos(Array.isArray(d.fotos) ? d.fotos : []);
+    setDirty(false);
+  }, [relatorioResponse]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const data: RelatorioData = { campos, logo, croqui, localizacao, fotos };
       await api.put(`/relatorios-fotograficos/${contractId}/${relatorioId}`, { data });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setDirty(false);
-      if (manualSaveRef.current) {
-        toast.success('Relatório salvo!');
-        manualSaveRef.current = false;
-      }
+      await queryClient.invalidateQueries({ queryKey: ['relatorio-fotografico', contractId, relatorioId] });
+      await queryClient.invalidateQueries({ queryKey: ['relatorios-fotograficos', contractId] });
+      toast.success('Relatório salvo!');
     },
     onError: () => {
       toast.error('Erro ao salvar.');
-      manualSaveRef.current = false;
     },
   });
 
-  const runSave = useCallback(
-    (opts?: { manual?: boolean }) => {
-      if (opts?.manual) manualSaveRef.current = true;
-      saveMutation.mutate();
-    },
-    [saveMutation]
-  );
-
   const handleSave = useCallback(() => {
-    if (autoSaveDebounceRef.current) {
-      clearTimeout(autoSaveDebounceRef.current);
-      autoSaveDebounceRef.current = null;
-    }
-    runSave({ manual: true });
-  }, [runSave]);
+    saveMutation.mutate();
+  }, [saveMutation]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -208,22 +202,6 @@ export default function RelatorioFotograficoEditorPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [handleSave]);
-
-  const AUTOSAVE_MS = 1400;
-  useEffect(() => {
-    if (!contractId || !relatorioId || loadingRelatorio || !dirty) return;
-    if (autoSaveDebounceRef.current) clearTimeout(autoSaveDebounceRef.current);
-    autoSaveDebounceRef.current = setTimeout(() => {
-      autoSaveDebounceRef.current = null;
-      runSave();
-    }, AUTOSAVE_MS);
-    return () => {
-      if (autoSaveDebounceRef.current) {
-        clearTimeout(autoSaveDebounceRef.current);
-        autoSaveDebounceRef.current = null;
-      }
-    };
-  }, [campos, logo, croqui, localizacao, fotos, dirty, loadingRelatorio, contractId, relatorioId, runSave]);
 
   const mark = () => setDirty(true);
 
@@ -291,6 +269,247 @@ export default function RelatorioFotograficoEditorPage() {
     router.push('/auth/login');
   };
 
+  const exportarPdfDireto = useCallback(async () => {
+    const hasCover = !!croqui || !!localizacao;
+    const fotosValidas = fotos.filter((f) => !!f.src);
+    if (!hasCover && fotosValidas.length === 0) {
+      toast.error('Não há conteúdo para exportar.');
+      return;
+    }
+
+    setIsExportingPdf(true);
+    try {
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const contentW = pageW - margin * 2;
+      const drawImageContained = (src: string, x: number, y: number, w: number, h: number) => {
+        const img = new Image();
+        img.src = src;
+        const iw = img.width || 1;
+        const ih = img.height || 1;
+        const ratio = Math.min(w / iw, h / ih);
+        const rw = iw * ratio;
+        const rh = ih * ratio;
+        const rx = x + (w - rw) / 2;
+        const ry = y + (h - rh) / 2;
+        const format = src.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        pdf.addImage(src, format, rx, ry, rw, rh);
+      };
+
+      const generatedAt = new Date();
+      const generatedAtLabel = generatedAt.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const headerTitleH = 8;
+      const headerMetaH = 5;
+      const headerTotalH = headerTitleH + headerMetaH;
+
+      const drawHeader = () => {
+        // Barra principal do título
+        pdf.setFillColor(185, 28, 28);
+        pdf.rect(margin, margin, contentW, headerTitleH, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text('RELATORIO FOTOGRAFICO', margin + contentW / 2, margin + 5.3, { align: 'center' });
+        pdf.setTextColor(30, 30, 30);
+      };
+
+      const drawCoverBlock = (title: string, src: string | null, y: number, h: number) => {
+        pdf.setDrawColor(200, 200, 200);
+        pdf.setFillColor(245, 245, 245);
+        pdf.rect(margin, y, contentW, 7, 'FD');
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(8);
+        pdf.text(title, margin + contentW / 2, y + 4.5, { align: 'center' });
+        pdf.setDrawColor(220, 220, 220);
+        pdf.rect(margin, y + 7, contentW, h - 7, 'S');
+        if (src) {
+          drawImageContained(src, margin + 3, y + 10, contentW - 6, h - 13);
+        }
+      };
+
+      const drawDadosRelatorioPage = () => {
+        drawHeader();
+        const sectionTop = margin + headerTitleH + 5;
+        const sectionHeaderH = 7;
+        pdf.setDrawColor(200, 200, 200);
+        pdf.setFillColor(245, 245, 245);
+        pdf.rect(margin, sectionTop, contentW, sectionHeaderH, 'FD');
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(8);
+        pdf.setTextColor(65, 65, 65);
+        pdf.text('DADOS DO RELATORIO', margin + contentW / 2, sectionTop + 4.5, { align: 'center' });
+
+        const rows: Array<{ label: string; value: string }> = [
+          { label: 'Contrato', value: campos.contrato?.trim() || '' },
+          { label: 'Ordem de Servico', value: campos.os?.trim() || '' },
+          { label: 'Unidade', value: campos.unidade?.trim() || '' },
+          { label: 'Tipo', value: campos.tipo?.trim() || '' },
+          { label: 'Solicitante', value: campos.solicitante?.trim() || '' },
+          { label: 'OS Secundaria', value: campos.os2?.trim() || '' },
+          { label: 'Lote', value: campos.lote?.trim() || '' },
+        ].filter((row) => row.value.length > 0);
+
+        let y = sectionTop + sectionHeaderH;
+        const rowH = 9;
+        const labelW = 44;
+        const valueW = contentW - labelW;
+        rows.forEach((r) => {
+          pdf.setDrawColor(220, 220, 220);
+          pdf.setFillColor(248, 248, 248);
+          pdf.rect(margin, y, labelW, rowH, 'FD');
+          pdf.setFillColor(255, 255, 255);
+          pdf.rect(margin + labelW, y, valueW, rowH, 'FD');
+
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(8);
+          pdf.setTextColor(90, 90, 90);
+          pdf.text(r.label, margin + 2, y + 5.7);
+
+          pdf.setFont('helvetica', 'normal');
+          pdf.setTextColor(35, 35, 35);
+          const line = pdf.splitTextToSize(r.value, valueW - 4).slice(0, 1);
+          pdf.text(line, margin + labelW + 2, y + 5.7);
+          y += rowH;
+        });
+
+        // Croqui + localização também na primeira página (abaixo dos dados).
+        if (hasCover) {
+          const coverStartY = y + 4;
+          const available = pageH - margin - coverStartY;
+          const coverGap = 3;
+          const blockH = Math.max(36, Math.min(72, (available - coverGap) / 2));
+          drawCoverBlock('CROQUI DA UNIDADE', croqui, coverStartY, blockH);
+          drawCoverBlock('LOCALIZACAO', localizacao, coverStartY + blockH + coverGap, blockH);
+        }
+      };
+
+      // Página 1: sempre com os dados do relatório
+      drawDadosRelatorioPage();
+
+      if (fotosValidas.length > 0) {
+        const porPagina = 6;
+        const gap = 4;
+        const colW = (contentW - gap) / 2;
+        const startY = margin + headerTotalH + 6;
+        const headerH = 6;
+        const imgH = 48;
+        const titleBoxH = 7.2;
+        const descBoxH = 12;
+        const cardH = headerH + imgH + titleBoxH + descBoxH;
+
+        for (let i = 0; i < fotosValidas.length; i += porPagina) {
+          pdf.addPage();
+          drawHeader();
+          const pagina = fotosValidas.slice(i, i + porPagina);
+          pagina.forEach((foto, idx) => {
+            const row = Math.floor(idx / 2);
+            const col = idx % 2;
+            const x = margin + col * (colW + gap);
+            const y = startY + row * (cardH + gap);
+            const blockBottom = y + cardH;
+
+            // Bloco único com bordas retas
+            pdf.setDrawColor(210, 210, 210);
+            pdf.rect(x, y, colW, cardH, 'S');
+
+            // Faixa do título da foto no mesmo estilo do "CROQUI DA UNIDADE"
+            // (cinza claro + texto escuro), mantendo bordas retas.
+            pdf.setDrawColor(210, 210, 210);
+            pdf.setFillColor(245, 245, 245);
+            pdf.rect(x, y, colW, headerH, 'FD');
+            pdf.setTextColor(55, 55, 55);
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(7);
+            pdf.text(`FOTO ${String(i + idx + 1).padStart(2, '0')}`, x + colW / 2, y + 3.95, { align: 'center' });
+            pdf.setTextColor(30, 30, 30);
+
+            // Separadores internos (sem gaps entre seções)
+            const imgTop = y + headerH;
+            const titleTop = imgTop + imgH;
+            const descTop = titleTop + titleBoxH;
+            pdf.setDrawColor(210, 210, 210);
+            pdf.line(x, imgTop, x + colW, imgTop);
+            pdf.line(x, titleTop, x + colW, titleTop);
+            pdf.line(x, descTop, x + colW, descTop);
+
+            drawImageContained(foto.src!, x + 1.5, imgTop + 1.5, colW - 3, imgH - 3);
+
+            const txtY = titleTop;
+            const titulo = (foto.titulo || '').trim();
+            const desc = (foto.desc || '').trim();
+            const boxPadX = 2;
+            const boxW = colW;
+            const titleLabelX = x + boxPadX;
+            const descLabelX = x + boxPadX;
+            const labelGap = 1.2;
+
+            // Título (dentro do bloco único)
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(7);
+            pdf.setTextColor(120, 120, 120);
+            const titleLabel = 'Título:';
+            const titleValueX = titleLabelX + pdf.getTextWidth(titleLabel) + labelGap;
+            pdf.text(titleLabel, titleLabelX, txtY + 4.6);
+            pdf.setTextColor(30, 30, 30);
+            pdf.setFont('helvetica', 'normal');
+            if (titulo) {
+              const tituloOneLine = pdf
+                .splitTextToSize(titulo, boxW - (titleValueX - x) - boxPadX)
+                .slice(0, 1);
+              pdf.text(tituloOneLine, titleValueX, txtY + 4.6);
+            }
+
+            // Descrição (dentro do bloco único)
+            const descY = txtY + titleBoxH;
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(7);
+            pdf.setTextColor(120, 120, 120);
+            const descLabel = 'Descrição:';
+            const descValueX = descLabelX + pdf.getTextWidth(descLabel) + labelGap;
+            pdf.text(descLabel, descLabelX, descY + 4.5);
+            pdf.setTextColor(30, 30, 30);
+            pdf.setFont('helvetica', 'normal');
+            if (desc) {
+              const descLines = pdf
+                .splitTextToSize(desc, boxW - (descValueX - x) - boxPadX)
+                .slice(0, 2);
+              pdf.text(descLines, descValueX, descY + 4.5);
+            }
+          });
+        }
+      }
+
+      // Rodapé institucional com paginação em todas as páginas
+      const totalPages = pdf.getNumberOfPages();
+      for (let p = 1; p <= totalPages; p++) {
+        pdf.setPage(p);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(7.2);
+        pdf.setTextColor(120, 120, 120);
+        pdf.text('Relatório Fotográfico', margin, pageH - 5.3);
+        pdf.text(`Página ${p} de ${totalPages}`, margin + contentW, pageH - 5.3, { align: 'right' });
+      }
+
+      const safeContract = (contract?.name || 'Relatorio').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `Relatorio_Fotografico_${safeContract}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      pdf.save(fileName);
+      toast.success('PDF exportado com sucesso!');
+    } catch (error) {
+      console.error('Falha ao exportar PDF do relatório:', error);
+      toast.error('Não foi possível exportar o PDF.');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }, [contract?.name, croqui, localizacao, fotos]);
+
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
   if (!contractId || !relatorioId || loadingUser) {
@@ -307,6 +526,7 @@ export default function RelatorioFotograficoEditorPage() {
     fotos: grupo,
     showAddSlot: false,
   }));
+  const hasCoverContent = !!croqui || !!localizacao;
   if (gruposRender.length === 0) {
     gruposRender.push({ fotos: [], showAddSlot: true });
   } else if (fotos.length % FOTOS_POR_PAGINA === 0) {
@@ -354,6 +574,16 @@ export default function RelatorioFotograficoEditorPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={saveMutation.isPending || !dirty}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-3.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:pointer-events-none disabled:opacity-50"
+                      title={dirty ? 'Salvar alterações' : 'Sem alterações pendentes'}
+                    >
+                      <Save className="h-4 w-4 shrink-0" />
+                      {saveMutation.isPending ? 'Salvando...' : 'Salvar'}
+                    </button>
                     <label className="relatorio-add-foto-btn inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
                       <Upload className="h-4 w-4 shrink-0" />
                       Fotos em lote
@@ -361,12 +591,13 @@ export default function RelatorioFotograficoEditorPage() {
                     </label>
                     <button
                       type="button"
-                      onClick={() => window.print()}
+                      onClick={() => void exportarPdfDireto()}
+                      disabled={isExportingPdf}
                       className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                      title="Gera PDF pela caixa de impressão do navegador"
+                      title="Exportar PDF"
                     >
                       <Download className="h-4 w-4 shrink-0" />
-                      Exportar
+                      {isExportingPdf ? 'Exportando...' : 'Exportar PDF'}
                     </button>
                   </div>
                 </div>
@@ -379,8 +610,15 @@ export default function RelatorioFotograficoEditorPage() {
               className="space-y-4 sm:space-y-5 print:space-y-0"
             >
               {/* Croqui + Localização */}
-              <Card className="relatorio-primeira-folha w-full rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm print:shadow-none print:max-w-none print:rounded-none">
-                <CardContent className="p-4 sm:p-6 sm:pt-5 space-y-6">
+              <div
+                className={`relatorio-primeira-folha w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 print:shadow-none print:max-w-none print:rounded-none ${
+                  hasCoverContent ? '' : 'relatorio-primeira-folha--empty'
+                }`}
+              >
+                <div className="py-2 text-center font-bold uppercase tracking-widest text-white bg-red-600 dark:bg-red-700">
+                  RELATÓRIO FOTOGRAFICO
+                </div>
+                <div className="p-3 sm:p-4 space-y-4 sm:space-y-5">
                   {(
                     [
                       {
@@ -397,13 +635,30 @@ export default function RelatorioFotograficoEditorPage() {
                       },
                     ] as const
                   ).map(({ titulo, src, setter, placeholder }, idx) => (
-                    <div key={titulo} className={idx > 0 ? 'pt-2' : ''}>
+                    <div
+                      key={titulo}
+                      className={`relatorio-bloco-wrapper ${idx > 0 ? 'pt-2' : ''}`}
+                      data-empty={src ? 'false' : 'true'}
+                    >
                       <div
-                        className="rounded-t-md border border-b-0 border-gray-200 dark:border-gray-600
+                        className="relative rounded-t-md border border-b-0 border-gray-200 dark:border-gray-600
                           bg-gray-100 dark:bg-gray-700/80 py-1.5 px-2 text-center text-[11px] font-bold uppercase
                           tracking-wide text-gray-800 dark:text-gray-100"
                       >
                         {titulo}
+                        {src && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setter(null);
+                              mark();
+                            }}
+                            className="relatorio-bloco-remover absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                            title="Remover"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                       <div
                         className={`relatorio-bloco-img-area relative border border-gray-200 dark:border-gray-600
@@ -415,26 +670,11 @@ export default function RelatorioFotograficoEditorPage() {
                           } transition-colors`}
                       >
                         {src ? (
-                          <>
-                            <img
-                              src={src}
-                              alt={titulo}
-                              className="max-w-full max-h-full object-contain"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setter(null);
-                                mark();
-                              }}
-                              className="relatorio-bloco-remover absolute top-1.5 right-1.5 w-6 h-6 rounded-full
-                                bg-red-600/90 text-white text-xs flex items-center justify-center
-                                hover:bg-red-700 shadow"
-                              title="Remover"
-                            >
-                              ✕
-                            </button>
-                          </>
+                          <img
+                            src={src}
+                            alt={titulo}
+                            className="max-w-full max-h-full object-contain"
+                          />
                         ) : (
                           <label className="relatorio-placeholder flex flex-col items-center justify-center gap-2 w-full h-full min-h-[200px] cursor-pointer p-4 text-center">
                             <ImagePlus
@@ -453,14 +693,16 @@ export default function RelatorioFotograficoEditorPage() {
                       </div>
                     </div>
                   ))}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
 
               {/* Grade de fotos */}
               {gruposRender.map((grupoRender, gi) => (
                 <div
                   key={gi}
-                  className="relatorio-grupo-pagina w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 print:shadow-none print:rounded-none"
+                  className={`relatorio-grupo-pagina w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 print:shadow-none print:rounded-none ${
+                    gi === 0 ? 'relatorio-grupo-pagina--first' : ''
+                  }`}
                 >
                   {/* Faixa título — edge-to-edge, sem padding extra, igual CROQUI DA UNIDADE */}
                   <div className="py-2 text-center font-bold uppercase tracking-widest text-white bg-red-600 dark:bg-red-700">

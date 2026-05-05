@@ -7845,15 +7845,10 @@ export function OrcamentoPageView({
                     <>
                       <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <span>
-                          <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredListaOrcamentos.length}</span>
-                          {' de '}
-                          <span className="font-medium text-gray-800 dark:text-gray-200">{listaOrcamentos.length}</span>
-                          {' '}
-                          {listaOrcamentos.length === 1 ? 'orçamento' : 'orçamentos'}
-                          {orcamentosSearch.trim() && listaOrcamentos.length > 0 ? (
-                            <span className="text-gray-500 dark:text-gray-500"> · filtro ativo</span>
-                          ) : null}
+                          Mostrando {filteredListaOrcamentos.length > 0 ? 1 : 0} a {filteredListaOrcamentos.length} de{' '}
+                          {filteredListaOrcamentos.length} {filteredListaOrcamentos.length === 1 ? 'orçamento' : 'orçamentos'}
                         </span>
+                        <span>Página 1 de 1</span>
                       </div>
                       <div className="overflow-x-auto">
                         <table className={`w-full border-collapse text-sm ${gradeTableCls}`}>

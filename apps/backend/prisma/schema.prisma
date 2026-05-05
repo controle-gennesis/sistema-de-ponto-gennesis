@@ -775,6 +775,11 @@ model Message {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   
+  /// Mensagem citada (resposta estilo WhatsApp)
+  replyToId       String?
+  replyTo         Message?          @relation("MessageReplyThread", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies         Message[]         @relation("MessageReplyThread")
+
   // Relacionamentos
   chat            Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender          User              @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -786,6 +791,7 @@ model Message {
   @@index([senderId])
   @@index([isRead])
   @@index([createdAt])
+  @@index([replyToId])
   @@map("messages")
 }
 

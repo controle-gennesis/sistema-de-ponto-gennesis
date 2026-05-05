@@ -107,6 +107,11 @@ router.post('/direct/messages',
   (req, res, next) => chatController.sendDirectMessage(req, res, next)
 );
 
+// Download de anexos (proxy autenticado para forçar "attachment")
+router.get('/direct/attachments/download', (req, res, next) =>
+  chatController.downloadDirectAttachment(req, res, next)
+);
+
 // Marcar mensagens de chat direto como lidas
 router.patch('/direct/:id/read', (req, res, next) =>
   chatController.markAsRead(req, res, next)
