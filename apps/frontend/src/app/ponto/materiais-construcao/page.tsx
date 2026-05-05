@@ -13,9 +13,14 @@ import toast from 'react-hot-toast';
 
 interface ConstructionMaterial {
   id: string;
+  name: string;
   sinapiCode?: string;
   description: string;
   unit: string;
+  category?: string;
+  dimensions?: string;
+  productImageUrl?: string;
+  productImageName?: string;
   medianPrice?: number | string;
   state?: string;
   referenceMonth?: number;
@@ -28,6 +33,66 @@ interface ConstructionMaterial {
 }
 
 export default function MateriaisConstrucaoPage() {
+  const CUSTOM_UNITS_STORAGE_KEY = 'construction-material-custom-units';
+
+  const siUnits = [
+    'm',
+    'kg',
+    's',
+    'A',
+    'K',
+    'mol',
+    'cd',
+    'm²',
+    'm³',
+    'm/s',
+    'm/s²',
+    'kg/m³',
+    'N',
+    'Pa',
+    'J',
+    'W',
+    'Hz',
+    'C',
+    'V',
+    'Ω',
+    'S',
+    'F',
+    'H',
+    'Wb',
+    'T',
+    'lm',
+    'lx',
+    'Bq',
+    'Gy',
+    'Sv',
+    'kat'
+  ];
+
+  const materialCategories = [
+    'ACABAMENTO',
+    'ADMINISTRATIVO',
+    'ALVENARIA',
+    'COBERTURA',
+    'COMUNICAÇÃO VISUAL',
+    'ELÉTRICA',
+    'EPI',
+    'FERRAMENTAS',
+    'GASES MEDICINAIS',
+    'HIDRÁULICA',
+    'IMPERMEABILIZAÇÃO',
+    'INCÊNDIO',
+    'MARCENARIA',
+    'MARMORARIA',
+    'MATERIAL DE EXPEDIENTE',
+    'PAISAGISMO',
+    'PINTURA',
+    'REFRIGERAÇÃO',
+    'SERRALHERIA',
+    'TELECOMUNICAÇÕES',
+    'VIDRAÇARIA'
+  ];
+
   const router = useRouter();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,7 +101,12 @@ export default function MateriaisConstrucaoPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<ConstructionMaterial | null>(null);
   const [formData, setFormData] = useState({
+    name: '',
     description: '',
+    category: '',
+    dimensions: '',
+    productImageUrl: '',
+    productImageName: '',
     unit: '',
     medianPrice: '',
     state: '',
@@ -50,6 +120,7 @@ export default function MateriaisConstrucaoPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importData, setImportData] = useState('');
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
+  const [customUnits, setCustomUnits] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleLogout = () => {
@@ -81,6 +152,45 @@ export default function MateriaisConstrucaoPage() {
       return res.data;
     }
   });
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CUSTOM_UNITS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const sanitized = parsed
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean);
+        setCustomUnits(Array.from(new Set(sanitized)));
+      }
+    } catch (_error) {
+      // Ignora erro de parse e segue com lista padrão.
+    }
+  }, []);
+
+  const unitOptions = useMemo(() => {
+    const unitsFromMaterials = (materialsData?.data || [])
+      .map((material: ConstructionMaterial) => material.unit?.trim())
+      .filter((unit: string) => Boolean(unit));
+
+    return Array.from(new Set([...siUnits, ...customUnits, ...unitsFromMaterials]))
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  }, [siUnits, customUnits, materialsData?.data]);
+
+  const rememberCustomUnit = (unit: string) => {
+    const normalized = unit.trim();
+    if (!normalized) return;
+
+    setCustomUnits((prev) => {
+      if (prev.includes(normalized)) return prev;
+      const updated = [...prev, normalized].sort((a, b) =>
+        a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+      );
+      localStorage.setItem(CUSTOM_UNITS_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   // Criar material
   const createMutation = useMutation({
@@ -153,7 +263,12 @@ export default function MateriaisConstrucaoPage() {
 
   const resetForm = () => {
     setFormData({
+      name: '',
       description: '',
+      category: '',
+      dimensions: '',
+      productImageUrl: '',
+      productImageName: '',
       unit: '',
       medianPrice: '',
       state: '',
@@ -169,7 +284,12 @@ export default function MateriaisConstrucaoPage() {
   const handleEdit = (material: ConstructionMaterial) => {
     setEditingMaterial(material);
     setFormData({
+      name: material.name || '',
       description: material.description || '',
+      category: material.category || '',
+      dimensions: material.dimensions || '',
+      productImageUrl: material.productImageUrl || '',
+      productImageName: material.productImageName || '',
       unit: material.unit,
       medianPrice: material.medianPrice?.toString() || '',
       state: material.state || '',
@@ -186,21 +306,35 @@ export default function MateriaisConstrucaoPage() {
     e.preventDefault();
     
     // Validação básica
-    if (!formData.description.trim() || !formData.unit.trim()) {
-      toast.error('Por favor, preencha descrição e unidade de medida');
+    if (!formData.name.trim() || !formData.unit.trim()) {
+      toast.error('Por favor, preencha nome do material e unidade de medida');
       return;
     }
 
-    const desc = formData.description.trim();
-    const name = desc.slice(0, 255);
+    const name = formData.name.trim().toUpperCase().slice(0, 255);
+    const unit = formData.unit.trim();
+    const materialDescription = formData.description.trim();
 
     // Limpar dados: remover campos vazios e manter apenas os necessários
     const dataToSend: any = {
       name,
-      description: desc,
-      unit: formData.unit.trim(),
+      description: materialDescription || name,
+      unit,
       isActive: formData.isActive
     };
+
+    if (formData.category && formData.category.trim()) {
+      dataToSend.category = formData.category.trim();
+    }
+    if (formData.dimensions && formData.dimensions.trim()) {
+      dataToSend.dimensions = formData.dimensions.trim();
+    }
+    if (formData.productImageUrl && formData.productImageUrl.trim()) {
+      dataToSend.productImageUrl = formData.productImageUrl.trim();
+    }
+    if (formData.productImageName && formData.productImageName.trim()) {
+      dataToSend.productImageName = formData.productImageName.trim();
+    }
     
     // Adicionar campos opcionais apenas se tiverem valor
     if (formData.medianPrice && formData.medianPrice.toString().trim()) {
@@ -223,6 +357,8 @@ export default function MateriaisConstrucaoPage() {
     }
     
     console.log('Enviando dados:', dataToSend);
+
+    rememberCustomUnit(unit);
     
     if (editingMaterial) {
       updateMutation.mutate({ id: editingMaterial.id, data: dataToSend });
@@ -291,6 +427,19 @@ export default function MateriaisConstrucaoPage() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleProductImageUpload = async (file: File) => {
+    const payload = new FormData();
+    payload.append('file', file);
+
+    const res = await api.post('/construction-materials/upload-image', payload, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+
+    return res.data?.data as { url: string; originalName: string };
   };
 
   const handleImport = () => {
@@ -437,6 +586,9 @@ export default function MateriaisConstrucaoPage() {
             onSubmit={handleSubmit}
             createMutation={createMutation}
             updateMutation={updateMutation}
+            materialCategories={materialCategories}
+            unitOptions={unitOptions}
+            handleProductImageUpload={handleProductImageUpload}
           />
 
           {/* Lista de materiais */}
@@ -493,7 +645,10 @@ export default function MateriaisConstrucaoPage() {
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Descrição
+                        Nome do Material
+                      </th>
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Categoria
                       </th>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Unidade
@@ -509,7 +664,7 @@ export default function MateriaisConstrucaoPage() {
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {loadingMaterials ? (
                       <tr>
-                        <td colSpan={4} className="px-6 py-8 text-center">
+                        <td colSpan={5} className="px-6 py-8 text-center">
                           <div className="flex items-center justify-center">
                             <div className="loading-spinner w-6 h-6 mr-2" />
                             <span className="text-gray-600 dark:text-gray-400">Carregando materiais...</span>
@@ -518,7 +673,7 @@ export default function MateriaisConstrucaoPage() {
                       </tr>
                     ) : filteredMaterials.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-6 py-8 text-center">
+                        <td colSpan={5} className="px-6 py-8 text-center">
                           <div className="text-gray-500 dark:text-gray-400">
                             <p>Nenhum material encontrado.</p>
                             <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
@@ -532,8 +687,16 @@ export default function MateriaisConstrucaoPage() {
                           className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
                           <td className="px-3 sm:px-6 py-4">
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {material.name || '-'}
+                            </div>
                             <span className="text-sm text-gray-600 dark:text-gray-400">
-                              {material.description || '-'}
+                              {material.description || 'Sem descrição'}
+                            </span>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                            <span className="text-sm text-gray-900 dark:text-gray-100">
+                              {material.category || '-'}
                             </span>
                           </td>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
@@ -765,13 +928,21 @@ function MaterialFormModal({
   setFormData,
   onSubmit,
   createMutation,
-  updateMutation
+  updateMutation,
+  materialCategories,
+  unitOptions,
+  handleProductImageUpload
 }: {
   isOpen: boolean;
   onClose: () => void;
   editingMaterial: ConstructionMaterial | null;
   formData: {
+    name: string;
     description: string;
+    category: string;
+    dimensions: string;
+    productImageUrl: string;
+    productImageName: string;
     unit: string;
     medianPrice: string;
     state: string;
@@ -782,7 +953,12 @@ function MaterialFormModal({
     isActive: boolean;
   };
   setFormData: React.Dispatch<React.SetStateAction<{
+    name: string;
     description: string;
+    category: string;
+    dimensions: string;
+    productImageUrl: string;
+    productImageName: string;
     unit: string;
     medianPrice: string;
     state: string;
@@ -795,6 +971,9 @@ function MaterialFormModal({
   onSubmit: (e: React.FormEvent) => void;
   createMutation: any;
   updateMutation: any;
+  materialCategories: string[];
+  unitOptions: string[];
+  handleProductImageUpload: (file: File) => Promise<{ url: string; originalName: string }>;
 }) {
   if (!isOpen) return null;
 
@@ -819,16 +998,62 @@ function MaterialFormModal({
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Descrição *
+                Nome do Material *
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value.toUpperCase() })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="Ex: Cimento Portland CP-II"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Descrição do Material
               </label>
               <textarea
-                required
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Descrição do material..."
+                placeholder="Detalhes adicionais do material..."
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Categoria
+                </label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="">Selecione uma categoria</option>
+                  {materialCategories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Dimensões
+                </label>
+                <input
+                  type="text"
+                  value={formData.dimensions}
+                  onChange={(e) => setFormData({ ...formData, dimensions: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Ex: 2,00m x 1,00m x 0,05m"
+                />
+              </div>
             </div>
 
             <div>
@@ -838,11 +1063,75 @@ function MaterialFormModal({
               <input
                 type="text"
                 required
+                list="material-unit-options"
                 value={formData.unit}
                 onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Ex: kg, m, m², un"
+                placeholder="Digite para buscar ou cadastrar (ex: kg, m², un, rolo)"
               />
+              <datalist id="material-unit-options">
+                {unitOptions.map((unit) => (
+                  <option key={unit} value={unit} />
+                ))}
+              </datalist>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Imagem do Produto
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+
+                  try {
+                    const uploaded = await handleProductImageUpload(file);
+                    setFormData({
+                      ...formData,
+                      productImageUrl: uploaded.url,
+                      productImageName: uploaded.originalName
+                    });
+                    toast.success('Imagem enviada com sucesso!');
+                  } catch (error: any) {
+                    const message =
+                      error?.response?.data?.message || error?.message || 'Erro ao enviar imagem';
+                    toast.error(message);
+                  } finally {
+                    e.target.value = '';
+                  }
+                }}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              {formData.productImageName && (
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                    {formData.productImageName}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        productImageUrl: '',
+                        productImageName: ''
+                      })
+                    }
+                  >
+                    Remover
+                  </button>
+                </div>
+              )}
+              {formData.productImageUrl && (
+                <img
+                  src={formData.productImageUrl}
+                  alt={formData.productImageName || 'Imagem do produto'}
+                  className="mt-3 h-24 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
+                />
+              )}
             </div>
 
             <div className="flex items-center">

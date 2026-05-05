@@ -40,11 +40,15 @@ export class QuoteMapService {
       where: { id: quoteMapId },
       include: {
         materialRequest: {
-          include: {
+          select: {
+            id: true,
+            requestNumber: true,
             items: {
               include: { material: true }
-            }
-          }
+            },
+            // Mantém suporte ao fallback textual sem depender de colunas em drift no banco
+            serviceOrder: true
+          },
         },
         suppliers: {
           include: { supplier: true }
@@ -116,14 +120,14 @@ export class QuoteMapService {
       y += 8;
 
       // Items title
-      doc.fillColor('#1E293B').font('Helvetica-Bold').fontSize(12).text('Itens e vencedores', left, y);
+      doc.fillColor('#1E293B').font('Helvetica-Bold').fontSize(12).text('Itens e cotações completas', left, y);
       y += 18;
 
       const tableCols = {
         material: left + 8,
         qty: left + 268,
         unit: left + 318,
-        winner: left + 360
+        quotes: left + 360
       };
 
       const drawTableHeader = () => {
@@ -135,7 +139,7 @@ export class QuoteMapService {
           .text('Material', tableCols.material, y + 6, { width: 250 })
           .text('Qtd', tableCols.qty, y + 6, { width: 40, align: 'right' })
           .text('Un.', tableCols.unit, y + 6, { width: 35, align: 'center' })
-          .text('Vencedor / Valores', tableCols.winner, y + 6, { width: 148 });
+          .text('Fornecedores / Valores', tableCols.quotes, y + 6, { width: 148 });
         y += 22;
       };
 
@@ -151,16 +155,23 @@ export class QuoteMapService {
       const items = map.materialRequest?.items || [];
       for (const item of items) {
         const winner = (map.winners || []).find((w: any) => w.materialRequestItemId === item.id);
-        const winnerName = winner?.winnerSupplier?.name || 'Não definido';
-        const winnerUnit = winner ? this.formatCurrency(this.toNumber(winner.winnerUnitPrice)) : '-';
-        const winnerScore = winner ? this.formatCurrency(this.toNumber(winner.winnerScore)) : '-';
+        const winnerSupplierId = winner?.winnerSupplierId;
         const qty = this.toNumber(item.quantity);
         const itemLabel = item.material?.name || item.material?.description || item.id;
-        const winnerBlock = `${winnerName}\nUnit.: ${winnerUnit} | Score: ${winnerScore}`;
+        const itemQuotes = (map.supplierItems || [])
+          .filter((si: any) => si.materialRequestItemId === item.id)
+          .map((si: any) => {
+            const supplierName = si?.supplier?.name || si?.supplierId || 'Fornecedor';
+            const unitValue = this.formatCurrency(this.toNumber(si?.unitPrice));
+            const isWinner = winnerSupplierId && si?.supplierId === winnerSupplierId;
+            return `${isWinner ? 'VENCEDOR - ' : ''}${supplierName}\nUnit.: ${unitValue}`;
+          });
+
+        const quotesBlock = itemQuotes.length > 0 ? itemQuotes.join('\n') : 'Sem cotações registradas';
 
         const materialHeight = doc.heightOfString(itemLabel, { width: 250, align: 'left' });
-        const winnerHeight = doc.heightOfString(winnerBlock, { width: 148, align: 'left' });
-        const rowHeight = Math.max(22, Math.ceil(Math.max(materialHeight, winnerHeight) + 10));
+        const quotesHeight = doc.heightOfString(quotesBlock, { width: 148, align: 'left' });
+        const rowHeight = Math.max(22, Math.ceil(Math.max(materialHeight, quotesHeight) + 10));
         ensureSpace(rowHeight + 4);
 
         doc
@@ -170,7 +181,7 @@ export class QuoteMapService {
           .text(itemLabel, tableCols.material, y + 5, { width: 250 })
           .text(String(qty), tableCols.qty, y + 5, { width: 40, align: 'right' })
           .text(item.unit || '-', tableCols.unit, y + 5, { width: 35, align: 'center' })
-          .text(winnerBlock, tableCols.winner, y + 5, { width: 148 });
+          .text(quotesBlock, tableCols.quotes, y + 5, { width: 148 });
 
         doc.moveTo(left, y + rowHeight).lineTo(right, y + rowHeight).strokeColor('#E2E8F0').lineWidth(1).stroke();
         y += rowHeight + 2;

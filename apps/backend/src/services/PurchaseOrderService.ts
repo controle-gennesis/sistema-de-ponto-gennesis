@@ -256,7 +256,11 @@ const purchaseOrderIncludeDetail = {
     }
   },
   materialRequest: {
-    include: {
+    select: {
+      id: true,
+      requestNumber: true,
+      serviceOrder: true,
+      description: true,
       requester: true,
       costCenter: true,
       items: { include: { material: true } },
