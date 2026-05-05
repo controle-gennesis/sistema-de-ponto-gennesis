@@ -279,9 +279,7 @@ export function ChatWidget() {
         formData.append('attachments', file);
       });
 
-      const res = await api.post('/chats', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      const res = await api.post('/chats', formData);
 
       // Invalidar e refetch imediatamente
       await queryClient.invalidateQueries({ queryKey: ['chats-active'] });
@@ -347,9 +345,7 @@ export function ChatWidget() {
         formData.append('attachments', file);
       });
 
-      await api.post('/chats/messages', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      await api.post('/chats/messages', formData);
 
       setNewMessage('');
       setSelectedFiles([]);

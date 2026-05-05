@@ -103,18 +103,6 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Controle',
   },
   {
-    key: pathToModuleKey('/ponto/controle/auditoria-permissoes'),
-    name: 'Auditoria de permissões e acessos',
-    href: '/ponto/controle/auditoria-permissoes',
-    category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/exportacoes-administrativas'),
-    name: 'Exportações e relatórios administrativos',
-    href: '/ponto/controle/exportacoes-administrativas',
-    category: 'Controle',
-  },
-  {
     key: pathToModuleKey('/ponto/controle/criar-tipos-restritos-dp'),
     name: 'Criar solicitações restritas',
     href: '/ponto/controle/criar-tipos-restritos-dp',

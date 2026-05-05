@@ -53,7 +53,7 @@ export const Modal: React.FC<ModalProps> = ({
   };
 
   const modalContent = (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-[1000]">
       <div className="flex min-h-screen items-center justify-center">
         {/* Overlay */}
         <div

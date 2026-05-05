@@ -15,6 +15,7 @@ import {
   Shield,
   MoreVertical,
   Eye,
+  Pencil,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -170,7 +171,7 @@ function ContractAccessCheckbox({
 
 export default function ContratosPage() {
   const router = useRouter();
-  const { isAdministrator, canAction } = usePermissions();
+  const { isAdministrator, can, canAction } = usePermissions();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -203,7 +204,10 @@ export default function ContratosPage() {
   const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
   const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
   const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
-  const canManageUserPermissions = isAdministrator || canAction(pk('/ponto/permissoes'), 'ver');
+  const canManageUserPermissions =
+    isAdministrator ||
+    can(pk('/ponto/controle/alterar-permissoes')) ||
+    canAction(pk('/ponto/controle/alterar-permissoes'), 'ver');
   const canManageContrato = canEditContrato || canDeleteContrato;
   const showActionsColumn = canManageContrato || canManageUserPermissions;
 
@@ -313,9 +317,17 @@ export default function ContratosPage() {
       const res = await api.patch(`/contracts/${id}`, data);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] });
       queryClient.invalidateQueries({ queryKey: ['permission-contracts-list'] });
+      setPermissionsContract((prev) =>
+        prev && prev.id === variables.id
+          ? {
+              ...prev,
+              ...variables.data,
+            }
+          : prev
+      );
       setShowForm(false);
       setEditingContract(null);
       resetForm();
@@ -567,17 +579,29 @@ export default function ContratosPage() {
                           </p>
                         </div>
                       </div>
-                      <div className="relative w-full shrink-0 sm:max-w-xs">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                        <input
-                          type="search"
-                          value={contractUsersSearch}
-                          onChange={(e) => setContractUsersSearch(e.target.value)}
-                          placeholder="Buscar colaborador…"
-                          autoComplete="off"
-                          className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/30 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
-                          aria-label="Buscar colaborador na lista"
-                        />
+                      <div className="flex w-full shrink-0 flex-col gap-2 sm:max-w-sm sm:flex-row sm:items-center sm:justify-end">
+                        {canEditContrato && (
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(permissionsContract)}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Editar contrato
+                          </button>
+                        )}
+                        <div className="relative w-full sm:max-w-xs">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                          <input
+                            type="search"
+                            value={contractUsersSearch}
+                            onChange={(e) => setContractUsersSearch(e.target.value)}
+                            placeholder="Buscar colaborador…"
+                            autoComplete="off"
+                            className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/30 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+                            aria-label="Buscar colaborador na lista"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -798,7 +822,6 @@ export default function ContratosPage() {
                       contracts.map((c: Contract) => (
                         <tr
                           key={c.id}
-                          onClick={() => router.push(`/ponto/contratos/${c.id}`)}
                           className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
                           <td className="px-3 sm:px-6 py-3 min-w-[240px] align-middle text-left">
@@ -889,6 +912,21 @@ export default function ContratosPage() {
                         <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                         <span>Ver detalhes</span>
                       </button>
+                      {canEditContrato && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setContractActionMenu(null);
+                            handleEdit(contractForActionMenu);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                        >
+                          <Pencil className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span>Editar contrato</span>
+                        </button>
+                      )}
                       {canDeleteContrato && (
                         <button
                           type="button"

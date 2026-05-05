@@ -34,11 +34,18 @@ import {
   Check,
   Camera,
   ChevronRight,
+  ChevronDown,
   MoreVertical,
   EyeOff,
   Info,
   MinusCircle,
   XCircle,
+  CornerUpLeft,
+  Video,
+  Phone,
+  Square,
+  Play,
+  Pause,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
@@ -67,6 +74,16 @@ interface MessageAttachment {
   mimeType: string | null;
 }
 
+/** Mensagem citada em uma resposta (retorno da API) */
+interface MessageReplyPreview {
+  id: string;
+  content: string;
+  deletedAt?: string | null;
+  isSystem?: boolean;
+  sender: UserBasic;
+  attachments: Pick<MessageAttachment, 'id' | 'fileName' | 'mimeType'>[];
+}
+
 interface Message {
   id: string;
   chatId: string;
@@ -79,6 +96,8 @@ interface Message {
   createdAt: string;
   sender: UserBasic;
   attachments: MessageAttachment[];
+  replyToId?: string | null;
+  replyTo?: MessageReplyPreview | null;
   /** Preenchido pela API para o usuário logado: favoritou esta mensagem */
   favorites?: { id: string }[];
   editedAt?: string | null;
@@ -147,9 +166,7 @@ const createGroupChat = async ({
   if (groupDescription) formData.append('groupDescription', groupDescription);
   formData.append('participantIds', JSON.stringify(participantIds));
   if (groupAvatarFile) formData.append('groupAvatar', groupAvatarFile);
-  const res = await api.post('/chats/direct/groups', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  const res = await api.post('/chats/direct/groups', formData);
   return res.data.data;
 };
 
@@ -168,9 +185,7 @@ const updateGroupChatApi = async (
 const uploadGroupAvatarApi = async (chatId: string, file: File): Promise<DirectChat> => {
   const fd = new FormData();
   fd.append('groupAvatar', file);
-  const res = await api.patch(`/chats/direct/groups/${chatId}/avatar`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  const res = await api.patch(`/chats/direct/groups/${chatId}/avatar`, fd);
   return res.data.data;
 };
 
@@ -196,18 +211,19 @@ const sendDirectMessage = async ({
   chatId,
   content,
   files,
+  replyToId,
 }: {
   chatId: string;
   content: string;
   files?: File[];
+  replyToId?: string;
 }): Promise<Message> => {
   const form = new FormData();
   form.append('chatId', chatId);
   form.append('content', content);
+  if (replyToId) form.append('replyToId', replyToId);
   if (files) files.forEach(f => form.append('attachments', f));
-  const res = await api.post('/chats/direct/messages', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  const res = await api.post('/chats/direct/messages', form);
   return res.data.data;
 };
 
@@ -260,6 +276,20 @@ function formatMessageTime(iso: string) {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Abre sala de vídeo/voz (Jitsi Meet) compartilhada por conversa.
+ * Mesmo `chatId` = mesma sala (direto ou grupo). Opcional: NEXT_PUBLIC_JITSI_SERVER (ex.: https://meet.jit.si).
+ */
+function openVideoCallRoom(chatId: string, mode: 'video' | 'audio') {
+  if (typeof window === 'undefined') return;
+  const host = (process.env.NEXT_PUBLIC_JITSI_SERVER || 'https://meet.jit.si').replace(/\/$/, '');
+  const prefix = process.env.NEXT_PUBLIC_JITSI_ROOM_PREFIX || 'GennesisPonto';
+  const room = `${prefix}-${chatId}`.replace(/[^a-zA-Z0-9\-_]/g, '');
+  const base = `${host}/${encodeURIComponent(room)}`;
+  const hash = mode === 'audio' ? '#config.startWithVideoMuted=true' : '';
+  window.open(`${base}${hash}`, '_blank', 'noopener,noreferrer');
+}
+
 function formatChatDate(iso: string | null) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -285,8 +315,270 @@ function formatFileSize(bytes: number | null) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function normalizeAttachmentName(name: string | null | undefined) {
+  const raw = String(name || '').trim() || 'Anexo';
+  if (!/[ÃÂ]/.test(raw)) return raw;
+  try {
+    const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
+    const decoded = new TextDecoder('utf-8').decode(bytes);
+    return decoded.includes('�') ? raw : decoded;
+  } catch {
+    return raw;
+  }
+}
+
+function getAttachmentTypeLabel(fileName: string, mimeType: string | null) {
+  const ext = fileName.split('.').pop()?.trim();
+  if (ext) return ext.toUpperCase();
+  if (mimeType) return mimeType.split('/').pop()?.toUpperCase() || 'ARQUIVO';
+  return 'ARQUIVO';
+}
+
 function isImageMime(mimeType: string | null) {
   return mimeType?.startsWith('image/') ?? false;
+}
+
+function isAudioMime(mimeType: string | null) {
+  if (!mimeType) return false;
+  return mimeType.startsWith('audio/') || mimeType === 'application/ogg';
+}
+
+function pickAudioRecorderMimeType(): string {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+  for (const c of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(c)) return c;
+    } catch {
+      /* ignore */
+    }
+  }
+  return '';
+}
+
+function formatVoiceRecordingTime(ms: number) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+function formatAudioSeconds(sec: number) {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const s = Math.floor(sec);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+/** Player de voz: play + barra linear + tempo (sem controles nativos). */
+function ChatInlineAudioPlayer({
+  src,
+  isOwn,
+  reserveCornerForMeta,
+}: {
+  src: string;
+  isOwn: boolean;
+  reserveCornerForMeta?: boolean;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [current, setCurrent] = useState(0);
+
+  const syncDuration = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const d = el.duration;
+    if (Number.isFinite(d) && d > 0) setDuration(d);
+  }, []);
+
+  const toggle = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (el.paused) void el.play().catch(() => {});
+    else el.pause();
+  }, []);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => {
+      setPlaying(false);
+      setCurrent(0);
+    };
+    const onTime = () => setCurrent(el.currentTime);
+    const onMeta = () => syncDuration();
+    const onDurChange = () => syncDuration();
+    el.addEventListener('play', onPlay);
+    el.addEventListener('pause', onPause);
+    el.addEventListener('ended', onEnded);
+    el.addEventListener('timeupdate', onTime);
+    el.addEventListener('loadedmetadata', onMeta);
+    el.addEventListener('durationchange', onDurChange);
+    el.addEventListener('loadeddata', onMeta);
+    syncDuration();
+    return () => {
+      el.removeEventListener('play', onPlay);
+      el.removeEventListener('pause', onPause);
+      el.removeEventListener('ended', onEnded);
+      el.removeEventListener('timeupdate', onTime);
+      el.removeEventListener('loadedmetadata', onMeta);
+      el.removeEventListener('durationchange', onDurChange);
+      el.removeEventListener('loadeddata', onMeta);
+    };
+  }, [src, syncDuration]);
+
+  const progressPct = duration > 0 ? Math.min(100, (current / duration) * 100) : 0;
+
+  const seekFromClientX = useCallback(
+    (clientX: number, bar: HTMLDivElement) => {
+      const el = audioRef.current;
+      if (!el) return;
+      const d = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : duration;
+      if (!d) return;
+      const rect = bar.getBoundingClientRect();
+      const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      el.currentTime = pct * d;
+    },
+    [duration]
+  );
+
+  const onBarPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    seekFromClientX(e.clientX, e.currentTarget);
+  };
+  const onBarPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    seekFromClientX(e.clientX, e.currentTarget);
+  };
+  const onBarPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  };
+
+  const durationLabel = duration > 0 ? formatAudioSeconds(duration) : '0:00';
+
+  return (
+    <div
+      className={clsx(
+        'w-full min-w-[220px] max-w-[min(100%,320px)]',
+        reserveCornerForMeta ? 'pb-5 pr-14 pt-0.5' : 'py-0.5',
+        isOwn ? '' : 'rounded-lg bg-gray-100/80 px-2 py-2 dark:bg-gray-800/60'
+      )}
+    >
+      <audio ref={audioRef} src={src} preload="metadata" className="hidden" aria-hidden />
+      {/* Grid: play e barra na mesma linha (alinhados ao centro); tempo só sob a barra */}
+      <div className="grid w-full grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1">
+        <button
+          type="button"
+          onClick={toggle}
+          className={clsx(
+            'col-start-1 row-start-1 flex size-10 items-center justify-center rounded-full border transition-colors active:scale-[0.98]',
+            isOwn
+              ? 'border-white/50 text-white hover:bg-white/10'
+              : 'border-red-600/40 text-red-600 hover:bg-red-600/10 dark:border-red-500/50 dark:text-red-400'
+          )}
+          aria-label={playing ? 'Pausar áudio' : 'Reproduzir áudio'}
+        >
+          {playing ? (
+            <Pause size={18} strokeWidth={2} className="shrink-0" />
+          ) : (
+            <Play size={18} strokeWidth={2} className="shrink-0 translate-x-[1px]" />
+          )}
+        </button>
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-valuemin={0}
+          aria-valuemax={Math.round(duration) || 0}
+          aria-valuenow={Math.round(current)}
+          aria-label="Posição do áudio"
+          className={clsx(
+            'col-start-2 row-start-1 flex w-full min-w-0 cursor-pointer items-center py-2 outline-none focus-visible:ring-2 focus-visible:ring-offset-1 rounded-sm',
+            isOwn
+              ? 'focus-visible:ring-white/60 focus-visible:ring-offset-red-600'
+              : 'focus-visible:ring-red-500/50 focus-visible:ring-offset-gray-100 dark:focus-visible:ring-offset-gray-800'
+          )}
+          onPointerDown={onBarPointerDown}
+          onPointerMove={onBarPointerMove}
+          onPointerUp={onBarPointerUp}
+          onPointerCancel={onBarPointerUp}
+          onKeyDown={(e) => {
+            const el = audioRef.current;
+            if (!el) return;
+            const d = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : duration;
+            if (!d) return;
+            const step = Math.max(1, d / 20);
+            if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              el.currentTime = Math.min(d, el.currentTime + step);
+            } else if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              el.currentTime = Math.max(0, el.currentTime - step);
+            }
+          }}
+        >
+          <div className="relative h-2 w-full shrink-0 overflow-visible rounded-full">
+            <div
+              className={clsx(
+                'absolute inset-0 rounded-full',
+                isOwn ? 'bg-black/25' : 'bg-gray-300 dark:bg-gray-600'
+              )}
+              aria-hidden
+            />
+            <div
+              className={clsx(
+                'absolute left-0 top-0 h-full rounded-full transition-[width] duration-100',
+                isOwn ? 'bg-white' : 'bg-red-600 dark:bg-red-500'
+              )}
+              style={{ width: `${progressPct}%` }}
+              aria-hidden
+            />
+            <div
+              className={clsx(
+                'absolute top-1/2 z-[1] h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-sm transition-[left] duration-100',
+                isOwn ? 'border-white bg-white' : 'border-white bg-red-600 dark:bg-red-500'
+              )}
+              style={{ left: `${progressPct}%` }}
+              aria-hidden
+            />
+          </div>
+        </div>
+        <p
+          className={clsx(
+            'col-start-2 row-start-2 text-left tabular-nums text-[11px] font-medium leading-none',
+            isOwn ? 'text-white/85' : 'text-gray-600 dark:text-gray-400'
+          )}
+        >
+          {formatAudioSeconds(current)}
+          <span className={clsx('mx-1 opacity-45', isOwn ? 'text-white/70' : '')}>/</span>
+          {durationLabel}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function getReplyQuoteSnippet(reply: MessageReplyPreview) {
+  if (reply.deletedAt) return 'Mensagem apagada';
+  if (reply.isSystem) return reply.content || 'Evento';
+  if (reply.content && reply.content !== '📎') {
+    const t = reply.content.trim();
+    return t.length > 160 ? `${t.slice(0, 157)}…` : t;
+  }
+  const att = reply.attachments?.[0];
+  if (att) {
+    if (isImageMime(att.mimeType ?? null)) return '📷 Foto';
+    if (isAudioMime(att.mimeType ?? null)) return '🎤 Mensagem de voz';
+    return `📎 ${normalizeAttachmentName(att.fileName)}`;
+  }
+  return 'Mensagem';
 }
 
 function isMessageFavorited(m: Message) {
@@ -294,6 +586,33 @@ function isMessageFavorited(m: Message) {
 }
 
 const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+const CHAT_REACTIONS_STORAGE_KEY = 'gennesis-chat-message-reactions';
+
+/** Reações rápidas (estilo WhatsApp) — persistidas por chat/mensagem no dispositivo */
+const QUICK_REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
+const EXTRA_REACTION_EMOJIS = ['🔥', '👏', '🎉', '😀', '✅', '👋', '💯', '🙌', '💖', '😍'] as const;
+
+function loadChatReactionsFromStorage(): Record<string, Record<string, string>> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(CHAT_REACTIONS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, Record<string, string>>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistChatReactions(data: Record<string, Record<string, string>>) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CHAT_REACTIONS_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    /* ignore quota */
+  }
+}
 
 /** Só o remetente, mensagem não apagada, até 15 min após o envio */
 function canEditOrDeleteMessage(m: Message, currentUserId: string | undefined): boolean {
@@ -308,7 +627,12 @@ function getMessageSearchPreview(m: Message) {
   if (m.deletedAt) return 'Mensagem apagada';
   if (m.isSystem) return m.content;
   if (m.content && m.content !== '📎') return m.content;
-  if (m.attachments?.length) return m.attachments[0].fileName || 'Anexo';
+  if (m.attachments?.length) {
+    const a0 = m.attachments[0];
+    if (isAudioMime(a0.mimeType)) return '🎤 Mensagem de voz';
+    if (isImageMime(a0.mimeType)) return '📷 Foto';
+    return a0.fileName || 'Anexo';
+  }
   return 'Mensagem';
 }
 
@@ -464,6 +788,7 @@ function ConversasContent() {
   const [userSearch, setUserSearch] = useState('');
   const [messageInput, setMessageInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isMobileView, setIsMobileView] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGroupDetails, setShowGroupDetails] = useState(false);
@@ -495,6 +820,20 @@ function ConversasContent() {
     isFavorited: boolean;
     isPinned: boolean;
   } | null>(null);
+  /** Mensagem sendo respondida (envio usa `replyToId` na API) */
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  /** Reações locais: chatId → messageId → emoji */
+  const [reactionsByChat, setReactionsByChat] = useState<Record<string, Record<string, string>>>({});
+  const [reactionPickerForMessageId, setReactionPickerForMessageId] = useState<string | null>(null);
+  const [reactionPickerShowMore, setReactionPickerShowMore] = useState(false);
+  const [voiceRecordingActive, setVoiceRecordingActive] = useState(false);
+  const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingMaxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceRecordingActiveRef = useRef(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(MIN_LEFT_PANEL_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [chatHeaderMenuOpen, setChatHeaderMenuOpen] = useState(false);
@@ -546,6 +885,7 @@ function ConversasContent() {
 
   const [groupAvatarMenu, setGroupAvatarMenu] = useState(false);
   const [showGroupAvatarViewer, setShowGroupAvatarViewer] = useState(false);
+  const [messageImageViewer, setMessageImageViewer] = useState<{ src: string; name: string } | null>(null);
   const groupAvatarMenuRef = useRef<HTMLDivElement>(null);
 
   const closeEditModal = useCallback(() => {
@@ -855,12 +1195,23 @@ function ConversasContent() {
       queryClient.invalidateQueries({ queryKey: ['directChats'] });
       setMessageInput('');
       setAttachedFiles([]);
+      setReplyingTo(null);
       if (textareaRef.current) {
         textareaRef.current.style.height = '44px';
       }
     },
     onError: () => toast.error('Erro ao enviar mensagem'),
   });
+
+  const mergeUpdatedMessage = useCallback((base: Message, updated: Message): Message => {
+    return {
+      ...base,
+      ...updated,
+      sender: updated.sender ?? base.sender,
+      attachments: updated.attachments ?? base.attachments,
+      replyTo: updated.replyTo !== undefined ? updated.replyTo : base.replyTo,
+    };
+  }, []);
 
   const messageContextMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -876,9 +1227,7 @@ function ConversasContent() {
         return {
           ...old,
           messages: old.messages.map((m) =>
-            m.id === updated.id
-              ? { ...m, ...updated, sender: updated.sender ?? m.sender, attachments: updated.attachments ?? m.attachments }
-              : m
+            m.id === updated.id ? mergeUpdatedMessage(m, updated) : m
           ),
         };
       });
@@ -909,15 +1258,6 @@ function ConversasContent() {
       toast.error(msg);
     },
   });
-
-  const mergeUpdatedMessage = useCallback((base: Message, updated: Message): Message => {
-    return {
-      ...base,
-      ...updated,
-      sender: updated.sender ?? base.sender,
-      attachments: updated.attachments ?? base.attachments,
-    };
-  }, []);
 
   const editMessageMutation = useMutation({
     mutationFn: ({ messageId, content }: { messageId: string; content: string }) => editMessageApi(messageId, content),
@@ -1118,12 +1458,193 @@ function ConversasContent() {
     setMessageContextMenu(null);
   }, [selectedChatId]);
 
+  useEffect(() => {
+    setReplyingTo(null);
+  }, [selectedChatId]);
+
+  useEffect(() => {
+    setReactionsByChat(loadChatReactionsFromStorage());
+  }, []);
+
+  useEffect(() => {
+    setReactionPickerForMessageId(null);
+    setReactionPickerShowMore(false);
+  }, [selectedChatId]);
+
+  useEffect(() => {
+    if (!reactionPickerForMessageId) return;
+    const close = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('[data-reaction-picker-root]')) return;
+      setReactionPickerForMessageId(null);
+      setReactionPickerShowMore(false);
+    };
+    document.addEventListener('mousedown', close, true);
+    return () => document.removeEventListener('mousedown', close, true);
+  }, [reactionPickerForMessageId]);
+
+  const applyMessageReaction = useCallback((messageId: string, emoji: string) => {
+    if (!selectedChatId) return;
+    setReactionsByChat((prev) => {
+      const chatMap = { ...(prev[selectedChatId] || {}) };
+      if (chatMap[messageId] === emoji) delete chatMap[messageId];
+      else chatMap[messageId] = emoji;
+      const next = { ...prev, [selectedChatId]: chatMap };
+      persistChatReactions(next);
+      return next;
+    });
+    setReactionPickerForMessageId(null);
+    setReactionPickerShowMore(false);
+  }, [selectedChatId]);
+
+  const downloadAttachmentFile = useCallback(async (url: string, fileName: string) => {
+    const triggerLinkDownload = (targetUrl: string, targetName: string) => {
+      const link = document.createElement('a');
+      link.href = targetUrl;
+      link.download = targetName || 'anexo';
+      link.rel = 'noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+
+    try {
+      const response = await api.get('/chats/direct/attachments/download', {
+        params: { url, fileName },
+        responseType: 'blob',
+        timeout: 30000,
+      });
+      const blob = response.data as Blob;
+      if (!(blob instanceof Blob)) throw new Error('Resposta de download inválida');
+      const objectUrl = URL.createObjectURL(blob);
+      triggerLinkDownload(objectUrl, fileName);
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error('Falha ao baixar anexo:', error);
+      toast.error('Não foi possível baixar o anexo.');
+    }
+  }, []);
+
   const handleSend = useCallback(() => {
     if (!selectedChatId) return;
     const text = messageInput.trim();
     if (!text && attachedFiles.length === 0) return;
-    sendMutation.mutate({ chatId: selectedChatId, content: text || '📎', files: attachedFiles });
-  }, [selectedChatId, messageInput, attachedFiles, sendMutation]);
+    sendMutation.mutate({
+      chatId: selectedChatId,
+      content: text || '📎',
+      files: attachedFiles,
+      ...(replyingTo ? { replyToId: replyingTo.id } : {}),
+    });
+  }, [selectedChatId, messageInput, attachedFiles, replyingTo, sendMutation]);
+
+  const abortVoiceRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'recording') {
+      recorder.onstop = () => {
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recordingChunksRef.current = [];
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current = null;
+      };
+      try {
+        recorder.stop();
+      } catch {
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recordingChunksRef.current = [];
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current = null;
+      }
+    } else {
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current = null;
+    }
+    if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+    if (recordingMaxTimerRef.current) clearTimeout(recordingMaxTimerRef.current);
+    recordingIntervalRef.current = null;
+    recordingMaxTimerRef.current = null;
+    voiceRecordingActiveRef.current = false;
+    setVoiceRecordingActive(false);
+    setVoiceRecordingMs(0);
+  }, []);
+
+  const stopVoiceRecordingAndSend = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== 'recording') return;
+    recorder.onstop = () => {
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+      const mime = recorder.mimeType || 'audio/webm';
+      const blob = new Blob(recordingChunksRef.current, { type: mime });
+      recordingChunksRef.current = [];
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current = null;
+      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+      if (recordingMaxTimerRef.current) clearTimeout(recordingMaxTimerRef.current);
+      recordingIntervalRef.current = null;
+      recordingMaxTimerRef.current = null;
+      voiceRecordingActiveRef.current = false;
+      setVoiceRecordingActive(false);
+      setVoiceRecordingMs(0);
+      if (blob.size < 900) {
+        toast.error('Áudio muito curto');
+        return;
+      }
+      const ext = mime.includes('webm') ? 'webm' : mime.includes('mp4') ? 'm4a' : 'webm';
+      const file = new File([blob], `mensagem-de-voz-${Date.now()}.${ext}`, { type: mime });
+      if (!selectedChatId) return;
+      sendMutation.mutate({
+        chatId: selectedChatId,
+        content: '📎',
+        files: [file],
+        ...(replyingTo ? { replyToId: replyingTo.id } : {}),
+      });
+    };
+    try {
+      recorder.stop();
+    } catch {
+      abortVoiceRecording();
+    }
+  }, [selectedChatId, replyingTo, sendMutation, abortVoiceRecording]);
+
+  const startVoiceRecording = useCallback(async () => {
+    if (!selectedChatId || sendMutation.isPending || voiceRecordingActiveRef.current) return;
+    if (messageInput.trim() || attachedFiles.length > 0) {
+      toast.error('Envie ou apague o texto e os anexos antes de gravar áudio');
+      return;
+    }
+    if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      toast.error('Seu navegador não suporta gravação de áudio');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const mime = pickAudioRecorderMimeType();
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
+      };
+      recorder.start(200);
+      voiceRecordingActiveRef.current = true;
+      setVoiceRecordingActive(true);
+      setVoiceRecordingMs(0);
+      const t0 = Date.now();
+      recordingIntervalRef.current = setInterval(() => setVoiceRecordingMs(Date.now() - t0), 200);
+      recordingMaxTimerRef.current = setTimeout(() => {
+        if (voiceRecordingActiveRef.current) {
+          toast('Limite de 2 minutos de gravação');
+          stopVoiceRecordingAndSend();
+        }
+      }, 120_000);
+    } catch {
+      toast.error('Não foi possível acessar o microfone');
+    }
+  }, [selectedChatId, sendMutation, messageInput, attachedFiles, stopVoiceRecordingAndSend]);
+
+  useEffect(() => {
+    abortVoiceRecording();
+  }, [selectedChatId, abortVoiceRecording]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1191,15 +1712,40 @@ function ConversasContent() {
     editMessageMutation.mutate({ messageId: editingMessageId, content: t });
   }, [editingMessageId, editDraft, editMessageMutation]);
 
+  const appendFilesToComposer = useCallback((files: File[]) => {
+    if (!files.length) return;
+    setAttachedFiles((prev) => [...prev, ...files].slice(0, 5));
+  }, []);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    setAttachedFiles(prev => [...prev, ...files].slice(0, 5));
+    appendFilesToComposer(files);
     e.target.value = '';
   };
 
   const removeFile = (idx: number) => {
     setAttachedFiles(prev => prev.filter((_, i) => i !== idx));
   };
+
+  const handleComposerDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!isDraggingFiles) setIsDraggingFiles(true);
+  }, [isDraggingFiles]);
+
+  const handleComposerDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setIsDraggingFiles(false);
+  }, []);
+
+  const handleComposerDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingFiles(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    appendFilesToComposer(files);
+  }, [appendFilesToComposer]);
 
   // Helpers
   const getOtherUser = (chat: DirectChat): UserBasic | null => {
@@ -1676,6 +2222,36 @@ function ConversasContent() {
                         <div ref={chatHeaderMenuRef} className="relative ml-auto flex shrink-0 items-center gap-0.5">
                           <button
                             type="button"
+                            title="Videochamada (abre sala no navegador)"
+                            aria-label="Iniciar videochamada"
+                            onClick={() => {
+                              if (!activeChat?.id) return;
+                              openVideoCallRoom(activeChat.id, 'video');
+                              toast.success(
+                                'Sala de vídeo aberta. Quem estiver nesta conversa pode entrar na mesma sala pelo botão de vídeo.'
+                              );
+                            }}
+                            className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                          >
+                            <Video size={18} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Ligação de voz (abre sala com microfone)"
+                            aria-label="Iniciar ligação de voz"
+                            onClick={() => {
+                              if (!activeChat?.id) return;
+                              openVideoCallRoom(activeChat.id, 'audio');
+                              toast.success(
+                                'Sala de voz aberta. A câmera inicia desligada; você pode ligá-la na reunião se quiser.'
+                              );
+                            }}
+                            className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                          >
+                            <Phone size={18} />
+                          </button>
+                          <button
+                            type="button"
                             title="Pesquisar mensagens"
                             onClick={() => setShowMsgSearch(v => !v)}
                             className={clsx(
@@ -1700,7 +2276,7 @@ function ConversasContent() {
                           {chatHeaderMenuOpen && (
                             <div
                               role="menu"
-                              className="absolute right-0 top-[calc(100%+4px)] z-[70] flex min-w-[260px] flex-col overflow-hidden rounded-xl border border-slate-700/70 bg-[#1f2937] py-1 shadow-xl"
+                              className="absolute right-0 top-[calc(100%+4px)] z-[70] flex min-w-[260px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
                             >
                               <div className="flex flex-col">
                                 {activeChat.chatType === 'GROUP' && isCurrentUserGroupMember && (
@@ -1708,7 +2284,7 @@ function ConversasContent() {
                                     <button
                                       type="button"
                                       role="menuitem"
-                                      className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/5"
+                                      className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
                                       onClick={() => {
                                         setChatHeaderMenuOpen(false);
                                         setAddMemberPickSearch('');
@@ -1717,7 +2293,7 @@ function ConversasContent() {
                                       }}
                                     >
                                       <UserPlus
-                                        size={19}
+                                        size={16}
                                         strokeWidth={2}
                                         className="shrink-0 text-slate-400 transition-colors group-hover:text-emerald-400"
                                         aria-hidden
@@ -1725,7 +2301,7 @@ function ConversasContent() {
                                       <span>Adicionar membro</span>
                                     </button>
                                     <div
-                                      className="mx-4 h-px shrink-0 bg-slate-500/45"
+                                      className="mx-4 h-px shrink-0 bg-gray-100 dark:bg-gray-700"
                                       aria-hidden
                                       role="presentation"
                                     />
@@ -1736,14 +2312,14 @@ function ConversasContent() {
                                     <button
                                       type="button"
                                       role="menuitem"
-                                      className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/5"
+                                      className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
                                       onClick={() => {
                                         setChatHeaderMenuOpen(false);
                                         setShowGroupDetails(true);
                                       }}
                                     >
                                       <Info
-                                        size={19}
+                                        size={16}
                                         strokeWidth={2}
                                         className="shrink-0 text-slate-400 transition-colors group-hover:text-sky-400"
                                         aria-hidden
@@ -1751,7 +2327,7 @@ function ConversasContent() {
                                       <span>Dados do grupo</span>
                                     </button>
                                     <div
-                                      className="mx-4 h-px shrink-0 bg-slate-500/45"
+                                      className="mx-4 h-px shrink-0 bg-gray-100 dark:bg-gray-700"
                                       aria-hidden
                                       role="presentation"
                                     />
@@ -1762,14 +2338,14 @@ function ConversasContent() {
                                     <button
                                       type="button"
                                       role="menuitem"
-                                      className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/5"
+                                      className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
                                       onClick={() => {
                                         setChatHeaderMenuOpen(false);
                                         setContactDetailsUser(other);
                                       }}
                                     >
                                       <Info
-                                        size={19}
+                                        size={16}
                                         strokeWidth={2}
                                         className="shrink-0 text-slate-400 transition-colors group-hover:text-sky-400"
                                         aria-hidden
@@ -1777,7 +2353,7 @@ function ConversasContent() {
                                       <span>Dados do contato</span>
                                     </button>
                                     <div
-                                      className="mx-4 h-px shrink-0 bg-slate-500/45"
+                                      className="mx-4 h-px shrink-0 bg-gray-100 dark:bg-gray-700"
                                       aria-hidden
                                       role="presentation"
                                     />
@@ -1786,7 +2362,7 @@ function ConversasContent() {
                                 <button
                                   type="button"
                                   role="menuitem"
-                                  className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/5"
+                                  className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
                                   onClick={() => {
                                     setChatHeaderMenuOpen(false);
                                     setShowMsgSearch(true);
@@ -1794,7 +2370,7 @@ function ConversasContent() {
                                   }}
                                 >
                                   <Search
-                                    size={19}
+                                    size={16}
                                     strokeWidth={2}
                                     className="shrink-0 text-slate-400 transition-colors group-hover:text-violet-400"
                                     aria-hidden
@@ -1804,14 +2380,14 @@ function ConversasContent() {
                               </div>
 
                               <div
-                                className="mx-4 h-px shrink-0 bg-slate-500/45"
+                                className="mx-4 h-px shrink-0 bg-gray-100 dark:bg-gray-700"
                                 aria-hidden
                                 role="separator"
                               />
                               <button
                                 type="button"
                                 role="menuitem"
-                                className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/5"
+                                className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
                                 onClick={() => {
                                   setChatHeaderMenuOpen(false);
                                   setShowMsgSearch(false);
@@ -1822,7 +2398,7 @@ function ConversasContent() {
                                 }}
                               >
                                 <XCircle
-                                  size={19}
+                                  size={16}
                                   strokeWidth={2}
                                   className="shrink-0 text-slate-400 transition-colors group-hover:text-slate-300"
                                   aria-hidden
@@ -1831,7 +2407,7 @@ function ConversasContent() {
                               </button>
 
                               <div
-                                className="mx-4 h-px shrink-0 bg-slate-500/45"
+                                className="mx-4 h-px shrink-0 bg-gray-100 dark:bg-gray-700"
                                 aria-hidden
                                 role="separator"
                               />
@@ -1840,7 +2416,7 @@ function ConversasContent() {
                                   type="button"
                                   role="menuitem"
                                   disabled={clearConversationForMeMutation.isPending}
-                                  className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/5 disabled:opacity-50"
+                                  className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
                                   onClick={() => {
                                     setChatHeaderMenuOpen(false);
                                     if (
@@ -1855,7 +2431,7 @@ function ConversasContent() {
                                   }}
                                 >
                                   <MinusCircle
-                                    size={19}
+                                    size={16}
                                     strokeWidth={2}
                                     className="shrink-0 text-slate-400 transition-colors group-hover:text-zinc-300"
                                     aria-hidden
@@ -1950,6 +2526,14 @@ function ConversasContent() {
                     const isOwn = msg.senderId === currentUser?.id;
                     const prevMsg = activeChat.messages[idx - 1];
                     const showDate = !prevMsg || new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
+                    const isClusterStart =
+                      !prevMsg || showDate || prevMsg.isSystem || prevMsg.senderId !== msg.senderId;
+                    const hasAttachments = msg.attachments.length > 0;
+                    const hasVisibleText = !!(msg.content && msg.content !== '📎');
+                    const hasImageAttachment = msg.attachments.some(
+                      (att) => isImageMime(att.mimeType) && !!resolveApiMediaUrl(att.fileUrl ?? null)
+                    );
+                    const shouldOverlayMeta = !msg.deletedAt && hasAttachments && !hasVisibleText;
 
                     return (
                       <React.Fragment key={msg.id}>
@@ -1975,7 +2559,11 @@ function ConversasContent() {
                         ) : (
                         <div
                           ref={el => { if (el) msgRefs.current.set(msg.id, el); else msgRefs.current.delete(msg.id); }}
-                          className={clsx('flex msg-item', isOwn ? 'justify-end' : 'justify-start')}
+                          className={clsx(
+                            'group flex msg-item items-start',
+                            isOwn ? 'justify-end' : 'justify-start',
+                            !isClusterStart && '-mt-0.5'
+                          )}
                           onContextMenu={e => {
                             if (msg.deletedAt) return;
                             e.preventDefault();
@@ -1987,55 +2575,216 @@ function ConversasContent() {
                               isPinned: activeChat?.pinnedMessageId === msg.id,
                             });
                           }}
+                          onDoubleClick={() => {
+                            if (msg.deletedAt) return;
+                            setReplyingTo(msg);
+                            textareaRef.current?.focus();
+                          }}
                         >
-                          <div className={clsx(
-                            'max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-colors duration-300',
-                            isOwn
-                              ? 'bg-red-600 text-white rounded-br-sm'
-                              : 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-bl-sm border border-gray-200 dark:border-gray-800'
-                          )}>
+                          {activeChat?.chatType === 'GROUP' && !isOwn && !msg.deletedAt && (
+                            <div className="mr-2 mt-1.5 flex w-8 flex-shrink-0 justify-center self-start">
+                              {isClusterStart ? (
+                                <Avatar user={msg.sender} size="sm" />
+                              ) : (
+                                <span className="block w-8 shrink-0" aria-hidden />
+                              )}
+                            </div>
+                          )}
+                          <div
+                            className={clsx(
+                              'flex min-w-0 flex-col',
+                              isOwn ? 'max-w-[75%] items-end' : 'max-w-[75%] items-start'
+                            )}
+                          >
+                            <div
+                              className={clsx(
+                                'flex min-w-0 items-center gap-1',
+                                isOwn ? 'flex-row-reverse' : 'flex-row'
+                              )}
+                            >
+                              <div
+                                className={clsx(
+                                  'relative min-w-0 flex-1 rounded-2xl shadow-sm transition-colors duration-300',
+                                  shouldOverlayMeta ? 'px-2 py-2' : 'px-4 py-2',
+                                  isOwn
+                                    ? clsx('bg-red-600 text-white', isClusterStart && 'rounded-br-sm')
+                                    : clsx(
+                                        'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-800',
+                                        isClusterStart && 'rounded-tl-sm'
+                                      )
+                                )}
+                              >
+                            {activeChat?.chatType === 'GROUP' && !isOwn && !msg.deletedAt && isClusterStart && (
+                              <button
+                                type="button"
+                                onClick={() => setContactDetailsUser(msg.sender)}
+                                className="mb-1 block text-[11px] font-semibold text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+                                title="Ver dados do contato"
+                              >
+                                {msg.sender?.name || 'Usuário'}
+                              </button>
+                            )}
                             {msg.deletedAt ? (
                               <p className="text-sm italic opacity-80">Mensagem apagada</p>
                             ) : (
                               <>
-                                {/* Attachments */}
-                                {msg.attachments.map(att => (
-                                  <div key={att.id} className="mb-2">
-                                    {isImageMime(att.mimeType) && att.fileUrl ? (
-                                      <a href={att.fileUrl} target="_blank" rel="noreferrer">
-                                        <img
-                                          src={att.fileUrl}
-                                          alt={att.fileName}
-                                          className="max-w-full rounded-lg max-h-64 object-cover"
-                                        />
-                                      </a>
-                                    ) : (
-                                      <a
-                                        href={att.fileUrl ?? '#'}
-                                        target="_blank"
-                                        rel="noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                    setMessageContextMenu({
+                                      x: rect.right - 220,
+                                      y: rect.bottom + 6,
+                                      messageId: msg.id,
+                                      isFavorited: isMessageFavorited(msg),
+                                      isPinned: activeChat?.pinnedMessageId === msg.id,
+                                    });
+                                  }}
+                                  className={clsx(
+                                    'absolute right-2 top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md transition-opacity',
+                                    'opacity-0 group-hover:opacity-100 focus:opacity-100',
+                                    isOwn
+                                      ? 'bg-black/20 text-white/90 hover:bg-black/35'
+                                      : 'bg-gray-200/80 text-gray-700 hover:bg-gray-300 dark:bg-gray-800/80 dark:text-gray-200 dark:hover:bg-gray-700'
+                                  )}
+                                  title="Abrir ações da mensagem"
+                                  aria-label="Abrir ações da mensagem"
+                                >
+                                  <ChevronDown size={14} />
+                                </button>
+                                {msg.replyTo && (
+                                  <button
+                                    type="button"
+                                    onClick={() => scrollToMessage(msg.replyTo!.id)}
+                                    className={clsx(
+                                      'relative z-0 mb-2 flex min-w-0 items-stretch gap-2 rounded-md py-1.5 pl-2 pr-2 text-left transition-opacity hover:opacity-90',
+                                      /* px-4 na bolha: largura explícita + -mx-2 para encostar igual nos dois lados */
+                                      shouldOverlayMeta
+                                        ? 'w-full max-w-full'
+                                        : 'w-[calc(100%+1rem)] max-w-[calc(100%+1rem)] -mx-2',
+                                      isOwn ? 'bg-black/15' : 'bg-sky-50/90 dark:bg-sky-950/35'
+                                    )}
+                                    title="Ir à mensagem original"
+                                  >
+                                    <span
+                                      className={clsx(
+                                        'w-0.5 shrink-0 self-stretch rounded-full',
+                                        isOwn ? 'bg-white/75' : 'bg-sky-500 dark:bg-sky-400'
+                                      )}
+                                      aria-hidden
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <p
                                         className={clsx(
-                                          'flex items-center gap-2 p-2 rounded-lg text-xs',
-                                          isOwn ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                          'text-[11px] font-semibold leading-tight',
+                                          isOwn ? 'text-white' : 'text-sky-800 dark:text-sky-200'
                                         )}
                                       >
-                                        <FileText size={16} className="flex-shrink-0" />
-                                        <span className="flex-1 truncate">{att.fileName}</span>
-                                        {att.fileSize && <span className="flex-shrink-0 opacity-70">{formatFileSize(att.fileSize)}</span>}
-                                        <Download size={14} className="flex-shrink-0" />
-                                      </a>
-                                    )}
-                                  </div>
-                                ))}
+                                        {msg.replyTo.sender?.name || 'Usuário'}
+                                      </p>
+                                      <p
+                                        className={clsx(
+                                          'line-clamp-2 text-xs leading-snug',
+                                          isOwn ? 'text-white/85' : 'text-gray-600 dark:text-gray-400'
+                                        )}
+                                      >
+                                        {getReplyQuoteSnippet(msg.replyTo)}
+                                      </p>
+                                    </span>
+                                  </button>
+                                )}
+                                {/* Attachments */}
+                                {msg.attachments.map(att => {
+                                  const resolvedFileUrl = resolveApiMediaUrl(att.fileUrl ?? null);
+                                  const isImageAttachment = isImageMime(att.mimeType) && !!resolvedFileUrl;
+                                  const isAudioAttachment = isAudioMime(att.mimeType) && !!resolvedFileUrl;
+                                  const normalizedFileName = normalizeAttachmentName(att.fileName);
+                                  const typeLabel = getAttachmentTypeLabel(normalizedFileName, att.mimeType);
+                                  return (
+                                    <div key={att.id} className={hasVisibleText ? 'mb-2' : ''}>
+                                      {isImageAttachment ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setMessageImageViewer({ src: resolvedFileUrl!, name: normalizedFileName })}
+                                          className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                                          title="Abrir imagem"
+                                        >
+                                          <img
+                                            src={resolvedFileUrl!}
+                                            alt={normalizedFileName}
+                                            className="max-w-full rounded-lg max-h-64 object-cover cursor-zoom-in"
+                                          />
+                                        </button>
+                                      ) : isAudioAttachment ? (
+                                        <ChatInlineAudioPlayer
+                                          src={resolvedFileUrl!}
+                                          isOwn={isOwn}
+                                          reserveCornerForMeta={shouldOverlayMeta}
+                                        />
+                                      ) : (
+                                        <div
+                                          className={clsx(
+                                            'w-full overflow-hidden rounded-xl border',
+                                            isOwn
+                                              ? 'border-white/15 bg-black/10'
+                                              : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/70'
+                                          )}
+                                        >
+                                          <div className="flex items-center gap-3 p-3">
+                                            <div
+                                              className={clsx(
+                                                'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+                                                isOwn
+                                                  ? 'bg-white/15 text-white'
+                                                  : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300'
+                                              )}
+                                            >
+                                              <FileText size={18} />
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate text-sm font-semibold">{normalizedFileName}</p>
+                                              <p
+                                                className={clsx(
+                                                  'mt-0.5 text-xs',
+                                                  isOwn ? 'text-white/75' : 'text-gray-500 dark:text-gray-400'
+                                                )}
+                                              >
+                                                {typeLabel}
+                                                {att.fileSize ? ` - ${formatFileSize(att.fileSize)}` : ''}
+                                              </p>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                                 {/* Conteúdo */}
-                                {msg.content &&
-                                  msg.content !== '📎' && (
+                                {hasVisibleText && (
                                     <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>
                                   )}
                               </>
                             )}
                             {/* Time + read status + ícones de estado */}
-                            <div className={clsx('flex items-center gap-1 mt-1 justify-end')}>
+                            {shouldOverlayMeta ? (
+                              <div
+                                className={clsx(
+                                  'absolute bottom-2 right-2 flex items-center gap-1 text-[10px]',
+                                  isOwn ? 'text-white' : 'text-gray-500 dark:text-gray-400'
+                                )}
+                              >
+                                <span>{formatMessageTime(msg.createdAt)}</span>
+                                {isOwn && !msg.deletedAt && (
+                                  <CheckCheck
+                                    size={12}
+                                    strokeWidth={2.4}
+                                    className={msg.isRead ? 'text-blue-200' : 'text-white/90'}
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                            <div className={clsx('flex items-center gap-1 mt-0.5 justify-end')}>
                               {activeChat?.pinnedMessageId === msg.id && !msg.deletedAt && (
                                 <Pin
                                   size={11}
@@ -2070,6 +2819,101 @@ function ConversasContent() {
                                 <CheckCheck size={14} strokeWidth={2.4} className={msg.isRead ? 'text-blue-200' : 'text-white/85'} />
                               )}
                             </div>
+                            )}
+                              </div>
+                              {!msg.deletedAt && (
+                                <div
+                                  className="relative flex shrink-0 flex-col items-center justify-center self-center"
+                                  data-reaction-picker-root
+                                  onDoubleClick={(e) => e.stopPropagation()}
+                                >
+                                  {reactionPickerForMessageId === msg.id && (
+                                    <div
+                                      className="absolute bottom-full left-1/2 z-[85] mb-1.5 flex max-w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2 flex-wrap items-center justify-center gap-0.5 rounded-full border border-gray-600/80 bg-[#1f2c33] px-2 py-1.5 shadow-xl dark:border-gray-500/60"
+                                      role="listbox"
+                                      aria-label="Escolher reação"
+                                    >
+                                      {QUICK_REACTION_EMOJIS.map((em) => (
+                                        <button
+                                          key={em}
+                                          type="button"
+                                          className="rounded-full p-1 text-[1.35rem] leading-none transition-colors hover:bg-white/10"
+                                          onClick={() => applyMessageReaction(msg.id, em)}
+                                        >
+                                          {em}
+                                        </button>
+                                      ))}
+                                      {reactionPickerShowMore &&
+                                        EXTRA_REACTION_EMOJIS.map((em) => (
+                                          <button
+                                            key={`extra-${em}`}
+                                            type="button"
+                                            className="rounded-full p-1 text-[1.35rem] leading-none transition-colors hover:bg-white/10"
+                                            onClick={() => applyMessageReaction(msg.id, em)}
+                                          >
+                                            {em}
+                                          </button>
+                                        ))}
+                                      <button
+                                        type="button"
+                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg font-light text-white/90 hover:bg-white/10"
+                                        title="Mais reações"
+                                        aria-label="Mais reações"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setReactionPickerShowMore((v) => !v);
+                                        }}
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className={clsx(
+                                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-opacity',
+                                      'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
+                                      'max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100',
+                                      reactionPickerForMessageId === msg.id &&
+                                        'opacity-100 ring-2 ring-red-400/40 dark:ring-red-500/35'
+                                    )}
+                                    title="Reagir"
+                                    aria-label="Reagir à mensagem"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setReactionPickerShowMore(false);
+                                      setReactionPickerForMessageId((id) => (id === msg.id ? null : msg.id));
+                                    }}
+                                    onDoubleClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Smile size={17} strokeWidth={2} className="opacity-90" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            {selectedChatId &&
+                              reactionsByChat[selectedChatId]?.[msg.id] &&
+                              !msg.deletedAt && (
+                                <button
+                                  type="button"
+                                  className={clsx(
+                                    'mt-0.5 flex w-full min-w-0',
+                                    isOwn ? 'justify-end' : 'justify-start'
+                                  )}
+                                  title="Toque para remover sua reação"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    applyMessageReaction(
+                                      msg.id,
+                                      reactionsByChat[selectedChatId]![msg.id]!
+                                    );
+                                  }}
+                                >
+                                  <span className="inline-flex cursor-pointer rounded-full border border-gray-200 bg-white px-2 py-0.5 text-sm leading-none shadow-sm dark:border-gray-600 dark:bg-gray-800">
+                                    {reactionsByChat[selectedChatId]![msg.id]}
+                                  </span>
+                                </button>
+                              )}
                           </div>
                         </div>
                         )}
@@ -2149,6 +2993,63 @@ function ConversasContent() {
                           {messageContextMenu.isFavorited ? 'Desfavoritar' : 'Favoritar'}
                         </span>
                       </button>
+
+                      {contextMenuMessage && !contextMenuMessage.deletedAt && !contextMenuMessage.isSystem && (
+                        <>
+                          <div className="mx-4 h-px bg-gray-100 dark:bg-gray-700" role="separator" aria-hidden />
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
+                            onClick={() => {
+                              setReplyingTo(contextMenuMessage);
+                              setMessageContextMenu(null);
+                              textareaRef.current?.focus();
+                            }}
+                          >
+                            <CornerUpLeft
+                              size={16}
+                              className="flex-shrink-0 text-slate-400 transition-colors group-hover:text-sky-500"
+                            />
+                            <span className="font-medium">Responder</span>
+                          </button>
+                        </>
+                      )}
+
+                      {contextMenuMessage?.attachments?.some((att) => !!resolveApiMediaUrl(att.fileUrl ?? null)) && (
+                        <>
+                          <div className="mx-4 h-px bg-gray-100 dark:bg-gray-700" role="separator" aria-hidden />
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
+                            onClick={() => {
+                              if (!contextMenuMessage) return;
+                              const filesToDownload = contextMenuMessage.attachments
+                                .map((att) => ({
+                                  url: resolveApiMediaUrl(att.fileUrl ?? null),
+                                  fileName: att.fileName || 'anexo',
+                                }))
+                                .filter((item): item is { url: string; fileName: string } => !!item.url);
+                              if (filesToDownload.length === 0) return;
+
+                              void Promise.all(
+                                filesToDownload.map((item) => downloadAttachmentFile(item.url, item.fileName))
+                              );
+
+                              setMessageContextMenu(null);
+                            }}
+                          >
+                            <Download
+                              size={16}
+                              className="flex-shrink-0 text-slate-400 transition-colors group-hover:text-emerald-500"
+                            />
+                            <span className="font-medium">
+                              {contextMenuMessage.attachments.length > 1 ? 'Baixar' : 'Baixar'}
+                            </span>
+                          </button>
+                        </>
+                      )}
 
                       {contextMenuMessage && !contextMenuMessage.deletedAt && (
                         <>
@@ -2386,12 +3287,59 @@ function ConversasContent() {
                 )}
 
               {/* Input area — pílula fina, fundo contínuo com a área de mensagens */}
-              <div className="flex-shrink-0 bg-transparent border-0 px-3 pt-2 pb-3 sm:px-4">
+              <div
+                className="flex-shrink-0 bg-transparent border-0 px-3 pt-2 pb-3 sm:px-4"
+                onDragOver={handleComposerDragOver}
+                onDragLeave={handleComposerDragLeave}
+                onDrop={handleComposerDrop}
+              >
+                {replyingTo && (
+                  <div className="mb-2 flex min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/90">
+                    <div className="min-w-0 flex-1 border-l-[3px] border-red-500 pl-2.5">
+                      <p className="text-[11px] font-semibold text-gray-800 dark:text-gray-100">
+                        {replyingTo.sender?.name || 'Usuário'}
+                      </p>
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                        {getMessageSearchPreview(replyingTo)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-200 dark:hover:bg-gray-700 dark:text-gray-400"
+                      aria-label="Cancelar resposta"
+                      onClick={() => setReplyingTo(null)}
+                    >
+                      <X size={18} strokeWidth={2} />
+                    </button>
+                  </div>
+                )}
+                {isDraggingFiles && (
+                  <div className="mb-2 rounded-lg border border-dashed border-red-400/70 bg-red-50/70 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-500/60 dark:bg-red-900/20 dark:text-red-300">
+                    Solte os arquivos aqui para anexar
+                  </div>
+                )}
+                {voiceRecordingActive && (
+                  <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm dark:border-red-800 dark:bg-red-950/50">
+                    <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" aria-hidden />
+                    <span className="font-medium text-red-800 dark:text-red-200">
+                      Gravando {formatVoiceRecordingTime(voiceRecordingMs)}
+                    </span>
+                    <span className="text-xs text-red-700/90 dark:text-red-300/90">
+                      Toque no quadrado vermelho para parar e enviar
+                    </span>
+                  </div>
+                )}
                 {attachedFiles.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-1.5 px-0.5">
                     {attachedFiles.map((f, i) => (
                       <div key={i} className="flex items-center gap-1 text-xs bg-white dark:bg-gray-900 rounded-lg px-2 py-1 max-w-[160px] border border-gray-200 dark:border-gray-800">
-                        {f.type.startsWith('image/') ? <ImageIcon size={12} /> : <FileText size={12} />}
+                        {f.type.startsWith('image/') ? (
+                          <ImageIcon size={12} />
+                        ) : f.type.startsWith('audio/') ? (
+                          <Mic size={12} />
+                        ) : (
+                          <FileText size={12} />
+                        )}
                         <span className="truncate flex-1">{f.name}</span>
                         <button type="button" onClick={() => removeFile(i)} className="flex-shrink-0 hover:text-red-500">
                           <X size={12} />
@@ -2461,13 +3409,25 @@ function ConversasContent() {
                     onKeyDown={handleKeyDown}
                     placeholder="Digite uma mensagem"
                     rows={1}
-                    className="chat-composer-input min-h-[44px] max-h-[120px] flex-1 resize-none border-0 bg-transparent px-1.5 py-2 leading-6"
+                    disabled={voiceRecordingActive}
+                    className="chat-composer-input min-h-[44px] max-h-[120px] flex-1 resize-none border-0 bg-transparent px-1.5 py-2 leading-6 disabled:cursor-not-allowed disabled:opacity-50"
                     style={{ height: '44px', minHeight: '44px' }}
                   />
 
                   {/* Bloco fixo à direita: sempre h-11 alinhado ao esquerdo */}
                   <div className="flex h-11 shrink-0 items-center justify-center">
-                    {messageInput.trim() || attachedFiles.length > 0 ? (
+                    {voiceRecordingActive ? (
+                      <button
+                        type="button"
+                        onClick={() => stopVoiceRecordingAndSend()}
+                        disabled={sendMutation.isPending}
+                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Parar e enviar áudio"
+                        aria-label="Parar gravação e enviar"
+                      >
+                        <Square size={20} strokeWidth={2.5} className="shrink-0 fill-current" />
+                      </button>
+                    ) : messageInput.trim() || attachedFiles.length > 0 ? (
                       <button
                         type="button"
                         onClick={handleSend}
@@ -2485,10 +3445,11 @@ function ConversasContent() {
                     ) : (
                       <button
                         type="button"
-                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors hover:bg-gray-200/80 dark:text-gray-300 dark:hover:bg-white/10"
-                        title="Mensagem de voz (em breve)"
-                        aria-label="Mensagem de voz"
-                        onClick={() => toast('Gravação de áudio em breve')}
+                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors hover:bg-gray-200/80 dark:text-gray-300 dark:hover:bg-white/10 disabled:opacity-50"
+                        title="Gravar mensagem de voz"
+                        aria-label="Gravar mensagem de voz"
+                        disabled={!selectedChatId || sendMutation.isPending}
+                        onClick={() => void startVoiceRecording()}
                       >
                         <Mic size={22} strokeWidth={2} className="shrink-0" />
                       </button>
@@ -3454,6 +4415,31 @@ function ConversasContent() {
           src={resolveApiMediaUrl(activeChat.groupAvatarUrl)!}
           alt={activeChat.groupName || 'Foto do grupo'}
           className="max-w-[90vw] max-h-[90vh] rounded-2xl object-contain shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+          referrerPolicy="no-referrer"
+        />
+      </div>,
+      document.body
+    )}
+
+    {/* ── Lightbox: imagens das mensagens ─────────────────────────── */}
+    {messageImageViewer && typeof document !== 'undefined' && createPortal(
+      <div
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+        onClick={() => setMessageImageViewer(null)}
+      >
+        <button
+          type="button"
+          onClick={() => setMessageImageViewer(null)}
+          className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+          title="Fechar"
+        >
+          <X size={22} />
+        </button>
+        <img
+          src={messageImageViewer.src}
+          alt={messageImageViewer.name}
+          className="max-w-[92vw] max-h-[88vh] rounded-2xl object-contain shadow-2xl"
           onClick={(e) => e.stopPropagation()}
           referrerPolicy="no-referrer"
         />
