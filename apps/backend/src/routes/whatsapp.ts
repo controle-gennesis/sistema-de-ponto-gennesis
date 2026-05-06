@@ -39,4 +39,9 @@ router.post('/conversations/:id/submissions/:submissionId/finalize', (req, res, 
   controller.finalizeMedicalCertificateSubmission(req as any, res, next)
 );
 
+// Download do arquivo do atestado (Content-Disposition: attachment)
+router.get('/conversations/:id/submissions/:submissionId/file', (req, res, next) =>
+  controller.downloadMedicalCertificateSubmissionFile(req as any, res, next)
+);
+
 export default router;

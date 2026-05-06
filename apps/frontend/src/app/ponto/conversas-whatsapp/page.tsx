@@ -10,8 +10,6 @@ import {
   Clock,
   FileText,
   ChevronRight,
-  User,
-  Sparkles,
   Paperclip,
   Loader2,
   ArrowLeft,
@@ -212,7 +210,6 @@ function ListaMensagensWhatsAppDetalhe({
                   : 'opacity-80 text-gray-600 dark:text-gray-300'
               }`}
             >
-              {m.role === 'user' ? <User className="w-3 h-3 shrink-0" /> : <Sparkles className="w-3 h-3 shrink-0" />}
               <span className="font-medium truncate max-w-[11rem] sm:max-w-[14rem]">
                 {m.role === 'user' ? userLabel : 'Luna'}
               </span>
@@ -438,16 +435,53 @@ export default function ConversasWhatsAppPage() {
     return pending[pending.length - 1];
   }, [detail]);
 
-  const handleDownloadAtestado = (url: string | null | undefined, fileName: string | null | undefined) => {
+  const handleDownloadAtestado = async (
+    url: string | null | undefined,
+    fileName: string | null | undefined,
+    opts?: { submissionId?: string; conversationId?: string }
+  ) => {
+    const safeName = (fileName?.trim() || 'atestado').replace(/[/\\?%*:|"<>]/g, '-');
+
+    const triggerBlobDownload = (blob: Blob, name: string) => {
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = name;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    };
+
+    // Atestado no painel: baixa via API com Content-Disposition (evita abrir S3/JPG em nova aba).
+    if (opts?.submissionId && opts?.conversationId) {
+      try {
+        const res = await api.get(`/whatsapp/conversations/${opts.conversationId}/submissions/${opts.submissionId}/file`, {
+          responseType: 'blob'
+        });
+        const blob = res.data instanceof Blob ? res.data : new Blob([res.data]);
+        triggerBlobDownload(blob, safeName);
+      } catch {
+        alert('Não foi possível baixar o arquivo. Tente de novo ou use “Ver”.');
+      }
+      return;
+    }
+
     if (!url) return;
-    const a = document.createElement('a');
-    a.href = getFileHref(url);
-    a.download = fileName || 'atestado';
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const href = getFileHref(url);
+    if (!href || href === '#') return;
+
+    try {
+      const res = await fetch(href, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) throw new Error('download failed');
+      const blob = await res.blob();
+      triggerBlobDownload(blob, safeName);
+    } catch {
+      alert(
+        'Não foi possível baixar o arquivo automaticamente. Tente em “Ver” e salve pelo navegador.'
+      );
+    }
   };
 
   const openAtestadoFilePreview = (fileUrl: string | null | undefined, fileName: string | null | undefined) => {
@@ -1081,7 +1115,13 @@ export default function ConversasWhatsAppPage() {
                                               </button>
                                               <button
                                                 type="button"
-                                                onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
+                                                onClick={() => {
+                                                  if (!selectedId) return;
+                                                  void handleDownloadAtestado(s.fileUrl, s.fileName, {
+                                                    submissionId: s.id,
+                                                    conversationId: selectedId
+                                                  });
+                                                }}
                                                 disabled={!s.fileUrl}
                                                 title="Baixar arquivo"
                                                 aria-label="Baixar arquivo"
@@ -1125,7 +1165,13 @@ export default function ConversasWhatsAppPage() {
                                           </button>
                                           <button
                                             type="button"
-                                            onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
+                                            onClick={() => {
+                                              if (!selectedId) return;
+                                              void handleDownloadAtestado(s.fileUrl, s.fileName, {
+                                                submissionId: s.id,
+                                                conversationId: selectedId
+                                              });
+                                            }}
                                             disabled={!s.fileUrl}
                                             title="Baixar arquivo"
                                             aria-label="Baixar arquivo"

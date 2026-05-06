@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Request, Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
@@ -478,6 +480,73 @@ export class WhatsAppController {
         success: true,
         message: 'Atestado finalizado com sucesso'
       });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * Download do arquivo de um envio de atestado (força attachment; evita abrir S3 em nova aba).
+   */
+  async downloadMedicalCertificateSubmissionFile(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id: conversationId, submissionId } = req.params;
+
+      const submission = await prisma.whatsAppSubmission.findFirst({
+        where: {
+          id: submissionId,
+          conversationId,
+          type: 'MEDICAL_CERTIFICATE'
+        }
+      });
+
+      if (!submission) {
+        throw createError('Atestado não encontrado', 404);
+      }
+
+      const fileNameRaw = submission.fileName?.trim() || 'atestado';
+      const safeFilename = fileNameRaw.replace(/[/\\?%*:|"<>]/g, '-').slice(0, 180);
+
+      if (submission.fileKey) {
+        const got = await metaWhatsApp.getObjectBuffer(submission.fileKey);
+        if (!got) {
+          throw createError('Não foi possível obter o arquivo', 500);
+        }
+        res.setHeader('Content-Type', got.contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+        return res.send(got.buffer);
+      }
+
+      const url = submission.fileUrl || '';
+      const marker = '/uploads/whatsapp-media/';
+      if (url.includes(marker)) {
+        const after = url.split(marker)[1]?.split('?')[0];
+        if (!after) {
+          throw createError('Arquivo não encontrado', 404);
+        }
+        const basename = path.basename(after);
+        const filePath = path.join(process.cwd(), 'apps', 'backend', 'uploads', 'whatsapp-media', basename);
+        if (!fs.existsSync(filePath)) {
+          throw createError('Arquivo não encontrado', 404);
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType =
+          (
+            {
+              '.pdf': 'application/pdf',
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.png': 'image/png',
+              '.webp': 'image/webp',
+              '.gif': 'image/gif'
+            } as Record<string, string>
+          )[ext] || 'application/octet-stream';
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+        return res.sendFile(filePath);
+      }
+
+      throw createError('Arquivo não disponível para download', 404);
     } catch (error) {
       return next(error);
     }
