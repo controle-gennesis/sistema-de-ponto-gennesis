@@ -5,6 +5,48 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 
 export class UserController {
+  async updateUserPassword(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const { newPassword } = req.body as { newPassword?: string };
+
+      if (!newPassword || typeof newPassword !== 'string') {
+        throw createError('A nova senha é obrigatória', 400);
+      }
+
+      const password = newPassword.trim();
+      if (password.length < 6) {
+        throw createError('A nova senha deve ter pelo menos 6 caracteres', 400);
+      }
+
+      const existingUser = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true }
+      });
+
+      if (!existingUser) {
+        throw createError('Usuário não encontrado', 404);
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 12);
+
+      await prisma.user.update({
+        where: { id },
+        data: {
+          password: hashedPassword,
+          isFirstLogin: false
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Senha alterada com sucesso'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getAllUsers(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { page = 1, limit = 10, search, role, department, status } = req.query;

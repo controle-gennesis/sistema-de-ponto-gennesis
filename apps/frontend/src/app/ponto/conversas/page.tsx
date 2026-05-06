@@ -50,7 +50,9 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
 import { CircularPhotoCropModal } from '@/components/conversas/CircularPhotoCropModal';
+import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { useNativeWebRTCCall } from '@/hooks/useNativeWebRTCCall';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -771,6 +773,7 @@ function ConversasContent() {
   const MIN_RIGHT_PANEL_WIDTH = 480;
 
   const { user: currentUser } = usePermissions();
+  const nativeCall = useNativeWebRTCCall({ userId: currentUser?.id });
   const queryClient = useQueryClient();
 
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -2222,14 +2225,26 @@ function ConversasContent() {
                         <div ref={chatHeaderMenuRef} className="relative ml-auto flex shrink-0 items-center gap-0.5">
                           <button
                             type="button"
-                            title="Videochamada (abre sala no navegador)"
+                            title={
+                              activeChat?.chatType === 'GROUP'
+                                ? 'Videochamada em grupo (abre sala no navegador)'
+                                : 'Videochamada no sistema'
+                            }
                             aria-label="Iniciar videochamada"
                             onClick={() => {
                               if (!activeChat?.id) return;
-                              openVideoCallRoom(activeChat.id, 'video');
-                              toast.success(
-                                'Sala de vídeo aberta. Quem estiver nesta conversa pode entrar na mesma sala pelo botão de vídeo.'
-                              );
+                              if (activeChat.chatType === 'GROUP') {
+                                openVideoCallRoom(activeChat.id, 'video');
+                                toast.success(
+                                  'Sala de grupo aberta. Para chamada nativa 1:1, use uma conversa direta.'
+                                );
+                                return;
+                              }
+                              if (!other) {
+                                toast.error('Abra uma conversa direta para ligar.');
+                                return;
+                              }
+                              void nativeCall.startOutgoing(activeChat.id, other.id, other.name || 'Contato', true);
                             }}
                             className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
                           >
@@ -2237,14 +2252,24 @@ function ConversasContent() {
                           </button>
                           <button
                             type="button"
-                            title="Ligação de voz (abre sala com microfone)"
+                            title={
+                              activeChat?.chatType === 'GROUP'
+                                ? 'Ligação em grupo (abre sala no navegador)'
+                                : 'Ligação de voz no sistema'
+                            }
                             aria-label="Iniciar ligação de voz"
                             onClick={() => {
                               if (!activeChat?.id) return;
-                              openVideoCallRoom(activeChat.id, 'audio');
-                              toast.success(
-                                'Sala de voz aberta. A câmera inicia desligada; você pode ligá-la na reunião se quiser.'
-                              );
+                              if (activeChat.chatType === 'GROUP') {
+                                openVideoCallRoom(activeChat.id, 'audio');
+                                toast.success('Sala de voz do grupo aberta no navegador.');
+                                return;
+                              }
+                              if (!other) {
+                                toast.error('Abra uma conversa direta para ligar.');
+                                return;
+                              }
+                              void nativeCall.startOutgoing(activeChat.id, other.id, other.name || 'Contato', false);
                             }}
                             className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
                           >
@@ -4710,6 +4735,8 @@ function ConversasContent() {
         onPickReplacement={handleGroupPhotoReplaceSource}
       />
     )}
+
+    <NativeCallOverlay call={nativeCall} />
     </>
   );
 }

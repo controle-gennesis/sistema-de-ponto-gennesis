@@ -112,6 +112,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/controle/criar-tipos-restritos-dp',
     category: 'Controle',
   },
+  {
+    key: pathToModuleKey('/ponto/controle/alterar-senha-funcionarios'),
+    name: 'Alterar senha de funcionários',
+    href: '/ponto/controle/alterar-senha-funcionarios',
+    category: 'Controle',
+  },
 ] as const;
 
 const keySet = new Set(PERMISSION_MODULES.map((m) => m.key));

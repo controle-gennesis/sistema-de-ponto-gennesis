@@ -82,6 +82,7 @@ interface AtestadoPayload {
   atestadoOtherType?: string | null;
   dataInicio?: string | null;
   dataFim?: string | null;
+  numeroDias?: number | null;
   fileReceived?: boolean;
   fileNote?: string | null;
 }
@@ -122,6 +123,7 @@ const ATESTADO_FLOW_STEPS = [
   'ATESTADO_ASK_OTHER_TYPE',
   'ATESTADO_ASK_START_DATE',
   'ATESTADO_ASK_END_DATE',
+  'ATESTADO_ASK_DAYS',
   'ATESTADO_ASK_FILE',
   'ATESTADO_COMPLETE'
 ];
@@ -176,7 +178,9 @@ export default function ConversasWhatsAppPage() {
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const [painelTab, setPainelTab] = useState<'atendimentos' | 'atestados'>('atendimentos');
   const [atendimentoTab, setAtendimentoTab] = useState<'aguardando' | 'andamento' | 'encerradas'>('aguardando');
+  const [atestadoTab, setAtestadoTab] = useState<'pendentes' | 'finalizados'>('pendentes');
   const [isEndingConversation, setIsEndingConversation] = useState(false);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -240,9 +244,16 @@ export default function ConversasWhatsAppPage() {
       : atendimentoTab === 'andamento'
         ? atendimentoEmAndamento
         : conversasEncerradas;
+  const conversasAtestadoBase = conversations.filter(
+    (c) => getCategoriaConversa(c.flowStatus) === 'atestados' || c.submissionCount > 0
+  );
+  const atestadosPendentes = conversasAtestadoBase.filter((c) => c.status === 'PENDING');
+  const atestadosFinalizados = conversasAtestadoBase.filter((c) => c.status !== 'PENDING');
+  const conversasAtestadoFiltradas = atestadoTab === 'pendentes' ? atestadosPendentes : atestadosFinalizados;
+  const conversasVisiveis = painelTab === 'atendimentos' ? conversasFiltradas : conversasAtestadoFiltradas;
   const detail: ConversationDetail | null = detailData?.data ?? null;
   const isLoading = loadingUser || loadingList;
-  const showLegacyData = false;
+  const showLegacyData = painelTab === 'atestados';
 
   /** Categoria da conversa selecionada (para acompanhar aba só quando o status mudar na mesma conversa, ex. após refetch). */
   const lastSelectedIdForCategoryRef = useRef<string | null>(null);
@@ -267,6 +278,11 @@ export default function ConversasWhatsAppPage() {
     if (!selected || !conversationBelongsToTab(selected, tab)) {
       setSelectedId(null);
     }
+  };
+
+  const handlePainelTabChange = (tab: 'atendimentos' | 'atestados') => {
+    setPainelTab(tab);
+    setSelectedId(null);
   };
 
   useEffect(() => {
@@ -404,69 +420,140 @@ export default function ConversasWhatsAppPage() {
             Central de Atendimentos
           </h1>
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
-            Encaminhe, acompanhe e encerre conversas com atendente humano.
+            {painelTab === 'atendimentos'
+              ? 'Encaminhe, acompanhe e encerre conversas com atendente humano.'
+              : 'Acompanhe os envios de atestado e os documentos recebidos.'}
           </p>
         </div>
 
-        {/* Filtros por etapa */}
+        {/* Alternância de painel */}
         <div className="flex flex-wrap justify-center gap-2 p-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl w-fit mx-auto">
           <button
             type="button"
-            onClick={() => handleAtendimentoTabChange('aguardando')}
+            onClick={() => handlePainelTabChange('atendimentos')}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              atendimentoTab === 'aguardando'
-                ? 'bg-blue-600 text-white dark:bg-blue-500'
+              painelTab === 'atendimentos'
+                ? 'bg-red-600 text-white dark:bg-red-500'
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
             }`}
           >
-            <HelpCircle className="w-4 h-4 shrink-0" />
-            Aguardando atendente
-            <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'aguardando' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
-              {aguardandoAtendimento.length}
-            </span>
+            <MessageSquare className="w-4 h-4 shrink-0" />
+            Atendimentos
           </button>
           <button
             type="button"
-            onClick={() => handleAtendimentoTabChange('andamento')}
+            onClick={() => handlePainelTabChange('atestados')}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              atendimentoTab === 'andamento'
-                ? 'bg-indigo-600 text-white dark:bg-indigo-500'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
-            }`}
-          >
-            <Clock className="w-4 h-4 shrink-0" />
-            Em atendimento
-            <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'andamento' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
-              {atendimentoEmAndamento.length}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleAtendimentoTabChange('encerradas')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              atendimentoTab === 'encerradas'
-                ? 'bg-green-600 text-white dark:bg-green-500'
+              painelTab === 'atestados'
+                ? 'bg-red-600 text-white dark:bg-red-500'
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
             }`}
           >
             <FileCheck className="w-4 h-4 shrink-0" />
-            Encerradas
-            <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'encerradas' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
-              {conversasEncerradas.length}
-            </span>
+            Atestados
           </button>
+        </div>
+
+        {/* Filtros por etapa */}
+        <div className="flex flex-wrap justify-center gap-2 p-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl w-fit mx-auto">
+          {painelTab === 'atendimentos' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => handleAtendimentoTabChange('aguardando')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  atendimentoTab === 'aguardando'
+                    ? 'bg-blue-600 text-white dark:bg-blue-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                }`}
+              >
+                <HelpCircle className="w-4 h-4 shrink-0" />
+                Aguardando atendente
+                <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'aguardando' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+                  {aguardandoAtendimento.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAtendimentoTabChange('andamento')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  atendimentoTab === 'andamento'
+                    ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                }`}
+              >
+                <Clock className="w-4 h-4 shrink-0" />
+                Em atendimento
+                <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'andamento' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+                  {atendimentoEmAndamento.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAtendimentoTabChange('encerradas')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  atendimentoTab === 'encerradas'
+                    ? 'bg-green-600 text-white dark:bg-green-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                }`}
+              >
+                <FileCheck className="w-4 h-4 shrink-0" />
+                Encerradas
+                <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atendimentoTab === 'encerradas' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+                  {conversasEncerradas.length}
+                </span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setAtestadoTab('pendentes')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  atestadoTab === 'pendentes'
+                    ? 'bg-amber-600 text-white dark:bg-amber-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                }`}
+              >
+                <Clock className="w-4 h-4 shrink-0" />
+                Pendentes
+                <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atestadoTab === 'pendentes' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+                  {atestadosPendentes.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAtestadoTab('finalizados')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  atestadoTab === 'finalizados'
+                    ? 'bg-green-600 text-white dark:bg-green-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                }`}
+              >
+                <FileCheck className="w-4 h-4 shrink-0" />
+                Finalizados
+                <span className={`ml-1 min-w-[1.25rem] text-center text-xs rounded-full px-1.5 ${atestadoTab === 'finalizados' ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}`}>
+                  {atestadosFinalizados.length}
+                </span>
+              </button>
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           {/* Lista de conversas (filtrada pela aba) */}
           <Card className="lg:col-span-1 shadow-sm">
-            <CardHeader className="pb-3">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {atendimentoTab === 'aguardando'
+            <CardHeader className="p-2">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                {painelTab === 'atendimentos'
+                  ? atendimentoTab === 'aguardando'
                     ? 'Aguardando atendente'
                     : atendimentoTab === 'andamento'
                       ? 'Em atendimento'
-                      : 'Encerradas'}
+                      : 'Encerradas'
+                  : atestadoTab === 'pendentes'
+                    ? 'Atestados pendentes'
+                    : 'Atestados finalizados'}
               </h2>
             </CardHeader>
             <CardContent className="p-0">
@@ -475,27 +562,33 @@ export default function ConversasWhatsAppPage() {
                   <Loader2 className="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">Carregando...</span>
                 </div>
-              ) : conversasFiltradas.length === 0 ? (
+              ) : conversasVisiveis.length === 0 ? (
                 <div className="py-10 px-6 text-center">
                   <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gray-100 dark:bg-gray-700/60 mb-4">
                     <AlertCircle className="w-7 h-7 text-gray-500 dark:text-gray-400" />
                   </div>
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {atendimentoTab === 'aguardando'
-                      ? 'Nenhuma conversa aguardando atendimento'
-                      : atendimentoTab === 'andamento'
-                        ? 'Nenhuma conversa em atendimento'
-                        : 'Nenhuma conversa finalizada'}
+                    {painelTab === 'atendimentos'
+                      ? atendimentoTab === 'aguardando'
+                        ? 'Nenhuma conversa aguardando atendimento'
+                        : atendimentoTab === 'andamento'
+                          ? 'Nenhuma conversa em atendimento'
+                          : 'Nenhuma conversa finalizada'
+                      : atestadoTab === 'pendentes'
+                        ? 'Nenhum atestado pendente'
+                        : 'Nenhum atestado finalizado'}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-[240px] mx-auto">
-                    {atendimentoTab === 'encerradas'
-                      ? 'Quando a conversa for concluída ou cancelada, ela aparece aqui.'
-                      : 'Quando alguém solicitar atendimento humano, aparecerá aqui.'}
+                    {painelTab === 'atendimentos'
+                      ? atendimentoTab === 'encerradas'
+                        ? 'Quando a conversa for concluída ou cancelada, ela aparece aqui.'
+                        : 'Quando alguém solicitar atendimento humano, aparecerá aqui.'
+                      : 'Quando houver envio de atestado pelo chatbot, ele aparecerá aqui.'}
                   </p>
                 </div>
               ) : (
                 <ul className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[calc(100vh-20rem)] overflow-y-auto">
-                  {conversasFiltradas.map((c) => {
+                  {conversasVisiveis.map((c) => {
                     return (
                       <li key={c.id}>
                         <button
@@ -508,7 +601,9 @@ export default function ConversasWhatsAppPage() {
                           }`}
                         >
                           <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 shrink-0">
-                            {c.attendantRequested ? (
+                            {painelTab === 'atestados' ? (
+                              <FileCheck className="w-4 h-4 text-red-600 dark:text-red-400" />
+                            ) : c.attendantRequested ? (
                               <HelpCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                             ) : c.attendantInProgress ? (
                               <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
@@ -583,7 +678,9 @@ export default function ConversasWhatsAppPage() {
                   </div>
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Selecione uma conversa</p>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-[280px] mx-auto">
-                    Para ver as mensagens e tratar o atendimento humano.
+                    {painelTab === 'atendimentos'
+                      ? 'Para ver as mensagens e tratar o atendimento humano.'
+                      : 'Para ver os dados e os arquivos do atestado enviado.'}
                   </p>
                 </div>
               </Card>
@@ -617,11 +714,11 @@ export default function ConversasWhatsAppPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {detail.payload && (detail.payload as any).attendantRequested ? (
+                      {painelTab === 'atendimentos' && detail.payload && (detail.payload as any).attendantRequested ? (
                         <span className="text-xs px-2 py-1 rounded-md shrink-0 font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
                           Aguardando atendente
                         </span>
-                      ) : detail.payload && (detail.payload as any).attendantInProgress ? (
+                      ) : painelTab === 'atendimentos' && detail.payload && (detail.payload as any).attendantInProgress ? (
                         <span className="text-xs px-2 py-1 rounded-md shrink-0 font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200">
                           Em atendimento
                         </span>
@@ -643,7 +740,7 @@ export default function ConversasWhatsAppPage() {
                               : detail.status}
                         </span>
                       )}
-                      {detail.status === 'PENDING' && (
+                      {painelTab === 'atendimentos' && detail.status === 'PENDING' && (
                         <button
                           type="button"
                           onClick={handleEndConversation}
@@ -769,6 +866,7 @@ export default function ConversasWhatsAppPage() {
                                           )}
                                       <LinhaDado icon={Calendar} label="Data início" value={p.dataInicio ?? null} />
                                       <LinhaDado icon={Calendar} label="Data fim" value={p.dataFim ?? null} />
+                                      <LinhaDado icon={Hash} label="Número de dias" value={p.numeroDias != null ? String(p.numeroDias) : null} />
                                       {(s.fileUrl || s.fileName) && (
                                         <div className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
                                           <Paperclip className="w-4 h-4 text-gray-400 dark:text-gray-500 mt-0.5 shrink-0" />
@@ -932,6 +1030,11 @@ export default function ConversasWhatsAppPage() {
                               )}
                               <LinhaDado icon={Calendar} label="Data início" value={(detail.payload as AtestadoPayload).dataInicio ?? null} />
                               <LinhaDado icon={Calendar} label="Data fim" value={(detail.payload as AtestadoPayload).dataFim ?? null} />
+                              <LinhaDado
+                                icon={Hash}
+                                label="Número de dias"
+                                value={(detail.payload as AtestadoPayload).numeroDias != null ? String((detail.payload as AtestadoPayload).numeroDias) : null}
+                              />
                             </div>
                           )}
                           {!isAtestadoPayload(detail.payload as Record<string, unknown>) && (
@@ -999,6 +1102,7 @@ export default function ConversasWhatsAppPage() {
                       <div ref={messagesEndRef} />
                     </div>
 
+                    {painelTab === 'atendimentos' && (
                     <form
                       onSubmit={(e) => {
                         e.preventDefault();
@@ -1029,6 +1133,7 @@ export default function ConversasWhatsAppPage() {
                         {isSending ? 'Enviando...' : 'Enviar'}
                       </button>
                     </form>
+                    )}
                   </div>
                 </CardContent>
               </Card>
