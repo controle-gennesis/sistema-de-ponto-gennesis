@@ -731,10 +731,17 @@ export class WhatsAppBotService {
         typeof (newPayload as any).waProfileName === 'string'
           ? String((newPayload as any).waProfileName).trim().slice(0, 120)
           : '';
+      const hadHumanHandoff =
+        (newPayload as any).attendantHandoffEver === true ||
+        (newPayload as any).attendantRequested === true ||
+        (newPayload as any).attendantInProgress === true ||
+        (typeof (newPayload as any).attendantRequestedAt === 'string' &&
+          String((newPayload as any).attendantRequestedAt).length > 0);
       clearPayload();
       if (nameKeep) (newPayload as any).name = nameKeep;
       if (requesterKeep) (newPayload as any).requesterName = requesterKeep;
       if (waKeep) (newPayload as any).waProfileName = waKeep;
+      if (hadHumanHandoff) (newPayload as any).attendantHandoffEver = true;
       newStatus = 'MENU';
       newConversationStatus = 'CANCELLED';
       return {

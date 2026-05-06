@@ -184,6 +184,7 @@ export class WhatsAppController {
         status: c.status,
         attendantRequested: !!(c.payload as any)?.attendantRequested,
         attendantInProgress: !!(c.payload as any)?.attendantInProgress,
+        attendantHandoffEver: !!(c.payload as any)?.attendantHandoffEver,
         updatedAt: c.updatedAt,
         createdAt: c.createdAt,
         messageCount: c._count.messages,
@@ -395,13 +396,24 @@ export class WhatsAppController {
       whatsAppBot.clearInactivityTimeoutsForConversation(conversation.id);
 
       const prevPayload = (conversation.payload as Record<string, unknown>) || {};
-      const keptContact: Record<string, string> = {};
+      const keptContact: Record<string, unknown> = {};
       const n = prevPayload.name;
       const r = prevPayload.requesterName;
       const w = prevPayload.waProfileName;
       if (typeof n === 'string' && n.trim()) keptContact.name = n.trim().slice(0, 120);
       if (typeof r === 'string' && r.trim()) keptContact.requesterName = r.trim().slice(0, 120);
       if (typeof w === 'string' && w.trim()) keptContact.waProfileName = w.trim().slice(0, 120);
+
+      // Histórico de atendimento humano: sem isso, conversas com atestado somem da aba "Encerradas"
+      // após encerrar (payload perde attendantRequested).
+      const hadHumanHandoff =
+        prevPayload.attendantHandoffEver === true ||
+        prevPayload.attendantRequested === true ||
+        prevPayload.attendantInProgress === true ||
+        (typeof prevPayload.attendantRequestedAt === 'string' && prevPayload.attendantRequestedAt.length > 0);
+      if (hadHumanHandoff) {
+        keptContact.attendantHandoffEver = true;
+      }
 
       await prisma.whatsAppConversation.update({
         where: { id: conversation.id },

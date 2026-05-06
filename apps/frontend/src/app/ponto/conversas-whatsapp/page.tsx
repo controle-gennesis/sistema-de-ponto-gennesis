@@ -43,6 +43,8 @@ interface ConversationSummary {
   medicalCertificateStatus?: string | null;
   attendantRequested?: boolean;
   attendantInProgress?: boolean;
+  /** True após encerrar atendimento humano (persistido no payload). */
+  attendantHandoffEver?: boolean;
   updatedAt: string;
   createdAt: string;
   messageCount: number;
@@ -371,7 +373,9 @@ export default function ConversasWhatsAppPage() {
     (c) => !isOnlyAtestadoQueue(c) && c.status === 'PENDING' && !!c.attendantInProgress
   );
   const conversasEncerradas = conversations.filter(
-    (c) => !isOnlyAtestadoQueue(c) && (c.status === 'COMPLETED' || c.status === 'CANCELLED')
+    (c) =>
+      (c.status === 'COMPLETED' || c.status === 'CANCELLED') &&
+      (!isOnlyAtestadoQueue(c) || !!c.attendantHandoffEver)
   );
 
   const conversasFiltradas =
