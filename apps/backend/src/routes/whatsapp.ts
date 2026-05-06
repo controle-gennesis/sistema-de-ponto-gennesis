@@ -34,4 +34,9 @@ router.post('/conversations/:id/end', (req, res, next) =>
   controller.endConversation(req as any, res, next)
 );
 
+// Finaliza análise de um submission de atestado (PENDING -> PROCESSED)
+router.post('/conversations/:id/submissions/:submissionId/finalize', (req, res, next) =>
+  controller.finalizeMedicalCertificateSubmission(req as any, res, next)
+);
+
 export default router;

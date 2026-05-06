@@ -432,4 +432,54 @@ export class WhatsAppController {
       next(error);
     }
   }
+
+  /**
+   * Finalizar análise de um envio de atestado.
+   * Move o submission de PENDING para PROCESSED.
+   */
+  async finalizeMedicalCertificateSubmission(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id, submissionId } = req.params;
+
+      const conversation = await prisma.whatsAppConversation.findUnique({
+        where: { id },
+        select: { id: true }
+      });
+      if (!conversation) {
+        throw createError('Conversa não encontrada', 404);
+      }
+
+      const submission = await prisma.whatsAppSubmission.findFirst({
+        where: {
+          id: submissionId,
+          conversationId: id,
+          type: 'MEDICAL_CERTIFICATE'
+        },
+        select: { id: true, status: true }
+      });
+
+      if (!submission) {
+        throw createError('Atestado não encontrado para esta conversa', 404);
+      }
+
+      if (submission.status !== 'PENDING') {
+        return res.json({
+          success: true,
+          message: 'Atestado já finalizado'
+        });
+      }
+
+      await prisma.whatsAppSubmission.update({
+        where: { id: submission.id },
+        data: { status: 'PROCESSED' as any }
+      });
+
+      return res.json({
+        success: true,
+        message: 'Atestado finalizado com sucesso'
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }

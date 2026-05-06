@@ -23,7 +23,8 @@ import {
   UserCircle,
   Hash,
   Calendar,
-  FileType
+  FileType,
+  Download
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
@@ -183,6 +184,8 @@ export default function ConversasWhatsAppPage() {
   const [atendimentoTab, setAtendimentoTab] = useState<'aguardando' | 'andamento' | 'encerradas'>('aguardando');
   const [atestadoTab, setAtestadoTab] = useState<'pendentes' | 'finalizados'>('pendentes');
   const [isEndingConversation, setIsEndingConversation] = useState(false);
+  const [isFinalizingSubmissionId, setIsFinalizingSubmissionId] = useState<string | null>(null);
+  const [showAtestadoConversation, setShowAtestadoConversation] = useState(false);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -301,6 +304,44 @@ export default function ConversasWhatsAppPage() {
   const handlePainelTabChange = (tab: 'atendimentos' | 'atestados') => {
     setPainelTab(tab);
     setSelectedId(null);
+    setShowAtestadoConversation(false);
+  };
+
+  const formatMedicalCertificateStatus = (status: string | null | undefined) => {
+    const s = String(status || '').toUpperCase();
+    if (s === 'PENDING' || !s) return 'Pendente';
+    if (s === 'PROCESSED' || s === 'APPROVED') return 'Finalizado';
+    return s;
+  };
+
+  const isMedicalCertificatePending = (status: string | null | undefined) =>
+    String(status || '').toUpperCase() === 'PENDING' || !status;
+
+  const handleDownloadAtestado = (url: string | null | undefined, fileName: string | null | undefined) => {
+    if (!url) return;
+    const a = document.createElement('a');
+    a.href = getFileHref(url);
+    a.download = fileName || 'atestado';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleFinalizeSubmission = async (submissionId: string) => {
+    if (!selectedId || !submissionId) return;
+    try {
+      setIsFinalizingSubmissionId(submissionId);
+      await api.post(`/whatsapp/conversations/${selectedId}/submissions/${submissionId}/finalize`);
+      await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
+      await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversation', selectedId] });
+    } catch (error) {
+      console.error('Erro ao finalizar atestado:', error);
+      alert('Erro ao finalizar atestado.');
+    } finally {
+      setIsFinalizingSubmissionId(null);
+    }
   };
 
   useEffect(() => {
@@ -611,7 +652,10 @@ export default function ConversasWhatsAppPage() {
                       <li key={c.id}>
                         <button
                           type="button"
-                          onClick={() => setSelectedId(c.id)}
+                          onClick={() => {
+                            setSelectedId(c.id);
+                            setShowAtestadoConversation(false);
+                          }}
                           className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors border-l-4 border-transparent hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
                             selectedId === c.id
                               ? 'bg-red-50 dark:bg-red-900/20 border-l-red-600 dark:border-l-red-500'
@@ -646,7 +690,17 @@ export default function ConversasWhatsAppPage() {
                                 : format(new Date(c.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
                             </p>
                             <div className="mt-2 flex flex-wrap items-center gap-2">
-                              {c.status === 'PENDING' ? (
+                              {painelTab === 'atestados' ? (
+                                <span
+                                  className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                    isMedicalCertificatePending(c.medicalCertificateStatus)
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                      : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                  }`}
+                                >
+                                  {formatMedicalCertificateStatus(c.medicalCertificateStatus)}
+                                </span>
+                              ) : c.status === 'PENDING' ? (
                                 c.attendantRequested ? (
                                   <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
                                     Aguardando atendente
@@ -741,7 +795,19 @@ export default function ConversasWhatsAppPage() {
                           Em atendimento
                         </span>
                       ) : null}
-                      {detail.status !== 'PENDING' && (
+                      {painelTab === 'atestados' ? (
+                        <span
+                          className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
+                            isMedicalCertificatePending(detail.submissions.find((s) => s.type === 'MEDICAL_CERTIFICATE')?.status)
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                              : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                          }`}
+                        >
+                          {formatMedicalCertificateStatus(
+                            detail.submissions.find((s) => s.type === 'MEDICAL_CERTIFICATE')?.status
+                          )}
+                        </span>
+                      ) : detail.status !== 'PENDING' && (
                         <span
                           className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
                             detail.status === 'COMPLETED'
@@ -832,7 +898,7 @@ export default function ConversasWhatsAppPage() {
                                         : 'bg-gray-100 text-gray-700 dark:bg-gray-600 dark:text-gray-300'
                                     }`}
                                   >
-                                    {s.status === 'PENDING' ? 'Pendente' : s.status === 'PROCESSED' || s.status === 'APPROVED' ? 'Processado' : s.status}
+                                    {formatMedicalCertificateStatus(s.status)}
                                   </span>
                                 </div>
                                 <div className="p-4 space-y-0">
@@ -863,21 +929,29 @@ export default function ConversasWhatsAppPage() {
                                             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                                               Arquivo do atestado
                                             </p>
-                                            {s.fileUrl ? (
-                                              <a
-                                                href={getFileHref(s.fileUrl)}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="inline-flex items-center gap-1 mt-1 text-sm text-red-600 dark:text-red-400 hover:underline"
-                                              >
-                                                {s.fileName || 'Ver arquivo'}
-                                              </a>
-                                            ) : (
-                                              <p className="text-sm text-gray-900 dark:text-gray-100 mt-1 break-all">
-                                                {s.fileName || 'Arquivo recebido'}
-                                              </p>
-                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
+                                              disabled={!s.fileUrl}
+                                              className="inline-flex items-center gap-1 mt-1 text-sm px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                            >
+                                              <Download className="w-3.5 h-3.5" />
+                                              Baixar arquivo
+                                            </button>
                                           </div>
+                                        </div>
+                                      )}
+                                      {isMedicalCertificatePending(s.status) && (
+                                        <div className="flex justify-end py-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleFinalizeSubmission(s.id)}
+                                            disabled={isFinalizingSubmissionId === s.id}
+                                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors"
+                                          >
+                                            {isFinalizingSubmissionId === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                            Finalizar atestado
+                                          </button>
                                         </div>
                                       )}
                                       <div className="flex items-start gap-3 py-2">
@@ -1012,6 +1086,19 @@ export default function ConversasWhatsAppPage() {
 
                   {/* Conversa (mensagens) */}
                   <div>
+                    {painelTab === 'atestados' && !showAtestadoConversation ? (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAtestadoConversation(true)}
+                          className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                          Visualizar conversa
+                        </button>
+                      </div>
+                    ) : (
+                      <>
                     <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
                       <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400" /> Conversa
                     </h3>
@@ -1097,6 +1184,8 @@ export default function ConversasWhatsAppPage() {
                         {isSending ? 'Enviando...' : 'Enviar'}
                       </button>
                     </form>
+                    )}
+                      </>
                     )}
                   </div>
                 </CardContent>
