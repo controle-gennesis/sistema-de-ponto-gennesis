@@ -1319,9 +1319,8 @@ export function UserPermissionsEditor({
             {activeTab === 'controle' && (
               <div className="border-b border-gray-100 py-4 dark:border-gray-700/70">
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Ações administrativas que não são páginas do menu (ex.: alterar permissões, auditoria, exportações,
-                  criar solicitações restritas). Você pode restringir essas ações independentemente do acesso às
-                  telas.
+                  Ações administrativas que não são páginas do menu, como alterar permissões, auditoria, exportações e
+                  criar solicitações restritas. Você pode restringir essas ações independentemente do acesso às telas.
                 </p>
               </div>
             )}

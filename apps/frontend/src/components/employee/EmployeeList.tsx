@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera, FileCheck, Eye, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield, Filter } from 'lucide-react';
+import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera, FileCheck, Eye, EyeOff, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield, Filter, KeyRound } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { TOMADORES_LIST } from '@/constants/tomadores';
@@ -170,6 +170,10 @@ export function EmployeeList({
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editVisibleSections, setEditVisibleSections] = useState<Array<'personal'|'professional'|'bank'|'remuneration'>|undefined>(undefined);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ newPassword: '', confirmPassword: '' });
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   // Estados para criar ponto manualmente
   const [showManualPointModal, setShowManualPointModal] = useState(false);
@@ -443,6 +447,22 @@ export function EmployeeList({
     },
     onError: (error: any) => {
       console.error('Erro ao reativar funcionário:', error);
+    }
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async ({ employeeId, newPassword }: { employeeId: string; newPassword: string }) => {
+      const res = await api.put(`/users/${employeeId}/password`, { newPassword });
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success('Senha alterada com sucesso!');
+      setShowChangePasswordModal(false);
+      setPasswordForm({ newPassword: '', confirmPassword: '' });
+    },
+    onError: (error: any) => {
+      const errorMessage = error.response?.data?.error || 'Erro ao alterar senha';
+      toast.error(errorMessage);
     }
   });
 
@@ -1131,6 +1151,27 @@ export function EmployeeList({
     setCurrentPage(1);
   };
 
+  const handleChangePassword = () => {
+    if (!selectedEmployee) return;
+    const newPassword = passwordForm.newPassword.trim();
+    const confirmPassword = passwordForm.confirmPassword.trim();
+
+    if (!newPassword) {
+      toast.error('Informe a nova senha');
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast.error('A senha deve ter no mínimo 6 caracteres');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('As senhas não coincidem');
+      return;
+    }
+
+    changePasswordMutation.mutate({ employeeId: selectedEmployee.id, newPassword });
+  };
+
   // Verificar se o usuário tem permissões administrativas baseadas no cargo
   const {
     canManageEmployees,
@@ -1148,6 +1189,10 @@ export function EmployeeList({
     can(pk('/ponto/permissoes')) ||
     canAction(pk('/ponto/permissoes'), 'ver') ||
     can(pk('/ponto/controle/alterar-permissoes'));
+  const canChangeEmployeePassword =
+    isAdministrator ||
+    can(pk('/ponto/controle/alterar-senha-funcionarios')) ||
+    canAction(pk('/ponto/controle/alterar-senha-funcionarios'), 'ver');
 
   const employeeForActionMenu = useMemo(() => {
     if (!employeeActionMenu) return null;
@@ -1783,6 +1828,25 @@ export function EmployeeList({
                       <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                       <span>Ver detalhes</span>
                     </button>
+                    {canChangeEmployeePassword && employeeForActionMenu.isActive && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEmployeeActionMenu(null);
+                          setSelectedEmployee(employeeForActionMenu);
+                          setPasswordForm({ newPassword: '', confirmPassword: '' });
+                          setShowNewPassword(false);
+                          setShowConfirmPassword(false);
+                          setShowChangePasswordModal(true);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                      >
+                        <KeyRound className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
+                        <span>Alterar senha</span>
+                      </button>
+                    )}
                     {canDeleteEmployees && showDeleteButton && employeeForActionMenu.isActive && (
                       <button
                         type="button"
@@ -2090,7 +2154,7 @@ export function EmployeeList({
                 <div className="px-6 pt-6">
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-5 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4 min-w-0">
-                      <div className="w-14 h-14 rounded-full border-2 border-blue-400 dark:border-blue-500 overflow-hidden shrink-0 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center font-bold">
+                      <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center font-bold">
                         {selectedEmployeePhotoHref ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -2113,6 +2177,15 @@ export function EmployeeList({
                   </div>
                 </div>
                     <div className="flex items-center gap-2">
+                      {canChangeEmployeePassword && selectedEmployee.isActive && (
+                        <button
+                          onClick={() => setShowChangePasswordModal(true)}
+                          className="px-3 py-1.5 text-sm rounded-lg border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 inline-flex items-center gap-1.5"
+                          title="Alterar senha"
+                        >
+                          Alterar Senha
+                        </button>
+                      )}
                       {showDeleteButton &&
                         (selectedEmployee.isActive ? (
                           canDeleteEmployees ? (
@@ -3357,6 +3430,85 @@ export function EmployeeList({
                       <span>Remover</span>
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showChangePasswordModal && selectedEmployee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowChangePasswordModal(false)} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full mx-4 border border-gray-200 dark:border-gray-700">
+            <div className="p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Alterar senha</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{selectedEmployee.name}</p>
+              </div>
+              <button
+                onClick={() => setShowChangePasswordModal(false)}
+                className="p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="Fechar modal de senha"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nova senha</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={passwordForm.newPassword}
+                    onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+                    className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    placeholder="Digite a nova senha"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 px-3 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    aria-label={showNewPassword ? 'Ocultar nova senha' : 'Mostrar nova senha'}
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirmar senha</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                    className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    placeholder="Repita a nova senha"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 px-3 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    aria-label={showConfirmPassword ? 'Ocultar confirmação de senha' : 'Mostrar confirmação de senha'}
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShowChangePasswordModal(false)}
+                  className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleChangePassword}
+                  disabled={changePasswordMutation.isPending}
+                  className="px-4 py-2 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white inline-flex items-center gap-2"
+                >
+                  {changePasswordMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Confirmar
                 </button>
               </div>
             </div>

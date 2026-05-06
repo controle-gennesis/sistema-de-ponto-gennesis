@@ -14,6 +14,7 @@ console.log(`   📦 Bucket: ${process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos
 console.log(`   📊 Fluig API: ${process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN ? '✅ Configurado' : '❌ Não configurado'}`);
 console.log('');
 
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -64,6 +65,7 @@ import orcafascioRoutes from './routes/orcafascio';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 import { prisma } from './lib/prisma';
 import { ensureContractAddendaTable } from './lib/ensureContractAddendaSchema';
+import { attachCallSignaling } from './realtime/wsCallSignaling';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -271,9 +273,11 @@ app.use(errorHandler);
 // Configurar timezone
 process.env.TZ = 'America/Sao_Paulo';
 
-// Iniciar servidor
+// Iniciar servidor HTTP + WebSocket (sinalização de chamadas WebRTC)
 try {
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = http.createServer(app);
+  attachCallSignaling(server);
+  server.listen(PORT, '0.0.0.0', () => {
     void (async () => {
       try {
         await ensureContractAddendaTable(prisma);
