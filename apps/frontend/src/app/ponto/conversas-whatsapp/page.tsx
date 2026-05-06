@@ -11,7 +11,7 @@ import {
   FileText,
   ChevronRight,
   User,
-  Bot,
+  Sparkles,
   Paperclip,
   Loader2,
   ArrowLeft,
@@ -180,12 +180,20 @@ function getAtestadoFilePreviewKind(fileName: string | null | undefined): 'image
 function ListaMensagensWhatsAppDetalhe({
   messages,
   messagesEndRef,
-  scrollClassName
+  scrollClassName,
+  clientDisplayName,
+  onPreviewAttachment,
+  onDownloadAttachment
 }: {
   messages: Message[];
   messagesEndRef: React.Ref<HTMLDivElement>;
   scrollClassName?: string;
+  clientDisplayName: string;
+  onPreviewAttachment?: (url: string, fileName: string | null | undefined) => void;
+  onDownloadAttachment?: (url: string, fileName: string | null | undefined) => void;
 }) {
+  const userLabel = clientDisplayName?.trim() || 'Cliente';
+
   return (
     <div className={`space-y-3 overflow-y-auto pr-2 ${scrollClassName ?? 'max-h-[320px]'}`}>
       {messages.map((m) => (
@@ -197,31 +205,73 @@ function ListaMensagensWhatsAppDetalhe({
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
             }`}
           >
-            <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
-              {m.role === 'user' ? <User className="w-3 h-3 shrink-0" /> : <Bot className="w-3 h-3 shrink-0" />}
-              <span className="font-medium text-gray-600 dark:text-gray-300">
-                {m.role === 'user' ? 'Cliente' : 'Sistema'}
+            <div
+              className={`flex items-center gap-2 text-xs mb-1 flex-wrap ${
+                m.role === 'user'
+                  ? 'text-white/90'
+                  : 'opacity-80 text-gray-600 dark:text-gray-300'
+              }`}
+            >
+              {m.role === 'user' ? <User className="w-3 h-3 shrink-0" /> : <Sparkles className="w-3 h-3 shrink-0" />}
+              <span className="font-medium truncate max-w-[11rem] sm:max-w-[14rem]">
+                {m.role === 'user' ? userLabel : 'Luna'}
               </span>
-              <span>{format(new Date(m.createdAt), 'dd/MM HH:mm', { locale: ptBR })}</span>
+              <span className="shrink-0">{format(new Date(m.createdAt), 'dd/MM HH:mm', { locale: ptBR })}</span>
             </div>
             <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
-            {(m.mediaUrl || m.content === '[Arquivo enviado]') &&
-              (m.mediaUrl ? (
-                <a
-                  href={getFileHref(m.mediaUrl)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 mt-2 text-xs underline"
-                >
-                  <Paperclip className="w-3 h-3" />
-                  {m.fileName || 'Anexo'}
-                </a>
-              ) : (
-                <div className="inline-flex items-center gap-1 mt-2 text-xs opacity-80">
-                  <Paperclip className="w-3 h-3" />
-                  <span>{m.fileName || 'Arquivo enviado'}</span>
-                </div>
-              ))}
+            {(m.mediaUrl || m.content === '[Arquivo enviado]') && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {m.mediaUrl && onPreviewAttachment && (
+                  <button
+                    type="button"
+                    onClick={() => onPreviewAttachment(m.mediaUrl!, m.fileName)}
+                    title="Ver arquivo"
+                    aria-label="Ver arquivo"
+                    className={
+                      m.role === 'user'
+                        ? 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-white/40 text-white hover:bg-white/15 transition-colors'
+                        : 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 text-gray-800 dark:text-gray-100 bg-white/80 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors'
+                    }
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                )}
+                {m.mediaUrl && onDownloadAttachment && (
+                  <button
+                    type="button"
+                    onClick={() => onDownloadAttachment(m.mediaUrl!, m.fileName)}
+                    title="Baixar arquivo"
+                    aria-label="Baixar arquivo"
+                    className={
+                      m.role === 'user'
+                        ? 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-white hover:bg-white/15 transition-colors'
+                        : 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/25 transition-colors'
+                    }
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
+                )}
+                {m.mediaUrl && (!onPreviewAttachment || !onDownloadAttachment) && (
+                  <a
+                    href={getFileHref(m.mediaUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`inline-flex items-center gap-1 text-xs underline ${
+                      m.role === 'user' ? 'text-white' : ''
+                    }`}
+                  >
+                    <Paperclip className="w-3 h-3" />
+                    {m.fileName || 'Anexo'}
+                  </a>
+                )}
+                {!m.mediaUrl && (
+                  <div className={`inline-flex items-center gap-1 text-xs opacity-80 ${m.role === 'user' ? 'text-white/90' : ''}`}>
+                    <Paperclip className="w-3 h-3" />
+                    <span>{m.fileName || 'Arquivo enviado'}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ))}
@@ -917,18 +967,30 @@ export default function ConversasWhatsAppPage() {
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
-                      {painelTab === 'atestados' && latestPendingMedicalSubmission && (
-                        <button
-                          type="button"
-                          onClick={() => handleFinalizeSubmission(latestPendingMedicalSubmission.id)}
-                          disabled={isFinalizingSubmissionId === latestPendingMedicalSubmission.id}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors shrink-0"
-                        >
-                          {isFinalizingSubmissionId === latestPendingMedicalSubmission.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : null}
-                          Finalizar atestado
-                        </button>
+                      {painelTab === 'atestados' && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setAtestadoConversationModalOpen(true)}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                            Ver conversa
+                          </button>
+                          {latestPendingMedicalSubmission && (
+                            <button
+                              type="button"
+                              onClick={() => handleFinalizeSubmission(latestPendingMedicalSubmission.id)}
+                              disabled={isFinalizingSubmissionId === latestPendingMedicalSubmission.id}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors shrink-0"
+                            >
+                              {isFinalizingSubmissionId === latestPendingMedicalSubmission.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : null}
+                              Finalizar
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -1010,6 +1072,8 @@ export default function ConversasWhatsAppPage() {
                                                 type="button"
                                                 onClick={() => openAtestadoFilePreview(s.fileUrl, s.fileName)}
                                                 disabled={!s.fileUrl}
+                                                title="Ver arquivo"
+                                                aria-label="Ver arquivo"
                                                 className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                               >
                                                 <Eye className="w-3.5 h-3.5" />
@@ -1019,10 +1083,11 @@ export default function ConversasWhatsAppPage() {
                                                 type="button"
                                                 onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
                                                 disabled={!s.fileUrl}
-                                                className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                                title="Baixar arquivo"
+                                                aria-label="Baixar arquivo"
+                                                className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                               >
-                                                <Download className="w-3.5 h-3.5" />
-                                                Baixar arquivo
+                                                <Download className="w-5 h-5" />
                                               </button>
                                             </div>
                                           </div>
@@ -1051,6 +1116,8 @@ export default function ConversasWhatsAppPage() {
                                             type="button"
                                             onClick={() => openAtestadoFilePreview(s.fileUrl, s.fileName)}
                                             disabled={!s.fileUrl}
+                                            title="Ver arquivo"
+                                            aria-label="Ver arquivo"
                                             className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                           >
                                             <Eye className="w-3.5 h-3.5" />
@@ -1060,10 +1127,11 @@ export default function ConversasWhatsAppPage() {
                                             type="button"
                                             onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
                                             disabled={!s.fileUrl}
-                                            className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                            title="Baixar arquivo"
+                                            aria-label="Baixar arquivo"
+                                            className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                           >
-                                            <Download className="w-3.5 h-3.5" />
-                                            Baixar arquivo
+                                            <Download className="w-5 h-5" />
                                           </button>
                                           {!s.fileUrl && (
                                             <span className="text-sm text-gray-900 dark:text-gray-100 break-all">
@@ -1166,20 +1234,9 @@ export default function ConversasWhatsAppPage() {
                       </div>
                     )}
 
-                  {/* Conversa (mensagens) */}
+                  {/* Conversa (mensagens) — em atestados o acesso é pelo botão no cabeçalho */}
                   <div>
-                    {painelTab === 'atestados' ? (
-                      <div className="pt-2">
-                        <button
-                          type="button"
-                          onClick={() => setAtestadoConversationModalOpen(true)}
-                          className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                          Visualizar conversa
-                        </button>
-                      </div>
-                    ) : (
+                    {painelTab === 'atendimentos' ? (
                       <>
                         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
                           <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400" /> Conversa
@@ -1188,6 +1245,9 @@ export default function ConversasWhatsAppPage() {
                           messages={detail.messages}
                           messagesEndRef={messagesEndRef}
                           scrollClassName="max-h-[320px]"
+                          clientDisplayName={headerName ?? formatPhone(detail.phone)}
+                          onPreviewAttachment={openAtestadoFilePreview}
+                          onDownloadAttachment={handleDownloadAtestado}
                         />
 
                         <form
@@ -1221,7 +1281,7 @@ export default function ConversasWhatsAppPage() {
                           </button>
                         </form>
                       </>
-                    )}
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>
@@ -1275,6 +1335,9 @@ export default function ConversasWhatsAppPage() {
                   messages={detail.messages}
                   messagesEndRef={messagesEndRef}
                   scrollClassName="max-h-[min(70vh,520px)]"
+                  clientDisplayName={headerName ?? formatPhone(detail.phone)}
+                  onPreviewAttachment={openAtestadoFilePreview}
+                  onDownloadAttachment={handleDownloadAtestado}
                 />
               </div>
             </div>
