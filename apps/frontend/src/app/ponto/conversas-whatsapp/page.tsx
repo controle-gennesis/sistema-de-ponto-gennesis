@@ -357,14 +357,21 @@ export default function ConversasWhatsAppPage() {
     getCategoriaConversa(c.flowStatus) === 'atestados' ||
     c.submissionCount > 0 ||
     !!c.medicalCertificateStatus;
+  /**
+   * Quem já enviou atestado na mesma conversa ainda pode pedir atendente humano.
+   * Só tratamos como "fila exclusiva de atestado" quando não há escalonamento ativo.
+   */
+  const isOnlyAtestadoQueue = (c: ConversationSummary) =>
+    isAtestadoConversation(c) && !c.attendantRequested && !c.attendantInProgress;
+
   const aguardandoAtendimento = conversations.filter(
-    (c) => !isAtestadoConversation(c) && c.status === 'PENDING' && !!c.attendantRequested
+    (c) => !isOnlyAtestadoQueue(c) && c.status === 'PENDING' && !!c.attendantRequested && !c.attendantInProgress
   );
   const atendimentoEmAndamento = conversations.filter(
-    (c) => !isAtestadoConversation(c) && c.status === 'PENDING' && !!c.attendantInProgress
+    (c) => !isOnlyAtestadoQueue(c) && c.status === 'PENDING' && !!c.attendantInProgress
   );
   const conversasEncerradas = conversations.filter(
-    (c) => !isAtestadoConversation(c) && (c.status === 'COMPLETED' || c.status === 'CANCELLED')
+    (c) => !isOnlyAtestadoQueue(c) && (c.status === 'COMPLETED' || c.status === 'CANCELLED')
   );
 
   const conversasFiltradas =
