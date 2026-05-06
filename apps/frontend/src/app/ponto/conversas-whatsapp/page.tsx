@@ -38,6 +38,7 @@ interface ConversationSummary {
   name?: string | null;
   flowStatus: string;
   status: string;
+  medicalCertificateStatus?: string | null;
   attendantRequested?: boolean;
   attendantInProgress?: boolean;
   updatedAt: string;
@@ -234,9 +235,19 @@ export default function ConversasWhatsAppPage() {
   };
 
   const conversations: ConversationSummary[] = listData?.data ?? [];
-  const aguardandoAtendimento = conversations.filter((c) => c.status === 'PENDING' && !!c.attendantRequested);
-  const atendimentoEmAndamento = conversations.filter((c) => c.status === 'PENDING' && !!c.attendantInProgress);
-  const conversasEncerradas = conversations.filter((c) => c.status === 'COMPLETED' || c.status === 'CANCELLED');
+  const isAtestadoConversation = (c: ConversationSummary) =>
+    getCategoriaConversa(c.flowStatus) === 'atestados' ||
+    c.submissionCount > 0 ||
+    !!c.medicalCertificateStatus;
+  const aguardandoAtendimento = conversations.filter(
+    (c) => !isAtestadoConversation(c) && c.status === 'PENDING' && !!c.attendantRequested
+  );
+  const atendimentoEmAndamento = conversations.filter(
+    (c) => !isAtestadoConversation(c) && c.status === 'PENDING' && !!c.attendantInProgress
+  );
+  const conversasEncerradas = conversations.filter(
+    (c) => !isAtestadoConversation(c) && (c.status === 'COMPLETED' || c.status === 'CANCELLED')
+  );
 
   const conversasFiltradas =
     atendimentoTab === 'aguardando'
@@ -244,11 +255,18 @@ export default function ConversasWhatsAppPage() {
       : atendimentoTab === 'andamento'
         ? atendimentoEmAndamento
         : conversasEncerradas;
-  const conversasAtestadoBase = conversations.filter(
-    (c) => getCategoriaConversa(c.flowStatus) === 'atestados' || c.submissionCount > 0
-  );
-  const atestadosPendentes = conversasAtestadoBase.filter((c) => c.status === 'PENDING');
-  const atestadosFinalizados = conversasAtestadoBase.filter((c) => c.status !== 'PENDING');
+  const conversasAtestadoBase = conversations.filter((c) => isAtestadoConversation(c));
+  const atestadosPendentes = conversasAtestadoBase.filter((c) => {
+    const certStatus = String(c.medicalCertificateStatus || '').toUpperCase();
+    // Sem status explícito ainda (fluxo em andamento) ou pendente de análise do DP.
+    if (!certStatus) return true;
+    return certStatus === 'PENDING';
+  });
+  const atestadosFinalizados = conversasAtestadoBase.filter((c) => {
+    const certStatus = String(c.medicalCertificateStatus || '').toUpperCase();
+    if (!certStatus) return false;
+    return certStatus !== 'PENDING';
+  });
   const conversasAtestadoFiltradas = atestadoTab === 'pendentes' ? atestadosPendentes : atestadosFinalizados;
   const conversasVisiveis = painelTab === 'atendimentos' ? conversasFiltradas : conversasAtestadoFiltradas;
   const detail: ConversationDetail | null = detailData?.data ?? null;
@@ -788,10 +806,6 @@ export default function ConversasWhatsAppPage() {
                   {showLegacyData &&
                     detail.submissions.filter((s) => s.type === 'MEDICAL_CERTIFICATE').length > 0 && (
                     <div className="space-y-4">
-                      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-                        <FileCheck className="w-4 h-4 text-red-600 dark:text-red-400" />
-                        Dados do atestado
-                      </h3>
                       <div className="space-y-4">
                         {detail.submissions
                           .filter((s) => s.type === 'MEDICAL_CERTIFICATE')
@@ -825,17 +839,6 @@ export default function ConversasWhatsAppPage() {
                                   {isPayload ? (
                                     <>
                                       <LinhaDado icon={UserCircle} label="Nome completo" value={p.name} />
-                                          <LinhaDado
-                                            icon={UserCircle}
-                                            label="Para quem"
-                                            value={
-                                              p.forWhom === 'SELF'
-                                                ? 'Você'
-                                                : p.forWhom === 'OTHER'
-                                                  ? 'Outra pessoa'
-                                                  : null
-                                            }
-                                          />
                                       {p.requesterSector && (
                                         <LinhaDado
                                           icon={Hash}
@@ -843,20 +846,6 @@ export default function ConversasWhatsAppPage() {
                                           value={p.requesterSector ?? null}
                                         />
                                       )}
-                                          <LinhaDado
-                                            icon={Hash}
-                                            label="Centro de custo/contrato"
-                                            value={
-                                              p.costCenterCode
-                                                ? `${p.costCenterCode}${p.costCenterName ? ` - ${p.costCenterName}` : ''}`
-                                                : null
-                                            }
-                                          />
-                                      <LinhaDado
-                                        icon={FileType}
-                                        label="Tipo de atestado"
-                                        value={p.atestadoTypeLabel ?? p.atestadoType ?? null}
-                                      />
                                           {p.atestadoOtherType && (
                                             <LinhaDado
                                               icon={FileType}
@@ -989,17 +978,6 @@ export default function ConversasWhatsAppPage() {
                           {isAtestadoPayload(detail.payload as Record<string, unknown>) && (
                             <div className="space-y-0">
                               <LinhaDado icon={UserCircle} label="Nome completo" value={(detail.payload as AtestadoPayload).name} />
-                              <LinhaDado
-                                icon={UserCircle}
-                                label="Para quem"
-                                value={
-                                  (detail.payload as AtestadoPayload).forWhom === 'SELF'
-                                    ? 'Você'
-                                    : (detail.payload as AtestadoPayload).forWhom === 'OTHER'
-                                      ? 'Outra pessoa'
-                                      : null
-                                }
-                              />
                               {(detail.payload as AtestadoPayload).requesterSector && (
                                 <LinhaDado
                                   icon={Hash}
@@ -1007,20 +985,6 @@ export default function ConversasWhatsAppPage() {
                                   value={(detail.payload as AtestadoPayload).requesterSector ?? null}
                                 />
                               )}
-                              <LinhaDado
-                                icon={Hash}
-                                label="Centro de custo/contrato"
-                                value={
-                                  (detail.payload as AtestadoPayload).costCenterCode
-                                    ? `${(detail.payload as AtestadoPayload).costCenterCode}${(detail.payload as AtestadoPayload).costCenterName ? ` - ${(detail.payload as AtestadoPayload).costCenterName}` : ''}`
-                                    : null
-                                }
-                              />
-                              <LinhaDado
-                                icon={FileType}
-                                label="Tipo de atestado"
-                                value={(detail.payload as AtestadoPayload).atestadoTypeLabel ?? (detail.payload as AtestadoPayload).atestadoType ?? null}
-                              />
                               {(detail.payload as AtestadoPayload).atestadoOtherType && (
                                 <LinhaDado
                                   icon={FileType}

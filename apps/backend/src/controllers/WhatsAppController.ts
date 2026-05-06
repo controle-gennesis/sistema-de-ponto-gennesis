@@ -154,6 +154,12 @@ export class WhatsAppController {
           _count: {
             select: { messages: true, submissions: true }
           },
+          submissions: {
+            where: { type: 'MEDICAL_CERTIFICATE' },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { status: true }
+          },
           // O payload pode conter indicadores como escalonamento para atendente.
           // Usamos o payload na camada de mapeamento abaixo.
           messages: {
@@ -180,6 +186,7 @@ export class WhatsAppController {
         createdAt: c.createdAt,
         messageCount: c._count.messages,
         submissionCount: c._count.submissions,
+        medicalCertificateStatus: c.submissions[0]?.status ?? null,
         lastMessage: c.messages[0]?.content?.substring(0, 80) || null,
         lastMessageAt: c.messages[0]?.createdAt || null
       }));
