@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import {
@@ -24,7 +25,9 @@ import {
   Hash,
   Calendar,
   FileType,
-  Download
+  Download,
+  Eye,
+  X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
@@ -167,6 +170,66 @@ function LinhaDado({
   );
 }
 
+function getAtestadoFilePreviewKind(fileName: string | null | undefined): 'image' | 'pdf' | 'other' {
+  const n = (fileName || '').toLowerCase();
+  if (n.endsWith('.pdf')) return 'pdf';
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(n)) return 'image';
+  return 'other';
+}
+
+function ListaMensagensWhatsAppDetalhe({
+  messages,
+  messagesEndRef,
+  scrollClassName
+}: {
+  messages: Message[];
+  messagesEndRef: React.Ref<HTMLDivElement>;
+  scrollClassName?: string;
+}) {
+  return (
+    <div className={`space-y-3 overflow-y-auto pr-2 ${scrollClassName ?? 'max-h-[320px]'}`}>
+      {messages.map((m) => (
+        <div key={m.id} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div
+            className={`max-w-[85%] rounded-xl px-3 py-2.5 ${
+              m.role === 'user'
+                ? 'bg-red-600 text-white dark:bg-red-500'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
+              {m.role === 'user' ? <User className="w-3 h-3 shrink-0" /> : <Bot className="w-3 h-3 shrink-0" />}
+              <span className="font-medium text-gray-600 dark:text-gray-300">
+                {m.role === 'user' ? 'Cliente' : 'Sistema'}
+              </span>
+              <span>{format(new Date(m.createdAt), 'dd/MM HH:mm', { locale: ptBR })}</span>
+            </div>
+            <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+            {(m.mediaUrl || m.content === '[Arquivo enviado]') &&
+              (m.mediaUrl ? (
+                <a
+                  href={getFileHref(m.mediaUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 mt-2 text-xs underline"
+                >
+                  <Paperclip className="w-3 h-3" />
+                  {m.fileName || 'Anexo'}
+                </a>
+              ) : (
+                <div className="inline-flex items-center gap-1 mt-2 text-xs opacity-80">
+                  <Paperclip className="w-3 h-3" />
+                  <span>{m.fileName || 'Arquivo enviado'}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      ))}
+      <div ref={messagesEndRef} />
+    </div>
+  );
+}
+
 const ABAS: { id: TabFiltro; label: string; icon: React.ElementType }[] = [
   { id: 'todas', label: 'Todas', icon: LayoutList },
   { id: 'atestados', label: 'Atestados', icon: FileCheck },
@@ -179,13 +242,18 @@ export default function ConversasWhatsAppPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [painelTab, setPainelTab] = useState<'atendimentos' | 'atestados'>('atendimentos');
   const [atendimentoTab, setAtendimentoTab] = useState<'aguardando' | 'andamento' | 'encerradas'>('aguardando');
   const [atestadoTab, setAtestadoTab] = useState<'pendentes' | 'finalizados'>('pendentes');
   const [isEndingConversation, setIsEndingConversation] = useState(false);
   const [isFinalizingSubmissionId, setIsFinalizingSubmissionId] = useState<string | null>(null);
-  const [showAtestadoConversation, setShowAtestadoConversation] = useState(false);
+  const [atestadoConversationModalOpen, setAtestadoConversationModalOpen] = useState(false);
+  const [atestadoFilePreview, setAtestadoFilePreview] = useState<{
+    href: string;
+    fileName: string | null;
+    kind: 'image' | 'pdf' | 'other';
+  } | null>(null);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -304,18 +372,21 @@ export default function ConversasWhatsAppPage() {
   const handlePainelTabChange = (tab: 'atendimentos' | 'atestados') => {
     setPainelTab(tab);
     setSelectedId(null);
-    setShowAtestadoConversation(false);
-  };
-
-  const formatMedicalCertificateStatus = (status: string | null | undefined) => {
-    const s = String(status || '').toUpperCase();
-    if (s === 'PENDING' || !s) return 'Pendente';
-    if (s === 'PROCESSED' || s === 'APPROVED') return 'Finalizado';
-    return s;
+    setAtestadoConversationModalOpen(false);
+    setAtestadoFilePreview(null);
   };
 
   const isMedicalCertificatePending = (status: string | null | undefined) =>
     String(status || '').toUpperCase() === 'PENDING' || !status;
+
+  const latestPendingMedicalSubmission = useMemo(() => {
+    if (!detail) return null;
+    const pending = detail.submissions.filter(
+      (s) => s.type === 'MEDICAL_CERTIFICATE' && isMedicalCertificatePending(s.status)
+    );
+    if (pending.length === 0) return null;
+    return pending[pending.length - 1];
+  }, [detail]);
 
   const handleDownloadAtestado = (url: string | null | undefined, fileName: string | null | undefined) => {
     if (!url) return;
@@ -327,6 +398,14 @@ export default function ConversasWhatsAppPage() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  const openAtestadoFilePreview = (fileUrl: string | null | undefined, fileName: string | null | undefined) => {
+    if (!fileUrl) return;
+    const href = getFileHref(fileUrl);
+    if (!href || href === '#') return;
+    const kind = getAtestadoFilePreviewKind(fileName);
+    setAtestadoFilePreview({ href, fileName: fileName ?? null, kind });
   };
 
   const handleFinalizeSubmission = async (submissionId: string) => {
@@ -343,6 +422,17 @@ export default function ConversasWhatsAppPage() {
       setIsFinalizingSubmissionId(null);
     }
   };
+
+  useEffect(() => {
+    setAtestadoConversationModalOpen(false);
+    setAtestadoFilePreview(null);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!atestadoConversationModalOpen && !atestadoFilePreview) return;
+    document.body.classList.add('overflow-hidden');
+    return () => document.body.classList.remove('overflow-hidden');
+  }, [atestadoConversationModalOpen, atestadoFilePreview]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -374,7 +464,7 @@ export default function ConversasWhatsAppPage() {
   useEffect(() => {
     // Garante que o admin veja as mensagens mais recentes.
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [selectedId, detail?.messages?.length]);
+  }, [selectedId, detail?.messages?.length, atestadoConversationModalOpen]);
 
   const getAtestadoName = (source: unknown): string | null => {
     if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
@@ -654,7 +744,8 @@ export default function ConversasWhatsAppPage() {
                           type="button"
                           onClick={() => {
                             setSelectedId(c.id);
-                            setShowAtestadoConversation(false);
+                            setAtestadoConversationModalOpen(false);
+                            setAtestadoFilePreview(null);
                           }}
                           className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors border-l-4 border-transparent hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
                             selectedId === c.id
@@ -681,54 +772,48 @@ export default function ConversasWhatsAppPage() {
                                 {c.name ? c.name : formatPhone(c.phone)}
                               </span>
                             </div>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                              {c.lastMessage || 'Sem mensagens'}
-                            </p>
-                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            {painelTab === 'atendimentos' && (
+                              <p className="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                                {c.lastMessage || 'Sem mensagens'}
+                              </p>
+                            )}
+                            <p className={`text-xs text-gray-400 dark:text-gray-500 ${painelTab === 'atestados' ? 'mt-0.5' : 'mt-1'}`}>
                               {c.lastMessageAt
                                 ? format(new Date(c.lastMessageAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
                                 : format(new Date(c.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
                             </p>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              {painelTab === 'atestados' ? (
-                                <span
-                                  className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
-                                    isMedicalCertificatePending(c.medicalCertificateStatus)
-                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                      : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                  }`}
-                                >
-                                  {formatMedicalCertificateStatus(c.medicalCertificateStatus)}
-                                </span>
-                              ) : c.status === 'PENDING' ? (
-                                c.attendantRequested ? (
-                                  <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
-                                    Aguardando atendente
-                                  </span>
-                                ) : c.attendantInProgress ? (
-                                  <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200">
-                                    Em atendimento
-                                  </span>
-                                ) : null
-                              ) : null}
-                              {c.status !== 'PENDING' && (
-                                <span
-                                  className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
-                                    c.status === 'COMPLETED'
-                                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                            {painelTab === 'atendimentos' && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {c.status === 'PENDING' ? (
+                                  c.attendantRequested ? (
+                                    <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
+                                      Aguardando atendente
+                                    </span>
+                                  ) : c.attendantInProgress ? (
+                                    <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200">
+                                      Em atendimento
+                                    </span>
+                                  ) : null
+                                ) : null}
+                                {c.status !== 'PENDING' && (
+                                  <span
+                                    className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                      c.status === 'COMPLETED'
+                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                        : c.status === 'CANCELLED'
+                                          ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
+                                          : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                    }`}
+                                  >
+                                    {c.status === 'COMPLETED'
+                                      ? 'Concluído'
                                       : c.status === 'CANCELLED'
-                                        ? 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200'
-                                        : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                  }`}
-                                >
-                                  {c.status === 'COMPLETED'
-                                    ? 'Concluído'
-                                    : c.status === 'CANCELLED'
-                                      ? 'Encerrado'
-                                      : c.status}
-                                </span>
-                              )}
-                            </div>
+                                        ? 'Encerrado'
+                                        : c.status}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                           <ChevronRight className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
                         </button>
@@ -795,19 +880,7 @@ export default function ConversasWhatsAppPage() {
                           Em atendimento
                         </span>
                       ) : null}
-                      {painelTab === 'atestados' ? (
-                        <span
-                          className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
-                            isMedicalCertificatePending(detail.submissions.find((s) => s.type === 'MEDICAL_CERTIFICATE')?.status)
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                              : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                          }`}
-                        >
-                          {formatMedicalCertificateStatus(
-                            detail.submissions.find((s) => s.type === 'MEDICAL_CERTIFICATE')?.status
-                          )}
-                        </span>
-                      ) : detail.status !== 'PENDING' && (
+                      {painelTab === 'atendimentos' && detail.status !== 'PENDING' && (
                         <span
                           className={`text-xs px-2 py-1 rounded-md shrink-0 font-medium ${
                             detail.status === 'COMPLETED'
@@ -838,11 +911,25 @@ export default function ConversasWhatsAppPage() {
                       <button
                         type="button"
                         onClick={handleRemoveConversation}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
+                        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/25 transition-colors shrink-0"
+                        title="Remover conversa"
+                        aria-label="Remover conversa"
                       >
-                        <Trash2 className="w-4 h-4" />
-                        Remover
+                        <Trash2 className="w-5 h-5" />
                       </button>
+                      {painelTab === 'atestados' && latestPendingMedicalSubmission && (
+                        <button
+                          type="button"
+                          onClick={() => handleFinalizeSubmission(latestPendingMedicalSubmission.id)}
+                          disabled={isFinalizingSubmissionId === latestPendingMedicalSubmission.id}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors shrink-0"
+                        >
+                          {isFinalizingSubmissionId === latestPendingMedicalSubmission.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : null}
+                          Finalizar atestado
+                        </button>
+                      )}
                     </div>
                   </div>
                 </CardHeader>
@@ -883,22 +970,11 @@ export default function ConversasWhatsAppPage() {
                                 key={s.id}
                                 className="rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden bg-white dark:bg-gray-800/50"
                               >
-                                <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between flex-wrap gap-2 bg-gray-50 dark:bg-gray-800">
+                                <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-2 bg-gray-50 dark:bg-gray-800">
                                   <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                                     {detail.submissions.filter((x) => x.type === 'MEDICAL_CERTIFICATE').length > 1
                                       ? `Atestado #${idx + 1}`
                                       : 'Atestado médico'}
-                                  </span>
-                                  <span
-                                    className={`text-xs px-2 py-1 rounded-md ${
-                                      s.status === 'PENDING'
-                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                        : s.status === 'PROCESSED' || s.status === 'APPROVED'
-                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                        : 'bg-gray-100 text-gray-700 dark:bg-gray-600 dark:text-gray-300'
-                                    }`}
-                                  >
-                                    {formatMedicalCertificateStatus(s.status)}
                                   </span>
                                 </div>
                                 <div className="p-4 space-y-0">
@@ -929,29 +1005,27 @@ export default function ConversasWhatsAppPage() {
                                             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                                               Arquivo do atestado
                                             </p>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
-                                              disabled={!s.fileUrl}
-                                              className="inline-flex items-center gap-1 mt-1 text-sm px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                                            >
-                                              <Download className="w-3.5 h-3.5" />
-                                              Baixar arquivo
-                                            </button>
+                                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => openAtestadoFilePreview(s.fileUrl, s.fileName)}
+                                                disabled={!s.fileUrl}
+                                                className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                              >
+                                                <Eye className="w-3.5 h-3.5" />
+                                                Ver
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
+                                                disabled={!s.fileUrl}
+                                                className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                              >
+                                                <Download className="w-3.5 h-3.5" />
+                                                Baixar arquivo
+                                              </button>
+                                            </div>
                                           </div>
-                                        </div>
-                                      )}
-                                      {isMedicalCertificatePending(s.status) && (
-                                        <div className="flex justify-end py-2">
-                                          <button
-                                            type="button"
-                                            onClick={() => handleFinalizeSubmission(s.id)}
-                                            disabled={isFinalizingSubmissionId === s.id}
-                                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors"
-                                          >
-                                            {isFinalizingSubmissionId === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                                            Finalizar atestado
-                                          </button>
                                         </div>
                                       )}
                                       <div className="flex items-start gap-3 py-2">
@@ -972,23 +1046,31 @@ export default function ConversasWhatsAppPage() {
                                         Dados não disponíveis neste formato.
                                       </div>
                                       {(s.fileUrl || s.fileName) && (
-                                        <>
-                                          {s.fileUrl ? (
-                                            <a
-                                              href={getFileHref(s.fileUrl)}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="inline-flex items-center gap-1 text-sm text-red-600 dark:text-red-400 hover:underline"
-                                            >
-                                              <Paperclip className="w-4 h-4" />
-                                              {s.fileName || 'Ver arquivo'}
-                                            </a>
-                                          ) : (
-                                            <div className="mt-2 text-sm text-gray-900 dark:text-gray-100 break-all">
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => openAtestadoFilePreview(s.fileUrl, s.fileName)}
+                                            disabled={!s.fileUrl}
+                                            className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            Ver
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDownloadAtestado(s.fileUrl, s.fileName)}
+                                            disabled={!s.fileUrl}
+                                            className="inline-flex items-center gap-1 text-sm px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                          >
+                                            <Download className="w-3.5 h-3.5" />
+                                            Baixar arquivo
+                                          </button>
+                                          {!s.fileUrl && (
+                                            <span className="text-sm text-gray-900 dark:text-gray-100 break-all">
                                               {s.fileName || 'Arquivo recebido'}
-                                            </div>
+                                            </span>
                                           )}
-                                        </>
+                                        </div>
                                       )}
                                       <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                                         <Clock className="w-3 h-3 inline mr-1" />
@@ -1086,11 +1168,11 @@ export default function ConversasWhatsAppPage() {
 
                   {/* Conversa (mensagens) */}
                   <div>
-                    {painelTab === 'atestados' && !showAtestadoConversation ? (
+                    {painelTab === 'atestados' ? (
                       <div className="pt-2">
                         <button
                           type="button"
-                          onClick={() => setShowAtestadoConversation(true)}
+                          onClick={() => setAtestadoConversationModalOpen(true)}
                           className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
                         >
                           <MessageSquare className="w-4 h-4" />
@@ -1099,92 +1181,45 @@ export default function ConversasWhatsAppPage() {
                       </div>
                     ) : (
                       <>
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400" /> Conversa
-                    </h3>
-                    <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
-                      {detail.messages.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                        >
-                          <div
-                            className={`max-w-[85%] rounded-xl px-3 py-2.5 ${
-                              m.role === 'user'
-                                ? 'bg-red-600 text-white dark:bg-red-500'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
-                              {m.role === 'user' ? (
-                                <User className="w-3 h-3 shrink-0" />
-                              ) : (
-                                <Bot className="w-3 h-3 shrink-0" />
-                              )}
-                              <span className="font-medium text-gray-600 dark:text-gray-300">
-                                {m.role === 'user' ? 'Cliente' : 'Sistema'}
-                              </span>
-                              <span>
-                                {format(new Date(m.createdAt), "dd/MM HH:mm", { locale: ptBR })}
-                              </span>
-                            </div>
-                            <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
-                            {(m.mediaUrl || m.content === '[Arquivo enviado]') && (
-                              m.mediaUrl ? (
-                                <a
-                                  href={getFileHref(m.mediaUrl)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 mt-2 text-xs underline"
-                                >
-                                  <Paperclip className="w-3 h-3" />
-                                  {m.fileName || 'Anexo'}
-                                </a>
-                              ) : (
-                                <div className="inline-flex items-center gap-1 mt-2 text-xs opacity-80">
-                                  <Paperclip className="w-3 h-3" />
-                                  <span>{m.fileName || 'Arquivo enviado'}</span>
-                                </div>
-                              )
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      <div ref={messagesEndRef} />
-                    </div>
-
-                    {painelTab === 'atendimentos' && (
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        handleSendManualMessage();
-                      }}
-                      className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 items-end"
-                    >
-                      <div className="flex-1">
-                        <textarea
-                          value={replyText}
-                          onChange={(e) => setReplyText(e.target.value)}
-                          placeholder={
-                            detail.status === 'PENDING'
-                              ? 'Digite uma mensagem para a pessoa...'
-                              : 'Conversa encerrada — não é possível enviar novas mensagens.'
-                          }
-                          disabled={detail.status !== 'PENDING' || isSending}
-                          className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-gray-200 resize-none disabled:opacity-60 disabled:cursor-not-allowed"
-                          rows={1}
-                          style={{ minHeight: 42, maxHeight: 120 }}
+                        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400" /> Conversa
+                        </h3>
+                        <ListaMensagensWhatsAppDetalhe
+                          messages={detail.messages}
+                          messagesEndRef={messagesEndRef}
+                          scrollClassName="max-h-[320px]"
                         />
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={detail.status !== 'PENDING' || !replyText.trim() || isSending}
-                        className="px-4 py-2.5 bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-                      >
-                        {isSending ? 'Enviando...' : 'Enviar'}
-                      </button>
-                    </form>
-                    )}
+
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            handleSendManualMessage();
+                          }}
+                          className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 items-end"
+                        >
+                          <div className="flex-1">
+                            <textarea
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              placeholder={
+                                detail.status === 'PENDING'
+                                  ? 'Digite uma mensagem para a pessoa...'
+                                  : 'Conversa encerrada — não é possível enviar novas mensagens.'
+                              }
+                              disabled={detail.status !== 'PENDING' || isSending}
+                              className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-gray-200 resize-none disabled:opacity-60 disabled:cursor-not-allowed"
+                              rows={1}
+                              style={{ minHeight: 42, maxHeight: 120 }}
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={detail.status !== 'PENDING' || !replyText.trim() || isSending}
+                            className="px-4 py-2.5 bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                          >
+                            {isSending ? 'Enviando...' : 'Enviar'}
+                          </button>
+                        </form>
                       </>
                     )}
                   </div>
@@ -1201,6 +1236,105 @@ export default function ConversasWhatsAppPage() {
           </div>
         </div>
       </div>
+
+      {atestadoConversationModalOpen &&
+        detail &&
+        painelTab === 'atestados' &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="whatsapp-atestado-conversa-title"
+            onClick={() => setAtestadoConversationModalOpen(false)}
+          >
+            <div
+              className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+                <h2
+                  id="whatsapp-atestado-conversa-title"
+                  className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"
+                >
+                  <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                  Conversa
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setAtestadoConversationModalOpen(false)}
+                  className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  aria-label="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 overflow-hidden flex flex-col min-h-0">
+                <ListaMensagensWhatsAppDetalhe
+                  messages={detail.messages}
+                  messagesEndRef={messagesEndRef}
+                  scrollClassName="max-h-[min(70vh,520px)]"
+                />
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {atestadoFilePreview &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Visualizar arquivo do atestado"
+            onClick={() => setAtestadoFilePreview(null)}
+          >
+            <button
+              type="button"
+              onClick={() => setAtestadoFilePreview(null)}
+              className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors z-10"
+              aria-label="Fechar"
+            >
+              <X className="w-[22px] h-[22px]" />
+            </button>
+            <div
+              className="max-w-[92vw] max-h-[88vh] flex flex-col items-center justify-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {atestadoFilePreview.kind === 'image' ? (
+                <img
+                  src={atestadoFilePreview.href}
+                  alt={atestadoFilePreview.fileName || 'Atestado'}
+                  className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl"
+                  referrerPolicy="no-referrer"
+                />
+              ) : atestadoFilePreview.kind === 'pdf' ? (
+                <iframe
+                  title={atestadoFilePreview.fileName || 'PDF'}
+                  src={atestadoFilePreview.href}
+                  className="w-[min(90vw,800px)] h-[80vh] rounded-xl bg-white"
+                />
+              ) : (
+                <div className="rounded-xl bg-gray-800 dark:bg-gray-950 text-white p-6 text-center max-w-md border border-gray-700">
+                  <p className="text-sm mb-4">
+                    Não foi possível pré-visualizar este tipo de arquivo aqui.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => window.open(atestadoFilePreview.href, '_blank', 'noopener,noreferrer')}
+                    className="text-sm px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    Abrir em nova aba
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </MainLayout>
   );
 }
