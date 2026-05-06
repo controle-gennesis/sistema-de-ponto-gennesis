@@ -476,7 +476,7 @@ export class WhatsAppBotService {
 
     const payload = (conversation.payload as Record<string, unknown>) || {};
     const flowStatus = (conversation.flowStatus || 'MENU') as FlowStatus;
-    const normalizedFlowStatus = (String(flowStatus).startsWith('ATESTADO') ? 'MENU' : flowStatus) as FlowStatus;
+    const normalizedFlowStatus = flowStatus as FlowStatus;
 
     // Baixar e salvar mídia (S3 ou local)
     let savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null = null;
