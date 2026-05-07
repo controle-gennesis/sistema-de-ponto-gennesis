@@ -150,8 +150,6 @@ export function NativeCallOverlay({
   const showMain = phase === 'calling' || phase === 'connected';
   const showIncoming = phase === 'ringing' && incoming;
 
-  if (!showMain && !showIncoming) return null;
-
   const peerLabel = peerName || incoming?.from.name || 'Contato';
   const peerPhoto = peerAvatarUrl ?? null;
   const peerSeed = incoming?.from.id || peerLabel;
@@ -207,6 +205,8 @@ export function NativeCallOverlay({
         : callQuality === 'poor'
           ? 'bg-red-600/85'
           : 'bg-slate-700/85';
+
+  if (!showMain && !showIncoming) return null;
 
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!callIsVideo) return;
