@@ -7,6 +7,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeCallHook } from '@/hooks/useNativeWebRTCCall';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import api from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useTheme } from '@/context/ThemeContext';
 
 const AVATAR_COLORS = [
   'bg-red-600',
@@ -102,9 +104,15 @@ export function NativeCallOverlay({
   const [primaryView, setPrimaryView] = useState<'remote' | 'local'>('remote');
   const [pipPos, setPipPos] = useState<{ x: number; y: number } | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [minimizedPos, setMinimizedPos] = useState<{ x: number; y: number } | null>(null);
   const [isCallChatOpen, setIsCallChatOpen] = useState(false);
   const [callMessage, setCallMessage] = useState('');
+  const prevMinimizedRef = useRef(false);
+  const minimizedCardRef = useRef<HTMLDivElement>(null);
+  const minDragStateRef = useRef<{ active: boolean; dx: number; dy: number }>({ active: false, dx: 0, dy: 0 });
   const queryClient = useQueryClient();
+  const { user } = usePermissions();
+  const { isDark } = useTheme();
 
   const remoteHasLiveVideo = useMemo(() => {
     if (!remoteStream) return false;
@@ -134,6 +142,7 @@ export function NativeCallOverlay({
       setPrimaryView('remote');
       setPipPos(null);
       setIsMinimized(false);
+      setMinimizedPos(null);
       setIsCallChatOpen(false);
       setCallMessage('');
     }
@@ -144,6 +153,14 @@ export function NativeCallOverlay({
       setPrimaryView('remote');
     }
   }, [primaryView, localStream, callIsVideo]);
+
+  useEffect(() => {
+    if (prevMinimizedRef.current && !isMinimized) {
+      setPrimaryView('remote');
+      setPipPos(null);
+    }
+    prevMinimizedRef.current = isMinimized;
+  }, [isMinimized]);
 
   if (typeof document === 'undefined') return null;
 
@@ -185,7 +202,12 @@ export function NativeCallOverlay({
   });
 
   const callMessages = useMemo(() => {
-    const raw = (callChatData?.messages ?? []) as Array<{ id: string; content?: string; senderId?: string }>;
+    const raw = (callChatData?.messages ?? []) as Array<{
+      id: string;
+      content?: string;
+      senderId?: string;
+      sender?: { name?: string | null } | null;
+    }>;
     return raw.filter((m) => !!m?.content?.trim()).slice(-30);
   }, [callChatData]);
 
@@ -205,6 +227,15 @@ export function NativeCallOverlay({
         : callQuality === 'poor'
           ? 'bg-red-600/85'
           : 'bg-slate-700/85';
+  const overlayShellClass = isDark ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-900';
+  const callGradientClass = isDark ? 'from-gray-900 to-black' : 'from-slate-100 to-slate-200';
+  const glassBtnClass = isDark
+    ? 'bg-black/50 hover:bg-black/65 text-white'
+    : 'bg-white/80 hover:bg-white text-gray-900 border border-gray-300/80';
+  const controlBtnClass = isDark
+    ? 'bg-white/10 hover:bg-white/20 text-white'
+    : 'bg-white hover:bg-slate-100 text-gray-900 border border-gray-300';
+  const footerTextClass = isDark ? 'text-white/60' : 'text-gray-600';
 
   if (!showMain && !showIncoming) return null;
 
@@ -238,32 +269,119 @@ export function NativeCallOverlay({
     event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const startMinDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const card = minimizedCardRef.current;
+    if (!card) return;
+    card.setPointerCapture(event.pointerId);
+    const rect = card.getBoundingClientRect();
+    minDragStateRef.current = {
+      active: true,
+      dx: event.clientX - rect.left,
+      dy: event.clientY - rect.top
+    };
+    if (!minimizedPos) {
+      setMinimizedPos({ x: rect.left, y: rect.top });
+    }
+  };
+
+  const onMinDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!minDragStateRef.current.active) return;
+    const card = minimizedCardRef.current;
+    const w = card?.offsetWidth ?? 340;
+    const h = card?.offsetHeight ?? 140;
+    const x = Math.min(Math.max(8, event.clientX - minDragStateRef.current.dx), window.innerWidth - w - 8);
+    const y = Math.min(Math.max(8, event.clientY - minDragStateRef.current.dy), window.innerHeight - h - 8);
+    setMinimizedPos({ x, y });
+  };
+
+  const endMinDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!minDragStateRef.current.active) return;
+    minDragStateRef.current.active = false;
+    minimizedCardRef.current?.releasePointerCapture(event.pointerId);
+  };
+
+  if (showIncoming && !showMain) {
+    return createPortal(
+      <>
+        <div className="fixed inset-0 z-[199] bg-black/25" aria-hidden />
+        <div
+          className={`fixed bottom-4 right-4 z-[210] w-[min(92vw,360px)] rounded-2xl p-4 shadow-2xl backdrop-blur-md ${isDark ? 'border border-white/20 bg-gray-900/95 text-white' : 'border border-gray-300 bg-white/95 text-gray-900'}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="native-call-incoming-title"
+        >
+          <p id="native-call-incoming-title" className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? 'text-white/55' : 'text-gray-500'}`}>
+            Chamada recebida
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <CallAvatar name={incoming!.from.name} photoUrl={peerPhoto} seed={peerSeed} sizeClass="h-14 w-14 text-lg" ringClass="ring-2 ring-white/15" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-base font-semibold">{incoming!.from.name}</p>
+              <p className={`text-xs ${footerTextClass}`}>{incoming!.video ? 'Videochamada' : 'Somente áudio'}</p>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={rejectIncoming}
+              className="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            >
+              Recusar
+            </button>
+            <button
+              type="button"
+              onClick={() => void acceptIncoming()}
+              className="rounded-full bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700"
+            >
+              Atender
+            </button>
+          </div>
+        </div>
+      </>,
+      document.body
+    );
+  }
+
   if (showMain && isMinimized) {
     return createPortal(
-      <div className="fixed bottom-4 right-4 z-[210] w-[min(90vw,340px)] rounded-2xl border border-white/20 bg-gray-900/95 p-3 text-white shadow-2xl backdrop-blur-md">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
+      <div
+        ref={minimizedCardRef}
+        className={`fixed z-[210] w-[min(90vw,340px)] touch-none rounded-2xl p-3 shadow-2xl backdrop-blur-md ${isDark ? 'border border-white/20 bg-gray-900/95 text-white' : 'border border-gray-300 bg-white/95 text-gray-900'} ${minimizedPos ? '' : 'bottom-4 right-4'}`}
+        style={minimizedPos ? { left: minimizedPos.x, top: minimizedPos.y } : undefined}
+        onPointerMove={onMinDrag}
+        onPointerUp={endMinDrag}
+        onPointerCancel={endMinDrag}
+      >
+        <div className="mb-3 flex items-center gap-2">
+          <div
+            className="flex min-w-0 flex-1 cursor-grab touch-none items-center gap-2 active:cursor-grabbing"
+            onPointerDown={startMinDrag}
+          >
             <CallAvatar name={peerLabel} photoUrl={peerPhoto} seed={peerSeed} sizeClass="h-10 w-10 text-sm" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{peerLabel}</p>
-              <p className="text-xs text-white/60">{phase === 'connected' ? `Em chamada - ${durationLabel}` : 'Conectando...'}</p>
+              <p className={`text-xs ${footerTextClass}`}>{phase === 'connected' ? `Em chamada · ${durationLabel}` : 'Conectando...'}</p>
             </div>
           </div>
           <button
             type="button"
-            onClick={() => setIsMinimized(false)}
-            className="rounded-md bg-white/10 p-1.5 hover:bg-white/20"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              setIsMinimized(false);
+              setPrimaryView('remote');
+            }}
+            className={`shrink-0 rounded-md p-1.5 ${controlBtnClass}`}
             aria-label="Abrir chamada"
           >
             <Maximize2 className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex items-center justify-center gap-2">
-          <button type="button" onClick={toggleMic} className="flex size-10 items-center justify-center rounded-full bg-white/10 hover:bg-white/20" aria-label={micMuted ? 'Ligar microfone' : 'Silenciar'}>
+        <div className="flex items-center justify-center gap-2" onPointerDown={(e) => e.stopPropagation()}>
+          <button type="button" onClick={toggleMic} className={`flex size-10 items-center justify-center rounded-full ${controlBtnClass}`} aria-label={micMuted ? 'Ligar microfone' : 'Silenciar'}>
             {micMuted ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
           {callIsVideo && (
-            <button type="button" onClick={toggleCam} className="flex size-10 items-center justify-center rounded-full bg-white/10 hover:bg-white/20" aria-label={camOff ? 'Ligar câmera' : 'Desligar câmera'}>
+            <button type="button" onClick={toggleCam} className={`flex size-10 items-center justify-center rounded-full ${controlBtnClass}`} aria-label={camOff ? 'Ligar câmera' : 'Desligar câmera'}>
               {camOff ? <VideoOff size={18} /> : <Video size={18} />}
             </button>
           )}
@@ -277,35 +395,10 @@ export function NativeCallOverlay({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex min-h-0 flex-col bg-gray-950 text-white">
-      {showIncoming && (
-        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6">
-          <p className="text-lg font-semibold">Chamada recebida</p>
-          <CallAvatar name={incoming!.from.name} photoUrl={peerPhoto} seed={peerSeed} sizeClass="h-28 w-28 text-3xl" ringClass="ring-4 ring-white/20" />
-          <p className="text-2xl font-medium">{incoming!.from.name}</p>
-          <p className="text-sm text-white/60">{incoming!.video ? 'Videochamada' : 'Somente áudio'}</p>
-          <div className="mt-4 flex gap-4">
-            <button
-              type="button"
-              onClick={() => void acceptIncoming()}
-              className="rounded-full bg-green-600 px-8 py-3 font-medium hover:bg-green-700"
-            >
-              Atender
-            </button>
-            <button
-              type="button"
-              onClick={rejectIncoming}
-              className="rounded-full bg-red-600 px-8 py-3 font-medium hover:bg-red-700"
-            >
-              Recusar
-            </button>
-          </div>
-        </div>
-      )}
-
+    <div className={`fixed inset-0 z-[200] flex min-h-0 flex-col ${overlayShellClass}`}>
       {showMain && (
         <>
-          <div className="relative flex min-h-0 flex-1 flex-col bg-gradient-to-b from-gray-900 to-black">
+          <div className={`relative flex min-h-0 flex-1 flex-col bg-gradient-to-b ${callGradientClass}`}>
             <div className="absolute right-4 top-4 z-30 flex items-center gap-2">
               {phase === 'connected' && (
                 <>
@@ -327,7 +420,7 @@ export function NativeCallOverlay({
                   <MessageSquare className="h-4 w-4" />
                 </button>
               )}
-              <span className="rounded-md bg-black/50 px-2 py-1 text-[10px] font-semibold text-white/80">
+              <span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${isDark ? 'bg-black/50 text-white/80' : 'bg-white/80 text-gray-700 border border-gray-300/80'}`}>
                 {wsConnectionState === 'connected'
                   ? 'Sinalização online'
                   : wsConnectionState === 'reconnecting'
@@ -337,19 +430,19 @@ export function NativeCallOverlay({
               <button
                 type="button"
                 onClick={() => setIsMinimized(true)}
-                className="rounded-md bg-black/50 p-2 hover:bg-black/65"
+                className={`rounded-md p-2 ${glassBtnClass}`}
                 aria-label="Minimizar chamada"
               >
                 <Minimize2 className="h-4 w-4" />
               </button>
             </div>
             {phase === 'calling' && (
-              <p className="pointer-events-none absolute left-0 right-0 top-4 z-20 text-center text-sm text-white/80">
+              <p className={`pointer-events-none absolute left-0 right-0 top-4 z-20 text-center text-sm ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
                 {peerLabel ? `Chamando ${peerLabel}…` : 'Conectando…'}
               </p>
             )}
             {phase === 'connected' && (
-              <p className="pointer-events-none absolute left-0 right-0 top-11 z-20 text-center text-xs text-white/70">
+              <p className={`pointer-events-none absolute left-0 right-0 top-11 z-20 text-center text-xs ${isDark ? 'text-white/70' : 'text-gray-600'}`}>
                 RTT {callLatencyMs !== null ? `${Math.round(callLatencyMs)}ms` : '--'} | Perda {packetLossPct !== null ? `${packetLossPct.toFixed(1)}%` : '--'}
               </p>
             )}
@@ -388,15 +481,15 @@ export function NativeCallOverlay({
                 />
                 <div className="text-center">
                   <p className="text-xl font-semibold sm:text-2xl">{showLocalAsMain ? localLabel : peerLabel}</p>
-                  {!callIsVideo && <p className="mt-1 text-sm text-white/55">Chamada de voz</p>}
+                  {!callIsVideo && <p className={`mt-1 text-sm ${isDark ? 'text-white/55' : 'text-gray-600'}`}>Chamada de voz</p>}
                   {!showLocalAsMain && callIsVideo && !remoteStream && (
-                    <p className="mt-1 text-sm text-white/55">{phase === 'calling' ? 'Aguardando…' : 'Sem vídeo do outro participante'}</p>
+                    <p className={`mt-1 text-sm ${isDark ? 'text-white/55' : 'text-gray-600'}`}>{phase === 'calling' ? 'Aguardando…' : 'Sem vídeo do outro participante'}</p>
                   )}
                   {!showLocalAsMain && callIsVideo && remoteStream && !remoteHasLiveVideo && (
-                    <p className="mt-1 text-sm text-white/55">Câmera desligada no outro lado</p>
+                    <p className={`mt-1 text-sm ${isDark ? 'text-white/55' : 'text-gray-600'}`}>Câmera desligada no outro lado</p>
                   )}
                   {showLocalAsMain && camOff && (
-                    <p className="mt-1 text-sm text-white/55">Sua câmera está desligada</p>
+                    <p className={`mt-1 text-sm ${isDark ? 'text-white/55' : 'text-gray-600'}`}>Sua câmera está desligada</p>
                   )}
                 </div>
               </div>
@@ -404,7 +497,7 @@ export function NativeCallOverlay({
 
             {callIsVideo && localStream && localStream.getVideoTracks().length > 0 && (
               <div
-                className="absolute z-20 h-28 w-40 cursor-grab touch-none overflow-hidden rounded-xl border border-white/25 bg-black shadow-2xl active:cursor-grabbing sm:h-36 sm:w-52"
+                className={`absolute z-20 h-28 w-40 cursor-grab touch-none overflow-hidden rounded-xl shadow-2xl active:cursor-grabbing sm:h-36 sm:w-52 ${isDark ? 'border border-white/25 bg-black' : 'border border-gray-300 bg-white'}`}
                 style={pipPos ? { left: pipPos.x, top: pipPos.y } : { right: 16, bottom: 96 }}
                 onPointerDown={startDrag}
                 onPointerMove={onDrag}
@@ -433,8 +526,14 @@ export function NativeCallOverlay({
                 )}
                 <button
                   type="button"
-                  onClick={() => setPrimaryView((v) => (v === 'remote' ? 'local' : 'remote'))}
-                  className="absolute right-2 top-2 rounded-md bg-black/60 p-1.5 hover:bg-black/75"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPrimaryView((v) => (v === 'remote' ? 'local' : 'remote'));
+                  }}
+                  className={`absolute right-2 top-2 rounded-md p-1.5 ${glassBtnClass}`}
                   aria-label={showLocalAsMain ? 'Voltar foco para contato' : 'Focar na sua câmera'}
                 >
                   {showLocalAsMain ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -443,7 +542,7 @@ export function NativeCallOverlay({
             )}
 
             {!callIsVideo && (
-              <div className="absolute right-4 top-16 z-20 flex items-center gap-3 rounded-2xl border border-white/15 bg-black/50 px-3 py-2 backdrop-blur-sm">
+              <div className={`absolute right-4 top-16 z-20 flex items-center gap-3 rounded-2xl px-3 py-2 backdrop-blur-sm ${isDark ? 'border border-white/15 bg-black/50' : 'border border-gray-300 bg-white/85'}`}>
                 <CallAvatar
                   name={localDisplayName || 'Você'}
                   photoUrl={localAvatarUrl}
@@ -452,26 +551,29 @@ export function NativeCallOverlay({
                 />
                 <div className="min-w-0 text-left">
                   <p className="truncate text-sm font-medium">{localDisplayName || 'Você'}</p>
-                  <p className="text-xs text-white/55">Você</p>
+                  <p className={`text-xs ${isDark ? 'text-white/55' : 'text-gray-600'}`}>Você</p>
                 </div>
               </div>
             )}
             {isCallChatOpen && (
-              <div className="absolute bottom-24 right-4 top-16 z-30 flex w-[min(92vw,360px)] flex-col overflow-hidden rounded-2xl border border-white/20 bg-black/75 backdrop-blur-md">
-                <div className="border-b border-white/15 px-3 py-2 text-sm font-semibold">Chat da ligação</div>
+              <div className={`absolute bottom-24 right-4 top-16 z-30 flex w-[min(92vw,360px)] flex-col overflow-hidden rounded-2xl backdrop-blur-md ${isDark ? 'border border-white/20 bg-black/75' : 'border border-gray-300 bg-white/90'}`}>
+                <div className={`border-b px-3 py-2 text-sm font-semibold ${isDark ? 'border-white/15' : 'border-gray-300'}`}>Chat da ligação</div>
                 <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
                   {callMessages.length === 0 ? (
-                    <p className="text-xs text-white/60">Sem mensagens nessa conversa ainda.</p>
+                    <p className={`text-xs ${footerTextClass}`}>Sem mensagens nessa conversa ainda.</p>
                   ) : (
                     callMessages.map((m) => (
-                      <div key={m.id} className="rounded-lg bg-white/10 px-2 py-1.5 text-xs">
+                      <div key={m.id} className={`rounded-lg px-2 py-1.5 text-xs ${isDark ? 'bg-white/10' : 'bg-slate-100 border border-gray-300/60'}`}>
+                        <p className={`mb-0.5 text-[10px] font-semibold ${isDark ? 'text-white/70' : 'text-gray-600'}`}>
+                          {m.senderId === user?.id ? 'Você' : m.sender?.name || 'Contato'}
+                        </p>
                         {m.content}
                       </div>
                     ))
                   )}
                 </div>
                 <form
-                  className="flex items-center gap-2 border-t border-white/15 p-2"
+                  className={`flex items-center gap-2 border-t p-2 ${isDark ? 'border-white/15' : 'border-gray-300'}`}
                   onSubmit={(e) => {
                     e.preventDefault();
                     if (!callMessage.trim() || sendMessageMutation.isPending) return;
@@ -482,7 +584,7 @@ export function NativeCallOverlay({
                     value={callMessage}
                     onChange={(e) => setCallMessage(e.target.value)}
                     placeholder="Digite uma mensagem..."
-                    className="h-9 flex-1 rounded-lg border border-white/15 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/30"
+                    className={`h-9 flex-1 rounded-lg px-3 text-sm outline-none ${isDark ? 'border border-white/15 bg-white/10 text-white placeholder:text-white/50 focus:border-white/30' : 'border border-gray-300 bg-white text-gray-900 placeholder:text-gray-500 focus:border-gray-500'}`}
                   />
                   <button
                     type="submit"
@@ -497,11 +599,12 @@ export function NativeCallOverlay({
             )}
           </div>
 
-          <div className="relative z-40 flex shrink-0 items-center justify-center gap-4 border-t border-white/10 bg-gray-900/95 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-md">
+          <div className="pointer-events-none absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-0 right-0 z-40 flex justify-center">
+            <div className="pointer-events-auto flex items-center justify-center gap-4">
             <button
               type="button"
               onClick={toggleMic}
-              className="flex size-12 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+              className={`flex size-12 items-center justify-center rounded-full ${controlBtnClass}`}
               aria-label={micMuted ? 'Ligar microfone' : 'Silenciar'}
             >
               {micMuted ? <MicOff size={22} /> : <Mic size={22} />}
@@ -511,7 +614,7 @@ export function NativeCallOverlay({
                 type="button"
                 onClick={toggleCam}
                 disabled={!localStream || localStream.getVideoTracks().length === 0}
-                className="flex size-12 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                className={`flex size-12 items-center justify-center rounded-full ${controlBtnClass} disabled:cursor-not-allowed disabled:opacity-40`}
                 aria-label={camOff ? 'Ligar câmera' : 'Desligar câmera'}
               >
                 {camOff ? <VideoOff size={22} /> : <Video size={22} />}
@@ -522,7 +625,7 @@ export function NativeCallOverlay({
                 type="button"
                 onClick={() => void toggleScreenShare()}
                 className={`flex size-12 items-center justify-center rounded-full ${
-                  isScreenSharing ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white/10 hover:bg-white/20'
+                  isScreenSharing ? 'bg-blue-600 hover:bg-blue-700 text-white' : controlBtnClass
                 }`}
                 aria-label={isScreenSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
               >
@@ -537,6 +640,7 @@ export function NativeCallOverlay({
             >
               <PhoneOff size={26} />
             </button>
+            </div>
           </div>
         </>
       )}
