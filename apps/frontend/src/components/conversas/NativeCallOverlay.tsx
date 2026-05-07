@@ -121,21 +121,32 @@ export function NativeCallOverlay({
 
   const showRemoteVideo = callIsVideo && remoteHasLiveVideo;
 
+  /** Re-anexar streams sempre que o DOM dos &lt;video&gt; mudar (minimizar, trocar foco PiP/principal — refs montam de novo mas o objeto MediaStream não muda). */
   useEffect(() => {
-    [localPipRef.current, localMainRef.current].forEach((el) => {
-      if (!el) return;
-      el.srcObject = localStream;
-      void el.play().catch(() => {});
-    });
-  }, [localStream]);
+    const bindLocal = () => {
+      [localPipRef.current, localMainRef.current].forEach((el) => {
+        if (!el) return;
+        el.srcObject = localStream;
+        void el.play().catch(() => {});
+      });
+    };
+    bindLocal();
+    const raf = requestAnimationFrame(bindLocal);
+    return () => cancelAnimationFrame(raf);
+  }, [localStream, isMinimized, primaryView, showMain]);
 
   useEffect(() => {
-    [remoteRef.current, remotePipRef.current].forEach((el) => {
-      if (!el) return;
-      el.srcObject = remoteStream;
-      void el.play().catch(() => {});
-    });
-  }, [remoteStream]);
+    const bindRemote = () => {
+      [remoteRef.current, remotePipRef.current].forEach((el) => {
+        if (!el) return;
+        el.srcObject = remoteStream;
+        void el.play().catch(() => {});
+      });
+    };
+    bindRemote();
+    const raf = requestAnimationFrame(bindRemote);
+    return () => cancelAnimationFrame(raf);
+  }, [remoteStream, isMinimized, primaryView, showMain]);
 
   useEffect(() => {
     if (phase === 'idle') {
@@ -156,7 +167,6 @@ export function NativeCallOverlay({
 
   useEffect(() => {
     if (prevMinimizedRef.current && !isMinimized) {
-      setPrimaryView('remote');
       setPipPos(null);
     }
     prevMinimizedRef.current = isMinimized;
@@ -302,14 +312,12 @@ export function NativeCallOverlay({
 
   if (showIncoming && !showMain) {
     return createPortal(
-      <>
-        <div className="fixed inset-0 z-[199] bg-black/25" aria-hidden />
-        <div
-          className={`fixed bottom-4 right-4 z-[210] w-[min(92vw,360px)] rounded-2xl p-4 shadow-2xl backdrop-blur-md ${isDark ? 'border border-white/20 bg-gray-900/95 text-white' : 'border border-gray-300 bg-white/95 text-gray-900'}`}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="native-call-incoming-title"
-        >
+      <div
+        className={`fixed bottom-4 right-4 z-[210] w-[min(92vw,360px)] rounded-2xl p-4 shadow-2xl backdrop-blur-md ${isDark ? 'border border-white/20 bg-gray-900/95 text-white' : 'border border-gray-300 bg-white/95 text-gray-900'}`}
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="native-call-incoming-title"
+      >
           <p id="native-call-incoming-title" className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? 'text-white/55' : 'text-gray-500'}`}>
             Chamada recebida
           </p>
@@ -336,8 +344,7 @@ export function NativeCallOverlay({
               Atender
             </button>
           </div>
-        </div>
-      </>,
+        </div>,
       document.body
     );
   }
@@ -368,7 +375,6 @@ export function NativeCallOverlay({
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => {
               setIsMinimized(false);
-              setPrimaryView('remote');
             }}
             className={`shrink-0 rounded-md p-1.5 ${controlBtnClass}`}
             aria-label="Abrir chamada"
