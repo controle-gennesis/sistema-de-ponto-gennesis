@@ -583,8 +583,13 @@ export class WhatsAppBotService {
     mediaInfo?: MediaInfo,
     opts?: { whatsappProfileName?: string }
   ): Promise<void> {
+    // Cada novo contato após encerramento deve abrir um atendimento novo.
+    // Reaproveitamos apenas conversa ainda pendente.
     let conversation = await prisma.whatsAppConversation.findFirst({
-      where: { phone },
+      where: {
+        phone,
+        status: 'PENDING'
+      },
       orderBy: { updatedAt: 'desc' }
     });
 
@@ -663,11 +668,6 @@ export class WhatsAppBotService {
 
     // Se o usuário pedir atendimento humano, não queremos que o idle timeout feche a conversa.
     let skipInactivityTimeout = false;
-
-    // Se estava CANCELLED (por encerramento manual ou por inatividade), a próxima mensagem deve reativar.
-    if (newConversationStatus === 'CANCELLED' && !isEndRequest()) {
-      newConversationStatus = 'PENDING';
-    }
 
     /**
      * Atendimento humano (ou fila após nome): não rodar o fluxo da Luna em cada mensagem —
