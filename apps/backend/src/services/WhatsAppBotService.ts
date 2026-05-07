@@ -504,17 +504,24 @@ export class WhatsAppBotService {
     const now = new Date();
     const linked = await prisma.userContractPermission.findMany({
       where: { userId },
-      include: {
-        contract: {
-          include: { costCenter: true }
-        }
-      },
-      orderBy: [{ contract: { number: 'asc' } }]
+      select: { contractId: true }
     });
 
-    const linkedContracts = linked
-      .map((x) => x.contract)
-      .filter((c) => c.startDate <= now && c.endDate >= now);
+    const linkedIds = [...new Set(linked.map((x) => x.contractId).filter(Boolean))];
+    let linkedContracts: Array<
+      Prisma.ContractGetPayload<{ include: { costCenter: true } }>
+    > = [];
+    if (linkedIds.length > 0) {
+      linkedContracts = await prisma.contract.findMany({
+        where: {
+          id: { in: linkedIds },
+          startDate: { lte: now },
+          endDate: { gte: now }
+        },
+        include: { costCenter: true },
+        orderBy: [{ number: 'asc' }]
+      });
+    }
     if (linkedContracts.length > 0) return linkedContracts;
 
     // Fallback de segurança quando o vínculo não estiver preenchido no cadastro.
@@ -1224,7 +1231,13 @@ export class WhatsAppBotService {
           break;
         }
 
-        const contracts = await this.findContractsForUserCadastro(user.id);
+        let contracts: Array<any> = [];
+        try {
+          contracts = await this.findContractsForUserCadastro(user.id);
+        } catch (e) {
+          console.error('[WhatsAppBotService] Falha ao buscar contratos do cadastro:', e);
+          contracts = [];
+        }
 
         if (contracts.length === 0) {
           sendAction = {
@@ -1245,44 +1258,24 @@ export class WhatsAppBotService {
         newPayload.name = user.name;
         newPayload.employeeDepartment = user.employee.department;
 
-        if (contracts.length === 1) {
-          const c = contracts[0];
-          newPayload.contractId = c.id;
-          newPayload.contractNumber = c.number;
-          newPayload.contractName = c.name;
-          newPayload.company = c.costCenter.company || null;
-          newPayload.polo = c.costCenter.polo || null;
-          newStatus = 'ATESTADO_ASK_START_DATE';
-          sendAction = {
-            type: 'buttons',
-            body:
-              `Identifiquei *${user.name}* (CPF ${this.maskCpf(cpfDigits)}).\n` +
-              `Contrato: *${c.number}* · ${c.name}\n` +
-              `Empresa: *${c.costCenter.company || '—'}* | Polo: *${c.costCenter.polo || '—'}*\n\n` +
-              'Agora me informe a data de início do atestado no formato *DD/MM/AAAA*.',
-            buttons: [
-              { id: 'MENU', title: 'Voltar' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
-          break;
-        }
-
-        newPayload.contractOptions = contracts.map((c) => ({
-          id: c.id,
-          number: c.number,
-          name: c.name,
-          company: c.costCenter.company,
-          polo: c.costCenter.polo
-        }));
-        newStatus = 'ATESTADO_ASK_CONTRACT';
-        sendAction = askContractSelection(
-          contracts.map((c) => ({
-            id: `ATESTADO_CONTRACT_${c.id}`,
-            title: `${c.number} - ${c.costCenter.company || 'Empresa'}`
-          })),
-          user.name
-        );
+        // Não exibe contrato/empresa/polo no WhatsApp: escolhe internamente o primeiro elegível.
+        const c = contracts[0];
+        newPayload.contractId = c.id;
+        newPayload.contractNumber = c.number;
+        newPayload.contractName = c.name;
+        newPayload.company = c.costCenter.company || null;
+        newPayload.polo = c.costCenter.polo || null;
+        newStatus = 'ATESTADO_ASK_START_DATE';
+        sendAction = {
+          type: 'buttons',
+          body:
+            `Identifiquei *${user.name}* (CPF ${this.maskCpf(cpfDigits)}).\n` +
+            'Agora me informe a data de início do atestado no formato *DD/MM/AAAA*.',
+          buttons: [
+            { id: 'MENU', title: 'Voltar' },
+            { id: 'END', title: 'Encerrar' }
+          ]
+        };
         break;
       }
 
