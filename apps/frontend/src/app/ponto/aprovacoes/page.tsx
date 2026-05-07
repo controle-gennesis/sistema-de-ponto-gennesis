@@ -178,6 +178,14 @@ function extractAtestadoAttachment(
   return { fileName, mimeType, previewUrl: `data:${mimeType};base64,${dataBase64}` };
 }
 
+function getDetailString(details: Record<string, unknown> | null | undefined, key: string): string | null {
+  if (!details || typeof details !== 'object') return null;
+  const v = (details as any)[key];
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s || null;
+}
+
 function formatYmd(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
@@ -332,6 +340,56 @@ export default function AprovacoesPage() {
     if (r.requestType === 'ATESTADO_MEDICO') return getCostCenterLabel(r) || '—';
     return r.contract?.name ?? '—';
   };
+
+  const detailInfoRows = React.useMemo(() => {
+    if (!detailRequest) return [] as Array<{ key: string; label: string; value: string }>;
+    const rows: Array<{ key: string; label: string; value: string }> = [];
+    const seen = new Set<string>();
+    const push = (key: string, label: string, value?: string | null) => {
+      const v = String(value ?? '').trim();
+      if (!v || seen.has(key)) return;
+      seen.add(key);
+      rows.push({ key, label, value: v });
+    };
+
+    push('status', 'Status', STATUS_LABELS[detailRequest.status] ?? detailRequest.status);
+    push('urgency', 'Urgência', URGENCY_LABELS[detailRequest.urgency]);
+    push('tipo', 'Tipo', TYPE_LABELS[detailRequest.requestType] ?? detailRequest.requestType);
+    push('criadaEm', 'Criada em', formatDateTime(detailRequest.createdAt));
+    push('prazoInicio', 'Prazo (início)', formatYmd(detailRequest.prazoInicio));
+    push('prazoFim', 'Prazo (fim)', formatYmd(detailRequest.prazoFim));
+    push('centroCusto', 'Centro de custo', getCostCenterLabel(detailRequest));
+    push('empresa', 'Empresa', detailRequest.company ?? null);
+    push('polo', 'Polo', detailRequest.polo ?? null);
+    if (!getCostCenterLabel(detailRequest)) {
+      const contrato = `${detailRequest.contract?.name ?? ''}${
+        detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''
+      }`.trim();
+      push('contrato', 'Contrato', contrato || '—');
+    }
+    push('solicitante', 'Solicitante', detailRequest.solicitanteNome);
+    push('setor', 'Setor', detailRequest.sectorSolicitante || '—');
+    push('login', 'Login', detailRequest.solicitanteEmail || '—');
+
+    // Ordem pedida: data inicial acima de data final.
+    push('dataInicial', 'Data inicial', getDetailString(detailRequest.details, 'dataInicial'));
+    push('dataFinal', 'Data final', getDetailString(detailRequest.details, 'dataFinal'));
+    push('numeroDias', 'Número de dias', getDetailString(detailRequest.details, 'numeroDias'));
+    push(
+      'colaborador',
+      'Colaborador',
+      getDetailString(detailRequest.details, 'employeeId')
+        ? formatDetailEntryValue('employeeId', getDetailString(detailRequest.details, 'employeeId')!, employeeNameByIdForDetail)
+        : null
+    );
+
+    detailModalRows.forEach((row) => {
+      if (['costCenter', 'dataInicial', 'dataFinal', 'numeroDias', 'employeeId'].includes(row.key)) return;
+      push(`details_${row.key}`, row.label, row.value);
+    });
+
+    return rows;
+  }, [detailRequest, detailModalRows, employeeNameByIdForDetail]);
 
   const dpFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -530,72 +588,14 @@ export default function AprovacoesPage() {
           >
             {detailRequest && (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                  {detailRequest.requestType === 'ATESTADO_MEDICO' && getCostCenterLabel(detailRequest) ? (
-                    <div className="sm:col-span-2">
-                      <span className="font-semibold text-gray-900 dark:text-gray-100">Centro de custo:</span>{' '}
-                      {getCostCenterLabel(detailRequest)}
-                    </div>
-                  ) : null}
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Status:</span>{' '}
-                    {STATUS_LABELS[detailRequest.status] ?? detailRequest.status}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Urgência:</span>{' '}
-                    {URGENCY_LABELS[detailRequest.urgency]}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Tipo:</span>{' '}
-                    {TYPE_LABELS[detailRequest.requestType] ?? detailRequest.requestType}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Criada em:</span>{' '}
-                    {formatDateTime(detailRequest.createdAt)}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Prazo (início):</span>{' '}
-                    {formatYmd(detailRequest.prazoInicio)}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Prazo (fim):</span>{' '}
-                    {formatYmd(detailRequest.prazoFim)}
-                  </div>
-                  {!(detailRequest.requestType === 'ATESTADO_MEDICO' && getCostCenterLabel(detailRequest)) && (
-                    <div className="sm:col-span-2">
-                      <span className="font-semibold text-gray-900 dark:text-gray-100">Contrato:</span>{' '}
-                      {detailRequest.contract?.name ?? '—'}
-                      {detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''}
-                    </div>
-                  )}
-                  {(detailRequest.company || detailRequest.polo) && (
-                    <div className="sm:col-span-2">
-                      <span className="font-semibold text-gray-900 dark:text-gray-100">Empresa / polo:</span>{' '}
-                      {[detailRequest.company, detailRequest.polo].filter(Boolean).join(' · ') || '—'}
-                    </div>
-                  )}
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Solicitante:</span>{' '}
-                    {detailRequest.solicitanteNome}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Setor:</span>{' '}
-                    {detailRequest.sectorSolicitante || '—'}
-                  </div>
-                  <div className="sm:col-span-2">
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Login:</span>{' '}
-                    {detailRequest.solicitanteEmail || '—'}
-                  </div>
-                </div>
-
-                {detailModalRows.length > 0 ? (
+                {detailInfoRows.length > 0 ? (
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                       Informações
                     </h3>
                     <div className="max-h-[240px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
                       <dl className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                        {detailModalRows.map((row) => (
+                        {detailInfoRows.map((row) => (
                           <div key={row.key} className="grid gap-1 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] sm:gap-4">
                             <dt className="font-medium text-gray-700 dark:text-gray-300">{row.label}</dt>
                             <dd className="whitespace-pre-wrap break-words text-gray-600 dark:text-gray-400">
