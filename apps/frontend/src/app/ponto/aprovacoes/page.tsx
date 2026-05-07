@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { Eye, FileCheck, FileText, Search } from 'lucide-react';
+import { Download, Eye, FileCheck, FileText, Search, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
@@ -78,6 +78,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
 const DETAIL_KEY_LABELS: Record<string, string> = {
   employeeId: 'Colaborador',
   employeeIds: 'Colaboradores',
+  costCenter: 'Centro de custo',
   punicao: 'Punição',
   motivo: 'Motivo',
   observacao: 'Observação',
@@ -225,6 +226,25 @@ export default function AprovacoesPage() {
     mimeType: string;
     previewUrl: string;
   } | null>(null);
+
+  const downloadAttachment = async (att: { fileName: string; previewUrl: string }) => {
+    try {
+      const res = await fetch(att.previewUrl, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) throw new Error('download failed');
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = att.fileName || 'atestado';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+      toast.error('Não foi possível baixar o anexo agora.');
+    }
+  };
 
   const { canAccessDpApproverPages } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
@@ -497,6 +517,14 @@ export default function AprovacoesPage() {
             {detailRequest && (
               <div className="space-y-6">
                 <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                  {detailRequest.requestType === 'ATESTADO_MEDICO' &&
+                  typeof detailRequest.details?.costCenter === 'string' &&
+                  detailRequest.details.costCenter.trim() ? (
+                    <div className="sm:col-span-2">
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">Centro de custo:</span>{' '}
+                      {detailRequest.details.costCenter}
+                    </div>
+                  ) : null}
                   <div>
                     <span className="font-semibold text-gray-900 dark:text-gray-100">Status:</span>{' '}
                     {STATUS_LABELS[detailRequest.status] ?? detailRequest.status}
@@ -521,11 +549,15 @@ export default function AprovacoesPage() {
                     <span className="font-semibold text-gray-900 dark:text-gray-100">Prazo (fim):</span>{' '}
                     {formatYmd(detailRequest.prazoFim)}
                   </div>
-                  <div className="sm:col-span-2">
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Contrato:</span>{' '}
-                    {detailRequest.contract?.name ?? '—'}
-                    {detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''}
-                  </div>
+                  {!(detailRequest.requestType === 'ATESTADO_MEDICO' &&
+                    typeof detailRequest.details?.costCenter === 'string' &&
+                    detailRequest.details.costCenter.trim()) && (
+                    <div className="sm:col-span-2">
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">Contrato:</span>{' '}
+                      {detailRequest.contract?.name ?? '—'}
+                      {detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''}
+                    </div>
+                  )}
                   {(detailRequest.company || detailRequest.polo) && (
                     <div className="sm:col-span-2">
                       <span className="font-semibold text-gray-900 dark:text-gray-100">Empresa / polo:</span>{' '}
@@ -576,15 +608,26 @@ export default function AprovacoesPage() {
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">{detailAttachment.mimeType}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setAttachmentPreview(detailAttachment)}
-                        className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
-                        title="Ver anexo"
-                        aria-label="Ver anexo"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAttachmentPreview(detailAttachment)}
+                          className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          title="Ver anexo"
+                          aria-label="Ver anexo"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void downloadAttachment(detailAttachment)}
+                          className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          title="Baixar anexo"
+                          aria-label="Baixar anexo"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : null}
@@ -635,31 +678,40 @@ export default function AprovacoesPage() {
             )}
           </Modal>
 
-          <Modal
-            isOpen={!!attachmentPreview}
-            onClose={() => setAttachmentPreview(null)}
-            title="Anexo do atestado"
-            size="lg"
-          >
-            {attachmentPreview && (
-              <div className="max-h-[75vh] overflow-auto">
+          {attachmentPreview && (
+            <div
+              className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/85 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Visualizar anexo do atestado"
+              onClick={() => setAttachmentPreview(null)}
+            >
+              <button
+                type="button"
+                onClick={() => setAttachmentPreview(null)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors z-10"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="max-w-[92vw] max-h-[88vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
                 {attachmentPreview.mimeType.toLowerCase().includes('pdf') ? (
                   <iframe
                     title={attachmentPreview.fileName}
                     src={attachmentPreview.previewUrl}
-                    className="w-full h-[70vh] rounded-lg bg-white"
+                    className="w-[min(92vw,980px)] h-[85vh] rounded-xl bg-white"
                   />
                 ) : (
                   <img
                     src={attachmentPreview.previewUrl}
                     alt={attachmentPreview.fileName}
-                    className="max-w-full max-h-[70vh] object-contain mx-auto rounded-lg"
+                    className="max-w-full max-h-[85vh] object-contain rounded-xl"
                     referrerPolicy="no-referrer"
                   />
                 )}
               </div>
-            )}
-          </Modal>
+            </div>
+          )}
         </div>
       </MainLayout>
     </ProtectedRoute>

@@ -9,7 +9,6 @@ type FlowStatus =
   | 'FAQ_TOPIC_SELECT'
   | 'FAQ_QUESTION_SELECT'
   | 'ATESTADO_ASK_CPF'
-  | 'ATESTADO_ASK_CONTRACT'
   | 'ATESTADO_ASK_START_DATE'
   | 'ATESTADO_ASK_END_DATE'
   | 'ATESTADO_ASK_DAYS'
@@ -500,65 +499,15 @@ export class WhatsAppBotService {
     };
   }
 
-  private async findContractsForUserCadastro(userId: string, employeeCostCenterCode?: string | null) {
-    const now = new Date();
-    const ccCode = (employeeCostCenterCode || '').trim();
-    if (ccCode) {
-      const cc = await prisma.costCenter.findUnique({ where: { code: ccCode }, select: { id: true } });
-      if (cc?.id) {
-        const byCostCenter = await prisma.contract.findMany({
-          where: {
-            costCenterId: cc.id,
-            startDate: { lte: now },
-            endDate: { gte: now }
-          },
-          include: { costCenter: true },
-          orderBy: [{ number: 'asc' }]
-        });
-        if (byCostCenter.length > 0) return byCostCenter;
-      }
-    }
-
-    const linked = await prisma.userContractPermission.findMany({
-      where: { userId },
-      select: { contractId: true }
-    });
-
-    const linkedIds = [...new Set(linked.map((x) => x.contractId).filter(Boolean))];
-    let linkedContracts: Array<
-      Prisma.ContractGetPayload<{ include: { costCenter: true } }>
-    > = [];
-    if (linkedIds.length > 0) {
-      linkedContracts = await prisma.contract.findMany({
-        where: {
-          id: { in: linkedIds },
-          startDate: { lte: now },
-          endDate: { gte: now }
-        },
-        include: { costCenter: true },
-        orderBy: [{ number: 'asc' }]
-      });
-    }
-    if (linkedContracts.length > 0) return linkedContracts;
-
-    // Fallback de segurança quando o vínculo não estiver preenchido no cadastro.
-    return prisma.contract.findMany({
-      where: { startDate: { lte: now }, endDate: { gte: now } },
-      include: { costCenter: true },
-      orderBy: [{ number: 'asc' }],
-      take: 20
-    });
-  }
-
   private async createDpRequestFromWhatsappAtestado(args: {
     employee: {
       id: string;
       department: string;
+      costCenter: string | null;
       company: string | null;
       polo: string | null;
       user: { id: string; name: string; email: string; cpf: string };
     };
-    contract: { id: string; name: string; number: string; costCenter: { company: string | null; polo: string | null } };
     payload: Record<string, unknown>;
     savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null;
     mediaMimeType?: string;
@@ -576,6 +525,7 @@ export class WhatsAppBotService {
 
     const details = {
       employeeId: args.employee.id,
+      costCenter: args.employee.costCenter || '',
       dataInicial,
       dataFinal,
       numeroDias,
@@ -610,7 +560,7 @@ export class WhatsAppBotService {
           prazoInicio: now,
           prazoFim,
           details: details as Prisma.InputJsonValue,
-          contractId: args.contract.id,
+          contractId: null,
           company: args.employee.company || null,
           polo: args.employee.polo || null,
           status: 'WAITING_MANAGER',
@@ -857,16 +807,6 @@ export class WhatsAppBotService {
         { id: 'MENU', title: 'Voltar' },
         { id: 'END', title: 'Encerrar' }
       ]
-    });
-
-    const askContractSelection = (
-      rows: Array<{ id: string; title: string }>,
-      employeeName: string
-    ): SendAction => ({
-      type: 'list',
-      body: `Encontrei mais de um contrato para ${employeeName}. Selecione o contrato correto:`,
-      buttonText: 'Escolher contrato',
-      sections: [{ title: 'Contratos', rows }]
     });
 
     const parseDateInput = (
@@ -1255,40 +1195,15 @@ export class WhatsAppBotService {
           break;
         }
 
-        let contracts: Array<any> = [];
-        try {
-          contracts = await this.findContractsForUserCadastro(user.id, user.employee.costCenter);
-        } catch (e) {
-          console.error('[WhatsAppBotService] Falha ao buscar contratos do cadastro:', e);
-          contracts = [];
-        }
-
-        if (contracts.length === 0) {
-          sendAction = {
-            type: 'buttons',
-            body: `Encontrei ${user.name}, mas não achei contrato ativo para o seu centro de custo (${user.employee.costCenter || 'não informado'}). Vou te encaminhar para atendente.`,
-            buttons: [
-              { id: 'ATENDENTE', title: 'Falar atendente' },
-              { id: 'MENU', title: 'Menu' }
-            ]
-          };
-          break;
-        }
-
         newPayload.cpf = cpfDigits;
         newPayload.cpfMasked = this.maskCpf(cpfDigits);
         newPayload.employeeId = user.employee.id;
         newPayload.requesterName = user.name;
         newPayload.name = user.name;
         newPayload.employeeDepartment = user.employee.department;
-
-        // Não exibe contrato/empresa/polo no WhatsApp: escolhe internamente o primeiro elegível.
-        const c = contracts[0];
-        newPayload.contractId = c.id;
-        newPayload.contractNumber = c.number;
-        newPayload.contractName = c.name;
-        newPayload.company = c.costCenter.company || null;
-        newPayload.polo = c.costCenter.polo || null;
+        newPayload.costCenter = user.employee.costCenter || null;
+        newPayload.company = user.employee.company || null;
+        newPayload.polo = user.employee.polo || null;
         newStatus = 'ATESTADO_ASK_START_DATE';
         sendAction = {
           type: 'buttons',
@@ -1300,46 +1215,6 @@ export class WhatsAppBotService {
             { id: 'END', title: 'Encerrar' }
           ]
         };
-        break;
-      }
-
-      case 'ATESTADO_ASK_CONTRACT': {
-        if (isEndRequest()) {
-          sendAction = endConversation();
-          break;
-        }
-        if (isMenuRequest()) {
-          sendAction = resetToMenu();
-          break;
-        }
-
-        const selectedId = content.startsWith('atestado_contract_')
-          ? content.replace('atestado_contract_', '').trim()
-          : '';
-        const options = Array.isArray((newPayload as any).contractOptions)
-          ? ((newPayload as any).contractOptions as Array<Record<string, unknown>>)
-          : [];
-        const selected = options.find((o) => String(o.id) === selectedId);
-        if (!selected) {
-          sendAction = {
-            type: 'buttons',
-            body: 'Não consegui identificar o contrato selecionado. Escolha novamente pela lista.',
-            buttons: [
-              { id: 'MENU', title: 'Voltar' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
-          break;
-        }
-
-        newPayload.contractId = selected.id;
-        newPayload.contractNumber = selected.number;
-        newPayload.contractName = selected.name;
-        newPayload.company = selected.company || null;
-        newPayload.polo = selected.polo || null;
-        delete (newPayload as any).contractOptions;
-        newStatus = 'ATESTADO_ASK_START_DATE';
-        sendAction = askDateByTyping('inicio');
         break;
       }
 
@@ -1486,22 +1361,20 @@ export class WhatsAppBotService {
           });
 
           const employeeId = String(newPayload.employeeId || '').trim();
-          const contractId = String(newPayload.contractId || '').trim();
-          if (employeeId && contractId && savedMedia) {
+          if (employeeId && savedMedia) {
             try {
               const employee = await prisma.employee.findUnique({
                 where: { id: employeeId },
-                include: { user: { select: { id: true, name: true, email: true, cpf: true } } }
+                include: {
+                  user: { select: { id: true, name: true, email: true, cpf: true } }
+                }
               });
-              const contract = await prisma.contract.findUnique({
-                where: { id: contractId },
-                include: { costCenter: { select: { company: true, polo: true } } }
-              });
-              if (employee?.user && contract) {
+              if (employee?.user) {
                 await this.createDpRequestFromWhatsappAtestado({
                   employee: {
                     id: employee.id,
                     department: employee.department,
+                    costCenter: employee.costCenter || null,
                     user: {
                       id: employee.user.id,
                       name: employee.user.name,
@@ -1510,15 +1383,6 @@ export class WhatsAppBotService {
                     },
                     company: employee.company || null,
                     polo: employee.polo || null
-                  },
-                  contract: {
-                    id: contract.id,
-                    name: contract.name,
-                    number: contract.number,
-                    costCenter: {
-                      company: contract.costCenter.company,
-                      polo: contract.costCenter.polo
-                    }
                   },
                   payload: newPayload,
                   savedMedia,
