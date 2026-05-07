@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Mail, Lock, AlertCircle, Moon, Sun, ArrowRight } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, AlertCircle, Moon, Sun, ArrowRight, MessageCircle, X } from 'lucide-react';
 import { authService } from '@/lib/auth';
 import { toast } from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
@@ -25,6 +25,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+
+  const supportWhatsAppDigits = '5561981622021';
+  const supportWhatsAppUrl = `https://wa.me/${supportWhatsAppDigits}?text=${encodeURIComponent(
+    'Olá! Esqueci minha senha do Gennesis Attendance e preciso de ajuda para alterar.'
+  )}`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,7 +237,7 @@ export default function LoginPage() {
               </label>
               <button
                 type="button"
-                onClick={() => router.push('/auth/forgot-password')}
+                onClick={() => setShowHelpModal(true)}
                 className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500 font-medium transition-colors"
               >
                 Esqueceu a senha?
@@ -261,6 +267,51 @@ export default function LoginPage() {
         </form>
         </div>
       </div>
+
+      {showHelpModal && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="forgot-password-help-title"
+          onClick={() => setShowHelpModal(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h3 id="forgot-password-help-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Esqueceu a senha?
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowHelpModal(false)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+              A recuperação automática foi desativada. Solicite a alteração de senha pelo WhatsApp:
+            </p>
+
+            <div className="mt-5">
+              <a
+                href={supportWhatsAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 hover:bg-green-700 text-white px-4 py-3 text-sm font-medium transition-colors"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Solicitar via WhatsApp
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="w-full bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 py-10">
