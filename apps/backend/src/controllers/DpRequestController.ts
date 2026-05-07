@@ -374,6 +374,7 @@ export class DpRequestController {
         include: {
           employee: {
             select: {
+              costCenter: true,
               user: { select: { name: true, email: true } },
             },
           },
@@ -403,6 +404,7 @@ export class DpRequestController {
         include: {
           employee: {
             select: {
+              costCenter: true,
               user: { select: { name: true, email: true } },
             },
           },

@@ -60,6 +60,7 @@ type DpRequest = {
   managerRejectionReason?: string | null;
   createdAt?: string;
   details?: Record<string, unknown> | null;
+  employee?: { costCenter?: string | null } | null;
 };
 
 const STATUS_LABELS: Record<DpRequestStatus, string> = {
@@ -319,6 +320,19 @@ export default function AprovacoesPage() {
     [detailRequest]
   );
 
+  const getCostCenterLabel = (r: DpRequest): string | null => {
+    const fromDetails =
+      typeof r.details?.costCenter === 'string' ? r.details.costCenter.trim() : '';
+    if (fromDetails) return fromDetails;
+    const fromEmployee = typeof r.employee?.costCenter === 'string' ? r.employee.costCenter.trim() : '';
+    return fromEmployee || null;
+  };
+
+  const getContratoColunaLabel = (r: DpRequest): string => {
+    if (r.requestType === 'ATESTADO_MEDICO') return getCostCenterLabel(r) || '—';
+    return r.contract?.name ?? '—';
+  };
+
   const dpFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return dpRequests;
@@ -462,7 +476,7 @@ export default function AprovacoesPage() {
                               {TYPE_LABELS[r.requestType] ?? r.requestType}
                             </td>
                             <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 max-w-[220px]">
-                              {r.contract?.name ?? '—'}
+                              {getContratoColunaLabel(r)}
                             </td>
                             <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
                               {formatYmd(r.prazoInicio)}
@@ -517,12 +531,10 @@ export default function AprovacoesPage() {
             {detailRequest && (
               <div className="space-y-6">
                 <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                  {detailRequest.requestType === 'ATESTADO_MEDICO' &&
-                  typeof detailRequest.details?.costCenter === 'string' &&
-                  detailRequest.details.costCenter.trim() ? (
+                  {detailRequest.requestType === 'ATESTADO_MEDICO' && getCostCenterLabel(detailRequest) ? (
                     <div className="sm:col-span-2">
                       <span className="font-semibold text-gray-900 dark:text-gray-100">Centro de custo:</span>{' '}
-                      {detailRequest.details.costCenter}
+                      {getCostCenterLabel(detailRequest)}
                     </div>
                   ) : null}
                   <div>
@@ -549,9 +561,7 @@ export default function AprovacoesPage() {
                     <span className="font-semibold text-gray-900 dark:text-gray-100">Prazo (fim):</span>{' '}
                     {formatYmd(detailRequest.prazoFim)}
                   </div>
-                  {!(detailRequest.requestType === 'ATESTADO_MEDICO' &&
-                    typeof detailRequest.details?.costCenter === 'string' &&
-                    detailRequest.details.costCenter.trim()) && (
+                  {!(detailRequest.requestType === 'ATESTADO_MEDICO' && getCostCenterLabel(detailRequest)) && (
                     <div className="sm:col-span-2">
                       <span className="font-semibold text-gray-900 dark:text-gray-100">Contrato:</span>{' '}
                       {detailRequest.contract?.name ?? '—'}
