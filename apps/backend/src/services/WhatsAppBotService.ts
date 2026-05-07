@@ -500,34 +500,30 @@ export class WhatsAppBotService {
     };
   }
 
-  private async findContractsForEmployeeContext(employee: {
-    company: string | null;
-    polo: string | null;
-    client: string | null;
-  }) {
+  private async findContractsForUserCadastro(userId: string) {
     const now = new Date();
-    const byCompanyPolo = await prisma.contract.findMany({
-      where: {
-        startDate: { lte: now },
-        endDate: { gte: now },
-        costCenter: {
-          ...(employee.company ? { company: employee.company } : {}),
-          ...(employee.polo ? { polo: employee.polo } : {})
+    const linked = await prisma.userContractPermission.findMany({
+      where: { userId },
+      include: {
+        contract: {
+          include: { costCenter: true }
         }
       },
-      include: { costCenter: true },
-      orderBy: [{ number: 'asc' }],
-      take: 50
+      orderBy: [{ contract: { number: 'asc' } }]
     });
 
-    const clientTerm = (employee.client || '').trim();
-    if (!clientTerm) return byCompanyPolo;
-    const boosted = byCompanyPolo.filter(
-      (c) =>
-        c.name.toLowerCase().includes(clientTerm.toLowerCase()) ||
-        c.number.toLowerCase().includes(clientTerm.toLowerCase())
-    );
-    return boosted.length > 0 ? boosted : byCompanyPolo;
+    const linkedContracts = linked
+      .map((x) => x.contract)
+      .filter((c) => c.startDate <= now && c.endDate >= now);
+    if (linkedContracts.length > 0) return linkedContracts;
+
+    // Fallback de segurança quando o vínculo não estiver preenchido no cadastro.
+    return prisma.contract.findMany({
+      where: { startDate: { lte: now }, endDate: { gte: now } },
+      include: { costCenter: true },
+      orderBy: [{ number: 'asc' }],
+      take: 20
+    });
   }
 
   private async createDpRequestFromWhatsappAtestado(args: {
@@ -1228,11 +1224,7 @@ export class WhatsAppBotService {
           break;
         }
 
-        const contracts = await this.findContractsForEmployeeContext({
-          company: user.employee.company,
-          polo: user.employee.polo,
-          client: user.employee.client
-        });
+        const contracts = await this.findContractsForUserCadastro(user.id);
 
         if (contracts.length === 0) {
           sendAction = {
