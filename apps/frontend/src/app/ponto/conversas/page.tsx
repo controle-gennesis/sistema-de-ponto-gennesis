@@ -1785,6 +1785,18 @@ function ConversasContent() {
     return getOtherUser(chat)?.employee?.department ?? 'Conversa direta';
   };
 
+  /** Foto do outro participante na chamada nativa (DM): lista de chats ou conversa ativa. */
+  const nativeCallPeerAvatarUrl = useMemo(() => {
+    const inc = nativeCall.incoming;
+    if (inc) {
+      const c = chats.find((x) => x.id === inc.chatId);
+      if (c && c.chatType !== 'GROUP') return getOtherUser(c)?.profilePhotoUrl ?? null;
+      return null;
+    }
+    if (activeChat && activeChat.chatType !== 'GROUP') return getOtherUser(activeChat)?.profilePhotoUrl ?? null;
+    return null;
+  }, [nativeCall.incoming, chats, activeChat, currentUser]);
+
   const getUnreadCount = (chat: DirectChat): number => {
     if (!currentUser) return 0;
     return chat.messages.filter(
@@ -4736,7 +4748,12 @@ function ConversasContent() {
       />
     )}
 
-    <NativeCallOverlay call={nativeCall} />
+    <NativeCallOverlay
+      call={nativeCall}
+      peerAvatarUrl={nativeCallPeerAvatarUrl}
+      localAvatarUrl={currentUser?.profilePhotoUrl ?? null}
+      localDisplayName={currentUser?.name ?? null}
+    />
     </>
   );
 }

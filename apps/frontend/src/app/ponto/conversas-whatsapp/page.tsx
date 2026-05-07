@@ -53,6 +53,21 @@ interface ConversationSummary {
   lastMessageAt: string | null;
 }
 
+interface MedicalCertificateListItem {
+  id: string;
+  submissionId: string;
+  conversationId: string;
+  phone: string;
+  name?: string | null;
+  flowStatus: string;
+  conversationStatus: string;
+  status: string;
+  medicalCertificateStatus?: string | null;
+  fileName?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface Message {
   id: string;
   role: string;
@@ -297,6 +312,7 @@ export default function ConversasWhatsAppPage() {
   const [atestadoTab, setAtestadoTab] = useState<'pendentes' | 'finalizados'>('pendentes');
   const [isEndingConversation, setIsEndingConversation] = useState(false);
   const [isFinalizingSubmissionId, setIsFinalizingSubmissionId] = useState<string | null>(null);
+  const [selectedAtestadoSubmissionId, setSelectedAtestadoSubmissionId] = useState<string | null>(null);
   const [atestadoConversationModalOpen, setAtestadoConversationModalOpen] = useState(false);
   const [atestadoFilePreview, setAtestadoFilePreview] = useState<{
     href: string;
@@ -348,6 +364,20 @@ export default function ConversasWhatsAppPage() {
     }
   });
 
+  const { data: medicalSubmissionsData, isLoading: loadingMedicalSubmissions } = useQuery({
+    queryKey: ['whatsapp-medical-certificate-submissions'],
+    queryFn: async () => {
+      const res = await api.get('/whatsapp/medical-certificate-submissions');
+      return res.data;
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: () => {
+      if (typeof document === 'undefined') return false;
+      return document.hidden ? false : 2000;
+    }
+  });
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
@@ -384,22 +414,22 @@ export default function ConversasWhatsAppPage() {
       : atendimentoTab === 'andamento'
         ? atendimentoEmAndamento
         : conversasEncerradas;
-  const conversasAtestadoBase = conversations.filter((c) => isAtestadoConversation(c));
-  const atestadosPendentes = conversasAtestadoBase.filter((c) => {
-    const certStatus = String(c.medicalCertificateStatus || '').toUpperCase();
+  const medicalSubmissions: MedicalCertificateListItem[] = medicalSubmissionsData?.data ?? [];
+  const atestadosPendentes = medicalSubmissions.filter((s) => {
+    const certStatus = String(s.medicalCertificateStatus || s.status || '').toUpperCase();
     // Sem status explícito ainda (fluxo em andamento) ou pendente de análise do DP.
     if (!certStatus) return true;
     return certStatus === 'PENDING';
   });
-  const atestadosFinalizados = conversasAtestadoBase.filter((c) => {
-    const certStatus = String(c.medicalCertificateStatus || '').toUpperCase();
+  const atestadosFinalizados = medicalSubmissions.filter((s) => {
+    const certStatus = String(s.medicalCertificateStatus || s.status || '').toUpperCase();
     if (!certStatus) return false;
     return certStatus !== 'PENDING';
   });
-  const conversasAtestadoFiltradas = atestadoTab === 'pendentes' ? atestadosPendentes : atestadosFinalizados;
-  const conversasVisiveis = painelTab === 'atendimentos' ? conversasFiltradas : conversasAtestadoFiltradas;
+  const atestadosFiltrados = atestadoTab === 'pendentes' ? atestadosPendentes : atestadosFinalizados;
+  const conversasVisiveis = painelTab === 'atendimentos' ? conversasFiltradas : [];
   const detail: ConversationDetail | null = detailData?.data ?? null;
-  const isLoading = loadingUser || loadingList;
+  const isLoading = loadingUser || loadingList || (painelTab === 'atestados' && loadingMedicalSubmissions);
   const showLegacyData = painelTab === 'atestados';
 
   /** Categoria da conversa selecionada (para acompanhar aba só quando o status mudar na mesma conversa, ex. após refetch). */
@@ -430,6 +460,7 @@ export default function ConversasWhatsAppPage() {
   const handlePainelTabChange = (tab: 'atendimentos' | 'atestados') => {
     setPainelTab(tab);
     setSelectedId(null);
+    setSelectedAtestadoSubmissionId(null);
     setAtestadoConversationModalOpen(false);
     setAtestadoFilePreview(null);
   };
@@ -445,6 +476,11 @@ export default function ConversasWhatsAppPage() {
     if (pending.length === 0) return null;
     return pending[pending.length - 1];
   }, [detail]);
+
+  const selectedMedicalSubmission = useMemo(() => {
+    if (!detail || !selectedAtestadoSubmissionId) return null;
+    return detail.submissions.find((s) => s.type === 'MEDICAL_CERTIFICATE' && s.id === selectedAtestadoSubmissionId) ?? null;
+  }, [detail, selectedAtestadoSubmissionId]);
 
   const handleDownloadAtestado = async (
     url: string | null | undefined,
@@ -510,6 +546,7 @@ export default function ConversasWhatsAppPage() {
       await api.post(`/whatsapp/conversations/${selectedId}/submissions/${submissionId}/finalize`);
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversation', selectedId] });
+      await queryClient.invalidateQueries({ queryKey: ['whatsapp-medical-certificate-submissions'] });
     } catch (error) {
       console.error('Erro ao finalizar atestado:', error);
       alert('Erro ao finalizar atestado.');
@@ -806,7 +843,7 @@ export default function ConversasWhatsAppPage() {
                   <Loader2 className="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">Carregando...</span>
                 </div>
-              ) : conversasVisiveis.length === 0 ? (
+              ) : (painelTab === 'atendimentos' ? conversasVisiveis.length === 0 : atestadosFiltrados.length === 0) ? (
                 <div className="py-10 px-6 text-center">
                   <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gray-100 dark:bg-gray-700/60 mb-4">
                     <AlertCircle className="w-7 h-7 text-gray-500 dark:text-gray-400" />
@@ -832,18 +869,21 @@ export default function ConversasWhatsAppPage() {
                 </div>
               ) : (
                 <ul className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[calc(100vh-20rem)] overflow-y-auto">
-                  {conversasVisiveis.map((c) => {
+                  {(painelTab === 'atendimentos' ? conversasVisiveis : (atestadosFiltrados as any[])).map((c: any) => {
                     return (
                       <li key={c.id}>
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedId(c.id);
+                            setSelectedId(painelTab === 'atestados' ? c.conversationId : c.id);
+                            setSelectedAtestadoSubmissionId(painelTab === 'atestados' ? c.submissionId : null);
                             setAtestadoConversationModalOpen(false);
                             setAtestadoFilePreview(null);
                           }}
                           className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors border-l-4 border-transparent hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
-                            selectedId === c.id
+                            (painelTab === 'atestados'
+                              ? selectedAtestadoSubmissionId === c.submissionId
+                              : selectedId === c.id)
                               ? 'bg-red-50 dark:bg-red-900/20 border-l-red-600 dark:border-l-red-500'
                               : ''
                           }`}
@@ -873,7 +913,9 @@ export default function ConversasWhatsAppPage() {
                               </p>
                             )}
                             <p className={`text-xs text-gray-400 dark:text-gray-500 ${painelTab === 'atestados' ? 'mt-0.5' : 'mt-1'}`}>
-                              {c.lastMessageAt
+                              {painelTab === 'atestados'
+                                ? format(new Date(c.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                                : c.lastMessageAt
                                 ? format(new Date(c.lastMessageAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
                                 : format(new Date(c.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
                             </p>
@@ -1022,14 +1064,15 @@ export default function ConversasWhatsAppPage() {
                             <MessageSquare className="w-4 h-4" />
                             Ver conversa
                           </button>
-                          {latestPendingMedicalSubmission && (
+                          {(selectedMedicalSubmission ?? latestPendingMedicalSubmission) &&
+                            isMedicalCertificatePending((selectedMedicalSubmission ?? latestPendingMedicalSubmission)?.status) && (
                             <button
                               type="button"
-                              onClick={() => handleFinalizeSubmission(latestPendingMedicalSubmission.id)}
-                              disabled={isFinalizingSubmissionId === latestPendingMedicalSubmission.id}
+                              onClick={() => handleFinalizeSubmission((selectedMedicalSubmission ?? latestPendingMedicalSubmission)!.id)}
+                              disabled={isFinalizingSubmissionId === (selectedMedicalSubmission ?? latestPendingMedicalSubmission)!.id}
                               className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors shrink-0"
                             >
-                              {isFinalizingSubmissionId === latestPendingMedicalSubmission.id ? (
+                              {isFinalizingSubmissionId === (selectedMedicalSubmission ?? latestPendingMedicalSubmission)!.id ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                               ) : null}
                               Finalizar
@@ -1075,7 +1118,11 @@ export default function ConversasWhatsAppPage() {
                             return (
                               <div
                                 key={s.id}
-                                className="rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden bg-white dark:bg-gray-800/50"
+                                className={`rounded-xl border overflow-hidden bg-white dark:bg-gray-800/50 ${
+                                  selectedAtestadoSubmissionId === s.id
+                                    ? 'border-red-400 dark:border-red-500 ring-1 ring-red-200 dark:ring-red-900/60'
+                                    : 'border-gray-200 dark:border-gray-600'
+                                }`}
                               >
                                 <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-2 bg-gray-50 dark:bg-gray-800">
                                   <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">

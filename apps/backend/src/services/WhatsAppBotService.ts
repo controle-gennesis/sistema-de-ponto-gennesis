@@ -1,12 +1,15 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { metaWhatsApp } from './MetaWhatsAppService';
+import * as fs from 'fs';
+import * as path from 'path';
 
 type FlowStatus =
   | 'MENU'
   | 'FAQ_TOPIC_SELECT'
   | 'FAQ_QUESTION_SELECT'
-  | 'ATESTADO_ASK_REQUESTER_NAME'
+  | 'ATESTADO_ASK_CPF'
+  | 'ATESTADO_ASK_CONTRACT'
   | 'ATESTADO_ASK_START_DATE'
   | 'ATESTADO_ASK_END_DATE'
   | 'ATESTADO_ASK_DAYS'
@@ -438,6 +441,164 @@ export class WhatsAppBotService {
     this.inactivityTimers.set(conversationId, endTimer);
   }
 
+  private onlyDigits(value: string): string {
+    return String(value || '').replace(/\D/g, '');
+  }
+
+  private isValidCpf(cpfRaw: string): boolean {
+    const cpf = this.onlyDigits(cpfRaw);
+    if (cpf.length !== 11) return false;
+    if (/^(\d)\1{10}$/.test(cpf)) return false;
+    const calcDigit = (base: string, factorStart: number) => {
+      let sum = 0;
+      for (let i = 0; i < base.length; i++) sum += Number(base[i]) * (factorStart - i);
+      const remainder = (sum * 10) % 11;
+      return remainder === 10 ? 0 : remainder;
+    };
+    const d1 = calcDigit(cpf.slice(0, 9), 10);
+    const d2 = calcDigit(cpf.slice(0, 10), 11);
+    return d1 === Number(cpf[9]) && d2 === Number(cpf[10]);
+  }
+
+  private maskCpf(cpfRaw: string): string {
+    const cpf = this.onlyDigits(cpfRaw).padStart(11, '0').slice(-11);
+    return `${cpf.slice(0, 3)}.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-${cpf.slice(9)}`;
+  }
+
+  private async getAttachmentBase64FromSavedMedia(savedMedia: { fileUrl: string; fileName: string; fileKey?: string }) {
+    if (savedMedia.fileKey) {
+      const got = await metaWhatsApp.getObjectBuffer(savedMedia.fileKey);
+      if (got?.buffer) {
+        return {
+          mimeType: got.contentType || 'application/octet-stream',
+          dataBase64: got.buffer.toString('base64')
+        };
+      }
+    }
+
+    const marker = '/uploads/whatsapp-media/';
+    const url = savedMedia.fileUrl || '';
+    if (!url.includes(marker)) return null;
+    const after = url.split(marker)[1]?.split('?')[0];
+    if (!after) return null;
+    const baseName = path.basename(after);
+    const filePath = path.join(process.cwd(), 'apps', 'backend', 'uploads', 'whatsapp-media', baseName);
+    if (!fs.existsSync(filePath)) return null;
+    const buff = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const byExt: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif'
+    };
+    return {
+      mimeType: byExt[ext] || 'application/octet-stream',
+      dataBase64: buff.toString('base64')
+    };
+  }
+
+  private async findContractsForEmployeeContext(employee: {
+    company: string | null;
+    polo: string | null;
+    client: string | null;
+  }) {
+    const now = new Date();
+    const byCompanyPolo = await prisma.contract.findMany({
+      where: {
+        startDate: { lte: now },
+        endDate: { gte: now },
+        costCenter: {
+          ...(employee.company ? { company: employee.company } : {}),
+          ...(employee.polo ? { polo: employee.polo } : {})
+        }
+      },
+      include: { costCenter: true },
+      orderBy: [{ number: 'asc' }],
+      take: 50
+    });
+
+    const clientTerm = (employee.client || '').trim();
+    if (!clientTerm) return byCompanyPolo;
+    const boosted = byCompanyPolo.filter(
+      (c) =>
+        c.name.toLowerCase().includes(clientTerm.toLowerCase()) ||
+        c.number.toLowerCase().includes(clientTerm.toLowerCase())
+    );
+    return boosted.length > 0 ? boosted : byCompanyPolo;
+  }
+
+  private async createDpRequestFromWhatsappAtestado(args: {
+    employee: { id: string; department: string; user: { id: string; name: string; email: string; cpf: string } };
+    contract: { id: string; name: string; number: string; costCenter: { company: string | null; polo: string | null } };
+    payload: Record<string, unknown>;
+    savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null;
+    mediaMimeType?: string;
+  }) {
+    if (!args.savedMedia) throw new Error('Arquivo do atestado ausente para solicitação DP');
+    const attachment = await this.getAttachmentBase64FromSavedMedia(args.savedMedia);
+    if (!attachment) throw new Error('Não foi possível carregar o arquivo do atestado para solicitação DP');
+
+    const dataInicial = String(args.payload.dataInicio || '').trim();
+    const dataFinal = String(args.payload.dataFim || '').trim();
+    const numeroDias = String(args.payload.numeroDias || '').trim();
+    if (!dataInicial || !dataFinal || !numeroDias) {
+      throw new Error('Dados do atestado incompletos para solicitação DP');
+    }
+
+    const details = {
+      employeeId: args.employee.id,
+      dataInicial,
+      dataFinal,
+      numeroDias,
+      anexoAtestado: {
+        fileName: args.savedMedia.fileName || 'atestado_enviado',
+        mimeType: args.mediaMimeType || attachment.mimeType,
+        dataBase64: attachment.dataBase64
+      }
+    };
+
+    const now = new Date();
+    const prazoFim = new Date(now);
+    prazoFim.setDate(prazoFim.getDate() + 1);
+    const lock = 91827364;
+    const createdAtIso = now.toISOString();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${lock})`);
+      const agg = await tx.dpRequest.aggregate({ _max: { displayNumber: true } });
+      const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
+      await tx.dpRequest.create({
+        data: {
+          displayNumber: nextDisplay,
+          employeeId: args.employee.id,
+          urgency: 'MEDIUM',
+          requestType: 'ATESTADO_MEDICO',
+          title: 'Solicitação DP · Atestado médico',
+          sectorSolicitante: args.employee.department,
+          solicitanteNome: args.employee.user.name,
+          solicitanteEmail: args.employee.user.email,
+          prazoInicio: now,
+          prazoFim,
+          details: details as Prisma.InputJsonValue,
+          contractId: args.contract.id,
+          company: args.contract.costCenter.company || null,
+          polo: args.contract.costCenter.polo || null,
+          status: 'WAITING_MANAGER',
+          statusHistory: [
+            {
+              at: createdAtIso,
+              status: 'WAITING_MANAGER',
+              actorName: 'Luna (WhatsApp Bot)'
+            }
+          ] as Prisma.InputJsonValue
+        } as any
+      });
+    });
+  }
+
   async processMessage(
     phone: string,
     text: string,
@@ -662,13 +823,23 @@ export class WhatsAppBotService {
       ]
     });
 
-    const askRequesterName = (): SendAction => ({
+    const askRequesterCpf = (): SendAction => ({
       type: 'buttons',
-      body: 'Pode me informar seu nome completo?',
+      body: 'Para localizar seu cadastro, me informe seu CPF (somente números).',
       buttons: [
         { id: 'MENU', title: 'Voltar' },
         { id: 'END', title: 'Encerrar' }
       ]
+    });
+
+    const askContractSelection = (
+      rows: Array<{ id: string; title: string }>,
+      employeeName: string
+    ): SendAction => ({
+      type: 'list',
+      body: `Encontrei mais de um contrato para ${employeeName}. Selecione o contrato correto:`,
+      buttonText: 'Escolher contrato',
+      sections: [{ title: 'Contratos', rows }]
     });
 
     const parseDateInput = (
@@ -852,9 +1023,9 @@ export class WhatsAppBotService {
           content.includes('atestados') ||
           content.includes('atest')
         ) {
-          newStatus = 'ATESTADO_ASK_REQUESTER_NAME';
+          newStatus = 'ATESTADO_ASK_CPF';
           newPayload.flow = 'ATESTADO';
-          sendAction = askRequesterName();
+          sendAction = askRequesterCpf();
         } else {
           sendAction = menu();
         }
@@ -1000,7 +1171,7 @@ export class WhatsAppBotService {
         break;
       }
 
-      case 'ATESTADO_ASK_REQUESTER_NAME': {
+      case 'ATESTADO_ASK_CPF': {
         if (isEndRequest()) {
           sendAction = endConversation();
           break;
@@ -1010,10 +1181,11 @@ export class WhatsAppBotService {
           break;
         }
 
-        if (!textRaw) {
+        const cpfDigits = this.onlyDigits(textRaw);
+        if (!cpfDigits) {
           sendAction = {
             type: 'buttons',
-            body: 'Não recebi o nome. Qual é o nome completo da pessoa que está solicitando?',
+            body: 'Não recebi o CPF. Envie o CPF com 11 dígitos (somente números).',
             buttons: [
               { id: 'MENU', title: 'Voltar' },
               { id: 'END', title: 'Encerrar' }
@@ -1022,8 +1194,137 @@ export class WhatsAppBotService {
           break;
         }
 
-        newPayload.requesterName = textRaw;
-        newPayload.name = textRaw;
+        if (!this.isValidCpf(cpfDigits)) {
+          sendAction = {
+            type: 'buttons',
+            body: 'CPF inválido. Confira e envie novamente os 11 dígitos do CPF.',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { cpf: cpfDigits },
+          include: { employee: true }
+        });
+
+        if (!user?.employee) {
+          sendAction = {
+            type: 'buttons',
+            body: 'Não encontrei colaborador ativo para esse CPF. Verifique o CPF ou fale com atendente.',
+            buttons: [
+              { id: 'ATENDENTE', title: 'Falar atendente' },
+              { id: 'MENU', title: 'Menu' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        const contracts = await this.findContractsForEmployeeContext({
+          company: user.employee.company,
+          polo: user.employee.polo,
+          client: user.employee.client
+        });
+
+        if (contracts.length === 0) {
+          sendAction = {
+            type: 'buttons',
+            body: `Encontrei ${user.name}, mas não achei contrato elegível para ${user.employee.company || 'a empresa'}. Vou te encaminhar para atendente.`,
+            buttons: [
+              { id: 'ATENDENTE', title: 'Falar atendente' },
+              { id: 'MENU', title: 'Menu' }
+            ]
+          };
+          break;
+        }
+
+        newPayload.cpf = cpfDigits;
+        newPayload.cpfMasked = this.maskCpf(cpfDigits);
+        newPayload.employeeId = user.employee.id;
+        newPayload.requesterName = user.name;
+        newPayload.name = user.name;
+        newPayload.employeeDepartment = user.employee.department;
+
+        if (contracts.length === 1) {
+          const c = contracts[0];
+          newPayload.contractId = c.id;
+          newPayload.contractNumber = c.number;
+          newPayload.contractName = c.name;
+          newPayload.company = c.costCenter.company || null;
+          newPayload.polo = c.costCenter.polo || null;
+          newStatus = 'ATESTADO_ASK_START_DATE';
+          sendAction = {
+            type: 'buttons',
+            body:
+              `Identifiquei *${user.name}* (CPF ${this.maskCpf(cpfDigits)}).\n` +
+              `Contrato: *${c.number}* · ${c.name}\n` +
+              `Empresa: *${c.costCenter.company || '—'}* | Polo: *${c.costCenter.polo || '—'}*\n\n` +
+              'Agora me informe a data de início do atestado no formato *DD/MM/AAAA*.',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        newPayload.contractOptions = contracts.map((c) => ({
+          id: c.id,
+          number: c.number,
+          name: c.name,
+          company: c.costCenter.company,
+          polo: c.costCenter.polo
+        }));
+        newStatus = 'ATESTADO_ASK_CONTRACT';
+        sendAction = askContractSelection(
+          contracts.map((c) => ({
+            id: `ATESTADO_CONTRACT_${c.id}`,
+            title: `${c.number} - ${c.costCenter.company || 'Empresa'}`
+          })),
+          user.name
+        );
+        break;
+      }
+
+      case 'ATESTADO_ASK_CONTRACT': {
+        if (isEndRequest()) {
+          sendAction = endConversation();
+          break;
+        }
+        if (isMenuRequest()) {
+          sendAction = resetToMenu();
+          break;
+        }
+
+        const selectedId = content.startsWith('atestado_contract_')
+          ? content.replace('atestado_contract_', '').trim()
+          : '';
+        const options = Array.isArray((newPayload as any).contractOptions)
+          ? ((newPayload as any).contractOptions as Array<Record<string, unknown>>)
+          : [];
+        const selected = options.find((o) => String(o.id) === selectedId);
+        if (!selected) {
+          sendAction = {
+            type: 'buttons',
+            body: 'Não consegui identificar o contrato selecionado. Escolha novamente pela lista.',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        newPayload.contractId = selected.id;
+        newPayload.contractNumber = selected.number;
+        newPayload.contractName = selected.name;
+        newPayload.company = selected.company || null;
+        newPayload.polo = selected.polo || null;
+        delete (newPayload as any).contractOptions;
         newStatus = 'ATESTADO_ASK_START_DATE';
         sendAction = askDateByTyping('inicio');
         break;
@@ -1171,6 +1472,49 @@ export class WhatsAppBotService {
             }
           });
 
+          const employeeId = String(newPayload.employeeId || '').trim();
+          const contractId = String(newPayload.contractId || '').trim();
+          if (employeeId && contractId && savedMedia) {
+            try {
+              const employee = await prisma.employee.findUnique({
+                where: { id: employeeId },
+                include: { user: { select: { id: true, name: true, email: true, cpf: true } } }
+              });
+              const contract = await prisma.contract.findUnique({
+                where: { id: contractId },
+                include: { costCenter: { select: { company: true, polo: true } } }
+              });
+              if (employee?.user && contract) {
+                await this.createDpRequestFromWhatsappAtestado({
+                  employee: {
+                    id: employee.id,
+                    department: employee.department,
+                    user: {
+                      id: employee.user.id,
+                      name: employee.user.name,
+                      email: employee.user.email,
+                      cpf: employee.user.cpf
+                    }
+                  },
+                  contract: {
+                    id: contract.id,
+                    name: contract.name,
+                    number: contract.number,
+                    costCenter: {
+                      company: contract.costCenter.company,
+                      polo: contract.costCenter.polo
+                    }
+                  },
+                  payload: newPayload,
+                  savedMedia,
+                  mediaMimeType: mediaInfo?.mimeType
+                });
+              }
+            } catch (e) {
+              console.error('[WhatsAppBotService] Falha ao criar solicitação DP de atestado:', e);
+            }
+          }
+
           newStatus = 'ATESTADO_COMPLETE';
           newConversationStatus = 'COMPLETED';
           sendAction = {
@@ -1210,9 +1554,9 @@ export class WhatsAppBotService {
         }
 
         if (content.includes('atestado') || content === 'atestados' || content === 'atestato') {
-          newStatus = 'ATESTADO_ASK_REQUESTER_NAME';
+          newStatus = 'ATESTADO_ASK_CPF';
           newPayload.flow = 'ATESTADO';
-          sendAction = askRequesterName();
+          sendAction = askRequesterCpf();
           break;
         }
 

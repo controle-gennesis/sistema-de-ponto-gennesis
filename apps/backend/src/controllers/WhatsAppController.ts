@@ -201,6 +201,61 @@ export class WhatsAppController {
   }
 
   /**
+   * Lista de envios de atestado (1 item por submission), para fila do painel de atestados.
+   */
+  async listMedicalCertificateSubmissions(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const submissions = await prisma.whatsAppSubmission.findMany({
+        where: { type: 'MEDICAL_CERTIFICATE' },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          conversation: {
+            select: {
+              id: true,
+              phone: true,
+              flowStatus: true,
+              payload: true,
+              status: true,
+              createdAt: true,
+              updatedAt: true
+            }
+          }
+        }
+      });
+
+      const data = submissions.map((s) => {
+        const conversationPayload = (s.conversation.payload as any) ?? {};
+        const submissionPayload = (s.payload as any) ?? {};
+        const name =
+          ((submissionPayload?.name ??
+            submissionPayload?.requesterName ??
+            conversationPayload?.name ??
+            conversationPayload?.requesterName ??
+            conversationPayload?.waProfileName) as string | undefined) || null;
+
+        return {
+          id: s.id,
+          submissionId: s.id,
+          conversationId: s.conversation.id,
+          phone: s.conversation.phone,
+          name,
+          flowStatus: s.conversation.flowStatus,
+          conversationStatus: s.conversation.status,
+          status: s.status,
+          medicalCertificateStatus: s.status,
+          fileName: s.fileName,
+          createdAt: s.createdAt,
+          updatedAt: s.createdAt
+        };
+      });
+
+      return res.json({ success: true, data });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
    * Obter uma conversa com todas as mensagens e envios (atestados etc.)
    */
   async getConversation(req: AuthRequest, res: Response, next: NextFunction) {

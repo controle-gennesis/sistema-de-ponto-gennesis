@@ -63,6 +63,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
   const [peerName, setPeerName] = useState('');
+  /** Modo da chamada atual (para UI: botões de câmera e layout só áudio). */
+  const [callIsVideo, setCallIsVideo] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -82,6 +84,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     setRemoteStream(null);
     setMicMuted(false);
     setCamOff(false);
+    setCallIsVideo(false);
   }, []);
 
   const closePeer = useCallback(() => {
@@ -106,6 +109,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     setPhase('idle');
     setIncoming(null);
     setPeerName('');
+    setCallIsVideo(false);
   }, [closePeer, stopAllMedia]);
 
   endCallRef.current = endCall;
@@ -314,6 +318,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
       setPhase('idle');
       setIncoming(null);
       setPeerName('');
+      setCallIsVideo(false);
     };
   }, [opts.userId]);
 
@@ -348,6 +353,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
       setPhase('calling');
       setRemoteStream(null);
       closePeer();
+      setCallIsVideo(video);
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -372,6 +378,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
         callCtxRef.current = null;
         setPhase('idle');
         setPeerName('');
+        setCallIsVideo(false);
         stopAllMedia();
       }
     },
@@ -401,6 +408,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     setIncoming(null);
     setPhase('calling');
     closePeer();
+    setCallIsVideo(video);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -418,6 +426,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
       callCtxRef.current = null;
       setPhase('idle');
       setPeerName('');
+      setCallIsVideo(false);
       stopAllMedia();
     }
   }, [incoming, closePeer, stopAllMedia]);
@@ -459,6 +468,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     micMuted,
     camOff,
     peerName,
+    callIsVideo,
     startOutgoing,
     acceptIncoming,
     rejectIncoming,

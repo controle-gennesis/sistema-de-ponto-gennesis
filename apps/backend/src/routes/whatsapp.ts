@@ -17,6 +17,10 @@ router.get('/conversations', (req, res, next) =>
   controller.listConversations(req as any, res, next)
 );
 
+router.get('/medical-certificate-submissions', (req, res, next) =>
+  controller.listMedicalCertificateSubmissions(req as any, res, next)
+);
+
 router.get('/conversations/:id', (req, res, next) =>
   controller.getConversation(req as any, res, next)
 );
