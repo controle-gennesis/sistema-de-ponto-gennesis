@@ -1206,8 +1206,12 @@ export class WhatsAppBotService {
           break;
         }
 
-        const user = await prisma.user.findUnique({
-          where: { cpf: cpfDigits },
+        // Banco pode ter CPF salvo com máscara ou só dígitos; tentamos ambos.
+        const cpfMasked = this.maskCpf(cpfDigits);
+        const user = await prisma.user.findFirst({
+          where: {
+            OR: [{ cpf: cpfDigits }, { cpf: cpfMasked }]
+          },
           include: { employee: true }
         });
 
