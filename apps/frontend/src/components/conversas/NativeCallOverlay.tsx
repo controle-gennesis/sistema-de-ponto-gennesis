@@ -120,6 +120,8 @@ export function NativeCallOverlay({
   }, [remoteStream]);
 
   const showRemoteVideo = callIsVideo && remoteHasLiveVideo;
+  const showMain = phase === 'calling' || phase === 'connected';
+  const showIncoming = phase === 'ringing' && incoming;
 
   /** Re-anexar streams sempre que o DOM dos &lt;video&gt; mudar (minimizar, trocar foco PiP/principal — refs montam de novo mas o objeto MediaStream não muda). */
   useEffect(() => {
@@ -173,9 +175,6 @@ export function NativeCallOverlay({
   }, [isMinimized]);
 
   if (typeof document === 'undefined') return null;
-
-  const showMain = phase === 'calling' || phase === 'connected';
-  const showIncoming = phase === 'ringing' && incoming;
 
   const peerLabel = peerName || incoming?.from.name || 'Contato';
   const peerPhoto = peerAvatarUrl ?? null;
