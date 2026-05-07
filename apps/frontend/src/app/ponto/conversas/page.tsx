@@ -43,6 +43,8 @@ import {
   CornerUpLeft,
   Video,
   Phone,
+  PhoneOff,
+  Minimize2,
   Square,
   Play,
   Pause,
@@ -50,9 +52,8 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
 import { CircularPhotoCropModal } from '@/components/conversas/CircularPhotoCropModal';
-import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
-import { useNativeWebRTCCall } from '@/hooks/useNativeWebRTCCall';
+import { useNativeCallContext } from '@/contexts/NativeCallContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -282,14 +283,13 @@ function formatMessageTime(iso: string) {
  * Abre sala de vídeo/voz (Jitsi Meet) compartilhada por conversa.
  * Mesmo `chatId` = mesma sala (direto ou grupo). Opcional: NEXT_PUBLIC_JITSI_SERVER (ex.: https://meet.jit.si).
  */
-function openVideoCallRoom(chatId: string, mode: 'video' | 'audio') {
-  if (typeof window === 'undefined') return;
+function buildVideoCallRoomUrl(chatId: string, mode: 'video' | 'audio') {
   const host = (process.env.NEXT_PUBLIC_JITSI_SERVER || 'https://meet.jit.si').replace(/\/$/, '');
   const prefix = process.env.NEXT_PUBLIC_JITSI_ROOM_PREFIX || 'GennesisPonto';
   const room = `${prefix}-${chatId}`.replace(/[^a-zA-Z0-9\-_]/g, '');
   const base = `${host}/${encodeURIComponent(room)}`;
   const hash = mode === 'audio' ? '#config.startWithVideoMuted=true' : '';
-  window.open(`${base}${hash}`, '_blank', 'noopener,noreferrer');
+  return `${base}${hash}`;
 }
 
 function formatChatDate(iso: string | null) {
@@ -308,6 +308,23 @@ function getInitials(name: string) {
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.substring(0, 2).toUpperCase();
+}
+
+const NAME_COLOR_CLASSES = [
+  'text-sky-700 dark:text-sky-300',
+  'text-emerald-700 dark:text-emerald-300',
+  'text-violet-700 dark:text-violet-300',
+  'text-amber-700 dark:text-amber-300',
+  'text-rose-700 dark:text-rose-300',
+  'text-cyan-700 dark:text-cyan-300',
+];
+
+function getNameColorClass(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return NAME_COLOR_CLASSES[hash % NAME_COLOR_CLASSES.length];
 }
 
 function formatFileSize(bytes: number | null) {
@@ -773,7 +790,7 @@ function ConversasContent() {
   const MIN_RIGHT_PANEL_WIDTH = 480;
 
   const { user: currentUser } = usePermissions();
-  const nativeCall = useNativeWebRTCCall({ userId: currentUser?.id });
+  const nativeCall = useNativeCallContext();
   const queryClient = useQueryClient();
 
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -889,6 +906,9 @@ function ConversasContent() {
   const [groupAvatarMenu, setGroupAvatarMenu] = useState(false);
   const [showGroupAvatarViewer, setShowGroupAvatarViewer] = useState(false);
   const [messageImageViewer, setMessageImageViewer] = useState<{ src: string; name: string } | null>(null);
+  const [groupCallRoomUrl, setGroupCallRoomUrl] = useState<string | null>(null);
+  const [groupCallMinimized, setGroupCallMinimized] = useState(false);
+  const [groupCallMode, setGroupCallMode] = useState<'video' | 'audio'>('video');
   const groupAvatarMenuRef = useRef<HTMLDivElement>(null);
 
   const closeEditModal = useCallback(() => {
@@ -1785,18 +1805,6 @@ function ConversasContent() {
     return getOtherUser(chat)?.employee?.department ?? 'Conversa direta';
   };
 
-  /** Foto do outro participante na chamada nativa (DM): lista de chats ou conversa ativa. */
-  const nativeCallPeerAvatarUrl = useMemo(() => {
-    const inc = nativeCall.incoming;
-    if (inc) {
-      const c = chats.find((x) => x.id === inc.chatId);
-      if (c && c.chatType !== 'GROUP') return getOtherUser(c)?.profilePhotoUrl ?? null;
-      return null;
-    }
-    if (activeChat && activeChat.chatType !== 'GROUP') return getOtherUser(activeChat)?.profilePhotoUrl ?? null;
-    return null;
-  }, [nativeCall.incoming, chats, activeChat, currentUser]);
-
   const getUnreadCount = (chat: DirectChat): number => {
     if (!currentUser) return 0;
     return chat.messages.filter(
@@ -2108,6 +2116,11 @@ function ConversasContent() {
                     const unread = getUnreadCount(chat);
                     const isSelected = chat.id === selectedChatId;
                     const other = getOtherUser(chat);
+                    const isChatInCall =
+                      nativeCall.activeChatId === chat.id &&
+                      (nativeCall.phase === 'calling' ||
+                        nativeCall.phase === 'connected' ||
+                        nativeCall.phase === 'ringing');
 
                     return (
                       <button
@@ -2133,10 +2146,17 @@ function ConversasContent() {
                           )}
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1">
-                          <div className="flex items-center justify-between">
-                            <p className={clsx('text-sm truncate', unread > 0 ? 'font-semibold text-gray-900 dark:text-gray-100' : 'font-medium text-gray-900 dark:text-gray-100')}>
-                              {getChatDisplayName(chat)}
-                            </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex items-center gap-2">
+                              <p className={clsx('text-sm truncate', unread > 0 ? 'font-semibold text-gray-900 dark:text-gray-100' : 'font-medium text-gray-900 dark:text-gray-100')}>
+                                {getChatDisplayName(chat)}
+                              </p>
+                              {isChatInCall && (
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300">
+                                  Em chamada
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0 ml-1">
                               {formatChatDate(chat.lastMessageAt)}
                             </span>
@@ -2239,17 +2259,16 @@ function ConversasContent() {
                             type="button"
                             title={
                               activeChat?.chatType === 'GROUP'
-                                ? 'Videochamada em grupo (abre sala no navegador)'
+                                ? 'Videochamada em grupo'
                                 : 'Videochamada no sistema'
                             }
                             aria-label="Iniciar videochamada"
                             onClick={() => {
                               if (!activeChat?.id) return;
                               if (activeChat.chatType === 'GROUP') {
-                                openVideoCallRoom(activeChat.id, 'video');
-                                toast.success(
-                                  'Sala de grupo aberta. Para chamada nativa 1:1, use uma conversa direta.'
-                                );
+                                setGroupCallMode('video');
+                                setGroupCallRoomUrl(buildVideoCallRoomUrl(activeChat.id, 'video'));
+                                setGroupCallMinimized(false);
                                 return;
                               }
                               if (!other) {
@@ -2266,15 +2285,16 @@ function ConversasContent() {
                             type="button"
                             title={
                               activeChat?.chatType === 'GROUP'
-                                ? 'Ligação em grupo (abre sala no navegador)'
+                                ? 'Ligação em grupo'
                                 : 'Ligação de voz no sistema'
                             }
                             aria-label="Iniciar ligação de voz"
                             onClick={() => {
                               if (!activeChat?.id) return;
                               if (activeChat.chatType === 'GROUP') {
-                                openVideoCallRoom(activeChat.id, 'audio');
-                                toast.success('Sala de voz do grupo aberta no navegador.');
+                                setGroupCallMode('audio');
+                                setGroupCallRoomUrl(buildVideoCallRoomUrl(activeChat.id, 'audio'));
+                                setGroupCallMinimized(false);
                                 return;
                               }
                               if (!other) {
@@ -2324,6 +2344,7 @@ function ConversasContent() {
                                       className="group flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/70"
                                       onClick={() => {
                                         setChatHeaderMenuOpen(false);
+                                        setShowGroupDetails(true);
                                         setAddMemberPickSearch('');
                                         setAddMemberPickSelection([]);
                                         setShowAddGroupMembers(true);
@@ -2655,7 +2676,10 @@ function ConversasContent() {
                               <button
                                 type="button"
                                 onClick={() => setContactDetailsUser(msg.sender)}
-                                className="mb-1 block text-[11px] font-semibold text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+                                className={clsx(
+                                  'mb-1 block text-[11px] font-semibold underline-offset-2 hover:underline',
+                                  getNameColorClass(String(msg.senderId || msg.sender?.id || msg.sender?.name || 'sender'))
+                                )}
                                 title="Ver dados do contato"
                               >
                                 {msg.sender?.name || 'Usuário'}
@@ -2715,7 +2739,15 @@ function ConversasContent() {
                                       <p
                                         className={clsx(
                                           'text-[11px] font-semibold leading-tight',
-                                          isOwn ? 'text-white' : 'text-sky-800 dark:text-sky-200'
+                                          isOwn
+                                            ? 'text-white'
+                                            : getNameColorClass(
+                                                String(
+                                                  msg.replyTo?.sender?.id ||
+                                                    msg.replyTo?.sender?.name ||
+                                                    'reply-sender'
+                                                )
+                                              )
                                         )}
                                       >
                                         {msg.replyTo.sender?.name || 'Usuário'}
@@ -4033,7 +4065,7 @@ function ConversasContent() {
                       <button
                         type="button"
                         aria-label="Fechar modal"
-                        className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-[1px]"
+                        className="fixed inset-0 z-[1100] bg-black/50 backdrop-blur-[1px]"
                         onClick={() => {
                           if (addGroupMembersMutation.isPending) return;
                           setShowAddGroupMembers(false);
@@ -4042,7 +4074,7 @@ function ConversasContent() {
                         }}
                       />
                       <div
-                        className="fixed inset-0 z-[61] flex items-center justify-center p-4 pointer-events-none"
+                        className="fixed inset-0 z-[1101] flex items-center justify-center p-4 pointer-events-none"
                         role="presentation"
                       >
                         <div
@@ -4120,13 +4152,35 @@ function ConversasContent() {
                                             : 'hover:bg-gray-50 dark:hover:bg-gray-800/80'
                                         )}
                                       >
-                                        <input
-                                          type="checkbox"
-                                          checked={selected}
-                                          onChange={() => toggleAddMemberPick(u.id)}
-                                          disabled={addGroupMembersMutation.isPending}
-                                          className="h-4 w-4 shrink-0 rounded border-gray-300 text-red-600 focus:ring-red-500 dark:border-gray-500 dark:bg-gray-800"
-                                        />
+                                        <div className="relative shrink-0">
+                                          <input
+                                            type="checkbox"
+                                            checked={selected}
+                                            onChange={() => toggleAddMemberPick(u.id)}
+                                            disabled={addGroupMembersMutation.isPending}
+                                            className="sr-only"
+                                          />
+                                          <div
+                                            className={clsx(
+                                              'h-5 w-5 rounded border-2 transition-all duration-200 flex items-center justify-center',
+                                              selected
+                                                ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
+                                                : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
+                                            )}
+                                          >
+                                            {selected && (
+                                              <svg
+                                                className="h-3 w-3 text-white"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                                aria-hidden
+                                              >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                              </svg>
+                                            )}
+                                          </div>
+                                        </div>
                                         <Avatar user={u} size="sm" />
                                         <div className="min-w-0 flex-1">
                                           <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
@@ -4276,7 +4330,9 @@ function ConversasContent() {
                             >
                               <div className="mb-1 flex items-center justify-between">
                                 <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                                  {senderName}
+                                  <span className={isOwn ? 'text-gray-700 dark:text-gray-200' : getNameColorClass(String(msg.senderId || senderName))}>
+                                    {senderName}
+                                  </span>
                                 </span>
                                 <span className="text-[10px] text-gray-400">
                                   {new Date(msg.createdAt).toLocaleDateString('pt-BR', {
@@ -4738,6 +4794,75 @@ function ConversasContent() {
       document.body
     )}
 
+    {groupCallRoomUrl && !groupCallMinimized && typeof document !== 'undefined' && createPortal(
+      <div className="fixed inset-0 z-[9800] bg-black/75">
+        <div className="absolute inset-0 flex flex-col">
+          <div className="flex items-center justify-between border-b border-white/10 bg-gray-900/90 px-4 py-3 text-white">
+            <div>
+              <p className="text-sm font-semibold">Chamada em grupo</p>
+              <p className="text-xs text-white/65">{groupCallMode === 'video' ? 'Vídeo' : 'Áudio'} - sala integrada</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setGroupCallMinimized(true)}
+                className="rounded-md bg-white/10 p-2 hover:bg-white/20"
+                aria-label="Minimizar chamada em grupo"
+              >
+                <Minimize2 size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupCallRoomUrl(null);
+                  setGroupCallMinimized(false);
+                }}
+                className="rounded-md bg-red-600 p-2 hover:bg-red-700"
+                aria-label="Encerrar chamada em grupo"
+              >
+                <PhoneOff size={16} />
+              </button>
+            </div>
+          </div>
+          <iframe
+            title="Chamada em grupo"
+            src={groupCallRoomUrl}
+            className="h-full w-full border-0"
+            allow="camera; microphone; fullscreen; display-capture"
+          />
+        </div>
+      </div>,
+      document.body
+    )}
+
+    {groupCallRoomUrl && groupCallMinimized && (
+      <div className="fixed bottom-4 right-4 z-[9810] w-[min(90vw,320px)] rounded-2xl border border-white/20 bg-gray-900/95 p-3 text-white shadow-2xl">
+        <div className="mb-3">
+          <p className="text-sm font-semibold">Chamada em grupo em andamento</p>
+          <p className="text-xs text-white/65">{groupCallMode === 'video' ? 'Vídeo' : 'Áudio'}</p>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setGroupCallMinimized(false)}
+            className="rounded-md bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/20"
+          >
+            Abrir
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setGroupCallRoomUrl(null);
+              setGroupCallMinimized(false);
+            }}
+            className="rounded-md bg-red-600 px-3 py-2 text-xs font-semibold hover:bg-red-700"
+          >
+            Encerrar
+          </button>
+        </div>
+      </div>
+    )}
+
     {groupPhotoCrop && (
       <CircularPhotoCropModal
         open
@@ -4748,12 +4873,6 @@ function ConversasContent() {
       />
     )}
 
-    <NativeCallOverlay
-      call={nativeCall}
-      peerAvatarUrl={nativeCallPeerAvatarUrl}
-      localAvatarUrl={currentUser?.profilePhotoUrl ?? null}
-      localDisplayName={currentUser?.name ?? null}
-    />
     </>
   );
 }

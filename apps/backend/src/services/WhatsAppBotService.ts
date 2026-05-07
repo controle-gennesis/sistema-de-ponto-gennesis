@@ -568,7 +568,7 @@ export class WhatsAppBotService {
             {
               at: createdAtIso,
               status: 'WAITING_MANAGER',
-              actorName: 'Luna (WhatsApp Bot)'
+              actorName: 'Gennecy (WhatsApp Bot)'
             }
           ] as Prisma.InputJsonValue
         } as any
@@ -670,7 +670,7 @@ export class WhatsAppBotService {
     let skipInactivityTimeout = false;
 
     /**
-     * Atendimento humano (ou fila após nome): não rodar o fluxo da Luna em cada mensagem —
+     * Atendimento humano (ou fila após nome): não rodar o fluxo da Gennecy em cada mensagem —
      * senão o default do MENU cai em `menu()` e sorteia de novo "Oi! Tudo bem?...".
      * A mensagem do usuário já foi salva acima; só atualizamos updatedAt.
      */
@@ -725,9 +725,9 @@ export class WhatsAppBotService {
     const menu = (): SendAction => ({
       type: 'list',
       body: pick([
-        'Olá! 😊 Eu sou a Luna, assistente virtual da Gennesis.\nEstou por aqui pra te ajudar — como posso te atender hoje?',
-        'Oi! Tudo bem? 😊\nSou a Luna, da Gennesis. Me conta como posso te ajudar!',
-        'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Luna, assistente virtual, e estou à disposição para ajudar no que precisar.'
+        'Olá! 😊 Eu sou a Gennecy, assistente virtual da Gennesis.\nEstou por aqui pra te ajudar — como posso te atender hoje?',
+        'Oi! Tudo bem? 😊\nSou a Gennecy, da Gennesis. Me conta como posso te ajudar!',
+        'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Gennecy, assistente virtual, e estou à disposição para ajudar no que precisar.'
       ]),
       buttonText: 'Escolher opção',
       sections: [

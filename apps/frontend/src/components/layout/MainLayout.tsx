@@ -9,6 +9,9 @@ import { Sidebar } from './Sidebar';
 import { ChatWidget } from '../chat/ChatWidget';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useNativeWebRTCCall } from '@/hooks/useNativeWebRTCCall';
+import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
+import { NativeCallProvider } from '@/contexts/NativeCallContext';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -23,6 +26,7 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
   const [hideConversasFabOverlay, setHideConversasFabOverlay] = useState(false);
   const pathname = usePathname();
   const { user } = usePermissions();
+  const nativeCall = useNativeWebRTCCall({ userId: user?.id });
 
   useEffect(() => {
     const onFabVis = (e: Event) => {
@@ -56,7 +60,8 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
   };
 
   return (
-    <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-900">
+    <NativeCallProvider value={nativeCall}>
+      <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-900">
       {/* Sidebar */}
       <Sidebar 
         userRole={userRole} 
@@ -93,6 +98,12 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
           )}
         </Link>
       )}
-    </div>
+        <NativeCallOverlay
+          call={nativeCall}
+          localAvatarUrl={user?.profilePhotoUrl ?? null}
+          localDisplayName={user?.name ?? null}
+        />
+      </div>
+    </NativeCallProvider>
   );
 }

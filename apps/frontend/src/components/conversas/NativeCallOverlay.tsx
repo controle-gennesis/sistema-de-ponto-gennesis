@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Mic, MicOff, Video, VideoOff, PhoneOff } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, MonitorUp, Minimize2, Maximize2, MessageSquare, Send } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeCallHook } from '@/hooks/useNativeWebRTCCall';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import api from '@/lib/api';
 
 const AVATAR_COLORS = [
   'bg-red-600',
@@ -77,15 +79,32 @@ export function NativeCallOverlay({
     camOff,
     peerName,
     callIsVideo,
+    isScreenSharing,
+    activeChatId,
+    callDurationSec,
+    callQuality,
+    callLatencyMs,
+    packetLossPct,
+    wsConnectionState,
     acceptIncoming,
     rejectIncoming,
     endCall,
     toggleMic,
-    toggleCam
+    toggleCam,
+    toggleScreenShare
   } = call;
 
-  const localRef = useRef<HTMLVideoElement>(null);
+  const localPipRef = useRef<HTMLVideoElement>(null);
+  const localMainRef = useRef<HTMLVideoElement>(null);
   const remoteRef = useRef<HTMLVideoElement>(null);
+  const remotePipRef = useRef<HTMLVideoElement>(null);
+  const dragStateRef = useRef<{ active: boolean; dx: number; dy: number }>({ active: false, dx: 0, dy: 0 });
+  const [primaryView, setPrimaryView] = useState<'remote' | 'local'>('remote');
+  const [pipPos, setPipPos] = useState<{ x: number; y: number } | null>(null);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isCallChatOpen, setIsCallChatOpen] = useState(false);
+  const [callMessage, setCallMessage] = useState('');
+  const queryClient = useQueryClient();
 
   const remoteHasLiveVideo = useMemo(() => {
     if (!remoteStream) return false;
@@ -95,18 +114,36 @@ export function NativeCallOverlay({
   const showRemoteVideo = callIsVideo && remoteHasLiveVideo;
 
   useEffect(() => {
-    const el = localRef.current;
-    if (!el) return;
-    el.srcObject = localStream;
-    void el.play().catch(() => {});
+    [localPipRef.current, localMainRef.current].forEach((el) => {
+      if (!el) return;
+      el.srcObject = localStream;
+      void el.play().catch(() => {});
+    });
   }, [localStream]);
 
   useEffect(() => {
-    const el = remoteRef.current;
-    if (!el) return;
-    el.srcObject = remoteStream;
-    void el.play().catch(() => {});
+    [remoteRef.current, remotePipRef.current].forEach((el) => {
+      if (!el) return;
+      el.srcObject = remoteStream;
+      void el.play().catch(() => {});
+    });
   }, [remoteStream]);
+
+  useEffect(() => {
+    if (phase === 'idle') {
+      setPrimaryView('remote');
+      setPipPos(null);
+      setIsMinimized(false);
+      setIsCallChatOpen(false);
+      setCallMessage('');
+    }
+  }, [phase]);
+
+  useEffect(() => {
+    if (primaryView === 'local' && (!localStream || !callIsVideo)) {
+      setPrimaryView('remote');
+    }
+  }, [primaryView, localStream, callIsVideo]);
 
   if (typeof document === 'undefined') return null;
 
@@ -118,6 +155,126 @@ export function NativeCallOverlay({
   const peerLabel = peerName || incoming?.from.name || 'Contato';
   const peerPhoto = peerAvatarUrl ?? null;
   const peerSeed = incoming?.from.id || peerLabel;
+  const localLabel = localDisplayName || 'Você';
+  const showLocalAsMain = primaryView === 'local' && callIsVideo && !!localStream;
+  const canUseCallChat = !!activeChatId && phase === 'connected';
+
+  const { data: callChatData } = useQuery({
+    queryKey: ['native-call-chat', activeChatId],
+    queryFn: async () => {
+      if (!activeChatId) return null;
+      const res = await api.get(`/chats/direct/${activeChatId}`);
+      return res.data?.data ?? null;
+    },
+    enabled: canUseCallChat,
+    refetchInterval: canUseCallChat ? 3000 : false,
+  });
+
+  const sendMessageMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeChatId || !callMessage.trim()) return;
+      const fd = new FormData();
+      fd.append('chatId', activeChatId);
+      fd.append('content', callMessage.trim());
+      await api.post('/chats/direct/messages', fd);
+    },
+    onSuccess: async () => {
+      setCallMessage('');
+      await queryClient.invalidateQueries({ queryKey: ['native-call-chat', activeChatId] });
+      await queryClient.invalidateQueries({ queryKey: ['directChat', activeChatId] });
+      await queryClient.invalidateQueries({ queryKey: ['directChats'] });
+    }
+  });
+
+  const callMessages = useMemo(() => {
+    const raw = (callChatData?.messages ?? []) as Array<{ id: string; content?: string; senderId?: string }>;
+    return raw.filter((m) => !!m?.content?.trim()).slice(-30);
+  }, [callChatData]);
+
+  const durationLabel = useMemo(() => {
+    const mm = Math.floor(callDurationSec / 60).toString().padStart(2, '0');
+    const ss = (callDurationSec % 60).toString().padStart(2, '0');
+    return `${mm}:${ss}`;
+  }, [callDurationSec]);
+
+  const qualityLabel =
+    callQuality === 'good' ? 'Boa' : callQuality === 'medium' ? 'Média' : callQuality === 'poor' ? 'Ruim' : 'Sem dados';
+  const qualityColor =
+    callQuality === 'good'
+      ? 'bg-emerald-600/85'
+      : callQuality === 'medium'
+        ? 'bg-amber-600/85'
+        : callQuality === 'poor'
+          ? 'bg-red-600/85'
+          : 'bg-slate-700/85';
+
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!callIsVideo) return;
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    const rect = target.getBoundingClientRect();
+    dragStateRef.current = {
+      active: true,
+      dx: event.clientX - rect.left,
+      dy: event.clientY - rect.top
+    };
+    if (!pipPos) {
+      setPipPos({ x: rect.left, y: rect.top });
+    }
+  };
+
+  const onDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStateRef.current.active) return;
+    const pipWidth = event.currentTarget.offsetWidth;
+    const pipHeight = event.currentTarget.offsetHeight;
+    const x = Math.min(Math.max(8, event.clientX - dragStateRef.current.dx), window.innerWidth - pipWidth - 8);
+    const y = Math.min(Math.max(8, event.clientY - dragStateRef.current.dy), window.innerHeight - pipHeight - 96);
+    setPipPos({ x, y });
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStateRef.current.active) return;
+    dragStateRef.current.active = false;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  if (showMain && isMinimized) {
+    return createPortal(
+      <div className="fixed bottom-4 right-4 z-[210] w-[min(90vw,340px)] rounded-2xl border border-white/20 bg-gray-900/95 p-3 text-white shadow-2xl backdrop-blur-md">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <CallAvatar name={peerLabel} photoUrl={peerPhoto} seed={peerSeed} sizeClass="h-10 w-10 text-sm" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{peerLabel}</p>
+              <p className="text-xs text-white/60">{phase === 'connected' ? `Em chamada - ${durationLabel}` : 'Conectando...'}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsMinimized(false)}
+            className="rounded-md bg-white/10 p-1.5 hover:bg-white/20"
+            aria-label="Abrir chamada"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex items-center justify-center gap-2">
+          <button type="button" onClick={toggleMic} className="flex size-10 items-center justify-center rounded-full bg-white/10 hover:bg-white/20" aria-label={micMuted ? 'Ligar microfone' : 'Silenciar'}>
+            {micMuted ? <MicOff size={18} /> : <Mic size={18} />}
+          </button>
+          {callIsVideo && (
+            <button type="button" onClick={toggleCam} className="flex size-10 items-center justify-center rounded-full bg-white/10 hover:bg-white/20" aria-label={camOff ? 'Ligar câmera' : 'Desligar câmera'}>
+              {camOff ? <VideoOff size={18} /> : <Video size={18} />}
+            </button>
+          )}
+          <button type="button" onClick={endCall} className="flex size-11 items-center justify-center rounded-full bg-red-600 hover:bg-red-700" aria-label="Encerrar chamada">
+            <PhoneOff size={20} />
+          </button>
+        </div>
+      </div>,
+      document.body
+    );
+  }
 
   return createPortal(
     <div className="fixed inset-0 z-[200] flex min-h-0 flex-col bg-gray-950 text-white">
@@ -149,57 +306,139 @@ export function NativeCallOverlay({
       {showMain && (
         <>
           <div className="relative flex min-h-0 flex-1 flex-col bg-gradient-to-b from-gray-900 to-black">
+            <div className="absolute right-4 top-4 z-30 flex items-center gap-2">
+              {phase === 'connected' && (
+                <>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${qualityColor}`}>
+                    Qualidade: {qualityLabel}
+                  </span>
+                  <span className="rounded-full bg-black/50 px-2 py-1 text-[10px] font-semibold">
+                    {durationLabel}
+                  </span>
+                </>
+              )}
+              {canUseCallChat && (
+                <button
+                  type="button"
+                  onClick={() => setIsCallChatOpen((v) => !v)}
+                  className={`rounded-md p-2 ${isCallChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-black/50 hover:bg-black/65'}`}
+                  aria-label="Abrir chat da ligação"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                </button>
+              )}
+              <span className="rounded-md bg-black/50 px-2 py-1 text-[10px] font-semibold text-white/80">
+                {wsConnectionState === 'connected'
+                  ? 'Sinalização online'
+                  : wsConnectionState === 'reconnecting'
+                    ? 'Reconectando...'
+                    : 'Sinalização offline'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsMinimized(true)}
+                className="rounded-md bg-black/50 p-2 hover:bg-black/65"
+                aria-label="Minimizar chamada"
+              >
+                <Minimize2 className="h-4 w-4" />
+              </button>
+            </div>
             {phase === 'calling' && (
               <p className="pointer-events-none absolute left-0 right-0 top-4 z-20 text-center text-sm text-white/80">
                 {peerLabel ? `Chamando ${peerLabel}…` : 'Conectando…'}
               </p>
             )}
+            {phase === 'connected' && (
+              <p className="pointer-events-none absolute left-0 right-0 top-11 z-20 text-center text-xs text-white/70">
+                RTT {callLatencyMs !== null ? `${Math.round(callLatencyMs)}ms` : '--'} | Perda {packetLossPct !== null ? `${packetLossPct.toFixed(1)}%` : '--'}
+              </p>
+            )}
 
             {/* Áudio continua saindo do &lt;video&gt; mesmo quando mostramos avatar (vídeo invisível). */}
-            <video
-              ref={remoteRef}
-              playsInline
-              autoPlay
-              className={
-                showRemoteVideo
-                  ? 'absolute inset-0 z-0 h-full w-full object-cover'
-                  : 'pointer-events-none absolute left-0 top-0 z-0 h-px w-px opacity-0'
-              }
-              aria-hidden={!showRemoteVideo}
-            />
+            {showLocalAsMain ? (
+              <video
+                ref={localMainRef}
+                playsInline
+                autoPlay
+                muted
+                className="absolute inset-0 z-0 h-full w-full object-cover"
+              />
+            ) : (
+              <video
+                ref={remoteRef}
+                playsInline
+                autoPlay
+                className={
+                  showRemoteVideo
+                    ? 'absolute inset-0 z-0 h-full w-full object-cover'
+                    : 'pointer-events-none absolute left-0 top-0 z-0 h-px w-px opacity-0'
+                }
+                aria-hidden={!showRemoteVideo}
+              />
+            )}
 
-            {!showRemoteVideo && (
+            {((!showRemoteVideo && !showLocalAsMain) || (showLocalAsMain && camOff)) && (
               <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 pb-4 pt-16">
                 <CallAvatar
-                  name={peerLabel}
-                  photoUrl={peerPhoto}
-                  seed={peerSeed}
+                  name={showLocalAsMain ? localLabel : peerLabel}
+                  photoUrl={showLocalAsMain ? localAvatarUrl : peerPhoto}
+                  seed={showLocalAsMain ? localLabel : peerSeed}
                   sizeClass="h-36 w-36 text-4xl sm:h-44 sm:w-44 sm:text-5xl"
                   ringClass="ring-4 ring-white/15"
                 />
                 <div className="text-center">
-                  <p className="text-xl font-semibold sm:text-2xl">{peerLabel}</p>
+                  <p className="text-xl font-semibold sm:text-2xl">{showLocalAsMain ? localLabel : peerLabel}</p>
                   {!callIsVideo && <p className="mt-1 text-sm text-white/55">Chamada de voz</p>}
-                  {callIsVideo && !remoteStream && (
+                  {!showLocalAsMain && callIsVideo && !remoteStream && (
                     <p className="mt-1 text-sm text-white/55">{phase === 'calling' ? 'Aguardando…' : 'Sem vídeo do outro participante'}</p>
                   )}
-                  {callIsVideo && remoteStream && !remoteHasLiveVideo && (
+                  {!showLocalAsMain && callIsVideo && remoteStream && !remoteHasLiveVideo && (
                     <p className="mt-1 text-sm text-white/55">Câmera desligada no outro lado</p>
+                  )}
+                  {showLocalAsMain && camOff && (
+                    <p className="mt-1 text-sm text-white/55">Sua câmera está desligada</p>
                   )}
                 </div>
               </div>
             )}
 
-            {/* Pré-visualização local — vídeo: PiP acima da barra de controles; áudio: canto superior. */}
             {callIsVideo && localStream && localStream.getVideoTracks().length > 0 && (
-              <div className="absolute bottom-24 right-4 z-20 h-28 w-40 overflow-hidden rounded-xl border border-white/25 bg-black shadow-2xl sm:bottom-28 sm:h-36 sm:w-52">
-                <video ref={localRef} playsInline autoPlay muted className="h-full w-full object-cover" />
-                {camOff && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-800/95 px-2 text-center text-xs text-white/90">
-                    <VideoOff className="h-6 w-6 opacity-80" />
-                    Câmera desligada
-                  </div>
+              <div
+                className="absolute z-20 h-28 w-40 cursor-grab touch-none overflow-hidden rounded-xl border border-white/25 bg-black shadow-2xl active:cursor-grabbing sm:h-36 sm:w-52"
+                style={pipPos ? { left: pipPos.x, top: pipPos.y } : { right: 16, bottom: 96 }}
+                onPointerDown={startDrag}
+                onPointerMove={onDrag}
+                onPointerUp={endDrag}
+              >
+                {showLocalAsMain ? (
+                  <>
+                    <video ref={remotePipRef} playsInline autoPlay className="h-full w-full object-cover" />
+                    {!showRemoteVideo && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-800/95 px-2 text-center text-xs text-white/90">
+                        <CallAvatar name={peerLabel} photoUrl={peerPhoto} seed={peerSeed} sizeClass="h-12 w-12 text-sm" />
+                        Câmera do contato desligada
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <video ref={localPipRef} playsInline autoPlay muted className="h-full w-full object-cover" />
+                    {camOff && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-800/95 px-2 text-center text-xs text-white/90">
+                        <CallAvatar name={localLabel} photoUrl={localAvatarUrl} seed={localLabel} sizeClass="h-12 w-12 text-sm" />
+                        Câmera desligada
+                      </div>
+                    )}
+                  </>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setPrimaryView((v) => (v === 'remote' ? 'local' : 'remote'))}
+                  className="absolute right-2 top-2 rounded-md bg-black/60 p-1.5 hover:bg-black/75"
+                  aria-label={showLocalAsMain ? 'Voltar foco para contato' : 'Focar na sua câmera'}
+                >
+                  {showLocalAsMain ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </button>
               </div>
             )}
 
@@ -215,6 +454,45 @@ export function NativeCallOverlay({
                   <p className="truncate text-sm font-medium">{localDisplayName || 'Você'}</p>
                   <p className="text-xs text-white/55">Você</p>
                 </div>
+              </div>
+            )}
+            {isCallChatOpen && (
+              <div className="absolute bottom-24 right-4 top-16 z-30 flex w-[min(92vw,360px)] flex-col overflow-hidden rounded-2xl border border-white/20 bg-black/75 backdrop-blur-md">
+                <div className="border-b border-white/15 px-3 py-2 text-sm font-semibold">Chat da ligação</div>
+                <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+                  {callMessages.length === 0 ? (
+                    <p className="text-xs text-white/60">Sem mensagens nessa conversa ainda.</p>
+                  ) : (
+                    callMessages.map((m) => (
+                      <div key={m.id} className="rounded-lg bg-white/10 px-2 py-1.5 text-xs">
+                        {m.content}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <form
+                  className="flex items-center gap-2 border-t border-white/15 p-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!callMessage.trim() || sendMessageMutation.isPending) return;
+                    sendMessageMutation.mutate();
+                  }}
+                >
+                  <input
+                    value={callMessage}
+                    onChange={(e) => setCallMessage(e.target.value)}
+                    placeholder="Digite uma mensagem..."
+                    className="h-9 flex-1 rounded-lg border border-white/15 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/30"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!callMessage.trim() || sendMessageMutation.isPending}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                    aria-label="Enviar mensagem"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </form>
               </div>
             )}
           </div>
@@ -237,6 +515,18 @@ export function NativeCallOverlay({
                 aria-label={camOff ? 'Ligar câmera' : 'Desligar câmera'}
               >
                 {camOff ? <VideoOff size={22} /> : <Video size={22} />}
+              </button>
+            )}
+            {callIsVideo && (
+              <button
+                type="button"
+                onClick={() => void toggleScreenShare()}
+                className={`flex size-12 items-center justify-center rounded-full ${
+                  isScreenSharing ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white/10 hover:bg-white/20'
+                }`}
+                aria-label={isScreenSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
+              >
+                <MonitorUp size={22} />
               </button>
             )}
             <button

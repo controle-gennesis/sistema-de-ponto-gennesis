@@ -213,7 +213,7 @@ function ListaMensagensWhatsAppDetalhe({
               }`}
             >
               <span className="font-medium truncate max-w-[11rem] sm:max-w-[14rem]">
-                {m.role === 'user' ? userLabel : 'Luna'}
+                {m.role === 'user' ? userLabel : 'Gennecy'}
               </span>
               <span className="shrink-0">{format(new Date(m.createdAt), 'dd/MM HH:mm', { locale: ptBR })}</span>
             </div>

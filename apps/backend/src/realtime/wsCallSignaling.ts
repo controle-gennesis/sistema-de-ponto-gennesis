@@ -60,6 +60,13 @@ function otherInCall(rec: CallRecord, me: string): string | null {
   return null;
 }
 
+function userHasActiveCall(userId: string): boolean {
+  for (const rec of activeCalls.values()) {
+    if (rec.callerId === userId || rec.calleeId === userId) return true;
+  }
+  return false;
+}
+
 /**
  * WebSocket em `/ws/calls?token=JWT` — sinalização WebRTC (1:1, chat direto).
  */
@@ -103,6 +110,10 @@ export function attachCallSignaling(server: Server): void {
             if (!callId || !chatId || !targetUserId || targetUserId === uid) return;
             const ok = await assertDirectChatPeers(chatId, uid, targetUserId);
             if (!ok) return;
+            if (userHasActiveCall(targetUserId)) {
+              sendToUser(uid, { type: 'call:busy', callId, targetUserId });
+              return;
+            }
             activeCalls.set(callId, { callerId: uid, calleeId: targetUserId, chatId });
             const fromUser = await prisma.user.findUnique({
               where: { id: uid },
