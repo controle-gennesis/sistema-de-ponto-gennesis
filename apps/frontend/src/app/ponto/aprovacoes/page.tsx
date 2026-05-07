@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { FileCheck, FileText, Search } from 'lucide-react';
+import { Eye, FileCheck, FileText, Search } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
@@ -153,11 +153,27 @@ function buildDetailRows(
   if (!details || typeof details !== 'object') return [];
   const rows: { key: string; label: string; value: string }[] = [];
   for (const [k, v] of Object.entries(details)) {
+    if (k === 'anexoAtestado') continue;
     const value = formatDetailEntryValue(k, v, employeeNameById).trim();
     if (!value) continue;
     rows.push({ key: k, label: humanizeDetailKey(k), value });
   }
   return rows.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+}
+
+function extractAtestadoAttachment(
+  details: Record<string, unknown> | null | undefined
+): { fileName: string; mimeType: string; previewUrl: string } | null {
+  if (!details || typeof details !== 'object') return null;
+  const raw = (details as any).anexoAtestado;
+  if (!raw || typeof raw !== 'object') return null;
+  const fileName = String(raw.fileName || 'atestado').trim() || 'atestado';
+  const mimeType = String(raw.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
+  const fileUrl = String(raw.fileUrl || '').trim();
+  if (fileUrl) return { fileName, mimeType, previewUrl: fileUrl };
+  const dataBase64 = String(raw.dataBase64 || '').trim();
+  if (!dataBase64) return null;
+  return { fileName, mimeType, previewUrl: `data:${mimeType};base64,${dataBase64}` };
 }
 
 function formatYmd(iso: string) {
@@ -204,6 +220,11 @@ export default function AprovacoesPage() {
   const [search, setSearch] = useState('');
   const [managerComment, setManagerComment] = useState<Record<string, string>>({});
   const [detailRequest, setDetailRequest] = useState<DpRequest | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<{
+    fileName: string;
+    mimeType: string;
+    previewUrl: string;
+  } | null>(null);
 
   const { canAccessDpApproverPages } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
@@ -272,6 +293,10 @@ export default function AprovacoesPage() {
   const detailModalRows = React.useMemo(
     () => (detailRequest ? buildDetailRows(detailRequest.details, employeeNameByIdForDetail) : []),
     [detailRequest, employeeNameByIdForDetail]
+  );
+  const detailAttachment = React.useMemo(
+    () => (detailRequest ? extractAtestadoAttachment(detailRequest.details) : null),
+    [detailRequest]
   );
 
   const dpFiltered = useMemo(() => {
@@ -541,6 +566,29 @@ export default function AprovacoesPage() {
                   </div>
                 ) : null}
 
+                {detailAttachment ? (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Anexo do atestado</h3>
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                          {detailAttachment.fileName}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{detailAttachment.mimeType}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAttachmentPreview(detailAttachment)}
+                        className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
+                        title="Ver anexo"
+                        aria-label="Ver anexo"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
                   <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">Decisão</h3>
                   <div className="space-y-3">
@@ -583,6 +631,32 @@ export default function AprovacoesPage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+          </Modal>
+
+          <Modal
+            isOpen={!!attachmentPreview}
+            onClose={() => setAttachmentPreview(null)}
+            title="Anexo do atestado"
+            size="lg"
+          >
+            {attachmentPreview && (
+              <div className="max-h-[75vh] overflow-auto">
+                {attachmentPreview.mimeType.toLowerCase().includes('pdf') ? (
+                  <iframe
+                    title={attachmentPreview.fileName}
+                    src={attachmentPreview.previewUrl}
+                    className="w-full h-[70vh] rounded-lg bg-white"
+                  />
+                ) : (
+                  <img
+                    src={attachmentPreview.previewUrl}
+                    alt={attachmentPreview.fileName}
+                    className="max-w-full max-h-[70vh] object-contain mx-auto rounded-lg"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
               </div>
             )}
           </Modal>

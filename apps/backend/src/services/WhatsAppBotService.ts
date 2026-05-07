@@ -500,8 +500,25 @@ export class WhatsAppBotService {
     };
   }
 
-  private async findContractsForUserCadastro(userId: string) {
+  private async findContractsForUserCadastro(userId: string, employeeCostCenterCode?: string | null) {
     const now = new Date();
+    const ccCode = (employeeCostCenterCode || '').trim();
+    if (ccCode) {
+      const cc = await prisma.costCenter.findUnique({ where: { code: ccCode }, select: { id: true } });
+      if (cc?.id) {
+        const byCostCenter = await prisma.contract.findMany({
+          where: {
+            costCenterId: cc.id,
+            startDate: { lte: now },
+            endDate: { gte: now }
+          },
+          include: { costCenter: true },
+          orderBy: [{ number: 'asc' }]
+        });
+        if (byCostCenter.length > 0) return byCostCenter;
+      }
+    }
+
     const linked = await prisma.userContractPermission.findMany({
       where: { userId },
       select: { contractId: true }
@@ -534,7 +551,13 @@ export class WhatsAppBotService {
   }
 
   private async createDpRequestFromWhatsappAtestado(args: {
-    employee: { id: string; department: string; user: { id: string; name: string; email: string; cpf: string } };
+    employee: {
+      id: string;
+      department: string;
+      company: string | null;
+      polo: string | null;
+      user: { id: string; name: string; email: string; cpf: string };
+    };
     contract: { id: string; name: string; number: string; costCenter: { company: string | null; polo: string | null } };
     payload: Record<string, unknown>;
     savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null;
@@ -559,7 +582,8 @@ export class WhatsAppBotService {
       anexoAtestado: {
         fileName: args.savedMedia.fileName || 'atestado_enviado',
         mimeType: args.mediaMimeType || attachment.mimeType,
-        dataBase64: attachment.dataBase64
+        dataBase64: attachment.dataBase64,
+        fileUrl: args.savedMedia.fileUrl || null
       }
     };
 
@@ -587,8 +611,8 @@ export class WhatsAppBotService {
           prazoFim,
           details: details as Prisma.InputJsonValue,
           contractId: args.contract.id,
-          company: args.contract.costCenter.company || null,
-          polo: args.contract.costCenter.polo || null,
+          company: args.employee.company || null,
+          polo: args.employee.polo || null,
           status: 'WAITING_MANAGER',
           statusHistory: [
             {
@@ -1233,7 +1257,7 @@ export class WhatsAppBotService {
 
         let contracts: Array<any> = [];
         try {
-          contracts = await this.findContractsForUserCadastro(user.id);
+          contracts = await this.findContractsForUserCadastro(user.id, user.employee.costCenter);
         } catch (e) {
           console.error('[WhatsAppBotService] Falha ao buscar contratos do cadastro:', e);
           contracts = [];
@@ -1242,7 +1266,7 @@ export class WhatsAppBotService {
         if (contracts.length === 0) {
           sendAction = {
             type: 'buttons',
-            body: `Encontrei ${user.name}, mas não achei contrato elegível para ${user.employee.company || 'a empresa'}. Vou te encaminhar para atendente.`,
+            body: `Encontrei ${user.name}, mas não achei contrato ativo para o seu centro de custo (${user.employee.costCenter || 'não informado'}). Vou te encaminhar para atendente.`,
             buttons: [
               { id: 'ATENDENTE', title: 'Falar atendente' },
               { id: 'MENU', title: 'Menu' }
@@ -1483,7 +1507,9 @@ export class WhatsAppBotService {
                       name: employee.user.name,
                       email: employee.user.email,
                       cpf: employee.user.cpf
-                    }
+                    },
+                    company: employee.company || null,
+                    polo: employee.polo || null
                   },
                   contract: {
                     id: contract.id,
