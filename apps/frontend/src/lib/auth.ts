@@ -33,30 +33,33 @@ class AuthService {
       body: JSON.stringify(credentials),
     });
 
-    if (!response.ok) {
-      const clone = response.clone();
-      try {
-        const error = await clone.json();
-        throw new Error(error?.error || error?.message || 'Erro ao fazer login');
-      } catch {
-        const text = await response.text();
-        throw new Error(text || 'Erro ao fazer login');
-      }
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error(response.ok ? 'Resposta inválida do servidor' : 'Erro ao fazer login');
     }
 
-    const clone = response.clone();
-    try {
-      const data = await clone.json();
-      if (data?.success && data?.data) {
-        this.setToken(data.data.token, rememberMe);
-        this.setUser(data.data.user, rememberMe);
-        return data.data as AuthResponse;
-      }
-      throw new Error('Resposta inválida do servidor');
-    } catch {
-      const text = await response.text();
-      throw new Error(text || 'Resposta inválida do servidor');
+    const body = data as { success?: boolean; data?: { user?: User; token?: string }; message?: string; error?: string };
+
+    if (!response.ok) {
+      throw new Error(body?.error || body?.message || 'Erro ao fazer login');
     }
+
+    if (!body?.success || !body.data || typeof body.data.token !== 'string' || !body.data.user) {
+      throw new Error(body?.message || 'Resposta inválida do servidor');
+    }
+
+    try {
+      this.setToken(body.data.token, rememberMe);
+      const plainUser = JSON.parse(JSON.stringify(body.data.user)) as User;
+      this.setUser(plainUser, rememberMe);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível guardar a sessão.';
+      throw new Error(msg);
+    }
+
+    return body.data as AuthResponse;
   }
 
   async register(data: RegisterData): Promise<AuthResponse> {
@@ -69,30 +72,33 @@ class AuthService {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      const clone = response.clone();
-      try {
-        const error = await clone.json();
-        throw new Error(error?.error || error?.message || 'Erro ao registrar usuário');
-      } catch {
-        const text = await response.text();
-        throw new Error(text || 'Erro ao registrar usuário');
-      }
+    let parsed: unknown;
+    try {
+      parsed = await response.json();
+    } catch {
+      throw new Error(response.ok ? 'Resposta inválida do servidor' : 'Erro ao registrar usuário');
     }
 
-    const clone = response.clone();
-    try {
-      const result = await clone.json();
-      if (result?.success && result?.data) {
-        this.setToken(result.data.token);
-        this.setUser(result.data.user);
-        return result.data as AuthResponse;
-      }
-      throw new Error('Resposta inválida do servidor');
-    } catch {
-      const text = await response.text();
-      throw new Error(text || 'Resposta inválida do servidor');
+    const result = parsed as { success?: boolean; data?: { user?: User; token?: string }; message?: string; error?: string };
+
+    if (!response.ok) {
+      throw new Error(result?.error || result?.message || 'Erro ao registrar usuário');
     }
+
+    if (!result?.success || typeof result.data?.token !== 'string' || !result.data?.user) {
+      throw new Error(result?.message || 'Resposta inválida do servidor');
+    }
+
+    try {
+      this.setToken(result.data.token);
+      const plainUser = JSON.parse(JSON.stringify(result.data.user)) as User;
+      this.setUser(plainUser);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível guardar a sessão.';
+      throw new Error(msg);
+    }
+
+    return result.data as AuthResponse;
   }
 
   async logout(): Promise<void> {
@@ -175,43 +181,6 @@ class AuthService {
         const text = await response.text();
         throw new Error(text || 'Erro ao alterar senha');
       }
-    }
-  }
-
-  async forgotPassword(email: string): Promise<void> {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-    
-    try {
-      const response = await fetch(`${API_URL}/auth/forgot-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ email }),
-      });
-
-      if (!response.ok) {
-        const clone = response.clone();
-        try {
-          const error = await clone.json();
-          throw new Error(error?.error || error?.message || 'Erro ao solicitar recuperação de senha');
-        } catch (parseError) {
-          const text = await response.text();
-          throw new Error(text || `Erro ao solicitar recuperação de senha (${response.status})`);
-        }
-      }
-
-      const data = await response.json();
-      if (!data.success) {
-        throw new Error(data.message || 'Erro ao solicitar recuperação de senha');
-      }
-    } catch (error: any) {
-      // Se for erro de rede, fornecer mensagem mais clara
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        throw new Error('Erro de conexão. Verifique sua internet e tente novamente.');
-      }
-      throw error;
     }
   }
 

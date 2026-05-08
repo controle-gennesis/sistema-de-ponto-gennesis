@@ -90,6 +90,7 @@ type DpRequest = {
   createdAt: string;
   details?: Record<string, unknown> | null;
   statusHistory?: unknown;
+  employee?: { costCenter?: string | null } | null;
 };
 
 function formatYmd(iso: string) {
@@ -274,6 +275,18 @@ export function GerenciarSolicitacoesGeraisPage() {
     }
     return r.id.toLowerCase() === qLower;
   });
+
+  const getCostCenterLabel = (r: DpRequest): string | null => {
+    const fromDetails = typeof r.details?.costCenter === 'string' ? r.details.costCenter.trim() : '';
+    if (fromDetails) return fromDetails;
+    const fromEmployee = typeof r.employee?.costCenter === 'string' ? r.employee.costCenter.trim() : '';
+    return fromEmployee || null;
+  };
+
+  const getContratoColunaLabel = (r: DpRequest): string => {
+    if (r.requestType === 'ATESTADO_MEDICO') return getCostCenterLabel(r) || '—';
+    return r.contract?.name ?? '—';
+  };
 
   const buildTimeline = (r: DpRequest) => buildDpRequestTimeline(r, STATUS_LABELS, formatDuration);
 
@@ -533,7 +546,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                                 {TYPE_LABELS[r.requestType] ?? r.requestType}
                               </td>
                               <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 max-w-[220px]">
-                                {r.contract?.name ?? '—'}
+                                {getContratoColunaLabel(r)}
                               </td>
                               <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
                                 {formatYmd(r.prazoInicio)}

@@ -1,54 +1,20 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { metaWhatsApp } from './MetaWhatsAppService';
+import * as fs from 'fs';
+import * as path from 'path';
 
 type FlowStatus =
   | 'MENU'
   | 'FAQ_TOPIC_SELECT'
   | 'FAQ_QUESTION_SELECT'
-  | 'ATESTADO_ASK_REQUESTER_NAME'
-  | 'ATESTADO_ASK_FOR_WHOM'
-  | 'ATESTADO_ASK_REQUESTER_SECTOR'
-  | 'ATESTADO_ASK_PERSON_NAME'
-  | 'ATESTADO_ASK_COST_CENTER'
-  | 'ATESTADO_ASK_TYPE'
-  | 'ATESTADO_ASK_OTHER_TYPE'
+  | 'ATESTADO_ASK_CPF'
   | 'ATESTADO_ASK_START_DATE'
   | 'ATESTADO_ASK_END_DATE'
+  | 'ATESTADO_ASK_DAYS'
   | 'ATESTADO_ASK_FILE'
   | 'ATESTADO_COMPLETE'
   | 'ATENDANT_ASK_NAME';
-
-const ATESTADO_TYPES: Record<string, string> = {
-  '1': 'MEDICAL',
-  '2': 'DENTAL',
-  '3': 'PREVENTIVE',
-  '4': 'MEDICAL', // "Acompanhamento" mapeado para MEDICAL (sem enum específico)
-  '5': 'ACCIDENT', // "Acidente de trabalho"
-  '6': 'ACCIDENT', // "Doença ocupacional" mapeado para ACCIDENT
-  '7': 'OTHER', // "Declaração de comparecimento" mapeado para OTHER
-  '8': 'OTHER' // "Outros"
-};
-
-const ATESTADO_LABELS: Record<string, string> = {
-  '1': 'Atestado médico',
-  '2': 'Atestado odontológico',
-  '3': 'Exame médico / preventivo',
-  '4': 'Acompanhamento',
-  '5': 'Acidente de trabalho',
-  '6': 'Doença ocupacional',
-  '7': 'Declaração de comparecimento',
-  '8': 'Outros'
-};
-
-const REQUESTER_SECTORS: Record<string, string> = {
-  ENGENHARIA: 'Engenharia',
-  CONTRATOS_LICITACOES: 'Contratos e Licitações',
-  JURIDICO: 'Jurídico',
-  PROJETOS: 'Projetos',
-  TST_ADM: 'TST/ADM',
-  SUPRIMENTOS: 'Suprimentos'
-};
 
 type FaqItem = { id: string; question: string; answer: string; label?: string };
 type FaqTopic = { id: string; title: string; items: FaqItem[]; label?: string };
@@ -474,6 +440,142 @@ export class WhatsAppBotService {
     this.inactivityTimers.set(conversationId, endTimer);
   }
 
+  private onlyDigits(value: string): string {
+    return String(value || '').replace(/\D/g, '');
+  }
+
+  private isValidCpf(cpfRaw: string): boolean {
+    const cpf = this.onlyDigits(cpfRaw);
+    if (cpf.length !== 11) return false;
+    if (/^(\d)\1{10}$/.test(cpf)) return false;
+    const calcDigit = (base: string, factorStart: number) => {
+      let sum = 0;
+      for (let i = 0; i < base.length; i++) sum += Number(base[i]) * (factorStart - i);
+      const remainder = (sum * 10) % 11;
+      return remainder === 10 ? 0 : remainder;
+    };
+    const d1 = calcDigit(cpf.slice(0, 9), 10);
+    const d2 = calcDigit(cpf.slice(0, 10), 11);
+    return d1 === Number(cpf[9]) && d2 === Number(cpf[10]);
+  }
+
+  private maskCpf(cpfRaw: string): string {
+    const cpf = this.onlyDigits(cpfRaw).padStart(11, '0').slice(-11);
+    return `${cpf.slice(0, 3)}.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-${cpf.slice(9)}`;
+  }
+
+  private async getAttachmentBase64FromSavedMedia(savedMedia: { fileUrl: string; fileName: string; fileKey?: string }) {
+    if (savedMedia.fileKey) {
+      const got = await metaWhatsApp.getObjectBuffer(savedMedia.fileKey);
+      if (got?.buffer) {
+        return {
+          mimeType: got.contentType || 'application/octet-stream',
+          dataBase64: got.buffer.toString('base64')
+        };
+      }
+    }
+
+    const marker = '/uploads/whatsapp-media/';
+    const url = savedMedia.fileUrl || '';
+    if (!url.includes(marker)) return null;
+    const after = url.split(marker)[1]?.split('?')[0];
+    if (!after) return null;
+    const baseName = path.basename(after);
+    const filePath = path.join(process.cwd(), 'apps', 'backend', 'uploads', 'whatsapp-media', baseName);
+    if (!fs.existsSync(filePath)) return null;
+    const buff = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const byExt: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif'
+    };
+    return {
+      mimeType: byExt[ext] || 'application/octet-stream',
+      dataBase64: buff.toString('base64')
+    };
+  }
+
+  private async createDpRequestFromWhatsappAtestado(args: {
+    employee: {
+      id: string;
+      department: string;
+      costCenter: string | null;
+      company: string | null;
+      polo: string | null;
+      user: { id: string; name: string; email: string; cpf: string };
+    };
+    payload: Record<string, unknown>;
+    savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null;
+    mediaMimeType?: string;
+  }) {
+    if (!args.savedMedia) throw new Error('Arquivo do atestado ausente para solicitação DP');
+    const attachment = await this.getAttachmentBase64FromSavedMedia(args.savedMedia);
+    if (!attachment) throw new Error('Não foi possível carregar o arquivo do atestado para solicitação DP');
+
+    const dataInicial = String(args.payload.dataInicio || '').trim();
+    const dataFinal = String(args.payload.dataFim || '').trim();
+    const numeroDias = String(args.payload.numeroDias || '').trim();
+    if (!dataInicial || !dataFinal || !numeroDias) {
+      throw new Error('Dados do atestado incompletos para solicitação DP');
+    }
+
+    const details = {
+      employeeId: args.employee.id,
+      costCenter: args.employee.costCenter || '',
+      dataInicial,
+      dataFinal,
+      numeroDias,
+      anexoAtestado: {
+        fileName: args.savedMedia.fileName || 'atestado_enviado',
+        mimeType: args.mediaMimeType || attachment.mimeType,
+        dataBase64: attachment.dataBase64,
+        fileUrl: args.savedMedia.fileUrl || null
+      }
+    };
+
+    const now = new Date();
+    const prazoFim = new Date(now);
+    prazoFim.setDate(prazoFim.getDate() + 1);
+    const lock = 91827364;
+    const createdAtIso = now.toISOString();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${lock})`);
+      const agg = await tx.dpRequest.aggregate({ _max: { displayNumber: true } });
+      const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
+      await tx.dpRequest.create({
+        data: {
+          displayNumber: nextDisplay,
+          employeeId: args.employee.id,
+          urgency: 'MEDIUM',
+          requestType: 'ATESTADO_MEDICO',
+          title: 'Solicitação DP · Atestado médico',
+          sectorSolicitante: args.employee.department,
+          solicitanteNome: args.employee.user.name,
+          solicitanteEmail: args.employee.user.email,
+          prazoInicio: now,
+          prazoFim,
+          details: details as Prisma.InputJsonValue,
+          contractId: null,
+          company: args.employee.company || null,
+          polo: args.employee.polo || null,
+          status: 'WAITING_MANAGER',
+          statusHistory: [
+            {
+              at: createdAtIso,
+              status: 'WAITING_MANAGER',
+              actorName: 'Gennecy (WhatsApp Bot)'
+            }
+          ] as Prisma.InputJsonValue
+        } as any
+      });
+    });
+  }
+
   async processMessage(
     phone: string,
     text: string,
@@ -481,8 +583,13 @@ export class WhatsAppBotService {
     mediaInfo?: MediaInfo,
     opts?: { whatsappProfileName?: string }
   ): Promise<void> {
+    // Cada novo contato após encerramento deve abrir um atendimento novo.
+    // Reaproveitamos apenas conversa ainda pendente.
     let conversation = await prisma.whatsAppConversation.findFirst({
-      where: { phone },
+      where: {
+        phone,
+        status: 'PENDING'
+      },
       orderBy: { updatedAt: 'desc' }
     });
 
@@ -512,7 +619,7 @@ export class WhatsAppBotService {
 
     const payload = (conversation.payload as Record<string, unknown>) || {};
     const flowStatus = (conversation.flowStatus || 'MENU') as FlowStatus;
-    const normalizedFlowStatus = (String(flowStatus).startsWith('ATESTADO') ? 'MENU' : flowStatus) as FlowStatus;
+    const normalizedFlowStatus = flowStatus as FlowStatus;
 
     // Baixar e salvar mídia (S3 ou local)
     let savedMedia: { fileUrl: string; fileName: string; fileKey?: string } | null = null;
@@ -562,13 +669,8 @@ export class WhatsAppBotService {
     // Se o usuário pedir atendimento humano, não queremos que o idle timeout feche a conversa.
     let skipInactivityTimeout = false;
 
-    // Se estava CANCELLED (por encerramento manual ou por inatividade), a próxima mensagem deve reativar.
-    if (newConversationStatus === 'CANCELLED' && !isEndRequest()) {
-      newConversationStatus = 'PENDING';
-    }
-
     /**
-     * Atendimento humano (ou fila após nome): não rodar o fluxo da Luna em cada mensagem —
+     * Atendimento humano (ou fila após nome): não rodar o fluxo da Gennecy em cada mensagem —
      * senão o default do MENU cai em `menu()` e sorteia de novo "Oi! Tudo bem?...".
      * A mensagem do usuário já foi salva acima; só atualizamos updatedAt.
      */
@@ -621,16 +723,23 @@ export class WhatsAppBotService {
     };
 
     const menu = (): SendAction => ({
-      type: 'buttons',
+      type: 'list',
       body: pick([
-        'Olá! 😊 Eu sou a Luna, assistente virtual da Gennesis.\nEstou por aqui pra te ajudar — como posso te atender hoje?',
-        'Oi! Tudo bem? 😊\nSou a Luna, da Gennesis. Me conta como posso te ajudar!',
-        'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Luna, assistente virtual, e estou à disposição para ajudar no que precisar.'
+        'Olá! 😊 Eu sou a Gennecy, assistente virtual da Gennesis.\nEstou por aqui pra te ajudar — como posso te atender hoje?',
+        'Oi! Tudo bem? 😊\nSou a Gennecy, da Gennesis. Me conta como posso te ajudar!',
+        'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Gennecy, assistente virtual, e estou à disposição para ajudar no que precisar.'
       ]),
-      buttons: [
-        { id: 'ATENDENTE', title: 'Falar com atendente' },
-        { id: 'DUVIDAS', title: 'Dúvidas' },
-        { id: 'END', title: 'Encerrar' }
+      buttonText: 'Escolher opção',
+      sections: [
+        {
+          title: 'Atendimento',
+          rows: [
+            { id: 'ATESTADO', title: 'Enviar atestado' },
+            { id: 'ATENDENTE', title: 'Falar com atendente' },
+            { id: 'DUVIDAS', title: 'Dúvidas' },
+            { id: 'END', title: 'Encerrar' }
+          ]
+        }
       ]
     });
 
@@ -691,54 +800,12 @@ export class WhatsAppBotService {
       ]
     });
 
-    const askRequesterName = (): SendAction => ({
+    const askRequesterCpf = (): SendAction => ({
       type: 'buttons',
-      body: 'Pode me informar seu nome completo?',
+      body: 'Para localizar seu cadastro, me informe seu CPF (somente números).',
       buttons: [
         { id: 'MENU', title: 'Voltar' },
         { id: 'END', title: 'Encerrar' }
-      ]
-    });
-
-    const askForWhom = (): SendAction => ({
-      type: 'buttons',
-      body: 'Este atestado é para você ou para outra pessoa?',
-      buttons: [
-        { id: 'SELF', title: 'Para mim' },
-        { id: 'OTHER', title: 'Outra pessoa' },
-        { id: 'END', title: 'Encerrar' }
-      ]
-    });
-
-    const requesterSectorList = (): SendAction => ({
-      type: 'list',
-      body: 'Você pode me informar o seu setor?',
-      buttonText: 'Escolher',
-      sections: [
-        {
-          title: 'Setores',
-          rows: [
-            ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({ id: k, title: v })),
-            { id: 'END', title: 'Encerrar atendimento' },
-            { id: 'MENU', title: 'Voltar' }
-          ]
-        }
-      ]
-    });
-
-    const tipoAtestado = (): SendAction => ({
-      type: 'list',
-      body: 'Qual o tipo de atestado?',
-      buttonText: 'Escolher',
-      sections: [
-        {
-          title: 'Opções',
-          rows: [
-            ...Object.entries(ATESTADO_LABELS).map(([k, v]) => ({ id: `TYPE_${k}`, title: v })),
-            { id: 'MENU', title: 'Voltar' },
-            { id: 'END', title: 'Encerrar atendimento' }
-          ]
-        }
       ]
     });
 
@@ -778,72 +845,14 @@ export class WhatsAppBotService {
       return null;
     };
 
-    const extractDateRange = (value: string): { start: string; end: string } | null => {
-      const v = (value || '').trim();
-      if (!v) return null;
-
-      // Procura 2 datas em sequência no texto (ex.: "01/03/2026 - 05/03/2026")
-      const matches = [...v.matchAll(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{4}-\d{2}-\d{2})/g)].map((m) => m[0]);
-      if (matches.length < 2) return null;
-      const startParsed = parseDateInput(matches[0]);
-      const endParsed = parseDateInput(matches[1]);
-      if (!startParsed || !endParsed) return null;
-      return { start: startParsed.normalized, end: endParsed.normalized };
-    };
-
-    /** Pede para digitar a data do atestado (formato DD/MM/AAAA ou início - fim) */
-    const askDateByTyping = (): SendAction => ({
+    const askDateByTyping = (kind: 'inicio' | 'fim'): SendAction => ({
       type: 'buttons',
-      body:
-        'Digite o período do atestado.\n\n' +
-        '• Uma data só: *01/03/2026*\n' +
-        '• Intervalo: *01/03/2026 - 05/03/2026*',
+      body: `Digite a data de ${kind} do atestado no formato *DD/MM/AAAA*.\nEx.: *01/03/2026*`,
       buttons: [
         { id: 'MENU', title: 'Voltar' },
         { id: 'END', title: 'Encerrar' }
       ]
     });
-
-    /** Monta lista de centros de custo. API WhatsApp: máx 10 linhas no total (todas as seções somadas) */
-    const costCenterList = async (): Promise<SendAction> => {
-      const costCenters = await prisma.costCenter.findMany({
-        where: { isActive: true },
-        orderBy: { code: 'asc' },
-        select: { id: true, code: true, name: true }
-      });
-
-      const MAX_TOTAL_ROWS = 10;
-      const ACTION_ROWS = 2; // Encerrar + Voltar
-      const MAX_CC_ROWS = MAX_TOTAL_ROWS - ACTION_ROWS; // 8 centros de custo na lista
-
-      const ccRows = costCenters
-        .slice(0, MAX_CC_ROWS)
-        .map((cc) => ({ id: cc.code, title: `${cc.code} - ${cc.name}`.slice(0, 24) }));
-
-      const sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }> = [
-        {
-          title: ccRows.length === costCenters.length ? 'Centros de custo' : `Centros (1 a ${ccRows.length})`,
-          rows: ccRows
-        },
-        {
-          title: 'Ações',
-          rows: [
-            { id: 'END', title: 'Encerrar atendimento' },
-            { id: 'MENU', title: 'Voltar' }
-          ]
-        }
-      ];
-
-      return {
-        type: 'list',
-        body:
-          costCenters.length > MAX_CC_ROWS
-            ? `Selecione o centro de custo (mostrando ${MAX_CC_ROWS} de ${costCenters.length}). Ou envie o código por texto:`
-            : 'Selecione o centro de custo/contrato no qual o atestado deve ser vinculado:',
-        buttonText: 'Escolher',
-        sections
-      };
-    };
 
     const clearPayload = () => {
       Object.keys(newPayload).forEach((k) => delete (newPayload as any)[k]);
@@ -860,10 +869,17 @@ export class WhatsAppBotService {
         typeof (newPayload as any).waProfileName === 'string'
           ? String((newPayload as any).waProfileName).trim().slice(0, 120)
           : '';
+      const hadHumanHandoff =
+        (newPayload as any).attendantHandoffEver === true ||
+        (newPayload as any).attendantRequested === true ||
+        (newPayload as any).attendantInProgress === true ||
+        (typeof (newPayload as any).attendantRequestedAt === 'string' &&
+          String((newPayload as any).attendantRequestedAt).length > 0);
       clearPayload();
       if (nameKeep) (newPayload as any).name = nameKeep;
       if (requesterKeep) (newPayload as any).requesterName = requesterKeep;
       if (waKeep) (newPayload as any).waProfileName = waKeep;
+      if (hadHumanHandoff) (newPayload as any).attendantHandoffEver = true;
       newStatus = 'MENU';
       newConversationStatus = 'CANCELLED';
       return {
@@ -963,21 +979,20 @@ export class WhatsAppBotService {
           break;
         }
 
-        if (content === '1' || isFaqStart() || content === 'duvidas') {
+        if (content === 'duvidas' || content === '2' || isFaqStart()) {
           newStatus = 'FAQ_TOPIC_SELECT';
           newPayload.flow = 'FAQ';
           sendAction = faqTopicList();
         } else if (
+          content === 'atestado' ||
           content.includes('atestado') ||
           content.includes('atestato') ||
           content.includes('atestados') ||
           content.includes('atest')
         ) {
-          // Removido o fluxo de "Enviar atestado". Para manter o chatbot útil,
-          // direcionamos para as dúvidas relacionadas (FAQ).
-          newStatus = 'FAQ_TOPIC_SELECT';
-          newPayload.flow = 'FAQ';
-          sendAction = faqTopicList();
+          newStatus = 'ATESTADO_ASK_CPF';
+          newPayload.flow = 'ATESTADO';
+          sendAction = askRequesterCpf();
         } else {
           sendAction = menu();
         }
@@ -1123,7 +1138,7 @@ export class WhatsAppBotService {
         break;
       }
 
-      case 'ATESTADO_ASK_REQUESTER_NAME': {
+      case 'ATESTADO_ASK_CPF': {
         if (isEndRequest()) {
           sendAction = endConversation();
           break;
@@ -1133,10 +1148,11 @@ export class WhatsAppBotService {
           break;
         }
 
-        if (!textRaw) {
+        const cpfDigits = this.onlyDigits(textRaw);
+        if (!cpfDigits) {
           sendAction = {
             type: 'buttons',
-            body: 'Não recebi o nome. Qual é o nome completo da pessoa que está solicitando?',
+            body: 'Não recebi o CPF. Envie o CPF com 11 dígitos (somente números).',
             buttons: [
               { id: 'MENU', title: 'Voltar' },
               { id: 'END', title: 'Encerrar' }
@@ -1145,66 +1161,10 @@ export class WhatsAppBotService {
           break;
         }
 
-        newPayload.requesterName = textRaw;
-        newStatus = 'ATESTADO_ASK_REQUESTER_SECTOR';
-        sendAction = requesterSectorList();
-        break;
-      }
-
-      case 'ATESTADO_ASK_FOR_WHOM': {
-        if (isEndRequest()) {
-          sendAction = endConversation();
-          break;
-        }
-        if (isMenuRequest()) {
-          sendAction = resetToMenu();
-          break;
-        }
-
-        if (content === 'self') {
-          newPayload.forWhom = 'SELF';
-          newPayload.name = newPayload.requesterName;
-          newStatus = 'ATESTADO_ASK_COST_CENTER';
-          sendAction = await costCenterList();
-        } else if (content === 'other') {
-          newPayload.forWhom = 'OTHER';
-          newStatus = 'ATESTADO_ASK_PERSON_NAME';
+        if (!this.isValidCpf(cpfDigits)) {
           sendAction = {
             type: 'buttons',
-            body: 'Certo. Qual é o nome completo da pessoa para quem você quer enviar o atestado?',
-            buttons: [
-              { id: 'MENU', title: 'Voltar' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
-        } else {
-          sendAction = {
-            type: 'buttons',
-            body: 'Me confirme: este atestado é para você ou para outra pessoa?',
-            buttons: [
-              { id: 'SELF', title: 'Para mim' },
-              { id: 'OTHER', title: 'Outra pessoa' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
-        }
-        break;
-      }
-
-      case 'ATESTADO_ASK_PERSON_NAME': {
-        if (isEndRequest()) {
-          sendAction = endConversation();
-          break;
-        }
-        if (isMenuRequest()) {
-          sendAction = resetToMenu();
-          break;
-        }
-
-        if (!textRaw) {
-          sendAction = {
-            type: 'buttons',
-            body: 'Não recebi o nome. Qual é o nome completo da pessoa?',
+            body: 'CPF inválido. Confira e envie novamente os 11 dígitos do CPF.',
             buttons: [
               { id: 'MENU', title: 'Voltar' },
               { id: 'END', title: 'Encerrar' }
@@ -1213,202 +1173,48 @@ export class WhatsAppBotService {
           break;
         }
 
-        newPayload.name = textRaw;
-
-        if (newPayload.forWhom === 'OTHER') {
-          // Para outra pessoa, não pedimos CPF: já seguimos para centro de custo/contrato.
-          newStatus = 'ATESTADO_ASK_COST_CENTER';
-          sendAction = await costCenterList();
-        } else {
-          // Caminho SELF (caso chegue aqui): seguimos para centro de custo/contrato.
-          newStatus = 'ATESTADO_ASK_COST_CENTER';
-          sendAction = await costCenterList();
-        }
-        break;
-      }
-
-      case 'ATESTADO_ASK_REQUESTER_SECTOR': {
-        if (isEndRequest()) {
-          sendAction = endConversation();
-          break;
-        }
-        if (isMenuRequest()) {
-          sendAction = resetToMenu();
-          break;
-        }
-
-        const sectorKey =
-          Object.keys(REQUESTER_SECTORS).find((k) => k.toLowerCase() === content) ??
-          Object.entries(REQUESTER_SECTORS).find(([_, v]) => v.toLowerCase() === textRaw.toLowerCase())?.[0];
-
-        if (!sectorKey || !REQUESTER_SECTORS[sectorKey]) {
-          sendAction = {
-            type: 'list',
-            body: 'Não entendi qual setor foi selecionado. Selecione novamente:',
-            buttonText: 'Escolher',
-            sections: [
-              {
-                title: 'Setores',
-                rows: [
-                  ...Object.entries(REQUESTER_SECTORS).map(([k, v]) => ({ id: k, title: v })),
-                  { id: 'END', title: 'Encerrar atendimento' },
-                  { id: 'MENU', title: 'Voltar' }
-                ]
-              }
-            ]
-          };
-          break;
-        }
-
-        newPayload.requesterSector = REQUESTER_SECTORS[sectorKey];
-
-        newStatus = 'ATESTADO_ASK_FOR_WHOM';
-        sendAction = askForWhom();
-        break;
-      }
-
-      case 'ATESTADO_ASK_COST_CENTER': {
-        if (isEndRequest()) {
-          sendAction = endConversation();
-          break;
-        }
-        if (isMenuRequest()) {
-          sendAction = resetToMenu();
-          break;
-        }
-
-        const costCenters = await prisma.costCenter.findMany({
-          where: { isActive: true },
-          orderBy: { code: 'asc' },
-          select: { id: true, code: true, name: true }
+        // Banco pode ter CPF salvo com máscara ou só dígitos; tentamos ambos.
+        const cpfMasked = this.maskCpf(cpfDigits);
+        const user = await prisma.user.findFirst({
+          where: {
+            OR: [{ cpf: cpfDigits }, { cpf: cpfMasked }]
+          },
+          include: { employee: true }
         });
 
-        // O WhatsApp pode retornar o "id" (que é o code) ou o "title" (que vem truncado).
-        // Então fazemos um matching tolerante, ignorando espaços e caracteres não-alfa-numéricos.
-        const normalizeText = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const contentNormalized = normalizeText(content.trim());
-
-        let matchByCode =
-          costCenters.find((cc) => cc.code.toLowerCase() === content) ??
-          // se for "CC-2026-001 - Nome", pegamos a parte antes de " - "
-          (() => {
-            const beforeDash = content.split(' - ')[0]?.trim();
-            if (!beforeDash) return undefined;
-            return costCenters.find((cc) => cc.code.toLowerCase() === beforeDash.toLowerCase());
-          })() ??
-          costCenters.find((cc) => normalizeText(cc.code) === contentNormalized) ??
-          // por inclusão normalizada (quando vier truncado pelo WhatsApp) escolhe o "melhor" (maior)
-          (() => {
-            const matches = costCenters
-              .map((cc) => ({ cc, codeNorm: normalizeText(cc.code) }))
-              .filter((m) => m.codeNorm && contentNormalized.includes(m.codeNorm));
-
-            if (matches.length === 0) return undefined;
-            matches.sort((a, b) => b.codeNorm.length - a.codeNorm.length);
-            return matches[0]?.cc;
-          })();
-
-        // Se a UI mostrou só o "nome" (title), o WhatsApp pode enviar apenas o title truncado.
-        // Neste caso, tentamos também casar por "name".
-        if (!matchByCode) {
-          const matches = costCenters
-            .map((cc) => ({ cc, nameNorm: normalizeText(cc.name) }))
-            .filter((m) => m.nameNorm && (m.nameNorm === contentNormalized || contentNormalized.includes(m.nameNorm)));
-
-          if (matches.length > 0) {
-            matches.sort((a, b) => b.nameNorm.length - a.nameNorm.length);
-            matchByCode = matches[0]?.cc;
-          }
-        }
-
-        if (!matchByCode) {
-          const listAction = await costCenterList();
-          if (listAction.type === 'list') {
-            sendAction = {
-              ...listAction,
-              body: 'Não encontrei esse centro de custo. Selecione novamente pela lista (ou envie o código):'
-            };
-          } else {
-            sendAction = listAction;
-          }
-          break;
-        }
-
-        newPayload.costCenterId = matchByCode.id;
-        newPayload.costCenterCode = matchByCode.code;
-        newPayload.costCenterName = matchByCode.name;
-
-        newStatus = 'ATESTADO_ASK_TYPE';
-        sendAction = tipoAtestado();
-        break;
-      }
-
-      case 'ATESTADO_ASK_TYPE': {
-        if (isEndRequest()) {
-          sendAction = endConversation();
-          break;
-        }
-        if (isMenuRequest()) {
-          sendAction = resetToMenu();
-          break;
-        }
-
-        const keyFromContent = (() => {
-          if (content.startsWith('type_')) return content.replace('type_', '').trim();
-          return content.trim();
-        })();
-
-        if (!ATESTADO_TYPES[keyFromContent]) {
-          sendAction = tipoAtestado();
-          break;
-        }
-
-        newPayload.atestadoType = ATESTADO_TYPES[keyFromContent];
-        newPayload.atestadoTypeLabel = ATESTADO_LABELS[keyFromContent];
-
-        // Apenas quando o usuário escolhe "Outros" (id=8) pedimos o tipo específico.
-        if (keyFromContent === '8') {
-          newStatus = 'ATESTADO_ASK_OTHER_TYPE';
+        if (!user?.employee) {
           sendAction = {
             type: 'buttons',
-            body: 'Você escolheu "Outros". Qual é o tipo específico do atestado? (ex.: afastamento, particular etc.)',
+            body: 'Não encontrei colaborador ativo para esse CPF. Verifique o CPF ou fale com atendente.',
             buttons: [
-              { id: 'MENU', title: 'Voltar' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
-        } else {
-          newStatus = 'ATESTADO_ASK_START_DATE';
-          sendAction = askDateByTyping();
-        }
-        break;
-      }
-
-      case 'ATESTADO_ASK_OTHER_TYPE': {
-        if (isEndRequest()) {
-          sendAction = endConversation();
-          break;
-        }
-        if (isMenuRequest()) {
-          sendAction = resetToMenu();
-          break;
-        }
-
-        if (!textRaw) {
-          sendAction = {
-            type: 'buttons',
-            body: 'Não recebi o tipo específico. Qual é o tipo do atestado?',
-            buttons: [
-              { id: 'MENU', title: 'Voltar' },
+              { id: 'ATENDENTE', title: 'Falar atendente' },
+              { id: 'MENU', title: 'Menu' },
               { id: 'END', title: 'Encerrar' }
             ]
           };
           break;
         }
 
-        newPayload.atestadoOtherType = textRaw;
+        newPayload.cpf = cpfDigits;
+        newPayload.cpfMasked = this.maskCpf(cpfDigits);
+        newPayload.employeeId = user.employee.id;
+        newPayload.requesterName = user.name;
+        newPayload.name = user.name;
+        newPayload.employeeDepartment = user.employee.department;
+        newPayload.costCenter = user.employee.costCenter || null;
+        newPayload.company = user.employee.company || null;
+        newPayload.polo = user.employee.polo || null;
         newStatus = 'ATESTADO_ASK_START_DATE';
-        sendAction = askDateByTyping();
+        sendAction = {
+          type: 'buttons',
+          body:
+            `Identifiquei *${user.name}* (CPF ${this.maskCpf(cpfDigits)}).\n` +
+            'Agora me informe a data de início do atestado no formato *DD/MM/AAAA*.',
+          buttons: [
+            { id: 'MENU', title: 'Voltar' },
+            { id: 'END', title: 'Encerrar' }
+          ]
+        };
         break;
       }
 
@@ -1422,49 +1228,19 @@ export class WhatsAppBotService {
           break;
         }
 
-        // Intervalo: "01/03/2026 - 05/03/2026"
-        const range = extractDateRange(textRaw);
-        if (range) {
-          const startParsed = parseDateInput(range.start);
-          const endParsed = parseDateInput(range.end);
-          if (startParsed && endParsed && startParsed.date <= endParsed.date) {
-            newPayload.dataInicio = startParsed.normalized;
-            newPayload.dataFim = endParsed.normalized;
-            newStatus = 'ATESTADO_ASK_FILE';
-            sendAction = {
-              type: 'buttons',
-              body: 'Perfeito. Agora envie a foto ou PDF do atestado. 📎',
-              buttons: [
-                { id: 'MENU', title: 'Voltar' },
-                { id: 'END', title: 'Encerrar' }
-              ]
-            };
-            break;
-          }
-        }
-
-        // Data única: "01/03/2026" (início e fim iguais)
-        const singleParsed = parseDateInput(textRaw);
-        if (singleParsed) {
-          newPayload.dataInicio = singleParsed.normalized;
-          newPayload.dataFim = singleParsed.normalized;
-          newStatus = 'ATESTADO_ASK_FILE';
-          sendAction = {
-            type: 'buttons',
-            body: 'Perfeito. Agora envie a foto ou PDF do atestado. 📎',
-            buttons: [
-              { id: 'MENU', title: 'Voltar' },
-              { id: 'END', title: 'Encerrar' }
-            ]
-          };
+        const startParsed = parseDateInput(textRaw);
+        if (startParsed) {
+          newPayload.dataInicio = startParsed.normalized;
+          newStatus = 'ATESTADO_ASK_END_DATE';
+          sendAction = askDateByTyping('fim');
           break;
         }
 
         sendAction = {
           type: 'buttons',
           body:
-            'Formato inválido. Digite a data no formato DD/MM/AAAA.\n' +
-            'Ex.: *01/03/2026* ou *01/03/2026 - 05/03/2026* para intervalo.',
+            'Formato inválido. Digite a data inicial no formato DD/MM/AAAA.\n' +
+            'Ex.: *01/03/2026*.',
           buttons: [
             { id: 'MENU', title: 'Voltar' },
             { id: 'END', title: 'Encerrar' }
@@ -1483,8 +1259,77 @@ export class WhatsAppBotService {
           break;
         }
 
-        newStatus = 'ATESTADO_ASK_START_DATE';
-        sendAction = askDateByTyping();
+        const startParsed = parseDateInput(String(newPayload.dataInicio || ''));
+        const endParsed = parseDateInput(textRaw);
+        if (!endParsed) {
+          sendAction = {
+            type: 'buttons',
+            body: 'Formato inválido. Digite a data final no formato DD/MM/AAAA.\nEx.: *05/03/2026*.',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+        if (!startParsed || endParsed.date < startParsed.date) {
+          sendAction = {
+            type: 'buttons',
+            body: 'A data final não pode ser menor que a data inicial. Informe novamente a data final.',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        newPayload.dataFim = endParsed.normalized;
+        newStatus = 'ATESTADO_ASK_DAYS';
+        sendAction = {
+          type: 'buttons',
+          body: 'Agora me informe o número de dias do atestado (somente número).',
+          buttons: [
+            { id: 'MENU', title: 'Voltar' },
+            { id: 'END', title: 'Encerrar' }
+          ]
+        };
+        break;
+      }
+
+      case 'ATESTADO_ASK_DAYS': {
+        if (isEndRequest()) {
+          sendAction = endConversation();
+          break;
+        }
+        if (isMenuRequest()) {
+          sendAction = resetToMenu();
+          break;
+        }
+
+        const days = Number.parseInt(textRaw, 10);
+        if (!Number.isFinite(days) || days <= 0) {
+          sendAction = {
+            type: 'buttons',
+            body: 'Não consegui validar o número de dias. Envie apenas um número inteiro maior que zero.',
+            buttons: [
+              { id: 'MENU', title: 'Voltar' },
+              { id: 'END', title: 'Encerrar' }
+            ]
+          };
+          break;
+        }
+
+        newPayload.numeroDias = days;
+        newStatus = 'ATESTADO_ASK_FILE';
+        sendAction = {
+          type: 'buttons',
+          body: 'Perfeito. Agora envie a foto ou PDF do atestado. 📎',
+          buttons: [
+            { id: 'MENU', title: 'Voltar' },
+            { id: 'END', title: 'Encerrar' }
+          ]
+        };
         break;
       }
 
@@ -1514,6 +1359,40 @@ export class WhatsAppBotService {
               fileName: savedMedia?.fileName ?? 'atestado_enviado'
             }
           });
+
+          const employeeId = String(newPayload.employeeId || '').trim();
+          if (employeeId && savedMedia) {
+            try {
+              const employee = await prisma.employee.findUnique({
+                where: { id: employeeId },
+                include: {
+                  user: { select: { id: true, name: true, email: true, cpf: true } }
+                }
+              });
+              if (employee?.user) {
+                await this.createDpRequestFromWhatsappAtestado({
+                  employee: {
+                    id: employee.id,
+                    department: employee.department,
+                    costCenter: employee.costCenter || null,
+                    user: {
+                      id: employee.user.id,
+                      name: employee.user.name,
+                      email: employee.user.email,
+                      cpf: employee.user.cpf
+                    },
+                    company: employee.company || null,
+                    polo: employee.polo || null
+                  },
+                  payload: newPayload,
+                  savedMedia,
+                  mediaMimeType: mediaInfo?.mimeType
+                });
+              }
+            } catch (e) {
+              console.error('[WhatsAppBotService] Falha ao criar solicitação DP de atestado:', e);
+            }
+          }
 
           newStatus = 'ATESTADO_COMPLETE';
           newConversationStatus = 'COMPLETED';
@@ -1553,10 +1432,10 @@ export class WhatsAppBotService {
           break;
         }
 
-        if (content.includes('atestado') || content === '1' || content === 'atestados' || content === 'atestato') {
-          newStatus = 'ATESTADO_ASK_REQUESTER_NAME';
+        if (content.includes('atestado') || content === 'atestados' || content === 'atestato') {
+          newStatus = 'ATESTADO_ASK_CPF';
           newPayload.flow = 'ATESTADO';
-          sendAction = askRequesterName();
+          sendAction = askRequesterCpf();
           break;
         }
 

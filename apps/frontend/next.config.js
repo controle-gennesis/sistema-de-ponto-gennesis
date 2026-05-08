@@ -10,7 +10,12 @@ const nextConfig = {
   compiler: { styledComponents: false },
   swcMinify: true,
   reactStrictMode: false,
-  generateBuildId: async () => `build-${Date.now()}`,
+  /** Railway/CI: id estável por commit evita rebuild total a cada deploy (menos tempo e menos OOM). Dev local pode variar por timestamp se não houver GIT SHA. */
+  generateBuildId: async () =>
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+    process.env.VERCEL_GIT_COMMIT_SHA?.slice?.(0, 12) ||
+    process.env.GITHUB_SHA?.slice?.(0, 12) ||
+    `local-${Date.now()}`,
   skipTrailingSlashRedirect: true,
   skipMiddlewareUrlNormalize: true,
   webpack: (config) => {

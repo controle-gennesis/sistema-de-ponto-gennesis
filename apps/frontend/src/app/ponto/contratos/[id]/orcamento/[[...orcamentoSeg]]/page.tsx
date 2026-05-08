@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React, { Suspense, useEffect, useMemo } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
@@ -17,11 +17,35 @@ interface Contract {
   costCenterId: string;
 }
 
+/** Redireciona `?orcamento=uuid` (formato antigo) para `/orcamento/uuid`. */
+function LegacyOrcamentoQueryRedirect({ contractId }: { contractId: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const q = searchParams?.get('orcamento')?.trim();
+    if (!q) return;
+    router.replace(`/ponto/contratos/${contractId}/orcamento/${q}`, { scroll: false });
+  }, [contractId, router, searchParams]);
+  return null;
+}
+
 export default function ContratoOrcamentoPage() {
   const params = useParams();
   const router = useRouter();
   const rawId = params?.id;
   const contractId = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] ?? '' : '';
+
+  const rawSeg = params?.orcamentoSeg;
+  const orcamentoSeg = useMemo(
+    () => (Array.isArray(rawSeg) ? rawSeg : rawSeg ? [String(rawSeg)] : []),
+    [rawSeg]
+  );
+  const embeddedOrcamentoIdFromRoute = orcamentoSeg.length === 1 ? orcamentoSeg[0] : null;
+
+  useEffect(() => {
+    if (!contractId || orcamentoSeg.length <= 1) return;
+    router.replace(`/ponto/contratos/${contractId}/orcamento`, { scroll: false });
+  }, [contractId, orcamentoSeg.length, router]);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -106,7 +130,24 @@ export default function ContratoOrcamentoPage() {
     );
   }
 
+  if (orcamentoSeg.length > 1) {
+    return (
+      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+        <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+          <Loading message="Redirecionando…" size="lg" />
+        </MainLayout>
+      </ProtectedRoute>
+    );
+  }
+
   return (
-    <OrcamentoPageView lockedCostCenterId={contract.costCenterId} embeddedContractId={contractId} />
+    <Suspense fallback={<Loading message="Carregando orçamento..." size="lg" />}>
+      <LegacyOrcamentoQueryRedirect contractId={contractId} />
+      <OrcamentoPageView
+        lockedCostCenterId={contract.costCenterId}
+        embeddedContractId={contractId}
+        embeddedOrcamentoIdFromRoute={embeddedOrcamentoIdFromRoute}
+      />
+    </Suspense>
   );
 }

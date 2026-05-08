@@ -34,22 +34,32 @@ export function pathToModuleKey(href: string): string {
 }
 
 /**
+ * Chaves concedidas apenas pela checklist por contrato (aba «Contratos»), não pela matriz «Acesso».
+ * Permanecem em `PERMISSION_MODULES` para sincronização/orfãos; a matriz «Acesso» as ignora na UI.
+ */
+export const PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX: readonly string[] = [
+  pathToModuleKey('/ponto/orcamento'),
+  pathToModuleKey('/ponto/contratos/relatorios'),
+];
+
+/**
  * Lista alinhada aos submenus do Sidebar (cada linha = um módulo).
  * Ordem: categorias como no menu lateral.
  */
 export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Principal
   { key: pathToModuleKey('/ponto/dashboard'), name: 'Dashboard', href: '/ponto/dashboard', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/bi'), name: 'Solicitações Fluig', href: '/ponto/bi', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Conversas WhatsApp', href: '/ponto/conversas-whatsapp', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Central de Atendimentos', href: '/ponto/conversas-whatsapp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/aprovacoes'), name: 'Aprovações', href: '/ponto/aprovacoes', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Painel de solicitações', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/drive'), name: 'Meu Drive', href: '/ponto/drive', category: 'Principal' },
   // Departamento Pessoal
   { key: pathToModuleKey('/ponto/funcionarios'), name: 'Funcionários', href: '/ponto/funcionarios', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/folha-pagamento'), name: 'Folha de Pagamento', href: '/ponto/folha-pagamento', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/atestados'), name: 'Ausências', href: '/ponto/atestados', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-atestados'), name: 'Gerenciar Ausências', href: '/ponto/gerenciar-atestados', category: 'Departamento Pessoal' },
-  { key: pathToModuleKey('/ponto/solicitacoes'), name: 'Solicitações', href: '/ponto/solicitacoes', category: 'Departamento Pessoal' },
-  { key: pathToModuleKey('/ponto/gerenciar-solicitacoes'), name: 'Gerenciar Solicitações', href: '/ponto/gerenciar-solicitacoes', category: 'Departamento Pessoal' },
+  { key: pathToModuleKey('/ponto/solicitacoes'), name: 'Alterações de ponto', href: '/ponto/solicitacoes', category: 'Departamento Pessoal' },
+  { key: pathToModuleKey('/ponto/gerenciar-solicitacoes'), name: 'Gerenciar alterações de ponto', href: '/ponto/gerenciar-solicitacoes', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações Gerais', href: '/ponto/solicitacoes-dp', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-solicitacoes-dp'), name: 'Gerenciar Solicitações Gerais', href: '/ponto/gerenciar-solicitacoes-dp', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/ferias'), name: 'Férias', href: '/ponto/ferias', category: 'Departamento Pessoal' },
@@ -62,10 +72,10 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/financeiro'), name: 'Financeiro', href: '/ponto/financeiro', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/analise'), name: 'Análise Financeira', href: '/ponto/financeiro/analise', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/analise-extrato'), name: 'Análise de Extrato', href: '/ponto/financeiro/analise-extrato', category: 'Financeiro' },
-  { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Gestão de Solicitações', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Financeiro' },
   // Engenharia
   { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamento', href: '/ponto/orcamento', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos'), name: 'Contratos', href: '/ponto/contratos', category: 'Engenharia' },
+  { key: pathToModuleKey('/ponto/contratos/relatorios'), name: 'Relatórios Fotográficos', href: '/ponto/contratos/relatorios', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos/controle-geral'), name: 'Controle Geral de Contratos', href: '/ponto/contratos/controle-geral', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/espelho-nf'), name: 'Espelho NF', href: '/ponto/espelho-nf', category: 'Contrações e Licitações' },
   { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contrações e Licitações' },
@@ -97,21 +107,15 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Controle',
   },
   {
-    key: pathToModuleKey('/ponto/controle/auditoria-permissoes'),
-    name: 'Auditoria de permissões e acessos',
-    href: '/ponto/controle/auditoria-permissoes',
-    category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/exportacoes-administrativas'),
-    name: 'Exportações e relatórios administrativos',
-    href: '/ponto/controle/exportacoes-administrativas',
-    category: 'Controle',
-  },
-  {
     key: pathToModuleKey('/ponto/controle/criar-tipos-restritos-dp'),
     name: 'Criar solicitações restritas',
     href: '/ponto/controle/criar-tipos-restritos-dp',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/alterar-senha-funcionarios'),
+    name: 'Alterar senha de funcionários',
+    href: '/ponto/controle/alterar-senha-funcionarios',
     category: 'Controle',
   },
 ] as const;

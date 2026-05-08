@@ -19,6 +19,7 @@ import {
   Trash2,
   Percent,
   Calculator,
+  FileImage,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -570,11 +571,22 @@ export default function ContractDetailPage() {
   const router = useRouter();
   const params = useParams();
   const queryClient = useQueryClient();
-  const { isAdministrator, can, canAction } = usePermissions();
+  const {
+    isAdministrator,
+    can,
+    canAction,
+    canAccessContractOrcamentoTab,
+    canAccessContractRelatoriosTab,
+    canAccessContractOrdemServicoTab,
+    canAccessContractProducaoSemanalTab
+  } = usePermissions();
   const idParam = params?.id;
   const contractId =
     typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
-  const canAccessOrcamento = isAdministrator || can(pk('/ponto/orcamento'));
+  const canAccessOrcamento = canAccessContractOrcamentoTab(contractId);
+  const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
+  const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
+  const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
   const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
   const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
   const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
@@ -617,6 +629,7 @@ export default function ContractDetailPage() {
   const [showPleitoValoresModal, setShowPleitoValoresModal] = useState(false);
   const [showPleitoResumoModal, setShowPleitoResumoModal] = useState(false);
   const [showHistoricoPleitosModal, setShowHistoricoPleitosModal] = useState(false);
+  const [showHistoricoOsModal, setShowHistoricoOsModal] = useState(false);
   const [histYearFilter, setHistYearFilter] = useState('all');
   const [histMonthFilter, setHistMonthFilter] = useState('all');
   const [histOsFilter, setHistOsFilter] = useState('');
@@ -675,7 +688,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/contracts/${contractId}/pleitos`);
       return res.data;
     },
-    enabled: !!contractId
+    enabled: !!contractId && canAccessOrdemServicoModulo
   });
 
   const { data: productionsData, isLoading: loadingProductions } = useQuery({
@@ -684,7 +697,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/contracts/${contractId}/weekly-productions`);
       return res.data;
     },
-    enabled: !!contractId
+    enabled: !!contractId && canAccessProducaoSemanalModulo
   });
 
   const { data: annualValuesResponse } = useQuery({
@@ -714,7 +727,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/pleitos/${selectedPleitoId}`);
       return res.data;
     },
-    enabled: !!selectedPleitoId
+    enabled: !!selectedPleitoId && canAccessOrdemServicoModulo
   });
 
   const createBillingMutation = useMutation({
@@ -1490,6 +1503,7 @@ export default function ContractDetailPage() {
           const source = pleitos.find((p) => p.id === id);
           if (!source) return;
           await api.post(`/contracts/${contractId}/pleitos`, {
+            serviceOrderId: (source as { serviceOrderId?: string }).serviceOrderId,
             creationMonth,
             creationYear,
             startDate: source.startDate,
@@ -1608,7 +1622,7 @@ export default function ContractDetailPage() {
     if (filterStatusExecucao) p.set('statusExecucao', filterStatusExecucao);
     if (filterStatusFaturamento) p.set('statusFaturamento', filterStatusFaturamento);
     p.set('selectedIds', ids.join(','));
-    window.open(`/ponto/contratos/${contractId}/andamento?${p.toString()}`, '_blank', 'noopener,noreferrer');
+    router.push(`/ponto/contratos/${contractId}/andamento?${p.toString()}`);
   };
 
   const handleGerarCronogramaMensal = () => {
@@ -1719,6 +1733,10 @@ export default function ContractDetailPage() {
         isPleitoHistorico(p) ||
         ((p.billingRequest != null ? Number(p.billingRequest) : 0) > 0)
       ),
+    [allPleitos]
+  );
+  const historicoOsList = useMemo(
+    () => allPleitos.filter((p) => isPleitoHistorico(p)),
     [allPleitos]
   );
   const historicoYears = useMemo(() => {
@@ -2085,25 +2103,29 @@ export default function ContractDetailPage() {
 
             {/* Barra de ações */}
             <div className="flex flex-wrap items-center gap-3 p-4 sm:p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setShowPleitoModal(true)}
-                disabled={!canCreateContrato}
-                className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-              >
-                <ClipboardList className="w-4 h-4 shrink-0" />
-                Ordem de Serviço
-              </button>
-              <button
-                onClick={() => {
-                  setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
-                  setShowProductionModal(true);
-                }}
-                disabled={!canCreateContrato}
-                className="h-10 px-4 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-              >
-                <BarChart3 className="w-4 h-4 shrink-0" />
-                Produção Semanal
-              </button>
+              {canAccessOrdemServicoModulo ? (
+                <button
+                  onClick={() => setShowPleitoModal(true)}
+                  disabled={!canCreateContrato}
+                  className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+                >
+                  <ClipboardList className="w-4 h-4 shrink-0" />
+                  Ordem de Serviço
+                </button>
+              ) : null}
+              {canAccessProducaoSemanalModulo ? (
+                <button
+                  onClick={() => {
+                    setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
+                    setShowProductionModal(true);
+                  }}
+                  disabled={!canCreateContrato}
+                  className="h-10 px-4 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+                >
+                  <BarChart3 className="w-4 h-4 shrink-0" />
+                  Produção Semanal
+                </button>
+              ) : null}
               {canAccessOrcamento ? (
                 <Link
                   href={`/ponto/contratos/${contractId}/orcamento`}
@@ -2111,6 +2133,15 @@ export default function ContractDetailPage() {
                 >
                   <Calculator className="w-4 h-4 shrink-0" />
                   Orçamento
+                </Link>
+              ) : null}
+              {canAccessRelatorios ? (
+                <Link
+                  href={`/ponto/contratos/${contractId}/relatorios`}
+                  className="h-10 px-4 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
+                >
+                  <FileImage className="w-4 h-4 shrink-0" />
+                  Relatórios
                 </Link>
               ) : null}
             </div>
@@ -2521,6 +2552,8 @@ export default function ContractDetailPage() {
             </CardContent>
           </Card>
 
+          {canAccessOrdemServicoModulo ? (
+          <>
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
           <Card>
             <CardHeader className="border-b border-gray-200 dark:border-gray-700">
@@ -2585,13 +2618,21 @@ export default function ContractDetailPage() {
                         </>
                       )}
                     </div>
-                    {!loadingPleitos && pleitos.length > 0 && (
-                      <button
-                        onClick={() => setShowHistoricoPleitosModal(true)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors shrink-0"
-                      >
-                        Histórico de Pleitos
-                      </button>
+                    {!loadingPleitos && allPleitos.length > 0 && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setShowHistoricoOsModal(true)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
+                        >
+                          Histórico de OS
+                        </button>
+                        <button
+                          onClick={() => setShowHistoricoPleitosModal(true)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors"
+                        >
+                          Histórico de Pleitos
+                        </button>
+                      </div>
                     )}
                   </div>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -2828,7 +2869,11 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
           </Card>
+          </>
+          ) : null}
 
+          {canAccessProducaoSemanalModulo ? (
+          <>
           {/* Produção Semanal */}
           <Card>
             <CardHeader className="border-b border-gray-200 dark:border-gray-700">
@@ -2948,6 +2993,8 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
           </Card>
+          </>
+          ) : null}
 
           {/* Faturamento - Lista de notas */}
           <Card>
@@ -3997,6 +4044,71 @@ export default function ContractDetailPage() {
                         </tbody>
                       </table>
                     </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          {showHistoricoOsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+              <div className="absolute inset-0" onClick={() => setShowHistoricoOsModal(false)} />
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Histórico de OS</h3>
+                  <button onClick={() => setShowHistoricoOsModal(false)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-6">
+                  {historicoOsList.length === 0 ? (
+                    <div className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhuma OS movida para histórico até o momento.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[900px]">
+                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Etiqueta</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Orçamento</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor pleiteado</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Preenchimento</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:border-gray-700">
+                          {historicoOsList.map((p) => {
+                            const etiqueta = getHistoricoEtiqueta(p);
+                            const valorPleito = p.billingRequest ? Number(p.billingRequest) : 0;
+                            return (
+                              <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                  {etiqueta ? (
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5 text-xs font-medium">
+                                      {etiqueta}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={p.serviceDescription}>
+                                  {p.serviceDescription || '-'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">
+                                  {p.budget ? formatCurrency(Number(p.budget)) : '-'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">
+                                  {formatCurrency(valorPleito)}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                  {formatDateTime(p.createdAt || '')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>

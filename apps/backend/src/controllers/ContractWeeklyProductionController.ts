@@ -3,13 +3,13 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { parseDateInput } from '../utils/dateInput';
-import { assertContractAccess } from '../lib/contractAccess';
+import { assertContractModulePermission } from '../lib/contractAccess';
 
 export class ContractWeeklyProductionController {
   async getProductionsByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractAccess(req, contractId);
+      await assertContractModulePermission(req, contractId, 'producaoSemanal');
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
@@ -33,7 +33,7 @@ export class ContractWeeklyProductionController {
   async createProduction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractAccess(req, contractId);
+      await assertContractModulePermission(req, contractId, 'producaoSemanal');
 
       const { divSe, weeklyProductionValue, responsiblePerson, fillingDate } = req.body;
 
@@ -68,7 +68,7 @@ export class ContractWeeklyProductionController {
   async updateProduction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId, id } = req.params;
-      await assertContractAccess(req, contractId);
+      await assertContractModulePermission(req, contractId, 'producaoSemanal');
 
       const { divSe, weeklyProductionValue, responsiblePerson, fillingDate } = req.body;
 
@@ -105,7 +105,7 @@ export class ContractWeeklyProductionController {
   async deleteProduction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId, id } = req.params;
-      await assertContractAccess(req, contractId);
+      await assertContractModulePermission(req, contractId, 'producaoSemanal');
 
       const existing = await prisma.contractWeeklyProduction.findFirst({
         where: { id, contractId }

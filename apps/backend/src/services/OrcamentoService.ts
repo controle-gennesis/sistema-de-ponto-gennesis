@@ -395,6 +395,7 @@ export class OrcamentoService {
 
   /**
    * Resposta da API: serviços/imports do contrato + sessão só deste orçamento.
+   * Árvore `servicos` editada na montagem fica no arquivo do orçamento; `servicos-padrao` é só o catálogo (import).
    */
   async getOrcamento(centroCustoId: string, orcamentoId: string): Promise<OrcamentoData | null> {
     if (!isUuid(orcamentoId)) return null;
@@ -402,20 +403,41 @@ export class OrcamentoService {
     const raw = await this.readOrcamentoFile(centroCustoId, orcamentoId);
     if (!raw) return null;
     const padrao = await this.getServicosPadrao(centroCustoId);
+    const rawObj = raw as unknown as Record<string, unknown>;
+    const docTemServicos = Object.prototype.hasOwnProperty.call(rawObj, 'servicos');
+    const servicos = docTemServicos && Array.isArray(rawObj.servicos) ? rawObj.servicos : padrao.servicos;
     return {
-      servicos: padrao.servicos,
+      servicos,
       imports: padrao.imports,
       composicoes: [],
       sessaoOrcamento: raw.sessaoOrcamento
     };
   }
 
-  async saveOrcamentoSessao(centroCustoId: string, orcamentoId: string, sessaoOrcamento: unknown): Promise<void> {
+  /**
+   * Mescla sessão e/ou árvore de serviços no JSON do orçamento sem apagar o que não veio no patch.
+   */
+  async mergeOrcamentoArquivo(
+    centroCustoId: string,
+    orcamentoId: string,
+    patch: { sessaoOrcamento?: unknown; servicos?: unknown[] }
+  ): Promise<void> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
     const index = await this.getIndex(centroCustoId);
     const exists = index.orcamentos.some(o => o.id === orcamentoId);
     if (!exists) throw new Error('Orçamento não encontrado no índice');
-    const body = JSON.stringify({ sessaoOrcamento });
+
+    const existing: Partial<OrcamentoData> =
+      (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {};
+    const nextSessao =
+      patch.sessaoOrcamento !== undefined ? patch.sessaoOrcamento : existing.sessaoOrcamento;
+    const nextServicos = patch.servicos !== undefined ? patch.servicos : existing.servicos;
+
+    const payload: Record<string, unknown> = {};
+    if (nextSessao !== undefined) payload.sessaoOrcamento = nextSessao;
+    if (nextServicos !== undefined) payload.servicos = nextServicos;
+
+    const body = JSON.stringify(payload);
     if (this.useLocal || !this.s3) {
       const dir = this.localDir(centroCustoId);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -438,20 +460,28 @@ export class OrcamentoService {
     await this.writeIndex(centroCustoId, next);
   }
 
+  async saveOrcamentoSessao(centroCustoId: string, orcamentoId: string, sessaoOrcamento: unknown): Promise<void> {
+    await this.mergeOrcamentoArquivo(centroCustoId, orcamentoId, { sessaoOrcamento });
+  }
+
   /** Grava serviços do contrato + sessão do orçamento (compat com clientes que enviam o payload completo). */
   async saveOrcamento(centroCustoId: string, orcamentoId: string, data: OrcamentoData): Promise<void> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
     const index = await this.getIndex(centroCustoId);
     const exists = index.orcamentos.some(o => o.id === orcamentoId);
     if (!exists) throw new Error('Orçamento não encontrado no índice');
+    await this.mergeOrcamentoArquivo(centroCustoId, orcamentoId, {
+      sessaoOrcamento: data.sessaoOrcamento,
+      servicos: Array.isArray(data.servicos) ? data.servicos : undefined
+    });
     const imports = Array.isArray(data.imports) ? data.imports : [];
-    if (this.hasOrcamentoPerfeitoImport(imports)) {
+    if (imports.length > 0 && this.hasOrcamentoPerfeitoImport(imports)) {
+      const current = await this.getServicosPadrao(centroCustoId);
       await this.saveServicosPadrao(centroCustoId, {
-        servicos: data.servicos || [],
+        servicos: current.servicos,
         imports
       });
     }
-    await this.saveOrcamentoSessao(centroCustoId, orcamentoId, data.sessaoOrcamento);
   }
 
   async createOrcamento(centroCustoId: string, nome?: string): Promise<OrcamentoIndexEntry> {

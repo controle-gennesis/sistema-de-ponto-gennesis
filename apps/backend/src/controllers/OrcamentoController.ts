@@ -4,15 +4,6 @@ import { AuthRequest } from '../middleware/auth';
 
 const orcamentoService = new OrcamentoService();
 
-function hasOrcamentoPerfeitoImport(imports: unknown[]): boolean {
-  if (!Array.isArray(imports) || imports.length === 0) return false;
-  return imports.some((imp) => {
-    if (!imp || typeof imp !== 'object') return false;
-    const origem = (imp as { origem?: unknown }).origem;
-    return origem === 'orcamento-perfeito';
-  });
-}
-
 export class OrcamentoController {
   /** Lê serviços padrão + imports do contrato (sem orçamento aberto). */
   async getServicosPadrao(req: AuthRequest, res: Response, next: NextFunction) {
@@ -104,21 +95,20 @@ export class OrcamentoController {
       if (!raw) {
         return res.status(404).json({ message: 'Orçamento não encontrado' });
       }
-      if (servicos !== undefined || imports !== undefined) {
+      // Histórico de imports no catálogo do contrato (sem sobrescrever a árvore do orçamento perfeito).
+      if (imports !== undefined) {
         const current = await orcamentoService.getServicosPadrao(centroCustoId);
-        const mergedImports = (imports !== undefined ? imports : current.imports) as unknown[];
-        // Catálogo do contrato só deve existir/atualizar quando vier de Orçamento perfeito.
-        if (hasOrcamentoPerfeitoImport(mergedImports)) {
-          await orcamentoService.saveServicosPadrao(centroCustoId, {
-            servicos: servicos !== undefined ? servicos : current.servicos,
-            imports: mergedImports
-          });
-        }
+        await orcamentoService.saveServicosPadrao(centroCustoId, {
+          servicos: current.servicos,
+          imports: imports as unknown[]
+        });
       }
-      if (sessaoOrcamento !== undefined) {
-        await orcamentoService.saveOrcamentoSessao(centroCustoId, orcamentoId, sessaoOrcamento);
-      } else if (servicos !== undefined || imports !== undefined) {
-        await orcamentoService.saveOrcamentoSessao(centroCustoId, orcamentoId, raw.sessaoOrcamento);
+      // Árvore editada na montagem fica no arquivo do orçamento; não gravar em servicos-padrao.json.
+      if (sessaoOrcamento !== undefined || servicos !== undefined) {
+        await orcamentoService.mergeOrcamentoArquivo(centroCustoId, orcamentoId, {
+          ...(sessaoOrcamento !== undefined ? { sessaoOrcamento } : {}),
+          ...(servicos !== undefined ? { servicos: servicos as unknown[] } : {})
+        });
       }
       return res.json({ success: true });
     } catch (err) {

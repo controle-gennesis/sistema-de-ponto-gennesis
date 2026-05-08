@@ -14,6 +14,7 @@ console.log(`   📦 Bucket: ${process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos
 console.log(`   📊 Fluig API: ${process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN ? '✅ Configurado' : '❌ Não configurado'}`);
 console.log('');
 
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -60,7 +61,14 @@ import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';
 import stockRoutes from './routes/stock';
 import espelhoNfRoutes from './routes/espelhoNf';
+import driveRoutes from './routes/drive';
+import relatoriosFotograficosRoutes from './routes/relatorios-fotograficos';
+import orcafascioRoutes from './routes/orcafascio';
+import callHistoryRoutes from './routes/callHistory';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
+import { prisma } from './lib/prisma';
+import { ensureContractAddendaTable } from './lib/ensureContractAddendaSchema';
+import { attachCallSignaling } from './realtime/wsCallSignaling';
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -202,8 +210,8 @@ app.use('/api/auth/me', authLimiter);
 
 // Logging
 app.use(morgan('combined'));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Sempre servir ficheiros gravados em disco (RM, OC/boleto, mensagens, etc.).
 // O uso de S3 para fotos de ponto não impede estes anexos locais.
@@ -257,6 +265,10 @@ app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/permissions', permissionRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/espelho-nf', espelhoNfRoutes);
+app.use('/api/drive', driveRoutes);
+app.use('/api/relatorios-fotograficos', relatoriosFotograficosRoutes);
+app.use('/api/orcafascio', orcafascioRoutes);
+app.use('/api/call-history', callHistoryRoutes);
 
 // Middleware de erro 404
 app.use(notFound);
@@ -267,11 +279,14 @@ app.use(errorHandler);
 // Configurar timezone
 process.env.TZ = 'America/Sao_Paulo';
 
-// Iniciar servidor
+// Iniciar servidor HTTP + WebSocket (sinalização de chamadas WebRTC)
 try {
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = http.createServer(app);
+  attachCallSignaling(server);
+  server.listen(PORT, '0.0.0.0', () => {
     void (async () => {
       try {
+        await ensureContractAddendaTable(prisma);
         const { removed } = await removeOrphanUserPermissions();
         if (removed > 0) {
           console.log(`🧹 Permissões de módulos removidos do registro: ${removed} registro(s) limpo(s).`);

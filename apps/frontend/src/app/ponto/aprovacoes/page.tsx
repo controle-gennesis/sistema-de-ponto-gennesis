@@ -13,6 +13,7 @@ import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Check, Download, FileCheck, FileText, Search, Wrench, X } from 'lucide-react';
+import { Download, Eye, FileCheck, FileText, Search, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import {
   exportEspelhoNfPdf,
@@ -94,6 +95,7 @@ type DpRequest = {
   managerRejectionReason?: string | null;
   createdAt?: string;
   details?: Record<string, unknown> | null;
+  employee?: { costCenter?: string | null } | null;
 };
 
 const STATUS_LABELS: Record<DpRequestStatus, string> = {
@@ -112,6 +114,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
 const DETAIL_KEY_LABELS: Record<string, string> = {
   employeeId: 'Colaborador',
   employeeIds: 'Colaboradores',
+  costCenter: 'Centro de custo',
   punicao: 'Punição',
   motivo: 'Motivo',
   observacao: 'Observação',
@@ -187,11 +190,35 @@ function buildDetailRows(
   if (!details || typeof details !== 'object') return [];
   const rows: { key: string; label: string; value: string }[] = [];
   for (const [k, v] of Object.entries(details)) {
+    if (k === 'anexoAtestado') continue;
     const value = formatDetailEntryValue(k, v, employeeNameById).trim();
     if (!value) continue;
     rows.push({ key: k, label: humanizeDetailKey(k), value });
   }
   return rows.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+}
+
+function extractAtestadoAttachment(
+  details: Record<string, unknown> | null | undefined
+): { fileName: string; mimeType: string; previewUrl: string } | null {
+  if (!details || typeof details !== 'object') return null;
+  const raw = (details as any).anexoAtestado;
+  if (!raw || typeof raw !== 'object') return null;
+  const fileName = String(raw.fileName || 'atestado').trim() || 'atestado';
+  const mimeType = String(raw.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
+  const fileUrl = String(raw.fileUrl || '').trim();
+  if (fileUrl) return { fileName, mimeType, previewUrl: fileUrl };
+  const dataBase64 = String(raw.dataBase64 || '').trim();
+  if (!dataBase64) return null;
+  return { fileName, mimeType, previewUrl: `data:${mimeType};base64,${dataBase64}` };
+}
+
+function getDetailString(details: Record<string, unknown> | null | undefined, key: string): string | null {
+  if (!details || typeof details !== 'object') return null;
+  const v = (details as any)[key];
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s || null;
 }
 
 function formatYmd(iso: string) {
@@ -249,6 +276,30 @@ export default function AprovacoesPage() {
   const [managerComment, setManagerComment] = useState<Record<string, string>>({});
   const [detailRequest, setDetailRequest] = useState<DpRequest | null>(null);
   const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('PENDING_APPROVAL');
+  const [attachmentPreview, setAttachmentPreview] = useState<{
+    fileName: string;
+    mimeType: string;
+    previewUrl: string;
+  } | null>(null);
+
+  const downloadAttachment = async (att: { fileName: string; previewUrl: string }) => {
+    try {
+      const res = await fetch(att.previewUrl, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) throw new Error('download failed');
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = att.fileName || 'atestado';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+      toast.error('Não foi possível baixar o anexo agora.');
+    }
+  };
 
   const { canAccessDpApproverPages } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
@@ -361,6 +412,73 @@ export default function AprovacoesPage() {
     () => (detailRequest ? buildDetailRows(detailRequest.details, employeeNameByIdForDetail) : []),
     [detailRequest, employeeNameByIdForDetail]
   );
+  const detailAttachment = React.useMemo(
+    () => (detailRequest ? extractAtestadoAttachment(detailRequest.details) : null),
+    [detailRequest]
+  );
+
+  const getCostCenterLabel = (r: DpRequest): string | null => {
+    const fromDetails =
+      typeof r.details?.costCenter === 'string' ? r.details.costCenter.trim() : '';
+    if (fromDetails) return fromDetails;
+    const fromEmployee = typeof r.employee?.costCenter === 'string' ? r.employee.costCenter.trim() : '';
+    return fromEmployee || null;
+  };
+
+  const getContratoColunaLabel = (r: DpRequest): string => {
+    if (r.requestType === 'ATESTADO_MEDICO') return getCostCenterLabel(r) || '—';
+    return r.contract?.name ?? '—';
+  };
+
+  const detailInfoRows = React.useMemo(() => {
+    if (!detailRequest) return [] as Array<{ key: string; label: string; value: string }>;
+    const rows: Array<{ key: string; label: string; value: string }> = [];
+    const seen = new Set<string>();
+    const push = (key: string, label: string, value?: string | null) => {
+      const v = String(value ?? '').trim();
+      if (!v || seen.has(key)) return;
+      seen.add(key);
+      rows.push({ key, label, value: v });
+    };
+
+    push('status', 'Status', STATUS_LABELS[detailRequest.status] ?? detailRequest.status);
+    push('urgency', 'Urgência', URGENCY_LABELS[detailRequest.urgency]);
+    push('tipo', 'Tipo', TYPE_LABELS[detailRequest.requestType] ?? detailRequest.requestType);
+    push('criadaEm', 'Criada em', formatDateTime(detailRequest.createdAt));
+    push('prazoInicio', 'Prazo (início)', formatYmd(detailRequest.prazoInicio));
+    push('prazoFim', 'Prazo (fim)', formatYmd(detailRequest.prazoFim));
+    push('centroCusto', 'Centro de custo', getCostCenterLabel(detailRequest));
+    push('empresa', 'Empresa', detailRequest.company ?? null);
+    push('polo', 'Polo', detailRequest.polo ?? null);
+    if (!getCostCenterLabel(detailRequest)) {
+      const contrato = `${detailRequest.contract?.name ?? ''}${
+        detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''
+      }`.trim();
+      push('contrato', 'Contrato', contrato || '—');
+    }
+    push('solicitante', 'Solicitante', detailRequest.solicitanteNome);
+    push('setor', 'Setor', detailRequest.sectorSolicitante || '—');
+    push('login', 'Login', detailRequest.solicitanteEmail || '—');
+
+    // Ordem pedida: data inicial acima de data final.
+    push('dataInicial', 'Data inicial', getDetailString(detailRequest.details, 'dataInicial'));
+    push('dataFinal', 'Data final', getDetailString(detailRequest.details, 'dataFinal'));
+    push('numeroDias', 'Número de dias', getDetailString(detailRequest.details, 'numeroDias'));
+    push(
+      'colaborador',
+      'Colaborador',
+      getDetailString(detailRequest.details, 'employeeId')
+        ? formatDetailEntryValue('employeeId', getDetailString(detailRequest.details, 'employeeId')!, employeeNameByIdForDetail)
+        : null
+    );
+
+    detailModalRows.forEach((row) => {
+      if (['costCenter', 'dataInicial', 'dataFinal', 'numeroDias', 'employeeId'].includes(row.key)) return;
+      push(`details_${row.key}`, row.label, row.value);
+    });
+
+    return rows;
+  }, [detailRequest, detailModalRows, employeeNameByIdForDetail]);
 
   const dpFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -570,7 +688,7 @@ export default function AprovacoesPage() {
                               {TYPE_LABELS[r.requestType] ?? r.requestType}
                             </td>
                             <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 max-w-[220px]">
-                              {r.contract?.name ?? '—'}
+                              {getContratoColunaLabel(r)}
                             </td>
                             <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
                               {formatYmd(r.prazoInicio)}
@@ -771,64 +889,14 @@ export default function AprovacoesPage() {
           >
             {detailRequest && (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Status:</span>{' '}
-                    {STATUS_LABELS[detailRequest.status] ?? detailRequest.status}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Urgência:</span>{' '}
-                    {URGENCY_LABELS[detailRequest.urgency]}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Tipo:</span>{' '}
-                    {TYPE_LABELS[detailRequest.requestType] ?? detailRequest.requestType}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Criada em:</span>{' '}
-                    {formatDateTime(detailRequest.createdAt)}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Prazo (início):</span>{' '}
-                    {formatYmd(detailRequest.prazoInicio)}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Prazo (fim):</span>{' '}
-                    {formatYmd(detailRequest.prazoFim)}
-                  </div>
-                  <div className="sm:col-span-2">
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Contrato:</span>{' '}
-                    {detailRequest.contract?.name ?? '—'}
-                    {detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''}
-                  </div>
-                  {(detailRequest.company || detailRequest.polo) && (
-                    <div className="sm:col-span-2">
-                      <span className="font-semibold text-gray-900 dark:text-gray-100">Empresa / polo:</span>{' '}
-                      {[detailRequest.company, detailRequest.polo].filter(Boolean).join(' · ') || '—'}
-                    </div>
-                  )}
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Solicitante:</span>{' '}
-                    {detailRequest.solicitanteNome}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Setor:</span>{' '}
-                    {detailRequest.sectorSolicitante || '—'}
-                  </div>
-                  <div className="sm:col-span-2">
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">Login:</span>{' '}
-                    {detailRequest.solicitanteEmail || '—'}
-                  </div>
-                </div>
-
-                {detailModalRows.length > 0 ? (
+                {detailInfoRows.length > 0 ? (
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                       Informações
                     </h3>
                     <div className="max-h-[240px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
                       <dl className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                        {detailModalRows.map((row) => (
+                        {detailInfoRows.map((row) => (
                           <div key={row.key} className="grid gap-1 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] sm:gap-4">
                             <dt className="font-medium text-gray-700 dark:text-gray-300">{row.label}</dt>
                             <dd className="whitespace-pre-wrap break-words text-gray-600 dark:text-gray-400">
@@ -837,6 +905,40 @@ export default function AprovacoesPage() {
                           </div>
                         ))}
                       </dl>
+                    </div>
+                  </div>
+                ) : null}
+
+                {detailAttachment ? (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Anexo do atestado</h3>
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                          {detailAttachment.fileName}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{detailAttachment.mimeType}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAttachmentPreview(detailAttachment)}
+                          className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          title="Ver anexo"
+                          aria-label="Ver anexo"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void downloadAttachment(detailAttachment)}
+                          className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          title="Baixar anexo"
+                          aria-label="Baixar anexo"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : null}
@@ -886,6 +988,41 @@ export default function AprovacoesPage() {
               </div>
             )}
           </Modal>
+
+          {attachmentPreview && (
+            <div
+              className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/85 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Visualizar anexo do atestado"
+              onClick={() => setAttachmentPreview(null)}
+            >
+              <button
+                type="button"
+                onClick={() => setAttachmentPreview(null)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors z-10"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="max-w-[92vw] max-h-[88vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                {attachmentPreview.mimeType.toLowerCase().includes('pdf') ? (
+                  <iframe
+                    title={attachmentPreview.fileName}
+                    src={attachmentPreview.previewUrl}
+                    className="w-[min(92vw,980px)] h-[85vh] rounded-xl bg-white"
+                  />
+                ) : (
+                  <img
+                    src={attachmentPreview.previewUrl}
+                    alt={attachmentPreview.fileName}
+                    className="max-w-full max-h-[85vh] object-contain rounded-xl"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </MainLayout>
     </ProtectedRoute>

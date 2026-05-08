@@ -279,9 +279,7 @@ export function ChatWidget() {
         formData.append('attachments', file);
       });
 
-      const res = await api.post('/chats', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      const res = await api.post('/chats', formData);
 
       // Invalidar e refetch imediatamente
       await queryClient.invalidateQueries({ queryKey: ['chats-active'] });
@@ -347,9 +345,7 @@ export function ChatWidget() {
         formData.append('attachments', file);
       });
 
-      await api.post('/chats/messages', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      await api.post('/chats/messages', formData);
 
       setNewMessage('');
       setSelectedFiles([]);
@@ -569,12 +565,7 @@ export function ChatWidget() {
         >
           <MessageCircle className="w-6 h-6 transition-transform" />
           {totalNotifications > 0 && (
-            <span
-              className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-bounce shadow-lg"
-              style={{
-                animation: 'bounce 1s infinite',
-              }}
-            >
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg animate-chat-unread-badge">
               {totalNotifications > 9 ? '9+' : totalNotifications}
             </span>
           )}

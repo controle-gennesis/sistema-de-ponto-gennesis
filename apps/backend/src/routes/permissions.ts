@@ -69,6 +69,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           permissions: [],
           allowedContractIds: [],
           dpApprovalContractIds: [],
+          contractModuleFlags: {},
         },
       });
     }
@@ -83,13 +84,37 @@ router.get('/me', async (req: AuthRequest, res, next) => {
 
     const allowedContractIds = await prisma.userContractPermission.findMany({
       where: { userId: req.user.id },
-      select: { contractId: true },
+      select: {
+        contractId: true,
+        accessOrcamento: true,
+        accessRelatorios: true,
+        accessOrdemServico: true,
+        accessProducaoSemanal: true,
+      },
     });
 
     const dpApprovalContractIds = await prisma.userDpApprovalContract.findMany({
       where: { userId: req.user.id },
       select: { contractId: true },
     });
+
+    const contractModuleFlags: Record<
+      string,
+      {
+        orcamento: boolean;
+        relatorios: boolean;
+        ordemServico: boolean;
+        producaoSemanal: boolean;
+      }
+    > = {};
+    for (const r of allowedContractIds) {
+      contractModuleFlags[r.contractId] = {
+        orcamento: r.accessOrcamento,
+        relatorios: r.accessRelatorios,
+        ordemServico: r.accessOrdemServico,
+        producaoSemanal: r.accessProducaoSemanal,
+      };
+    }
 
     return res.json({
       success: true,
@@ -98,6 +123,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         permissions,
         allowedContractIds: allowedContractIds.map((r) => r.contractId),
         dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
+        contractModuleFlags,
       },
     });
   } catch (error) {
@@ -236,11 +262,17 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           select: { module: true, action: true },
         });
 
-    const allowedContractIds = isAdmin
+    const contractPermRows = isAdmin
       ? []
       : await prisma.userContractPermission.findMany({
           where: { userId },
-          select: { contractId: true },
+          select: {
+            contractId: true,
+            accessOrcamento: true,
+            accessRelatorios: true,
+            accessOrdemServico: true,
+            accessProducaoSemanal: true,
+          },
         });
 
     const dpApprovalContractIds = isAdmin
@@ -250,14 +282,27 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           select: { contractId: true },
         });
 
+    const contractModuleFlags: Record<string, {
+      orcamento: boolean; relatorios: boolean; ordemServico: boolean; producaoSemanal: boolean;
+    }> = {};
+    for (const r of contractPermRows) {
+      contractModuleFlags[r.contractId] = {
+        orcamento: r.accessOrcamento,
+        relatorios: r.accessRelatorios,
+        ordemServico: r.accessOrdemServico,
+        producaoSemanal: r.accessProducaoSemanal,
+      };
+    }
+
     return res.json({
       success: true,
       data: {
         user: targetUser,
         isAdmin,
         permissions,
-        allowedContractIds: allowedContractIds.map((r) => r.contractId),
+        allowedContractIds: contractPermRows.map((r) => r.contractId),
         dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
+        contractModuleFlags,
       },
     });
   } catch (error) {
@@ -273,6 +318,11 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     const shouldSyncContracts = Array.isArray(rawContractIds);
     const rawDpApproval = req.body?.dpApprovalContractIds;
     const shouldSyncDpApproval = Array.isArray(rawDpApproval);
+    type ContractFlags = { orcamento?: boolean; relatorios?: boolean; ordemServico?: boolean; producaoSemanal?: boolean };
+    const rawModuleFlags: Record<string, ContractFlags> =
+      req.body?.contractModuleFlags && typeof req.body.contractModuleFlags === 'object'
+        ? (req.body.contractModuleFlags as Record<string, ContractFlags>)
+        : {};
 
     const targetUser = await prisma.user.findUnique({
       where: { id: userId },
@@ -373,11 +423,18 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         await tx.userContractPermission.deleteMany({ where: { userId } });
         if (contractIdsToSave.length > 0) {
           await tx.userContractPermission.createMany({
-            data: contractIdsToSave.map((contractId) => ({
-              userId,
-              contractId,
-              updatedBy: req.user!.id,
-            })),
+            data: contractIdsToSave.map((contractId) => {
+              const flags = rawModuleFlags[contractId] ?? {};
+              return {
+                userId,
+                contractId,
+                updatedBy: req.user!.id,
+                accessOrcamento: flags.orcamento !== false,
+                accessRelatorios: flags.relatorios !== false,
+                accessOrdemServico: flags.ordemServico !== false,
+                accessProducaoSemanal: flags.producaoSemanal !== false,
+              };
+            }),
           });
         }
       }
@@ -488,6 +545,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           permissions: [],
           allowedContractIds: [],
           dpApprovalContractIds: [],
+          contractModuleFlags: {},
         },
       });
     }
@@ -502,6 +560,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           permissions: [],
           allowedContractIds: [],
           dpApprovalContractIds: [],
+          contractModuleFlags: {},
         },
       });
     }
@@ -515,6 +574,11 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
     const dpApprovalContractIds = Array.isArray(idsRawDp)
       ? idsRawDp.filter((x): x is string => typeof x === 'string')
       : [];
+    const rawFlags = (row as { contractModuleFlags?: unknown }).contractModuleFlags;
+    const contractModuleFlags =
+      rawFlags && typeof rawFlags === 'object' && !Array.isArray(rawFlags)
+        ? (rawFlags as Record<string, unknown>)
+        : {};
     return res.json({
       success: true,
       data: {
@@ -522,6 +586,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
         permissions,
         allowedContractIds,
         dpApprovalContractIds,
+        contractModuleFlags,
       },
     });
   } catch (e) {
@@ -550,6 +615,11 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     const shouldSyncContracts = Array.isArray(rawContractIds);
     const rawDpApproval = req.body?.dpApprovalContractIds;
     const shouldSyncDpApproval = Array.isArray(rawDpApproval);
+    type PosContractFlags = { orcamento?: boolean; relatorios?: boolean; ordemServico?: boolean; producaoSemanal?: boolean };
+    const rawModuleFlagsPos: Record<string, PosContractFlags> =
+      req.body?.contractModuleFlags && typeof req.body.contractModuleFlags === 'object'
+        ? (req.body.contractModuleFlags as Record<string, PosContractFlags>)
+        : {};
 
     const rawPayload = filterValidPermissionPayload(
       receivedPermissions
@@ -611,9 +681,22 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
       dpApprovalIdsToSave = dpApprovalIdsToSave.filter((id) => allowedTemplateContracts.has(id));
     }
 
+    // Monta flags de módulo por contrato para salvar no JSON
+    const builtModuleFlags: Record<string, { orcamento: boolean; relatorios: boolean; ordemServico: boolean; producaoSemanal: boolean }> = {};
+    for (const contractId of contractIdsToSave) {
+      const f = rawModuleFlagsPos[contractId] ?? {};
+      builtModuleFlags[contractId] = {
+        orcamento: f.orcamento !== false,
+        relatorios: f.relatorios !== false,
+        ordemServico: f.ordemServico !== false,
+        producaoSemanal: f.producaoSemanal !== false,
+      };
+    }
+
     const permissionsJson = normalized as unknown as Prisma.InputJsonValue;
     const contractIdsJson = (shouldSyncContracts ? contractIdsToSave : []) as unknown as Prisma.InputJsonValue;
     const dpApprovalJson = (shouldSyncDpApproval ? dpApprovalIdsToSave : []) as unknown as Prisma.InputJsonValue;
+    const moduleFlagsJson = builtModuleFlags as unknown as Prisma.InputJsonValue;
 
     await positionTemplates.upsert({
       where: { position },
@@ -622,11 +705,13 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
         permissions: permissionsJson,
         allowedContractIds: contractIdsJson,
         dpApprovalContractIds: dpApprovalJson,
+        contractModuleFlags: moduleFlagsJson,
       },
       update: {
         permissions: permissionsJson,
         allowedContractIds: contractIdsJson,
         ...(shouldSyncDpApproval ? { dpApprovalContractIds: dpApprovalJson } : {}),
+        ...(shouldSyncContracts ? { contractModuleFlags: moduleFlagsJson } : {}),
       },
     });
 
