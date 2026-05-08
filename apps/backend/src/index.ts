@@ -63,6 +63,7 @@ import stockRoutes from './routes/stock';
 import driveRoutes from './routes/drive';
 import relatoriosFotograficosRoutes from './routes/relatorios-fotograficos';
 import orcafascioRoutes from './routes/orcafascio';
+import callHistoryRoutes from './routes/callHistory';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 import { prisma } from './lib/prisma';
 import { ensureContractAddendaTable } from './lib/ensureContractAddendaSchema';
@@ -265,6 +266,7 @@ app.use('/api/stock', stockRoutes);
 app.use('/api/drive', driveRoutes);
 app.use('/api/relatorios-fotograficos', relatoriosFotograficosRoutes);
 app.use('/api/orcafascio', orcafascioRoutes);
+app.use('/api/call-history', callHistoryRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

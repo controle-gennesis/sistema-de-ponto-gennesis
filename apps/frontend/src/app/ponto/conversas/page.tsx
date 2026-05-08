@@ -43,8 +43,6 @@ import {
   CornerUpLeft,
   Video,
   Phone,
-  PhoneOff,
-  Minimize2,
   Square,
   Play,
   Pause,
@@ -279,18 +277,7 @@ function formatMessageTime(iso: string) {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
-/**
- * Abre sala de vídeo/voz (Jitsi Meet) compartilhada por conversa.
- * Mesmo `chatId` = mesma sala (direto ou grupo). Opcional: NEXT_PUBLIC_JITSI_SERVER (ex.: https://meet.jit.si).
- */
-function buildVideoCallRoomUrl(chatId: string, mode: 'video' | 'audio') {
-  const host = (process.env.NEXT_PUBLIC_JITSI_SERVER || 'https://meet.jit.si').replace(/\/$/, '');
-  const prefix = process.env.NEXT_PUBLIC_JITSI_ROOM_PREFIX || 'GennesisPonto';
-  const room = `${prefix}-${chatId}`.replace(/[^a-zA-Z0-9\-_]/g, '');
-  const base = `${host}/${encodeURIComponent(room)}`;
-  const hash = mode === 'audio' ? '#config.startWithVideoMuted=true' : '';
-  return `${base}${hash}`;
-}
+
 
 function formatChatDate(iso: string | null) {
   if (!iso) return '';
@@ -906,9 +893,6 @@ function ConversasContent() {
   const [groupAvatarMenu, setGroupAvatarMenu] = useState(false);
   const [showGroupAvatarViewer, setShowGroupAvatarViewer] = useState(false);
   const [messageImageViewer, setMessageImageViewer] = useState<{ src: string; name: string } | null>(null);
-  const [groupCallRoomUrl, setGroupCallRoomUrl] = useState<string | null>(null);
-  const [groupCallMinimized, setGroupCallMinimized] = useState(false);
-  const [groupCallMode, setGroupCallMode] = useState<'video' | 'audio'>('video');
   const groupAvatarMenuRef = useRef<HTMLDivElement>(null);
 
   const closeEditModal = useCallback(() => {
@@ -1010,6 +994,27 @@ function ConversasContent() {
       setAddMemberPickSelection([]);
     }
   }, [activeChat?.id, activeChat?.chatType]);
+
+  const inviteGroupConference = useCallback(
+    (mode: 'video' | 'audio') => {
+      if (!currentUser?.id || !activeChat || activeChat.chatType !== 'GROUP') return;
+      const ids = activeChat.participants?.filter((p) => p.userId !== currentUser.id).map((p) => p.userId) ?? [];
+      if (ids.length === 0) {
+        toast.error('Sem outros participantes no grupo.');
+        return;
+      }
+      void nativeCall.startGroupOutgoing(activeChat.id, mode === 'video', ids);
+    },
+    [activeChat, currentUser?.id, nativeCall]
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inviteToken = params.get('callInvite');
+    if (!inviteToken) return;
+    const video = params.get('callType') !== 'audio';
+    void nativeCall.joinGroupFromInvite(inviteToken, video);
+  }, [nativeCall]);
 
   useEffect(() => {
     if (!showGroupDetails) {
@@ -2259,16 +2264,14 @@ function ConversasContent() {
                             type="button"
                             title={
                               activeChat?.chatType === 'GROUP'
-                                ? 'Videochamada em grupo'
+                                ? 'Videochamada com todo o grupo'
                                 : 'Videochamada no sistema'
                             }
                             aria-label="Iniciar videochamada"
                             onClick={() => {
                               if (!activeChat?.id) return;
                               if (activeChat.chatType === 'GROUP') {
-                                setGroupCallMode('video');
-                                setGroupCallRoomUrl(buildVideoCallRoomUrl(activeChat.id, 'video'));
-                                setGroupCallMinimized(false);
+                                inviteGroupConference('video');
                                 return;
                               }
                               if (!other) {
@@ -2285,16 +2288,14 @@ function ConversasContent() {
                             type="button"
                             title={
                               activeChat?.chatType === 'GROUP'
-                                ? 'Ligação em grupo'
+                                ? 'Ligação de voz com todo o grupo'
                                 : 'Ligação de voz no sistema'
                             }
                             aria-label="Iniciar ligação de voz"
                             onClick={() => {
                               if (!activeChat?.id) return;
                               if (activeChat.chatType === 'GROUP') {
-                                setGroupCallMode('audio');
-                                setGroupCallRoomUrl(buildVideoCallRoomUrl(activeChat.id, 'audio'));
-                                setGroupCallMinimized(false);
+                                inviteGroupConference('audio');
                                 return;
                               }
                               if (!other) {
@@ -4792,75 +4793,6 @@ function ConversasContent() {
         </div>
       </div>,
       document.body
-    )}
-
-    {groupCallRoomUrl && !groupCallMinimized && typeof document !== 'undefined' && createPortal(
-      <div className="fixed inset-0 z-[9800] bg-black/75">
-        <div className="absolute inset-0 flex flex-col">
-          <div className="flex items-center justify-between border-b border-white/10 bg-gray-900/90 px-4 py-3 text-white">
-            <div>
-              <p className="text-sm font-semibold">Chamada em grupo</p>
-              <p className="text-xs text-white/65">{groupCallMode === 'video' ? 'Vídeo' : 'Áudio'} - sala integrada</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setGroupCallMinimized(true)}
-                className="rounded-md bg-white/10 p-2 hover:bg-white/20"
-                aria-label="Minimizar chamada em grupo"
-              >
-                <Minimize2 size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setGroupCallRoomUrl(null);
-                  setGroupCallMinimized(false);
-                }}
-                className="rounded-md bg-red-600 p-2 hover:bg-red-700"
-                aria-label="Encerrar chamada em grupo"
-              >
-                <PhoneOff size={16} />
-              </button>
-            </div>
-          </div>
-          <iframe
-            title="Chamada em grupo"
-            src={groupCallRoomUrl}
-            className="h-full w-full border-0"
-            allow="camera; microphone; fullscreen; display-capture"
-          />
-        </div>
-      </div>,
-      document.body
-    )}
-
-    {groupCallRoomUrl && groupCallMinimized && (
-      <div className="fixed bottom-4 right-4 z-[9810] w-[min(90vw,320px)] rounded-2xl border border-white/20 bg-gray-900/95 p-3 text-white shadow-2xl">
-        <div className="mb-3">
-          <p className="text-sm font-semibold">Chamada em grupo em andamento</p>
-          <p className="text-xs text-white/65">{groupCallMode === 'video' ? 'Vídeo' : 'Áudio'}</p>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setGroupCallMinimized(false)}
-            className="rounded-md bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/20"
-          >
-            Abrir
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setGroupCallRoomUrl(null);
-              setGroupCallMinimized(false);
-            }}
-            className="rounded-md bg-red-600 px-3 py-2 text-xs font-semibold hover:bg-red-700"
-          >
-            Encerrar
-          </button>
-        </div>
-      </div>
     )}
 
     {groupPhotoCrop && (
