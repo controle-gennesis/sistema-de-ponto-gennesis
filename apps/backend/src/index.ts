@@ -59,6 +59,7 @@ import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';
 import stockRoutes from './routes/stock';
+import espelhoNfRoutes from './routes/espelhoNf';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 
 console.log('🚀 Iniciando aplicação...');
@@ -255,6 +256,7 @@ app.use('/api/fluig', fluigRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/permissions', permissionRoutes);
 app.use('/api/stock', stockRoutes);
+app.use('/api/espelho-nf', espelhoNfRoutes);
 
 // Middleware de erro 404
 app.use(notFound);
