@@ -12,8 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { Check, Download, FileCheck, FileText, Search, Wrench, X } from 'lucide-react';
-import { Download, Eye, FileCheck, FileText, Search, X } from 'lucide-react';
+import { Check, Download, Eye, FileCheck, FileText, Wrench, Search, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import {
   exportEspelhoNfPdf,
