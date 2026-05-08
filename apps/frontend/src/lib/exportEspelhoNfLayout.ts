@@ -4,11 +4,23 @@ import jsPDF from 'jspdf';
 
 /** Campos mínimos do espelho (espelho-nf/page.tsx) */
 export type EspelhoMirrorDraft = {
-  contract: string;
   measurementRef: string;
-  costCenter: string;
+  costCenterId: string;
+  /** Texto para PDF/Excel; preencha ao exportar a partir do cadastro de centros de custo */
+  costCenterLabel?: string;
   dueDate: string;
+  empenhoNumber: string;
+  processNumber: string;
+  serviceOrder: string;
+  measurementStartDate?: string;
+  measurementEndDate?: string;
+  buildingUnit: string;
+  observations: string;
   notes: string;
+  /** Valores em pt-BR (ex.: 50.000,00) */
+  measurementAmount: string;
+  laborAmount: string;
+  materialAmount: string;
   providerId: string;
   providerName: string;
   takerId: string;
@@ -17,6 +29,11 @@ export type EspelhoMirrorDraft = {
   bankAccountName: string;
   taxCodeId: string;
   taxCodeCityName: string;
+  /** Município do tomador (exibido nas outras informações) */
+  municipality?: string;
+  /** CNAE e lista de serviço escolhidos no espelho */
+  cnae?: string;
+  serviceIssqn?: string;
 };
 
 export type EspelhoExportProvider = {
@@ -55,6 +72,31 @@ export type EspelhoExportBank = {
 };
 
 export type EspelhoTaxRule = { collectionType: 'RETIDO' | 'RECOLHIDO' };
+
+/** Texto fixo + dinâmico do bloco "Outras informações" (corpo da NF). */
+export function buildEspelhoOutrasInformacoesBlock(
+  notesComplement: string,
+  municipality: string | undefined,
+  municipalityUf: string | undefined,
+  issRule: EspelhoTaxRule | undefined | null
+): string {
+  const issAnswer =
+    issRule?.collectionType === 'RETIDO'
+      ? 'Sim'
+      : issRule?.collectionType === 'RECOLHIDO'
+        ? 'Não'
+        : '—';
+  const mun = (municipality ?? '').trim();
+  const uf = (municipalityUf ?? '').trim().toUpperCase();
+  const munWithUf = mun ? (uf ? `${mun} (${uf})` : mun) : '—';
+  const lines = [
+    '- Retenção do INSS no Percentual de 11%. Dedução da BC do INSS conforme art. 117, inciso IV da IN RFB No 2110/2022.',
+    `O ISS desta NF-e será RETIDO pelo TOMADOR DE SERVIÇO? — ${issAnswer}`,
+    `O ISS desta NF-e é devido no Município de ${munWithUf}.`
+  ];
+  const extra = (notesComplement ?? '').trim();
+  return extra ? `${lines.join('\n')}\n\n${extra}` : lines.join('\n');
+}
 
 export type EspelhoExportTaxCode = {
   id: string;
@@ -99,6 +141,176 @@ function fmtPct(v: string | undefined | null): string {
   return t ? `${t}%` : '—';
 }
 
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Converte texto de moeda pt-BR (ex.: 50.000,00 ou 50000) em número. */
+export function parseEspelhoBrCurrencyToNumber(raw: string): number | null {
+  const s = String(raw ?? '')
+    .trim()
+    .replace(/R\$\s*/gi, '')
+    /* NBSP e espaços estreitos (ex.: saída do Intl); reforço além de \s. */
+    .replace(/[\s\u00A0\u202F\u2007\u2009]/g, '');
+  if (!s) return null;
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  let normalized: string;
+  if (lastComma > lastDot) {
+    normalized = s.replace(/\./g, '').replace(',', '.');
+  } else if (lastDot > lastComma) {
+    normalized = s.replace(/,/g, '');
+  } else {
+    normalized = s.replace(',', '.');
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Percentual do cadastro tributário (ex.: 50 ou 50,5 ou 12.345,67 ao colar). */
+export function parseEspelhoPercentToNumber(s: string | undefined | null): number | null {
+  const raw = String(s ?? '')
+    .trim()
+    .replace(/%/g, '')
+    .replace(/[\s\u00A0\u202F\u2007\u2009]/g, '');
+  if (raw === '') return null;
+  const lastComma = raw.lastIndexOf(',');
+  const lastDot = raw.lastIndexOf('.');
+  let normalized: string;
+  if (lastComma > lastDot) {
+    normalized = raw.replace(/\./g, '').replace(',', '.');
+  } else if (lastDot > lastComma) {
+    normalized = raw.replace(/,/g, '');
+  } else {
+    normalized = raw.replace(',', '.');
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function fmtEspelhoBrl(n: number): string {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
+}
+
+export function formatEspelhoMirrorCurrencyField(raw: string | undefined | null): string {
+  const n = parseEspelhoBrCurrencyToNumber(raw ?? '');
+  if (n === null) return '—';
+  return fmtEspelhoBrl(n);
+}
+
+/** Limites de material = valor da medição × % do código tributário. */
+export function computeEspelhoMaterialLimits(
+  measurementAmountStr: string,
+  inssPctStr: string | undefined | null,
+  issPctStr: string | undefined | null
+): { inssBrl: string; issBrl: string } {
+  const base = parseEspelhoBrCurrencyToNumber(measurementAmountStr);
+  const pInss = parseEspelhoPercentToNumber(inssPctStr);
+  const pIss = parseEspelhoPercentToNumber(issPctStr);
+  if (base === null) {
+    return { inssBrl: '—', issBrl: '—' };
+  }
+  const inssVal = pInss !== null ? round2(base * (pInss / 100)) : null;
+  const issVal = pIss !== null ? round2(base * (pIss / 100)) : null;
+  return {
+    inssBrl: inssVal !== null ? fmtEspelhoBrl(inssVal) : '—',
+    issBrl: issVal !== null ? fmtEspelhoBrl(issVal) : '—'
+  };
+}
+
+/**
+ * Base de cálculo INSS/ISS: se material > limite do tributo → medição − limite; senão → medição − material.
+ */
+export function computeEspelhoBasesCalculoInssIss(
+  measurementAmountStr: string,
+  materialAmountStr: string,
+  inssPctStr: string | undefined | null,
+  issPctStr: string | undefined | null
+): { baseInss: string; baseIss: string } {
+  const med = parseEspelhoBrCurrencyToNumber(measurementAmountStr);
+  const mat = parseEspelhoBrCurrencyToNumber(materialAmountStr);
+  if (med === null || mat === null) {
+    return { baseInss: '—', baseIss: '—' };
+  }
+  const pInss = parseEspelhoPercentToNumber(inssPctStr);
+  const pIss = parseEspelhoPercentToNumber(issPctStr);
+  const limInss = pInss !== null ? round2(med * (pInss / 100)) : null;
+  const limIss = pIss !== null ? round2(med * (pIss / 100)) : null;
+
+  const oneBase = (lim: number | null): string => {
+    if (lim === null) return '—';
+    const raw = mat > lim ? med - lim : med - mat;
+    return fmtEspelhoBrl(Math.max(0, round2(raw)));
+  };
+
+  return {
+    baseInss: oneBase(limInss),
+    baseIss: oneBase(limIss)
+  };
+}
+
+type EspelhoTaxLineComputed = { value: string; recolher: string | null };
+
+function buildEspelhoTaxLineForExport(
+  base: number | null,
+  aliquotaRaw: string | undefined | null,
+  collectionType: 'RETIDO' | 'RECOLHIDO' | undefined
+): EspelhoTaxLineComputed {
+  const aliquota = parseEspelhoPercentToNumber(aliquotaRaw);
+  if (base === null || aliquota === null) {
+    return { value: '—', recolher: null };
+  }
+  const calculado = fmtEspelhoBrl(round2((base * aliquota) / 100));
+  if (collectionType === 'RECOLHIDO') {
+    return { value: fmtEspelhoBrl(0), recolher: `Recolher ${calculado}` };
+  }
+  return { value: calculado, recolher: null };
+}
+
+function computeEspelhoImpostosBundle(b: EspelhoExportBundle): {
+  cofins: EspelhoTaxLineComputed;
+  csll: EspelhoTaxLineComputed;
+  irpj: EspelhoTaxLineComputed;
+  pis: EspelhoTaxLineComputed;
+  inss: EspelhoTaxLineComputed;
+  iss: EspelhoTaxLineComputed;
+} {
+  const { draft, taxCode, federal } = b;
+  const med = parseEspelhoBrCurrencyToNumber(draft.measurementAmount);
+  const bases = computeEspelhoBasesCalculoInssIss(
+    draft.measurementAmount,
+    draft.materialAmount,
+    taxCode?.inssMaterialLimit,
+    taxCode?.issMaterialLimit
+  );
+  const baseInss = parseEspelhoBrCurrencyToNumber(bases.baseInss);
+  const baseIss = parseEspelhoBrCurrencyToNumber(bases.baseIss);
+
+  return {
+    cofins: buildEspelhoTaxLineForExport(med, federal.cofins, taxCode?.cofins?.collectionType),
+    csll: buildEspelhoTaxLineForExport(med, federal.csll, taxCode?.csll?.collectionType),
+    irpj: buildEspelhoTaxLineForExport(med, federal.irpj, taxCode?.irpj?.collectionType),
+    pis: buildEspelhoTaxLineForExport(med, federal.pis, taxCode?.pis?.collectionType),
+    inss: buildEspelhoTaxLineForExport(baseInss, federal.inss, taxCode?.inss?.collectionType),
+    iss: buildEspelhoTaxLineForExport(baseIss, taxCode?.issRate, taxCode?.iss?.collectionType)
+  };
+}
+
+function computeEspelhoValorLiquidoBundle(b: EspelhoExportBundle): string {
+  const med = parseEspelhoBrCurrencyToNumber(b.draft.measurementAmount);
+  if (med === null) return '—';
+  const imp = computeEspelhoImpostosBundle(b);
+  const retidos = [
+    imp.cofins.value,
+    imp.csll.value,
+    imp.irpj.value,
+    imp.pis.value,
+    imp.inss.value,
+    imp.iss.value
+  ].reduce((acc, raw) => acc + (parseEspelhoBrCurrencyToNumber(raw) ?? 0), 0);
+  return fmtEspelhoBrl(round2(med - retidos));
+}
+
 function fmtDateBr(iso: string): string {
   if (!iso?.trim()) return '—';
   const d = new Date(iso + (iso.length === 10 ? 'T12:00:00' : ''));
@@ -122,11 +334,11 @@ function mergeRow(r: number): XLSX.Range {
 
 function serviceCodeLine(tax: EspelhoExportTaxCode | null): string {
   if (!tax?.cityName) return '—';
-  return `Serviço / município: ${tax.cityName} (alíquota ISS ${fmtPct(tax.issRate)})`;
+  return `Serviço / contrato: ${tax.cityName} (alíquota ISS ${fmtPct(tax.issRate)})`;
 }
 
 function issRetidoLine(tax: EspelhoExportTaxCode | null): string {
-  const ret = tax?.iss.collectionType === 'RETIDO';
+  const ret = tax?.iss?.collectionType === 'RETIDO';
   return `SIM ( ${ret ? 'X' : ' '} )    NÃO ( ${ret ? ' ' : 'X'} )`;
 }
 
@@ -151,6 +363,12 @@ function resolveBundle(
 /** Monta planilha no padrão “espelho para emissão de NF” (estrutura por seções e mesclagens). */
 function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merges: XLSX.Range[] } {
   const { draft, provider, taker, bank, taxCode } = b;
+  const outrasInformacoesCorpo = buildEspelhoOutrasInformacoesBlock(
+    draft.notes,
+    draft.municipality,
+    taker?.state,
+    taxCode?.iss ?? null
+  );
   const aoa: string[][] = [];
   const merges: XLSX.Range[] = [];
   let r = 0;
@@ -251,7 +469,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
       'UF',
       dash(taker?.state),
       'Contrato',
-      dash(draft.contract || taker?.contractRef),
+      dash(taker?.contractRef),
       '',
       '',
       '',
@@ -265,22 +483,53 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   r++;
 
   pushMergeTitle('DISCRIMINAÇÃO DOS SERVIÇOS');
-  const disc = dash(taker?.serviceDescription || draft.notes);
+  const disc =
+    (taker?.serviceDescription ?? '').trim() || (draft.notes ?? '').trim() || '—';
   aoa.push(row(disc));
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
   r++;
-  const refLine = `REFERÊNCIA: ${dash(draft.measurementRef)} | CC: ${dash(draft.costCenter)}`;
+  const refLine = `REFERÊNCIA: ${dash(draft.measurementRef)} | CC: ${dash(draft.costCenterLabel)}`;
   aoa.push(row(refLine));
+  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
+  r++;
+  const extraInfoLine1 = `Nº Empenho: ${dash(draft.empenhoNumber)} | Nº Processo: ${dash(draft.processNumber)}`;
+  aoa.push(row(extraInfoLine1));
+  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
+  r++;
+  const extraInfoLine2 = `Ordem de Serviço: ${dash(draft.serviceOrder)} | Unidade Predial: ${dash(draft.buildingUnit)}`;
+  aoa.push(row(extraInfoLine2));
+  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
+  r++;
+  const obsLine = `Observações: ${dash(draft.observations)}`;
+  aoa.push(row(obsLine));
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
   r++;
   aoa.push(row());
   r++;
 
+  const medVal = formatEspelhoMirrorCurrencyField(draft.measurementAmount);
+  const laborVal = formatEspelhoMirrorCurrencyField(draft.laborAmount);
+  const matVal = formatEspelhoMirrorCurrencyField(draft.materialAmount);
+  const matLimits = computeEspelhoMaterialLimits(
+    draft.measurementAmount,
+    taxCode?.inssMaterialLimit,
+    taxCode?.issMaterialLimit
+  );
+  const basesInssIss = computeEspelhoBasesCalculoInssIss(
+    draft.measurementAmount,
+    draft.materialAmount,
+    taxCode?.inssMaterialLimit,
+    taxCode?.issMaterialLimit
+  );
+  const impostosExport = computeEspelhoImpostosBundle(b);
+  const valorLiquidoExport = computeEspelhoValorLiquidoBundle(b);
+  const issRetidoExport = taxCode?.iss?.collectionType === 'RETIDO' ? impostosExport.iss.value : '—';
+
   pushMergeTitle('VALORES / INFORMAÇÕES FINANCEIRAS E BANCÁRIAS');
   aoa.push(
     row(
       'Medição (valor total)',
-      '—',
+      medVal,
       '',
       '',
       'OBSERVAÇÕES (corpo da NF)',
@@ -298,10 +547,10 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   aoa.push(
     row(
       'Mão-de-obra',
-      '—',
+      laborVal,
       'Material aplicado',
-      '—',
-      dash(draft.notes),
+      matVal,
+      dash(outrasInformacoesCorpo),
       '',
       '',
       '',
@@ -315,18 +564,37 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   r++;
   aoa.push(row('Vale-transporte', '—', 'Vale-alimentação', '—'));
   r++;
-  aoa.push(row('Limite material (INSS/ISS conforme cadastro)', `INSS ${fmtPct(taxCode?.inssMaterialLimit)} | ISS ${fmtPct(taxCode?.issMaterialLimit)}`));
-  merges.push({ s: { r, c: 1 }, e: { r, c: 3 } });
+  aoa.push(row('Limite Material INSS', matLimits.inssBrl, 'Limite Material ISS', matLimits.issBrl));
   r++;
-  aoa.push(row('Base de cálculo INSS', '—', 'ISS retido (R$)', '—'));
+  aoa.push(row('Base de cálculo INSS', basesInssIss.baseInss, 'Base de cálculo ISS', basesInssIss.baseIss));
+  r++;
+  aoa.push(
+    row(
+      'Referência código tributário',
+      `INSS mat.: ${fmtPct(taxCode?.inssMaterialLimit)} | ISS mat.: ${fmtPct(taxCode?.issMaterialLimit)}`,
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      ''
+    )
+  );
+  merges.push({ s: { r, c: 1 }, e: { r, c: COLS - 1 } });
+  r++;
+  aoa.push(row('ISS retido (R$)', issRetidoExport, '', '', '', '', '', '', '', '', '', ''));
   r++;
   aoa.push(
     row(
       'Centro de custo',
-      dash(draft.costCenter),
+      dash(draft.costCenterLabel),
       'Vencimento',
       fmtDateBr(draft.dueDate),
-      'ENVIAR NF EM ARQUIVOS PDF e XML',
+      dash(outrasInformacoesCorpo),
       '',
       '',
       '',
@@ -346,7 +614,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
       dash(bank?.agency),
       'C/C',
       dash(bank?.account),
-      'CONSTAR NA NOTA FISCAL: ENDEREÇO DA OBRA',
+      draft.buildingUnit.trim() ? `Unidade predial: ${draft.buildingUnit}` : '—',
       '',
       '',
       '',
@@ -363,7 +631,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
       '',
       '',
       'Nº Ordem de Serviço / CNO',
-      '—',
+      dash(draft.serviceOrder),
       '',
       '',
       '',
@@ -383,23 +651,40 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   aoa.push(
     row(
       'COFINS',
-      '0,00',
+      impostosExport.cofins.value,
       'CSLL',
-      '0,00',
+      impostosExport.csll.value,
       'INSS',
-      '0,00',
+      impostosExport.inss.value,
       'IRPJ',
-      '0,00',
+      impostosExport.irpj.value,
       'PIS',
-      '0,00',
+      impostosExport.pis.value,
       'ISS',
-      '0,00'
+      impostosExport.iss.value
     )
   );
   r++;
   aoa.push(
     row(
-      `Alíq. federal COFINS ${fmtPct(b.federal.cofins)} (${taxCode?.cofins.collectionType ?? '—'})`,
+      '',
+      impostosExport.cofins.recolher ?? '',
+      '',
+      impostosExport.csll.recolher ?? '',
+      '',
+      impostosExport.inss.recolher ?? '',
+      '',
+      impostosExport.irpj.recolher ?? '',
+      '',
+      impostosExport.pis.recolher ?? '',
+      '',
+      impostosExport.iss.recolher ?? ''
+    )
+  );
+  r++;
+  aoa.push(
+    row(
+      `Alíq. federal COFINS ${fmtPct(b.federal.cofins)} (${taxCode?.cofins?.collectionType ?? '—'})`,
       '',
       `CSLL ${fmtPct(b.federal.csll)}`,
       '',
@@ -409,7 +694,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
       '',
       `PIS ${fmtPct(b.federal.pis)}`,
       '',
-      `ISS ${fmtPct(taxCode?.issRate)} (${taxCode?.iss.collectionType ?? '—'})`,
+      `ISS ${fmtPct(taxCode?.issRate)} (${taxCode?.iss?.collectionType ?? '—'})`,
       ''
     )
   );
@@ -418,7 +703,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   r++;
 
   pushMergeTitle('VALOR DA NOTA');
-  aoa.push(row('—'));
+  aoa.push(row(medVal));
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
   r++;
   aoa.push(row());
@@ -429,7 +714,20 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
   r++;
   aoa.push(
-    row('Deduções', '—', 'Desconto incond.', '—', 'Base de cálculo', '—', 'Alíquota (%)', fmtPct(taxCode?.issRate), 'Valor do ISS', '—', 'ISS a recolher', '—')
+    row(
+      'Deduções',
+      '—',
+      'Desconto incond.',
+      '—',
+      'Base de cálculo',
+      basesInssIss.baseIss,
+      'Alíquota (%)',
+      fmtPct(taxCode?.issRate),
+      'Valor do ISS',
+      impostosExport.iss.value,
+      'ISS a recolher',
+      impostosExport.iss.recolher ?? '—'
+    )
   );
   r++;
   aoa.push(row());
@@ -456,7 +754,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   r++;
   aoa.push(
     row(
-      `O ISS desta NF-e será RETIDO pelo tomador? SIM ( ${taxCode?.iss.collectionType === 'RETIDO' ? 'X' : ' '} )   NÃO ( ${taxCode?.iss.collectionType !== 'RETIDO' ? 'X' : ' '} )`,
+      `O ISS desta NF-e será RETIDO pelo tomador? SIM ( ${taxCode?.iss?.collectionType === 'RETIDO' ? 'X' : ' '} )   NÃO ( ${taxCode?.iss?.collectionType !== 'RETIDO' ? 'X' : ' '} )`,
       '',
       '',
       '',
@@ -474,7 +772,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   r++;
   aoa.push(
     row(
-      `O ISS desta NF-e é devido no Município de ${dash(taxCode?.cityName || draft.taxCodeCityName)}`,
+      `O ISS desta NF-e é devido no Contrato ${dash(taxCode?.cityName || draft.taxCodeCityName)}`,
       '',
       '',
       '',
@@ -492,9 +790,24 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   r++;
   aoa.push(row('Lista de Serviços - ISSQN', '—', 'CNAE', '—', '', '', '', '', '', '', '', ''));
   r++;
-  aoa.push(row('Valor líquido a pagar', '—', '', '', '', '', '', '', '', '', '', ''));
+  aoa.push(row('Valor líquido a pagar', valorLiquidoExport, '', '', '', '', '', '', '', '', '', ''));
   r++;
-  aoa.push(row('Medição — Início', '—', 'Término', '—', '', '', '', '', '', '', '', ''));
+  aoa.push(
+    row(
+      'Medição — Início',
+      dash(draft.measurementStartDate) || '—',
+      'Término',
+      dash(draft.measurementEndDate) || '—',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      ''
+    )
+  );
   r++;
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -515,6 +828,7 @@ function pdfCheckPage(doc: jsPDF, y: number, step: number, margin: number): numb
 
 function pdfBar(doc: jsPDF, y: number, margin: number, contentW: number, title: string): number {
   const h = 6;
+  y = pdfCheckPage(doc, y, h + 4, margin);
   doc.setFillColor(0, 0, 0);
   doc.rect(margin, y, contentW, h, 'F');
   doc.setTextColor(255, 255, 255);
@@ -523,7 +837,7 @@ function pdfBar(doc: jsPDF, y: number, margin: number, contentW: number, title: 
   doc.text(title.toUpperCase(), margin + 2, y + 4.2);
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
-  return y + h + 2;
+  return y + h + 3.2;
 }
 
 function pdfKeyRow(
@@ -531,29 +845,39 @@ function pdfKeyRow(
   y: number,
   margin: number,
   contentW: number,
-  pairs: { k: string; v: string }[],
-  opts?: { valueYellow?: boolean[] }
+  pairs: { k: string; v: string }[]
 ): number {
-  const lineH = 4.5;
-  let x = margin;
+  const minLineH = 5.4;
+  const topPad = 1.4;
+  const bottomPad = 1.6;
+  const rowGap = 1.6;
   const n = pairs.length;
   const colW = contentW / Math.max(n, 1);
+  const prepared: Array<{ p: { k: string; v: string }; vxOffset: number; lines: string[] }> = [];
+  let maxLines = 1;
   doc.setFontSize(7);
-  pairs.forEach((p, i) => {
-    if (opts?.valueYellow?.[i]) {
-      doc.setFillColor(255, 248, 150);
-      doc.rect(x + colW * 0.38, y - 3, colW * 0.6, lineH, 'F');
-    }
+  pairs.forEach((p) => {
     doc.setFont('helvetica', 'bold');
     const kw = doc.getTextWidth(p.k + ' ');
-    doc.text(p.k, x, y);
+    const vxOffset = Math.min(kw, colW * 0.42);
+    const lines = doc.splitTextToSize(p.v, colW - vxOffset - 1);
+    const normalizedLines = Array.isArray(lines) ? lines : [String(lines)];
+    prepared.push({ p, vxOffset, lines: normalizedLines });
+    maxLines = Math.max(maxLines, Array.isArray(lines) ? lines.length : 1);
+  });
+  const textBlockH = Math.max(minLineH, maxLines * 4.1);
+  const dynamicRowH = topPad + textBlockH + bottomPad;
+  y = pdfCheckPage(doc, y, dynamicRowH + rowGap, margin);
+  const textY = y + topPad + 2.2;
+  let x = margin;
+  prepared.forEach(({ p, vxOffset, lines }) => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(p.k, x, textY);
     doc.setFont('helvetica', 'normal');
-    const vx = x + Math.min(kw, colW * 0.42);
-    const lines = doc.splitTextToSize(p.v, colW - (vx - x) - 1);
-    doc.text(lines, vx, y);
+    doc.text(lines, x + vxOffset, textY);
     x += colW;
   });
-  return y + lineH + 1;
+  return y + dynamicRowH + rowGap;
 }
 
 function pdfWrappedBlock(doc: jsPDF, y: number, margin: number, contentW: number, label: string, text: string): number {
@@ -578,23 +902,38 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   const contentW = doc.internal.pageSize.getWidth() - margin * 2;
   let y = margin;
   const { draft, provider, taker, bank, taxCode } = b;
+  const outrasInformacoesCorpo = buildEspelhoOutrasInformacoesBlock(
+    draft.notes,
+    draft.municipality,
+    taker?.state,
+    taxCode?.iss ?? null
+  );
 
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   const title = 'ESPELHO PARA EMISSÃO DE NOTA FISCAL';
   doc.text(title, margin + contentW / 2, y, { align: 'center' });
-  y += 8;
+  y += 7;
   doc.setFontSize(7);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Número da Nota:', margin + contentW - 42, y);
-  doc.text('—', margin + contentW - 8, y, { align: 'right' });
-  y += 4;
-  doc.text('Data e Hora de Emissão:', margin + contentW - 42, y);
-  doc.text(nowEmissionBr(), margin + contentW - 8, y, { align: 'right' });
-  y += 4;
-  doc.text('Código de Verificação:', margin + contentW - 42, y);
-  doc.text('—', margin + contentW - 8, y, { align: 'right' });
-  y += 6;
+  const metaRows: Array<{ label: string; value: string }> = [
+    { label: 'Número da Nota:', value: '—' },
+    { label: 'Data e Hora de Emissão:', value: nowEmissionBr() },
+    { label: 'Código de Verificação:', value: '—' }
+  ];
+  const metaLabelX = margin + contentW - 62;
+  const metaValueX = margin + contentW - 26;
+  const metaValueMaxW = 24;
+  const metaLineH = 4.2;
+  metaRows.forEach(({ label, value }) => {
+    y = pdfCheckPage(doc, y, metaLineH + 1, margin);
+    doc.setFont('helvetica', 'bold');
+    doc.text(label, metaLabelX, y);
+    doc.setFont('helvetica', 'normal');
+    const valueLines = doc.splitTextToSize(value, metaValueMaxW);
+    doc.text(valueLines, metaValueX, y);
+    y += Math.max(metaLineH, valueLines.length * 3.4);
+  });
+  y += 2.5;
 
   y = pdfBar(doc, y, margin, contentW, 'PRESTADOR DE SERVIÇOS');
   y = pdfKeyRow(doc, y, margin, contentW, [
@@ -623,14 +962,15 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Município:', v: dash(taker?.city) },
     { k: 'UF:', v: dash(taker?.state) },
-    { k: 'Contrato:', v: dash(draft.contract || taker?.contractRef) }
+    { k: 'Contrato:', v: dash(taker?.contractRef) }
   ]);
   y += 2;
 
   y = pdfBar(doc, y, margin, contentW, 'DISCRIMINAÇÃO DOS SERVIÇOS');
   doc.setFontSize(7);
-  const disc = taker?.serviceDescription?.trim() || draft.notes.trim() || '—';
-  const discLines = doc.splitTextToSize(disc, contentW);
+  const discPdf =
+    (taker?.serviceDescription ?? '').trim() || (draft.notes ?? '').trim() || '—';
+  const discLines = doc.splitTextToSize(discPdf, contentW);
   discLines.forEach((line: string) => {
     y = pdfCheckPage(doc, y, 5, margin);
     doc.text(line, margin, y);
@@ -638,7 +978,7 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   });
   y += 2;
   doc.setTextColor(0, 120, 40);
-  const refText = `REFERÊNCIA: ${dash(draft.measurementRef)} | CC: ${dash(draft.costCenter)}`;
+  const refText = `REFERÊNCIA: ${dash(draft.measurementRef)} | CC: ${dash(draft.costCenterLabel)}`;
   const refLines = doc.splitTextToSize(refText, contentW);
   refLines.forEach((line: string) => {
     y = pdfCheckPage(doc, y, 5, margin);
@@ -646,22 +986,49 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     y += 4;
   });
   doc.setTextColor(0, 0, 0);
+  y = pdfKeyRow(doc, y, margin, contentW, [
+    { k: 'Nº Empenho:', v: dash(draft.empenhoNumber) },
+    { k: 'Nº Processo:', v: dash(draft.processNumber) }
+  ]);
+  y = pdfKeyRow(doc, y, margin, contentW, [
+    { k: 'Ordem de Serviço:', v: dash(draft.serviceOrder) },
+    { k: 'Unidade Predial:', v: dash(draft.buildingUnit) }
+  ]);
+  if (draft.observations.trim()) {
+    y = pdfWrappedBlock(doc, y, margin, contentW, 'Observações:', draft.observations);
+  }
   y += 3;
+
+  const medValPdf = formatEspelhoMirrorCurrencyField(draft.measurementAmount);
+  const laborValPdf = formatEspelhoMirrorCurrencyField(draft.laborAmount);
+  const matValPdf = formatEspelhoMirrorCurrencyField(draft.materialAmount);
+  const matLimitsPdf = computeEspelhoMaterialLimits(
+    draft.measurementAmount,
+    taxCode?.inssMaterialLimit,
+    taxCode?.issMaterialLimit
+  );
+  const basesPdf = computeEspelhoBasesCalculoInssIss(
+    draft.measurementAmount,
+    draft.materialAmount,
+    taxCode?.inssMaterialLimit,
+    taxCode?.issMaterialLimit
+  );
+  const impostosPdf = computeEspelhoImpostosBundle(b);
+  const valorLiquidoPdf = computeEspelhoValorLiquidoBundle(b);
+  const issRetidoPdf = taxCode?.iss?.collectionType === 'RETIDO' ? impostosPdf.iss.value : '—';
 
   y = pdfBar(doc, y, margin, contentW, 'VALORES / INFORMAÇÕES FINANCEIRAS E BANCÁRIAS');
 
-  doc.setFillColor(255, 248, 120);
-  doc.rect(margin, y, contentW, 6, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
   doc.text('Medição (valor total)', margin + 1, y + 4);
   doc.setFont('helvetica', 'normal');
-  doc.text('—', margin + 55, y + 4);
+  doc.text(medValPdf, margin + 55, y + 4);
   y += 8;
 
   y = pdfKeyRow(doc, y, margin, contentW, [
-    { k: 'Mão-de-obra:', v: '—' },
-    { k: 'Material aplicado:', v: '—' }
+    { k: 'Mão-de-obra:', v: laborValPdf },
+    { k: 'Material aplicado:', v: matValPdf }
   ]);
   y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Vale-transporte:', v: '—' },
@@ -669,8 +1036,13 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   ]);
   doc.setFontSize(6.5);
   y = pdfCheckPage(doc, y, 6, margin);
+  y = pdfKeyRow(doc, y, margin, contentW, [
+    { k: 'Limite Material INSS:', v: matLimitsPdf.inssBrl },
+    { k: 'Limite Material ISS:', v: matLimitsPdf.issBrl }
+  ]);
+  y = pdfCheckPage(doc, y, 5, margin);
   doc.text(
-    `Limite – material (cadastro): INSS ${fmtPct(taxCode?.inssMaterialLimit)} | ISS ${fmtPct(taxCode?.issMaterialLimit)}`,
+    `Referência código tributário — INSS mat.: ${fmtPct(taxCode?.inssMaterialLimit)} | ISS mat.: ${fmtPct(taxCode?.issMaterialLimit)}`,
     margin,
     y
   );
@@ -681,20 +1053,24 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     margin,
     contentW,
     [
-      { k: 'Base de cálculo INSS:', v: '—' },
-      { k: 'ISS retido (R$):', v: '—' }
-    ],
-    { valueYellow: [true, true] }
+      { k: 'Base de cálculo INSS:', v: basesPdf.baseInss },
+      { k: 'Base de cálculo ISS:', v: basesPdf.baseIss }
+    ]
+  );
+  y = pdfKeyRow(
+    doc,
+    y,
+    margin,
+    contentW,
+    [{ k: 'ISS retido (R$):', v: issRetidoPdf }]
   );
 
-  doc.setFillColor(255, 248, 120);
-  doc.rect(margin, y, contentW, 5, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
-  doc.text('OBSERVAÇÕES', margin + 1, y + 3.5);
+  doc.text('OUTRAS INFORMAÇÕES (corpo da NF)', margin + 1, y + 3.5);
   y += 7;
   doc.setFont('helvetica', 'normal');
-  doc.splitTextToSize(dash(draft.notes), contentW).forEach((line: string) => {
+  doc.splitTextToSize(outrasInformacoesCorpo, contentW).forEach((line: string) => {
     y = pdfCheckPage(doc, y, 5, margin);
     doc.text(line, margin, y);
     y += 4;
@@ -702,15 +1078,11 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y += 2;
 
   doc.setFontSize(7);
-  doc.text('ENVIAR NF EM ARQUIVOS PDF e XML', margin, y);
-  y += 4;
-  doc.text('CONSTAR NA NOTA FISCAL: ENDEREÇO DA OBRA', margin, y);
-  y += 4;
-  doc.text('Número da Ordem de Serviço / Inscrição da Obra (CNO): —', margin, y);
+  doc.text(`Número da Ordem de Serviço / Inscrição da Obra (CNO): ${dash(draft.serviceOrder)}`, margin, y);
   y += 5;
 
   y = pdfKeyRow(doc, y, margin, contentW, [
-    { k: 'Centro de custo:', v: dash(draft.costCenter) },
+    { k: 'Centro de custo:', v: dash(draft.costCenterLabel) },
     { k: 'Vencimento:', v: fmtDateBr(draft.dueDate) },
     { k: 'Banco:', v: dash(bank?.bank) }
   ]);
@@ -720,8 +1092,6 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     { k: 'Conta (nome):', v: dash(bank?.name || draft.bankAccountName) }
   ]);
 
-  doc.setFillColor(255, 248, 120);
-  doc.rect(margin, y, contentW, 6, 'F');
   doc.setFontSize(7);
   doc.text('Reforço de garantia (valor / %): —', margin + 1, y + 4);
   y += 9;
@@ -729,24 +1099,48 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y = pdfBar(doc, y, margin, contentW, 'RETENÇÕES');
   const retY = y;
   const cellW = contentW / 6;
-  const labels = ['COFINS', 'CSLL', 'INSS', 'IRPJ', 'PIS', 'ISS'];
-  labels.forEach((lb, i) => {
-    const red = lb === 'COFINS' || lb === 'CSLL' || lb === 'PIS' || lb === 'ISS';
-    const yellow = lb === 'INSS' || lb === 'IRPJ';
-    if (red) doc.setFillColor(255, 210, 210);
-    else if (yellow) doc.setFillColor(255, 248, 120);
-    else doc.setFillColor(255, 255, 255);
-    doc.rect(margin + i * cellW, retY - 4, cellW - 0.5, 10, 'FD');
+  const retLabels = ['COFINS', 'CSLL', 'INSS', 'IRPJ', 'PIS', 'ISS'] as const;
+  const retVals = [
+    impostosPdf.cofins.value,
+    impostosPdf.csll.value,
+    impostosPdf.inss.value,
+    impostosPdf.irpj.value,
+    impostosPdf.pis.value,
+    impostosPdf.iss.value
+  ];
+  retLabels.forEach((lb, i) => {
+    doc.setFillColor(255, 255, 255);
+    doc.rect(margin + i * cellW, retY - 4, cellW - 0.5, 12, 'FD');
     doc.setFontSize(6);
     doc.setFont('helvetica', 'bold');
     doc.text(lb, margin + i * cellW + 1, retY);
     doc.setFont('helvetica', 'normal');
-    doc.text('0,00', margin + i * cellW + 1, retY + 5);
+    const vLines = doc.splitTextToSize(retVals[i] ?? '—', cellW - 2);
+    doc.text(vLines, margin + i * cellW + 1, retY + 4.5);
   });
-  y = retY + 12;
+  y = retY + 15;
+  doc.setFontSize(5);
+  const recHints = [
+    impostosPdf.cofins.recolher,
+    impostosPdf.csll.recolher,
+    impostosPdf.inss.recolher,
+    impostosPdf.irpj.recolher,
+    impostosPdf.pis.recolher,
+    impostosPdf.iss.recolher
+  ]
+    .filter(Boolean)
+    .join('  |  ');
+  if (recHints) {
+    doc.splitTextToSize(recHints, contentW).forEach((line: string) => {
+      y = pdfCheckPage(doc, y, 5, margin);
+      doc.text(line, margin, y);
+      y += 3.5;
+    });
+    y += 2;
+  }
   doc.setFontSize(6);
   doc.text(
-    `Alíq. COFINS ${fmtPct(b.federal.cofins)} (${taxCode?.cofins.collectionType}) | CSLL ${fmtPct(b.federal.csll)} | INSS ${fmtPct(b.federal.inss)} | IRPJ ${fmtPct(b.federal.irpj)} | PIS ${fmtPct(b.federal.pis)} | ISS ${fmtPct(taxCode?.issRate)} (${taxCode?.iss.collectionType})`,
+    `Alíq. COFINS ${fmtPct(b.federal.cofins)} (${taxCode?.cofins?.collectionType}) | CSLL ${fmtPct(b.federal.csll)} | INSS ${fmtPct(b.federal.inss)} | IRPJ ${fmtPct(b.federal.irpj)} | PIS ${fmtPct(b.federal.pis)} | ISS ${fmtPct(taxCode?.issRate)} (${taxCode?.iss?.collectionType})`,
     margin,
     y
   );
@@ -755,7 +1149,7 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y = pdfBar(doc, y, margin, contentW, 'VALOR DA NOTA');
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.text('—', margin + contentW / 2, y + 2, { align: 'center' });
+  doc.text(medValPdf, margin + contentW / 2, y + 2, { align: 'center' });
   y += 10;
 
   y = pdfBar(doc, y, margin, contentW, 'TRIBUTAÇÃO DO ISSQN');
@@ -771,9 +1165,8 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     [
       { k: 'Deduções:', v: '—' },
       { k: 'Desc. incond.:', v: '—' },
-      { k: 'Base cálculo:', v: '—' }
-    ],
-    { valueYellow: [false, false, true] }
+      { k: 'Base cálculo:', v: basesPdf.baseIss }
+    ]
   );
   y = pdfKeyRow(
     doc,
@@ -782,10 +1175,9 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     contentW,
     [
       { k: 'Alíq.:', v: fmtPct(taxCode?.issRate) },
-      { k: 'Valor ISS:', v: '—' },
-      { k: 'ISS recolher:', v: '—' }
-    ],
-    { valueYellow: [true, true, true] }
+      { k: 'Valor ISS:', v: impostosPdf.iss.value },
+      { k: 'ISS recolher:', v: impostosPdf.iss.recolher ?? '—' }
+    ]
   );
   y += 4;
 
@@ -809,26 +1201,24 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     y += 4;
   });
   y += 5;
-  doc.setFillColor(255, 248, 120);
-  doc.rect(margin, y - 3, contentW, 6, 'F');
-  doc.text(
-    `O ISS desta NF-e é devido no Município de ${dash(taxCode?.cityName || draft.taxCodeCityName)}`,
-    margin + 1,
-    y + 1
-  );
+  const municipioComUfPdf = (() => {
+    const mun = (draft.municipality ?? '').trim();
+    const uf = (taker?.state ?? '').trim().toUpperCase();
+    if (!mun) return '—';
+    return uf ? `${mun} (${uf})` : mun;
+  })();
+  doc.text(`O ISS desta NF-e é devido no Município de ${municipioComUfPdf}`, margin, y + 1);
   y += 8;
   y = pdfKeyRow(doc, y, margin, contentW, [
-    { k: 'Lista Serv. ISSQN:', v: '—' },
-    { k: 'CNAE:', v: '—' }
-  ], { valueYellow: [true, true] });
+    { k: 'Lista Serv. ISSQN:', v: dash(draft.serviceIssqn) },
+    { k: 'CNAE:', v: dash(draft.cnae) }
+  ]);
   doc.setFont('helvetica', 'bold');
-  doc.text('Valor líquido a pagar: —', margin + contentW / 2, y + 2, { align: 'center' });
+  doc.text(`Valor líquido a pagar: ${valorLiquidoPdf}`, margin + contentW / 2, y + 2, { align: 'center' });
   y += 8;
   doc.setFont('helvetica', 'normal');
-  doc.setFillColor(255, 248, 120);
-  doc.rect(margin + contentW * 0.55, y - 2, contentW * 0.43, 8, 'F');
-  doc.text('Medição — Início: —', margin + contentW * 0.55, y + 2);
-  doc.text('Término: —', margin + contentW * 0.55, y + 6);
+  doc.text(`Medição — Início: ${dash(draft.measurementStartDate)}`, margin + contentW * 0.55, y + 2);
+  doc.text(`Término: ${dash(draft.measurementEndDate)}`, margin + contentW * 0.55, y + 6);
 
   return doc;
 }
@@ -850,7 +1240,7 @@ export function exportEspelhoNfExcel(
   const { sheet } = buildExcelSheet(b);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, sheet, 'Espelho NF');
-  const base = sanitizeEspelhoFilenameBase(draft.contract || draft.measurementRef || 'espelho-nf');
+  const base = sanitizeEspelhoFilenameBase(draft.measurementRef || draft.costCenterLabel || 'espelho-nf');
   XLSX.writeFile(wb, `espelho-nf_${base}.xlsx`);
 }
 
@@ -864,21 +1254,76 @@ export function exportEspelhoNfPdf(
 ): void {
   const b = resolveBundle(draft, providers, takers, banks, taxCodes, federal);
   const doc = buildPdf(b);
-  const base = sanitizeEspelhoFilenameBase(draft.contract || draft.measurementRef || 'espelho-nf');
+  const base = sanitizeEspelhoFilenameBase(draft.measurementRef || draft.costCenterLabel || 'espelho-nf');
   doc.save(`espelho-nf_${base}.pdf`);
 }
 
+function resolveCostCenterRowLabel(
+  m: EspelhoMirrorDraft,
+  costCenters?: Array<{ id?: string; code?: string; name?: string }>
+): string {
+  const fromDraft = m.costCenterLabel?.trim();
+  if (fromDraft) return fromDraft;
+  if (m.costCenterId && costCenters?.length) {
+    const cc = costCenters.find((c) => c.id === m.costCenterId);
+    if (cc) return [cc.code, cc.name].filter(Boolean).join(' - ');
+  }
+  return '';
+}
+
 /** Linhas simples para modal “Ver detalhes” (mantém compatibilidade com a tela). */
-export function buildEspelhoDetailRows(m: EspelhoMirrorDraft): [string, string][] {
+export function buildEspelhoDetailRows(
+  m: EspelhoMirrorDraft,
+  costCenters?: Array<{ id?: string; code?: string; name?: string }>,
+  taxCodeLimits?: { inssMaterialLimit: string; issMaterialLimit: string } | null,
+  issRule?: EspelhoTaxRule | null
+): [string, string][] {
+  const ccRow = resolveCostCenterRowLabel(m, costCenters);
+  const limits = computeEspelhoMaterialLimits(
+    m.measurementAmount,
+    taxCodeLimits?.inssMaterialLimit,
+    taxCodeLimits?.issMaterialLimit
+  );
+  const bases = computeEspelhoBasesCalculoInssIss(
+    m.measurementAmount,
+    m.materialAmount,
+    taxCodeLimits?.inssMaterialLimit,
+    taxCodeLimits?.issMaterialLimit
+  );
   return [
-    ['Contrato', m.contract],
     ['Referência da medição', m.measurementRef],
-    ['Centro de custo', m.costCenter],
+    ['Medição (R$)', formatEspelhoMirrorCurrencyField(m.measurementAmount)],
+    ['Mão de obra (R$)', formatEspelhoMirrorCurrencyField(m.laborAmount)],
+    ['Material (R$)', formatEspelhoMirrorCurrencyField(m.materialAmount)],
+    ['Limite Material INSS', limits.inssBrl],
+    ['Limite Material ISS', limits.issBrl],
+    ['Base de cálculo INSS', bases.baseInss],
+    ['Base de cálculo ISS', bases.baseIss],
+    ['Centro de custo', ccRow || '—'],
     ['Vencimento', m.dueDate || '—'],
+    ['Nº Empenho', dash(m.empenhoNumber)],
+    ['Nº Processo', dash(m.processNumber)],
+    ['Ordem de Serviço', dash(m.serviceOrder)],
+    ['Início da medição', dash(m.measurementStartDate)],
+    ['Fim da medição', dash(m.measurementEndDate)],
+    ['Unidade Predial', dash(m.buildingUnit)],
+    ['Observações', m.observations.trim() ? m.observations : '—'],
     ['Prestador', m.providerName],
     ['Tomador', m.takerName],
     ['Conta bancária', m.bankAccountName],
-    ['Código tributário (município)', m.taxCodeCityName],
-    ['Observações', m.notes.trim() ? m.notes : '—']
+    ['Código tributário (contrato)', m.taxCodeCityName],
+    [
+      'Outras informações',
+      buildEspelhoOutrasInformacoesBlock(m.notes, m.municipality, undefined, issRule ?? null)
+    ]
   ];
+}
+
+/** Garante costCenterLabel nos PDFs/Excel a partir do id e da lista da API. */
+export function espelhoMirrorForExport(
+  draft: EspelhoMirrorDraft,
+  costCenters: Array<{ id?: string; code?: string; name?: string }>
+): EspelhoMirrorDraft {
+  const label = resolveCostCenterRowLabel(draft, costCenters);
+  return { ...draft, costCenterLabel: label || draft.costCenterLabel };
 }
