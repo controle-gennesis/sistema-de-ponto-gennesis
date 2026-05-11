@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -27,6 +27,7 @@ import {
   buildEspelhoDetailRows,
   computeEspelhoBasesCalculoInssIss,
   computeEspelhoMaterialLimits,
+  computeEspelhoReforcoGarantiaRetidoRs,
   espelhoMirrorForExport,
   exportEspelhoNfPdf,
   fmtEspelhoBrl,
@@ -43,6 +44,62 @@ import {
 } from '@/lib/espelhoNfApproval';
 import { useCostCenters } from '@/hooks/useCostCenters';
 
+/** Campos opcionais que o usuário escolhe exibir no formulário (Constar na nota fiscal). */
+type NfConstarNaNotaFields = {
+  obraCno: boolean;
+  garantiaComplementar: boolean;
+  processNumber: boolean;
+  empenhoNumber: boolean;
+  serviceOrder: boolean;
+  buildingUnit: boolean;
+  observations: boolean;
+};
+
+const DEFAULT_NF_CONSTAR_NA_NOTA: NfConstarNaNotaFields = {
+  obraCno: false,
+  garantiaComplementar: false,
+  processNumber: false,
+  empenhoNumber: false,
+  serviceOrder: false,
+  buildingUnit: false,
+  observations: false
+};
+
+const NF_CONSTAR_FIELD_LABELS: Record<keyof NfConstarNaNotaFields, string> = {
+  obraCno: 'Nº inscrição Obra / CNO',
+  garantiaComplementar: 'Garantia complementar',
+  processNumber: 'Nº Processo',
+  empenhoNumber: 'Nº Empenho',
+  serviceOrder: 'Ordem de Serviço',
+  buildingUnit: 'Unidade Predial',
+  observations: 'Observações'
+};
+
+function parseNfConstarNaNota(raw: unknown): NfConstarNaNotaFields {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_NF_CONSTAR_NA_NOTA };
+  const o = raw as Record<string, unknown>;
+  return {
+    obraCno: Boolean(o.obraCno),
+    garantiaComplementar: Boolean(o.garantiaComplementar),
+    processNumber: Boolean(o.processNumber),
+    empenhoNumber: Boolean(o.empenhoNumber),
+    serviceOrder: Boolean(o.serviceOrder),
+    buildingUnit: Boolean(o.buildingUnit),
+    observations: Boolean(o.observations)
+  };
+}
+
+/** Máscara CNO: xx.xxx.xxxxx/xx (12 dígitos). */
+function maskCnoObraInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 12);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  }
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 10)}/${digits.slice(10, 12)}`;
+}
+
 type MirrorDraft = {
   measurementRef: string;
   costCenterId: string;
@@ -56,6 +113,10 @@ type MirrorDraft = {
   measurementStartDate: string;
   measurementEndDate: string;
   buildingUnit: string;
+  /** CNO — formato xx.xxx.xxxxx/xx */
+  obraCno: string;
+  /** Garantia complementar (texto livre) */
+  garantiaComplementar: string;
   observations: string;
   notes: string;
   measurementAmount: string;
@@ -69,6 +130,9 @@ type MirrorDraft = {
   bankAccountName: string;
   taxCodeId: string;
   taxCodeCityName: string;
+  nfConstarNaNota: NfConstarNaNotaFields;
+  /** Obrigatório: confirma que revisou “constar na nota fiscal” antes de salvar. */
+  nfConstarNaNotaAcknowledged: boolean;
 };
 
 type MirrorAttachment = {
@@ -132,6 +196,10 @@ function normalizeSavedMirrorsFromStorage(raw: unknown): SavedMirror[] {
       measurementStartDate: String(o.measurementStartDate ?? ''),
       measurementEndDate: String(o.measurementEndDate ?? ''),
       buildingUnit: String(o.buildingUnit ?? ''),
+      obraCno: String(o.obraCno ?? ''),
+      garantiaComplementar: String(
+        o.garantiaComplementar ?? o.garantiaComplementarPct ?? ''
+      ),
       observations: String(o.observations ?? ''),
       notes: String(o.notes ?? ''),
       measurementAmount: String(o.measurementAmount ?? ''),
@@ -145,6 +213,8 @@ function normalizeSavedMirrorsFromStorage(raw: unknown): SavedMirror[] {
       bankAccountName: String(o.bankAccountName ?? ''),
       taxCodeId: String(o.taxCodeId ?? ''),
       taxCodeCityName: String(o.taxCodeCityName ?? ''),
+      nfConstarNaNota: parseNfConstarNaNota(o.nfConstarNaNota),
+      nfConstarNaNotaAcknowledged: Boolean(o.nfConstarNaNotaAcknowledged),
       approvalStatus: resolveEspelhoApprovalStatus(normalizedId, String(o.approvalStatus ?? ''))
     };
   });
@@ -216,6 +286,12 @@ type TaxCode = {
   id: string;
   cityName: string;
   abatesMaterial: boolean;
+  /** Possui garantia complementar */
+  hasComplementaryWarranty: boolean;
+  /** Se possui garantia: retida na nota (null = não se aplica) */
+  garantiaRetidaNaNota: boolean | null;
+  /** Alíquota da garantia (%), pt-BR; vazio se não houver garantia complementar */
+  garantiaAliquota: string;
   issRate: string;
   cofins: TaxRule;
   csll: TaxRule;
@@ -240,6 +316,8 @@ const INITIAL_DRAFT: MirrorDraft = {
   measurementStartDate: '',
   measurementEndDate: '',
   buildingUnit: '',
+  obraCno: '',
+  garantiaComplementar: '',
   observations: '',
   notes: '',
   measurementAmount: '',
@@ -252,7 +330,9 @@ const INITIAL_DRAFT: MirrorDraft = {
   bankAccountId: '',
   bankAccountName: '',
   taxCodeId: '',
-  taxCodeCityName: ''
+  taxCodeCityName: '',
+  nfConstarNaNota: { ...DEFAULT_NF_CONSTAR_NA_NOTA },
+  nfConstarNaNotaAcknowledged: false
 };
 
 function sanitizeEspelhoMoneyTyping(raw: string): string {
@@ -494,9 +574,18 @@ const FEDERAL_TAX_LAYOUT: Array<{
   }
 ];
 
-const INITIAL_TAX_CODE_FORM: Omit<TaxCode, 'id'> = {
+type TaxCodeFormState = Omit<TaxCode, 'id' | 'abatesMaterial' | 'hasComplementaryWarranty' | 'garantiaRetidaNaNota'> & {
+  abatesMaterial: boolean | null;
+  hasComplementaryWarranty: boolean | null;
+  garantiaRetidaNaNota: boolean | null;
+};
+
+const INITIAL_TAX_CODE_FORM: TaxCodeFormState = {
   cityName: '',
-  abatesMaterial: false,
+  abatesMaterial: null,
+  hasComplementaryWarranty: null,
+  garantiaRetidaNaNota: null,
+  garantiaAliquota: '',
   issRate: '',
   cofins: { ...INITIAL_TAX_RULE },
   csll: { ...INITIAL_TAX_RULE },
@@ -601,7 +690,7 @@ export default function EspelhoNfPage() {
   const [bankAccountForm, setBankAccountForm] = useState(INITIAL_BANK_ACCOUNT_FORM);
   const [editingBankAccountId, setEditingBankAccountId] = useState<string | null>(null);
   const [taxCodes, setTaxCodes] = useState<TaxCode[]>([]);
-  const [taxCodeForm, setTaxCodeForm] = useState(INITIAL_TAX_CODE_FORM);
+  const [taxCodeForm, setTaxCodeForm] = useState<TaxCodeFormState>(INITIAL_TAX_CODE_FORM);
   const [editingTaxCodeId, setEditingTaxCodeId] = useState<string | null>(null);
   const [federalTaxRatesByContext, setFederalTaxRatesByContext] = useState<FederalTaxRatesByContext>(
     INITIAL_FEDERAL_TAX_RATES_BY_CONTEXT
@@ -615,8 +704,32 @@ export default function EspelhoNfPage() {
   const [espelhoSavedFilterTaker, setEspelhoSavedFilterTaker] = useState('');
   const [espelhoSavedFilterMonth, setEspelhoSavedFilterMonth] = useState('');
   const [espelhoSavedFilterYear, setEspelhoSavedFilterYear] = useState('');
+  const [nfConstarMenuOpen, setNfConstarMenuOpen] = useState(false);
+  const nfConstarMenuRef = useRef<HTMLDivElement>(null);
 
   const { costCenters: costCentersHook, isLoading: loadingCostCenters } = useCostCenters();
+
+  const nfConstarSelectedCount = useMemo(
+    () => Object.values(draft.nfConstarNaNota).filter(Boolean).length,
+    [draft.nfConstarNaNota]
+  );
+
+  const toggleNfConstarField = (key: keyof NfConstarNaNotaFields) => {
+    setDraft((prev) => ({
+      ...prev,
+      nfConstarNaNota: { ...prev.nfConstarNaNota, [key]: !prev.nfConstarNaNota[key] }
+    }));
+  };
+
+  useEffect(() => {
+    if (!nfConstarMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = nfConstarMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setNfConstarMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [nfConstarMenuOpen]);
 
   const selectedFederalTaxContextKey = useMemo(
     () =>
@@ -717,6 +830,7 @@ export default function EspelhoNfPage() {
           draft.taxCodeId &&
           draft.measurementStartDate &&
           draft.measurementEndDate &&
+          draft.nfConstarNaNotaAcknowledged &&
           !espelhoMoneyTripletError
       ),
     [draft, espelhoMoneyTripletError]
@@ -839,12 +953,85 @@ export default function EspelhoNfPage() {
       espelhoImpostos.inss.value,
       espelhoImpostos.iss.value
     ].reduce((acc, raw) => acc + (parseEspelhoBrCurrencyToNumber(raw) ?? 0), 0);
-    const liquid = round2(med - retidos);
+    const reforcoGarantiaRetido = computeEspelhoReforcoGarantiaRetidoRs(draft, draftTaxCode);
+    const liquid = round2(med - retidos - reforcoGarantiaRetido);
     return {
       display: fmtEspelhoBrl(liquid),
       saldoNegativo: liquid < 0
     };
-  }, [draft.measurementAmount, espelhoImpostos]);
+  }, [draft, draftTaxCode, espelhoImpostos]);
+
+  const garantiaComplementarAuto = Boolean(
+    draftTaxCode?.hasComplementaryWarranty === true &&
+      draftTaxCode.garantiaRetidaNaNota !== null &&
+      (draftTaxCode.garantiaAliquota ?? '').trim() !== ''
+  );
+
+  const garantiaComplementarMessage = useMemo(() => {
+    if (!garantiaComplementarAuto || !draftTaxCode) return '';
+
+    const ptNumeroExtenso = (n: number): string => {
+      const ones: Record<number, string> = {
+        0: 'zero',
+        1: 'um',
+        2: 'dois',
+        3: 'três',
+        4: 'quatro',
+        5: 'cinco',
+        6: 'seis',
+        7: 'sete',
+        8: 'oito',
+        9: 'nove',
+        10: 'dez',
+        11: 'onze',
+        12: 'doze',
+        13: 'treze',
+        14: 'quatorze',
+        15: 'quinze',
+        16: 'dezesseis',
+        17: 'dezessete',
+        18: 'dezoito',
+        19: 'dezenove'
+      };
+      const tens: Record<number, string> = {
+        20: 'vinte',
+        30: 'trinta',
+        40: 'quarenta',
+        50: 'cinquenta',
+        60: 'sessenta',
+        70: 'setenta',
+        80: 'oitenta',
+        90: 'noventa'
+      };
+      const round = Math.max(0, Math.min(100, Math.round(n)));
+      if (round === 100) return 'cem';
+      if (round < 20) return ones[round] ?? String(round);
+      const t = Math.floor(round / 10) * 10;
+      const u = round % 10;
+      if (u === 0) return tens[t] ?? String(round);
+      return `${tens[t] ?? ''} e ${ones[u] ?? ''}`.trim();
+    };
+
+    const med = parseEspelhoBrCurrencyToNumber(draft.measurementAmount);
+    const aliquotaNum = parseEspelhoPercentToNumber(draftTaxCode.garantiaAliquota);
+    if (med === null || aliquotaNum === null) return '—';
+
+    const aliquotaInt = Math.round(aliquotaNum);
+    const aliquotaPctDisplay = `${draftTaxCode.garantiaAliquota}%`;
+    const porExtenso = `${ptNumeroExtenso(aliquotaInt)} por cento`;
+
+    const x =
+      draftTaxCode.garantiaRetidaNaNota === true
+        ? med * (aliquotaNum / 100)
+        : med * (aliquotaNum / (100 - aliquotaNum));
+
+    const xDisplay = Number.isFinite(x) ? fmtEspelhoBrl(round2EspelhoMoney(x)) : '—';
+
+    if (draftTaxCode.garantiaRetidaNaNota === true) {
+      return `Como Reforço de Garantia será Retido ${aliquotaPctDisplay} (${porExtenso}) sobre o valor da NF igual a: ${xDisplay}`;
+    }
+    return `Como Reforço de Garantia foi Retido ${aliquotaPctDisplay} (${porExtenso}) da Parcela na Medição no Valor de: ${xDisplay}`;
+  }, [garantiaComplementarAuto, draftTaxCode, draft.measurementAmount]);
 
   const onEspelhoMoneyChange =
     (field: 'measurementAmount' | 'laborAmount' | 'materialAmount') =>
@@ -968,10 +1155,17 @@ export default function EspelhoNfPage() {
         const normalizeRule = (rule?: Partial<TaxRule>, forceRetido = false): TaxRule => ({
           collectionType: forceRetido ? 'RETIDO' : rule?.collectionType === 'RECOLHIDO' ? 'RECOLHIDO' : 'RETIDO'
         });
-        const normalized = parsed.map((item) => ({
+        const normalized = parsed.map((item) => {
+          const hasWarranty = Boolean(item.hasComplementaryWarranty);
+          const gr = item.garantiaRetidaNaNota;
+          return {
           id: String(item.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
           cityName: String(item.cityName || ''),
           abatesMaterial: Boolean(item.abatesMaterial),
+          hasComplementaryWarranty: hasWarranty,
+          garantiaRetidaNaNota:
+            hasWarranty && (gr === true || gr === false) ? gr : null,
+          garantiaAliquota: hasWarranty ? String(item.garantiaAliquota ?? '') : '',
           issRate: String(item.issRate || ''),
           cofins: normalizeRule(item.cofins, true),
           csll: normalizeRule(item.csll, true),
@@ -981,7 +1175,8 @@ export default function EspelhoNfPage() {
           iss: normalizeRule(item.iss),
           inssMaterialLimit: String(item.inssMaterialLimit || ''),
           issMaterialLimit: String(item.issMaterialLimit || '')
-        }));
+        };
+        });
         setTaxCodes(normalized);
       }
     } catch {
@@ -1107,7 +1302,20 @@ export default function EspelhoNfPage() {
         setServiceProviders(providers);
         setServiceTakers(takers);
         setBankAccounts(banks);
-        setTaxCodes(codes);
+        setTaxCodes(
+          codes.map((c) => {
+            const t = c as TaxCode & { garantiaRetidaNaNota?: boolean | null };
+            const hasWarranty = Boolean(t.hasComplementaryWarranty);
+            const gr = t.garantiaRetidaNaNota;
+            return {
+              ...t,
+              hasComplementaryWarranty: hasWarranty,
+              garantiaRetidaNaNota:
+                hasWarranty && (gr === true || gr === false) ? gr : null,
+              garantiaAliquota: hasWarranty ? String(t.garantiaAliquota ?? '') : ''
+            };
+          })
+        );
         const providerById = new Map(providers.map((p) => [p.id, p]));
         const takerById = new Map(takers.map((t) => [t.id, t]));
         const bankById = new Map(banks.map((b) => [b.id, b]));
@@ -1121,7 +1329,19 @@ export default function EspelhoNfPage() {
             providerName: m.providerName || providerById.get(m.providerId)?.corporateName || '',
             takerName: m.takerName || takerById.get(m.takerId)?.corporateName || '',
             bankAccountName: m.bankAccountName || bankById.get(m.bankAccountId)?.name || '',
-            taxCodeCityName: m.taxCodeCityName || taxById.get(m.taxCodeId)?.cityName || ''
+            taxCodeCityName: m.taxCodeCityName || taxById.get(m.taxCodeId)?.cityName || '',
+            obraCno: String((m as unknown as Record<string, unknown>).obraCno ?? ''),
+            garantiaComplementar: String(
+              (m as unknown as Record<string, unknown>).garantiaComplementar ??
+                (m as unknown as Record<string, unknown>).garantiaComplementarPct ??
+                ''
+            ),
+            nfConstarNaNota: parseNfConstarNaNota(
+              (m as unknown as Record<string, unknown>).nfConstarNaNota
+            ),
+            nfConstarNaNotaAcknowledged: Boolean(
+              (m as unknown as Record<string, unknown>).nfConstarNaNotaAcknowledged
+            )
           }))
         );
       } catch {
@@ -1427,7 +1647,12 @@ export default function EspelhoNfPage() {
       Boolean(
         taxCodeForm.cityName.trim() &&
           taxCodeForm.issRate.trim() &&
-          (!taxCodeForm.abatesMaterial ||
+          taxCodeForm.abatesMaterial !== null &&
+          taxCodeForm.hasComplementaryWarranty !== null &&
+          (taxCodeForm.hasComplementaryWarranty !== true ||
+            (normalizeEspelhoPercentBlur(taxCodeForm.garantiaAliquota.trim()) !== '' &&
+              taxCodeForm.garantiaRetidaNaNota !== null)) &&
+          (taxCodeForm.abatesMaterial !== true ||
             (taxCodeForm.inssMaterialLimit.trim() && taxCodeForm.issMaterialLimit.trim()))
       ),
     [taxCodeForm]
@@ -1490,14 +1715,37 @@ export default function EspelhoNfPage() {
 
   const handleCreateOrUpdateTaxCode = () => {
     if (!canSaveTaxCode) {
+      if (taxCodeForm.abatesMaterial === null) {
+        toast.error('Indique se deduz material (obrigatório).');
+        return;
+      }
+      if (taxCodeForm.hasComplementaryWarranty === null) {
+        toast.error('Indique se possui garantia complementar (obrigatório).');
+        return;
+      }
+      if (
+        taxCodeForm.hasComplementaryWarranty === true &&
+        normalizeEspelhoPercentBlur(taxCodeForm.garantiaAliquota.trim()) === ''
+      ) {
+        toast.error('Informe a alíquota da garantia (obrigatório quando há garantia complementar).');
+        return;
+      }
+      if (taxCodeForm.hasComplementaryWarranty === true && taxCodeForm.garantiaRetidaNaNota === null) {
+        toast.error('Informe se a garantia complementar é retida na nota.');
+        return;
+      }
       toast.error('Preencha todos os campos obrigatórios do código tributário.');
       return;
     }
     const normalizedIssRate = normalizeEspelhoPercentBlur(taxCodeForm.issRate.trim());
-    const normalizedInssLimit = taxCodeForm.abatesMaterial
+    const normalizedGarantiaAliquota =
+      taxCodeForm.hasComplementaryWarranty === true
+        ? normalizeEspelhoPercentBlur(taxCodeForm.garantiaAliquota.trim())
+        : '';
+    const normalizedInssLimit = taxCodeForm.abatesMaterial === true
       ? normalizeEspelhoPercentBlur(taxCodeForm.inssMaterialLimit.trim())
       : '0';
-    const normalizedIssLimit = taxCodeForm.abatesMaterial
+    const normalizedIssLimit = taxCodeForm.abatesMaterial === true
       ? normalizeEspelhoPercentBlur(taxCodeForm.issMaterialLimit.trim())
       : '0';
     if (editingTaxCodeId) {
@@ -1507,7 +1755,13 @@ export default function EspelhoNfPage() {
             ? {
                 ...taxCode,
                 cityName: taxCodeForm.cityName.trim(),
-                abatesMaterial: taxCodeForm.abatesMaterial,
+                abatesMaterial: taxCodeForm.abatesMaterial === true,
+                hasComplementaryWarranty: taxCodeForm.hasComplementaryWarranty === true,
+                garantiaRetidaNaNota:
+                  taxCodeForm.hasComplementaryWarranty === true
+                    ? taxCodeForm.garantiaRetidaNaNota
+                    : null,
+                garantiaAliquota: normalizedGarantiaAliquota,
                 issRate: normalizedIssRate,
                 cofins: { collectionType: 'RETIDO' },
                 csll: { collectionType: 'RETIDO' },
@@ -1530,7 +1784,11 @@ export default function EspelhoNfPage() {
     const newTaxCode: TaxCode = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       cityName: taxCodeForm.cityName.trim(),
-      abatesMaterial: taxCodeForm.abatesMaterial,
+      abatesMaterial: taxCodeForm.abatesMaterial === true,
+      hasComplementaryWarranty: taxCodeForm.hasComplementaryWarranty === true,
+      garantiaRetidaNaNota:
+        taxCodeForm.hasComplementaryWarranty === true ? taxCodeForm.garantiaRetidaNaNota : null,
+      garantiaAliquota: normalizedGarantiaAliquota,
       issRate: normalizedIssRate,
       cofins: { collectionType: 'RETIDO' },
       csll: { collectionType: 'RETIDO' },
@@ -1550,7 +1808,14 @@ export default function EspelhoNfPage() {
     setEditingTaxCodeId(taxCode.id);
     setTaxCodeForm({
       cityName: taxCode.cityName,
-      abatesMaterial: taxCode.abatesMaterial,
+      abatesMaterial: taxCode.abatesMaterial ? true : false,
+      hasComplementaryWarranty: taxCode.hasComplementaryWarranty ? true : false,
+      garantiaRetidaNaNota: taxCode.hasComplementaryWarranty
+        ? taxCode.garantiaRetidaNaNota === true || taxCode.garantiaRetidaNaNota === false
+          ? taxCode.garantiaRetidaNaNota
+          : null
+        : null,
+      garantiaAliquota: taxCode.hasComplementaryWarranty ? taxCode.garantiaAliquota || '' : '',
       issRate: taxCode.issRate,
       cofins: { collectionType: 'RETIDO' },
       csll: { collectionType: 'RETIDO' },
@@ -1584,8 +1849,25 @@ export default function EspelhoNfPage() {
       return;
     }
     if (!canSave) {
+      const espelhoOkExcetoConfirmacao = Boolean(
+        draft.measurementRef.trim() &&
+          draft.costCenterId &&
+          draft.providerId &&
+          draft.takerId &&
+          draft.bankAccountId &&
+          draft.taxCodeId &&
+          draft.measurementStartDate &&
+          draft.measurementEndDate &&
+          !espelhoMoneyTripletError
+      );
+      if (espelhoOkExcetoConfirmacao && !draft.nfConstarNaNotaAcknowledged) {
+        toast.error(
+          'Marque a confirmação obrigatória em «Constar na nota fiscal» (declaração de que conferiu os campos da NF) antes de salvar.'
+        );
+        return;
+      }
       toast.error(
-        'Preencha a referência da medição, as datas de início/fim da medição, e selecione centro de custo, prestador, tomador, conta bancária e código tributário.'
+        'Preencha a referência da medição, as datas de início/fim da medição, e selecione centro de custo, prestador, tomador, conta bancária e código tributário. Quando tudo estiver preenchido, marque também a confirmação em «Constar na nota fiscal».'
       );
       return;
     }
@@ -1632,7 +1914,26 @@ export default function EspelhoNfPage() {
       return;
     }
     if (!canSave) {
-      toast.error('Preencha o formulário para exportar o espelho em elaboração.');
+      const espelhoOkExcetoConfirmacao = Boolean(
+        draft.measurementRef.trim() &&
+          draft.costCenterId &&
+          draft.providerId &&
+          draft.takerId &&
+          draft.bankAccountId &&
+          draft.taxCodeId &&
+          draft.measurementStartDate &&
+          draft.measurementEndDate &&
+          !espelhoMoneyTripletError
+      );
+      if (espelhoOkExcetoConfirmacao && !draft.nfConstarNaNotaAcknowledged) {
+        toast.error(
+          'Marque a confirmação obrigatória em «Constar na nota fiscal» antes de exportar o PDF.'
+        );
+      } else {
+        toast.error(
+          'Preencha o formulário para exportar o espelho em elaboração (e a confirmação em «Constar na nota fiscal» quando aplicável).'
+        );
+      }
       return;
     }
     exportEspelhoNfPdf(
@@ -2047,6 +2348,77 @@ export default function EspelhoNfPage() {
                     onChange={(e) => setDraft((prev) => ({ ...prev, measurementRef: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 md:col-span-2"
                   />
+                  <div className="md:col-span-2 relative" ref={nfConstarMenuRef}>
+                    <div className="flex flex-col gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/90 dark:bg-gray-900/40 p-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          Constar na nota fiscal
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          {nfConstarSelectedCount === 0
+                            ? 'Nenhum campo opcional visível. Use o botão para escolher o que deseja preencher.'
+                            : `${nfConstarSelectedCount} campo(s) opcional(is) visível(is).`}
+                        </p>
+                      </div>
+                      <label className="inline-flex max-w-md shrink-0 cursor-pointer items-start gap-2 rounded-md border border-amber-200/80 bg-amber-50/90 px-2.5 py-2 dark:border-amber-800/60 dark:bg-amber-950/40">
+                        <input
+                          type="checkbox"
+                          checked={draft.nfConstarNaNotaAcknowledged}
+                          onChange={(e) =>
+                            setDraft((prev) => ({
+                              ...prev,
+                              nfConstarNaNotaAcknowledged: e.target.checked
+                            }))
+                          }
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                          aria-required="true"
+                          aria-label="Checagem de campos — obrigatório para salvar"
+                        />
+                        <span className="text-xs font-medium leading-snug text-amber-950 dark:text-amber-100">
+                          Checagem de campos
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setNfConstarMenuOpen((o) => !o)}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 lg:self-center"
+                        aria-expanded={nfConstarMenuOpen}
+                        aria-haspopup="true"
+                      >
+                        Escolher campos
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform ${nfConstarMenuOpen ? 'rotate-180' : ''}`}
+                          aria-hidden
+                        />
+                      </button>
+                    </div>
+                    {nfConstarMenuOpen && (
+                      <div
+                        className="absolute left-0 right-0 top-full z-40 mt-1 max-h-[min(70vh,22rem)] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 shadow-xl"
+                        role="menu"
+                      >
+                        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Marque os campos que devem aparecer no formulário:
+                        </p>
+                        <div className="space-y-2">
+                          {(Object.keys(NF_CONSTAR_FIELD_LABELS) as (keyof NfConstarNaNotaFields)[]).map((key) => (
+                            <label
+                              key={key}
+                              className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/80"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={draft.nfConstarNaNota[key]}
+                                onChange={() => toggleNfConstarField(key)}
+                                className="h-4 w-4 accent-blue-600"
+                              />
+                              <span>{NF_CONSTAR_FIELD_LABELS[key]}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Vencimento</label>
                     <input
@@ -2056,42 +2428,89 @@ export default function EspelhoNfPage() {
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Nº Empenho</label>
-                    <input
-                      type="text"
-                      value={draft.empenhoNumber}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, empenhoNumber: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Nº Processo</label>
-                    <input
-                      type="text"
-                      value={draft.processNumber}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, processNumber: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Ordem de Serviço</label>
-                    <input
-                      type="text"
-                      value={draft.serviceOrder}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, serviceOrder: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Unidade Predial</label>
-                    <input
-                      type="text"
-                      value={draft.buildingUnit}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, buildingUnit: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
+                  {draft.nfConstarNaNota.processNumber && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Nº Processo</label>
+                      <input
+                        type="text"
+                        value={draft.processNumber}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, processNumber: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                  )}
+                  {draft.nfConstarNaNota.empenhoNumber && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Nº Empenho</label>
+                      <input
+                        type="text"
+                        value={draft.empenhoNumber}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, empenhoNumber: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                  )}
+                  {draft.nfConstarNaNota.serviceOrder && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Ordem de Serviço</label>
+                      <input
+                        type="text"
+                        value={draft.serviceOrder}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, serviceOrder: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                  )}
+                  {draft.nfConstarNaNota.buildingUnit && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Unidade Predial</label>
+                      <input
+                        type="text"
+                        value={draft.buildingUnit}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, buildingUnit: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                  )}
+                  {draft.nfConstarNaNota.obraCno && (
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Nº inscrição da Obra / CNO
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder="xx.xxx.xxxxx/xx"
+                        value={draft.obraCno}
+                        onChange={(e) =>
+                          setDraft((prev) => ({ ...prev, obraCno: maskCnoObraInput(e.target.value) }))
+                        }
+                        className="w-full max-w-md px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono tracking-wide"
+                      />
+                    </div>
+                  )}
+                  {(draft.nfConstarNaNota.garantiaComplementar ||
+                    draftTaxCode?.hasComplementaryWarranty === true) && (
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Garantia complementar
+                      </label>
+                      <textarea
+                        rows={2}
+                        placeholder="Informe os dados da garantia complementar…"
+                        value={
+                          garantiaComplementarAuto ? garantiaComplementarMessage : draft.garantiaComplementar
+                        }
+                        readOnly={garantiaComplementarAuto}
+                        onChange={(e) => {
+                          if (garantiaComplementarAuto) return;
+                          setDraft((prev) => ({ ...prev, garantiaComplementar: e.target.value }));
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-y min-h-[3rem]"
+                      />
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 self-end">
                       <div className="space-y-1">
                         <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
@@ -2118,16 +2537,18 @@ export default function EspelhoNfPage() {
                         />
                       </div>
                   </div>
-                  <div className="space-y-1 md:col-span-2">
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Observações</label>
-                    <textarea
-                      rows={3}
-                      placeholder="Observações sobre este espelho..."
-                      value={draft.observations}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, observations: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-y min-h-[4.5rem]"
-                    />
-                  </div>
+                  {draft.nfConstarNaNota.observations && (
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Observações</label>
+                      <textarea
+                        rows={3}
+                        placeholder="Observações sobre este espelho..."
+                        value={draft.observations}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, observations: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-y min-h-[4.5rem]"
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="mt-4 space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2829,12 +3250,14 @@ export default function EspelhoNfPage() {
                     ))}
 
                     <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-4 text-sm text-gray-900 dark:text-gray-100">
-                      <p className="font-medium mb-2">Abate material?</p>
+                      <p className="font-medium mb-2">
+                        Deduz material? <span className="text-red-600 dark:text-red-400">*</span>
+                      </p>
                       <div className="flex items-center gap-6">
                         <label className="inline-flex items-center gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={taxCodeForm.abatesMaterial}
+                            checked={taxCodeForm.abatesMaterial === true}
                             onChange={() =>
                               setTaxCodeForm((prev) => ({
                                 ...prev,
@@ -2850,7 +3273,7 @@ export default function EspelhoNfPage() {
                         <label className="inline-flex items-center gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={!taxCodeForm.abatesMaterial}
+                            checked={taxCodeForm.abatesMaterial === false}
                             onChange={() =>
                               setTaxCodeForm((prev) => ({
                                 ...prev,
@@ -2864,7 +3287,7 @@ export default function EspelhoNfPage() {
                           <span>Não</span>
                         </label>
                       </div>
-                      {taxCodeForm.abatesMaterial && (
+                      {taxCodeForm.abatesMaterial === true && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800">
                             <input
@@ -2909,6 +3332,110 @@ export default function EspelhoNfPage() {
                               className="w-full px-3 py-2 rounded-l-lg bg-transparent text-gray-900 dark:text-gray-100"
                             />
                             <span className="px-3 text-sm text-gray-500 dark:text-gray-400">%</span>
+                          </div>
+                        </div>
+                      )}
+                      <p className="font-medium mb-2 pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
+                        Possui garantia complementar? <span className="text-red-600 dark:text-red-400">*</span>
+                      </p>
+                      <div className="flex items-center gap-6">
+                        <label className="inline-flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={taxCodeForm.hasComplementaryWarranty === true}
+                            onChange={() =>
+                              setTaxCodeForm((prev) => ({
+                                ...prev,
+                                hasComplementaryWarranty: true,
+                                garantiaRetidaNaNota: null
+                              }))
+                            }
+                            className="h-5 w-5 accent-blue-600"
+                          />
+                          <span>Sim</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={taxCodeForm.hasComplementaryWarranty === false}
+                            onChange={() =>
+                              setTaxCodeForm((prev) => ({
+                                ...prev,
+                                hasComplementaryWarranty: false,
+                                garantiaRetidaNaNota: null,
+                                garantiaAliquota: ''
+                              }))
+                            }
+                            className="h-5 w-5 accent-blue-600"
+                          />
+                          <span>Não</span>
+                        </label>
+                      </div>
+                      {taxCodeForm.hasComplementaryWarranty === true && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="font-medium mb-2 pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
+                              Alíquota da garantia{' '}
+                              <span className="text-red-600 dark:text-red-400">*</span>
+                            </p>
+                            <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 max-w-xs">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="Alíquota (%) *"
+                                value={taxCodeForm.garantiaAliquota}
+                                onChange={(e) =>
+                                  setTaxCodeForm((prev) => ({
+                                    ...prev,
+                                    garantiaAliquota: sanitizeEspelhoPercentTyping(e.target.value)
+                                  }))
+                                }
+                                onBlur={(e) =>
+                                  setTaxCodeForm((prev) => ({
+                                    ...prev,
+                                    garantiaAliquota: normalizeEspelhoPercentBlur(e.target.value)
+                                  }))
+                                }
+                                className="w-full px-3 py-2 rounded-l-lg bg-transparent text-gray-900 dark:text-gray-100"
+                              />
+                              <span className="px-3 text-sm text-gray-500 dark:text-gray-400">%</span>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="font-medium mb-2 pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
+                              A garantia é retida na nota?{' '}
+                              <span className="text-red-600 dark:text-red-400">*</span>
+                            </p>
+                            <div className="flex items-center gap-6">
+                              <label className="inline-flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={taxCodeForm.garantiaRetidaNaNota === true}
+                                  onChange={() =>
+                                    setTaxCodeForm((prev) => ({
+                                      ...prev,
+                                      garantiaRetidaNaNota: true
+                                    }))
+                                  }
+                                  className="h-5 w-5 accent-blue-600"
+                                />
+                                <span>Sim</span>
+                              </label>
+                              <label className="inline-flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={taxCodeForm.garantiaRetidaNaNota === false}
+                                  onChange={() =>
+                                    setTaxCodeForm((prev) => ({
+                                      ...prev,
+                                      garantiaRetidaNaNota: false
+                                    }))
+                                  }
+                                  className="h-5 w-5 accent-blue-600"
+                                />
+                                <span>Não</span>
+                              </label>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -3417,7 +3944,19 @@ export default function EspelhoNfPage() {
                             {taxCode.cityName}
                           </p>
                           <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            {taxCode.abatesMaterial ? 'Abate material' : 'Não abate material'}
+                            {taxCode.abatesMaterial ? 'Deduz material' : 'Não deduz material'}
+                            {' · '}
+                            {taxCode.hasComplementaryWarranty
+                              ? `Garantia complementar: Sim · Alíq. garantia: ${
+                                  taxCode.garantiaAliquota ? `${taxCode.garantiaAliquota}%` : '—'
+                                } · Retida na nota: ${
+                                  taxCode.garantiaRetidaNaNota === true
+                                    ? 'Sim'
+                                    : taxCode.garantiaRetidaNaNota === false
+                                      ? 'Não'
+                                      : '—'
+                                }`
+                              : 'Garantia complementar: Não'}
                           </p>
                           <p className="text-xs text-gray-600 dark:text-gray-400">
                             COFINS ({taxCode.cofins.collectionType}) | CSLL ({taxCode.csll.collectionType}) | INSS (
