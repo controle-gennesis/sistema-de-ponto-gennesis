@@ -113,10 +113,11 @@ interface ChatParticipant {
 
 interface DirectChat {
   id: string;
-  chatType: 'DIRECT' | 'GROUP';
+  chatType: 'DIRECT' | 'GROUP' | 'GROUP_CALL';
   groupName?: string | null;
   groupDescription?: string | null;
   groupAvatarUrl?: string | null;
+  parentGroupChatId?: string | null;
   status: string;
   initiatorId: string;
   recipientId: string | null;
@@ -143,6 +144,19 @@ const fetchDirectChats = async (): Promise<DirectChat[]> => {
 
 const fetchDirectChatById = async (id: string): Promise<DirectChat> => {
   const res = await api.get(`/chats/direct/${id}`);
+  return res.data.data;
+};
+
+type ActiveNativeGroupCallInfo = {
+  active: boolean;
+  callId?: string;
+  video?: boolean;
+  joinedUserIds?: string[];
+  userInCall?: boolean;
+};
+
+const fetchActiveNativeGroupCall = async (chatId: string): Promise<ActiveNativeGroupCallInfo> => {
+  const res = await api.get(`/chats/direct/${chatId}/active-native-call`);
   return res.data.data;
 };
 
@@ -571,9 +585,87 @@ function ChatInlineAudioPlayer({
   );
 }
 
+function formatCallDurationPt(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return mm > 0 ? `${h} h ${mm} min` : `${h} h`;
+  }
+  return rem > 0 ? `${m} min ${rem} s` : `${m} min`;
+}
+
+/** Exibe mensagens de sistema CALL_LOG / CALL_STARTED em português no chat. */
+function formatSystemChatContent(raw: string): string {
+  if (raw.startsWith('CALL_LOG:')) {
+    try {
+      const payload = JSON.parse(raw.slice('CALL_LOG:'.length)) as {
+        mode: 'direct' | 'group';
+        type: 'voice' | 'video';
+        durationSec: number;
+        status: 'answered' | 'missed' | 'rejected' | 'cancelled';
+      };
+      const isVideo = payload.type === 'video';
+      const kindShort = isVideo ? 'Videochamada' : 'Ligação de voz';
+      const kindGroup = payload.mode === 'group' ? `${kindShort} em grupo` : kindShort;
+      const dur = formatCallDurationPt(payload.durationSec ?? 0);
+
+      if (payload.status === 'rejected') {
+        return payload.mode === 'group' ? 'Alguém recusou a chamada em grupo.' : 'Ligação recusada.';
+      }
+      if (payload.status === 'cancelled') {
+        return payload.mode === 'group' ? 'Chamada em grupo encerrada.' : 'Ligação cancelada.';
+      }
+      if (payload.status === 'missed') {
+        if (payload.mode === 'group') {
+          return (payload.durationSec ?? 0) >= 30
+            ? `Chamada encerrada · ${dur}`
+            : `${kindGroup} não atendida`;
+        }
+        return isVideo ? 'Videochamada perdida' : 'Ligação perdida';
+      }
+      return `${kindGroup} · duração ${dur}`;
+    } catch {
+      return raw;
+    }
+  }
+  if (raw.startsWith('CALL_STARTED:')) {
+    try {
+      const payload = JSON.parse(raw.slice('CALL_STARTED:'.length)) as {
+        mode: 'direct' | 'group';
+        type: 'voice' | 'video';
+        initiatorName: string;
+      };
+      const n = payload.initiatorName || 'Alguém';
+      const video = payload.type === 'video';
+      if (payload.mode === 'group') {
+        return video ? `${n} iniciou uma videochamada em grupo.` : `${n} iniciou uma ligação de voz em grupo.`;
+      }
+      return video ? `${n} iniciou uma videochamada.` : `${n} iniciou uma ligação de voz.`;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+function isCallEventMessageContent(content: string | undefined | null): boolean {
+  if (!content) return false;
+  return content.startsWith('CALL_LOG:') || content.startsWith('CALL_STARTED:');
+}
+
+/** API às vezes não devolve isSystem=true; conteúdo CALL_* ainda deve ser tratado como sistema. */
+function messageIsSystemLike(m: Pick<Message, 'isSystem' | 'content'>): boolean {
+  return Boolean(m.isSystem) || isCallEventMessageContent(m.content);
+}
+
 function getReplyQuoteSnippet(reply: MessageReplyPreview) {
   if (reply.deletedAt) return 'Mensagem apagada';
-  if (reply.isSystem) return reply.content || 'Evento';
+  if (reply.isSystem || isCallEventMessageContent(reply.content))
+    return formatSystemChatContent(reply.content || '') || 'Evento';
   if (reply.content && reply.content !== '📎') {
     const t = reply.content.trim();
     return t.length > 160 ? `${t.slice(0, 157)}…` : t;
@@ -622,7 +714,7 @@ function persistChatReactions(data: Record<string, Record<string, string>>) {
 
 /** Só o remetente, mensagem não apagada, até 15 min após o envio */
 function canEditOrDeleteMessage(m: Message, currentUserId: string | undefined): boolean {
-  if (m.isSystem) return false;
+  if (messageIsSystemLike(m)) return false;
   if (!currentUserId || m.senderId !== currentUserId) return false;
   if (m.deletedAt) return false;
   const elapsed = Date.now() - new Date(m.createdAt).getTime();
@@ -631,7 +723,7 @@ function canEditOrDeleteMessage(m: Message, currentUserId: string | undefined): 
 
 function getMessageSearchPreview(m: Message) {
   if (m.deletedAt) return 'Mensagem apagada';
-  if (m.isSystem) return m.content;
+  if (messageIsSystemLike(m)) return formatSystemChatContent(m.content || '');
   if (m.content && m.content !== '📎') return m.content;
   if (m.attachments?.length) {
     const a0 = m.attachments[0];
@@ -962,6 +1054,48 @@ function ConversasContent() {
     refetchInterval: 2000,
   });
 
+  const rejoinContextGroupId =
+    activeChat?.chatType === 'GROUP'
+      ? activeChat.id
+      : activeChat?.chatType === 'GROUP_CALL' && activeChat.parentGroupChatId
+        ? activeChat.parentGroupChatId
+        : null;
+
+  const { data: activeNativeGroupCall } = useQuery({
+    queryKey: ['activeNativeGroupCall', rejoinContextGroupId ?? ''],
+    queryFn: () => fetchActiveNativeGroupCall(rejoinContextGroupId!),
+    enabled: Boolean(rejoinContextGroupId),
+    refetchInterval: 2500,
+  });
+
+  const viewingGroupOrCallSideForActiveCall =
+    !!nativeCall.activeChatId &&
+    (selectedChatId === nativeCall.activeChatId ||
+      (activeChat?.chatType === 'GROUP_CALL' &&
+        activeChat.parentGroupChatId === nativeCall.activeChatId));
+
+  const suppressGroupRejoinBanner =
+    viewingGroupOrCallSideForActiveCall &&
+    nativeCall.isGroupCall &&
+    (nativeCall.phase === 'calling' ||
+      nativeCall.phase === 'connected' ||
+      nativeCall.phase === 'ringing');
+
+  const showGroupCallRejoinBanner = Boolean(
+    rejoinContextGroupId &&
+      activeNativeGroupCall?.active &&
+      activeNativeGroupCall.userInCall === false &&
+      !suppressGroupRejoinBanner &&
+      activeNativeGroupCall.callId
+  );
+
+  useEffect(() => {
+    if (!nativeCall.callSideChatId || !nativeCall.isGroupCall) return;
+    if (nativeCall.phase !== 'connected') return;
+    if (selectedChatId === nativeCall.callSideChatId) return;
+    setSelectedChatId(nativeCall.callSideChatId);
+  }, [nativeCall.callSideChatId, nativeCall.isGroupCall, nativeCall.phase, selectedChatId]);
+
   useEffect(() => {
     setContactDetailsUser(null);
     if (textareaRef.current) {
@@ -997,13 +1131,20 @@ function ConversasContent() {
 
   const inviteGroupConference = useCallback(
     (mode: 'video' | 'audio') => {
-      if (!currentUser?.id || !activeChat || activeChat.chatType !== 'GROUP') return;
+      if (!currentUser?.id || !activeChat) return;
+      const groupChatId =
+        activeChat.chatType === 'GROUP'
+          ? activeChat.id
+          : activeChat.chatType === 'GROUP_CALL' && activeChat.parentGroupChatId
+            ? activeChat.parentGroupChatId
+            : null;
+      if (!groupChatId) return;
       const ids = activeChat.participants?.filter((p) => p.userId !== currentUser.id).map((p) => p.userId) ?? [];
       if (ids.length === 0) {
-        toast.error('Sem outros participantes no grupo.');
+        toast.error('Sem outros participantes para convidar.');
         return;
       }
-      void nativeCall.startGroupOutgoing(activeChat.id, mode === 'video', ids);
+      void nativeCall.startGroupOutgoing(groupChatId, mode === 'video', ids);
     },
     [activeChat, currentUser?.id, nativeCall]
   );
@@ -1777,19 +1918,22 @@ function ConversasContent() {
 
   // Helpers
   const getOtherUser = (chat: DirectChat): UserBasic | null => {
-    if (chat.chatType === 'GROUP') return null;
+    if (chat.chatType === 'GROUP' || chat.chatType === 'GROUP_CALL') return null;
     if (!currentUser) return null;
     return chat.initiatorId === currentUser.id ? chat.recipient : chat.initiator;
   };
 
   const getChatDisplayName = (chat: DirectChat) => {
-    if (chat.chatType === 'GROUP') {
-      return chat.groupName || 'Grupo';
+    if (chat.chatType === 'GROUP' || chat.chatType === 'GROUP_CALL') {
+      return chat.groupName || (chat.chatType === 'GROUP_CALL' ? 'Chamada' : 'Grupo');
     }
     return getOtherUser(chat)?.name || 'Conversa';
   };
 
   const getChatSubtitle = (chat: DirectChat) => {
+    if (chat.chatType === 'GROUP_CALL') {
+      return 'Sala temporária desta ligação';
+    }
     if (chat.chatType === 'GROUP') {
       const participants = chat.participants ?? [];
       const hasCurrentUser = participants.some((p) => p.userId === currentUser?.id);
@@ -1813,7 +1957,7 @@ function ConversasContent() {
   const getUnreadCount = (chat: DirectChat): number => {
     if (!currentUser) return 0;
     return chat.messages.filter(
-      (m) => !m.isSystem && !m.isRead && m.senderId !== currentUser.id
+      (m) => !messageIsSystemLike(m) && !m.isRead && m.senderId !== currentUser.id
     ).length;
   };
 
@@ -1888,7 +2032,8 @@ function ConversasContent() {
 
   /** Membro do grupo: pode editar nome e descrição (igual à API). */
   const isCurrentUserGroupMember = useMemo(() => {
-    if (!activeChat || activeChat.chatType !== 'GROUP' || !currentUser?.id) return false;
+    if (!activeChat || !currentUser?.id) return false;
+    if (activeChat.chatType !== 'GROUP' && activeChat.chatType !== 'GROUP_CALL') return false;
     const uid = String(currentUser.id);
     return activeChat.participants?.some((x) => String(x.userId) === uid) ?? false;
   }, [activeChat, currentUser]);
@@ -2217,7 +2362,7 @@ function ConversasContent() {
               {(() => {
                 const other = activeChat ? getOtherUser(activeChat) : null;
                 return (
-                  <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-shrink-0">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-shrink-0">
                     {isMobileView && (
                       <button onClick={() => setSelectedChatId(null)} className="text-gray-800 dark:text-gray-200 mr-1">
                         <ChevronLeft size={20} />
@@ -2240,6 +2385,28 @@ function ConversasContent() {
                               </p>
                             </div>
                           </button>
+                        ) : activeChat.chatType === 'GROUP_CALL' ? (
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            {activeChat.parentGroupChatId ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedChatId(activeChat.parentGroupChatId!)}
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                                title="Voltar ao grupo"
+                                aria-label="Voltar ao grupo"
+                              >
+                                <ChevronLeft size={20} />
+                              </button>
+                            ) : null}
+                            <div className="min-w-0 flex-1 text-left">
+                              <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+                                {getChatDisplayName(activeChat)}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                {getChatSubtitle(activeChat)}
+                              </p>
+                            </div>
+                          </div>
                         ) : (
                           <button
                             type="button"
@@ -2259,18 +2426,63 @@ function ConversasContent() {
                             </div>
                           </button>
                         )}
+                        {(activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') &&
+                          showGroupCallRejoinBanner &&
+                          activeNativeGroupCall?.callId && (
+                            <div
+                              className="flex min-w-0 shrink-0 items-center gap-1.5"
+                              role="status"
+                              aria-live="polite"
+                            >
+                              <span
+                                className="inline-flex max-w-[9rem] items-center gap-1 truncate rounded-lg border border-amber-200/80 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/50 dark:text-amber-100 sm:max-w-none"
+                                title={
+                                  activeNativeGroupCall.video
+                                    ? 'Há uma videochamada em andamento neste grupo.'
+                                    : 'Há uma ligação de voz em andamento neste grupo.'
+                                }
+                              >
+                                {activeNativeGroupCall.video ? (
+                                  <Video size={12} className="shrink-0" aria-hidden />
+                                ) : (
+                                  <Phone size={12} className="shrink-0" aria-hidden />
+                                )}
+                                <span className="truncate sm:whitespace-nowrap">
+                                  {activeNativeGroupCall.video ? 'Videochamada ativa' : 'Chamada ativa'}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                className="shrink-0 rounded-lg bg-amber-600 px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-sm hover:bg-amber-700 dark:bg-amber-600 dark:hover:bg-amber-500 sm:px-3 sm:text-xs"
+                                onClick={() => {
+                                  const gid =
+                                    activeChat.chatType === 'GROUP_CALL' && activeChat.parentGroupChatId
+                                      ? activeChat.parentGroupChatId
+                                      : selectedChatId;
+                                  if (!gid || !activeNativeGroupCall.callId) return;
+                                  void nativeCall.rejoinActiveGroupCall(
+                                    activeNativeGroupCall.callId,
+                                    gid,
+                                    activeNativeGroupCall.video ?? true
+                                  );
+                                }}
+                              >
+                                Entrar
+                              </button>
+                            </div>
+                          )}
                         <div ref={chatHeaderMenuRef} className="relative ml-auto flex shrink-0 items-center gap-0.5">
                           <button
                             type="button"
                             title={
-                              activeChat?.chatType === 'GROUP'
+                              activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL'
                                 ? 'Videochamada com todo o grupo'
                                 : 'Videochamada no sistema'
                             }
                             aria-label="Iniciar videochamada"
                             onClick={() => {
                               if (!activeChat?.id) return;
-                              if (activeChat.chatType === 'GROUP') {
+                              if (activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') {
                                 inviteGroupConference('video');
                                 return;
                               }
@@ -2287,14 +2499,14 @@ function ConversasContent() {
                           <button
                             type="button"
                             title={
-                              activeChat?.chatType === 'GROUP'
+                              activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL'
                                 ? 'Ligação de voz com todo o grupo'
                                 : 'Ligação de voz no sistema'
                             }
                             aria-label="Iniciar ligação de voz"
                             onClick={() => {
                               if (!activeChat?.id) return;
-                              if (activeChat.chatType === 'GROUP') {
+                              if (activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') {
                                 inviteGroupConference('audio');
                                 return;
                               }
@@ -2555,7 +2767,9 @@ function ConversasContent() {
                       {activeChat.pinnedMessage.deletedAt
                         ? 'Mensagem apagada'
                         : activeChat.pinnedMessage.content && activeChat.pinnedMessage.content !== '📎'
-                          ? activeChat.pinnedMessage.content
+                          ? messageIsSystemLike(activeChat.pinnedMessage)
+                            ? formatSystemChatContent(activeChat.pinnedMessage.content)
+                            : activeChat.pinnedMessage.content
                           : activeChat.pinnedMessage.attachments?.[0]?.fileName || '📎 Anexo'}
                     </p>
                   </button>
@@ -2586,7 +2800,10 @@ function ConversasContent() {
                     const prevMsg = activeChat.messages[idx - 1];
                     const showDate = !prevMsg || new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
                     const isClusterStart =
-                      !prevMsg || showDate || prevMsg.isSystem || prevMsg.senderId !== msg.senderId;
+                      !prevMsg ||
+                      showDate ||
+                      messageIsSystemLike(prevMsg) ||
+                      prevMsg.senderId !== msg.senderId;
                     const hasAttachments = msg.attachments.length > 0;
                     const hasVisibleText = !!(msg.content && msg.content !== '📎');
                     const hasImageAttachment = msg.attachments.some(
@@ -2603,7 +2820,7 @@ function ConversasContent() {
                             </span>
                           </div>
                         )}
-                        {msg.isSystem ? (
+                        {messageIsSystemLike(msg) ? (
                           <div
                             ref={(el) => {
                               if (el) msgRefs.current.set(msg.id, el);
@@ -2612,7 +2829,7 @@ function ConversasContent() {
                             className="flex justify-center px-2 py-2"
                           >
                             <p className="max-w-[min(100%,28rem)] text-center text-[12px] leading-snug text-gray-500 dark:text-gray-400 px-3">
-                              {msg.content}
+                              {formatSystemChatContent(msg.content || '')}
                             </p>
                           </div>
                         ) : (
@@ -2640,7 +2857,9 @@ function ConversasContent() {
                             textareaRef.current?.focus();
                           }}
                         >
-                          {activeChat?.chatType === 'GROUP' && !isOwn && !msg.deletedAt && (
+                          {(activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL') &&
+                            !isOwn &&
+                            !msg.deletedAt && (
                             <div className="mr-2 mt-1.5 flex w-8 flex-shrink-0 justify-center self-start">
                               {isClusterStart ? (
                                 <Avatar user={msg.sender} size="sm" />
@@ -2673,7 +2892,10 @@ function ConversasContent() {
                                       )
                                 )}
                               >
-                            {activeChat?.chatType === 'GROUP' && !isOwn && !msg.deletedAt && isClusterStart && (
+                            {(activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL') &&
+                              !isOwn &&
+                              !msg.deletedAt &&
+                              isClusterStart && (
                               <button
                                 type="button"
                                 onClick={() => setContactDetailsUser(msg.sender)}
@@ -3064,7 +3286,9 @@ function ConversasContent() {
                         </span>
                       </button>
 
-                      {contextMenuMessage && !contextMenuMessage.deletedAt && !contextMenuMessage.isSystem && (
+                      {contextMenuMessage &&
+                        !contextMenuMessage.deletedAt &&
+                        !messageIsSystemLike(contextMenuMessage) && (
                         <>
                           <div className="mx-4 h-px bg-gray-100 dark:bg-gray-700" role="separator" aria-hidden />
                           <button

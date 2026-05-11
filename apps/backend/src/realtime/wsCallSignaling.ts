@@ -3,6 +3,9 @@ import jwt from 'jsonwebtoken';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ChatType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { ChatService } from '../services/ChatService';
+
+const chatService = new ChatService();
 
 type CallRecord = {
   callerId: string;
@@ -15,6 +18,8 @@ type CallRecord = {
 
 type GroupSession = {
   chatId: string;
+  /** Chat GROUP_CALL onde ficam CALL_STARTED / CALL_LOG e mensagens da ligação. */
+  sideChatId: string;
   video: boolean;
   initiatorId: string;
   startedAt: Date;
@@ -128,8 +133,12 @@ async function namesByUserIds(ids: string[]): Promise<Record<string, string>> {
   return m;
 }
 
-function encodeCallInvite(callId: string, chatId: string): string {
-  const payload = JSON.stringify({ callId, chatId });
+function encodeCallInvite(callId: string, chatId: string, callSideChatId?: string): string {
+  const payload = JSON.stringify({
+    callId,
+    chatId,
+    ...(callSideChatId ? { callSideChatId } : {}),
+  });
   return Buffer.from(payload, 'utf8').toString('base64url');
 }
 
@@ -163,6 +172,7 @@ async function notifyGroupEveryone(callId: string, grp: GroupSession) {
     type: 'call:group-sync' as const,
     callId,
     chatId: grp.chatId,
+    callSideChatId: grp.sideChatId,
     members,
     locked: grp.locked,
     waitingApprovalCount: grp.waitingApproval.size,
@@ -216,6 +226,46 @@ async function persistCallHistory(params: {
   });
 }
 
+async function persistCallStartedMessage(params: {
+  chatId: string;
+  senderId: string;
+  mode: 'direct' | 'group';
+  callId: string;
+  video: boolean;
+  initiatorName: string;
+}) {
+  await prisma.message.create({
+    data: {
+      chatId: params.chatId,
+      senderId: params.senderId,
+      isSystem: true,
+      content: `CALL_STARTED:${JSON.stringify({
+        callId: params.callId,
+        mode: params.mode,
+        type: params.video ? 'video' : 'voice',
+        initiatorName: params.initiatorName,
+      })}`,
+    },
+  });
+}
+
+/** Para HTTP: saber se há chamada nativa em grupo ativa neste chat. */
+export function getActiveGroupCallForChat(chatId: string): {
+  callId: string;
+  video: boolean;
+  joinedUserIds: string[];
+} | null {
+  for (const [callId, grp] of groupSessions) {
+    if (grp.chatId !== chatId || grp.joined.size === 0) continue;
+    return {
+      callId,
+      video: grp.video,
+      joinedUserIds: [...grp.joined],
+    };
+  }
+  return null;
+}
+
 async function teardownGroupCall(callId: string, grp: GroupSession, toastMsg?: string) {
   const endedAt = new Date();
   for (const p of grp.joined) {
@@ -225,7 +275,7 @@ async function teardownGroupCall(callId: string, grp: GroupSession, toastMsg?: s
   }
   groupSessions.delete(callId);
   await persistCallHistory({
-    chatId: grp.chatId,
+    chatId: grp.sideChatId,
     callId,
     mode: 'group',
     callType: grp.video ? 'video' : 'voice',
@@ -302,6 +352,14 @@ export function attachCallSignaling(server: Server): void {
               isGroupCall: false,
               from: { id: uid, name: fromUser?.name || 'Usuário' },
             });
+            await persistCallStartedMessage({
+              chatId,
+              senderId: uid,
+              mode: 'direct',
+              callId,
+              video,
+              initiatorName: fromUser?.name || 'Usuário',
+            });
             break;
           }
 
@@ -340,8 +398,23 @@ export function attachCallSignaling(server: Server): void {
               return;
             }
 
+            let sideChatId: string;
+            try {
+              sideChatId = await chatService.createGroupCallSideChat({
+                parentGroupChatId: chatId,
+                initiatorId: uid,
+                callId,
+                participantUserIds: allParticipants,
+              });
+            } catch (e) {
+              console.error('[ws/calls] createGroupCallSideChat', e);
+              sendToUser(uid, { type: 'call:error', callId, code: 'side-chat-failed' });
+              return;
+            }
+
             groupSessions.set(callId, {
               chatId,
+              sideChatId,
               video,
               initiatorId: uid,
               startedAt: new Date(),
@@ -361,6 +434,7 @@ export function attachCallSignaling(server: Server): void {
                 type: 'call:incoming',
                 callId,
                 chatId,
+                callSideChatId: sideChatId,
                 video,
                 isGroupCall: true,
                 groupExpectedCount: memberCountMesh,
@@ -371,7 +445,16 @@ export function attachCallSignaling(server: Server): void {
               type: 'call:invite-link',
               callId,
               chatId,
-              inviteToken: encodeCallInvite(callId, chatId),
+              callSideChatId: sideChatId,
+              inviteToken: encodeCallInvite(callId, chatId, sideChatId),
+            });
+            await persistCallStartedMessage({
+              chatId: sideChatId,
+              senderId: uid,
+              mode: 'group',
+              callId,
+              video,
+              initiatorName: fromUser?.name || 'Usuário',
             });
             break;
           }
@@ -387,6 +470,7 @@ export function attachCallSignaling(server: Server): void {
               grp.ringing.delete(uid);
               grp.joined.add(uid);
               grp.mediaState.set(uid, { micMuted: false, camOff: !grp.video });
+              await chatService.ensureUserInGroupCallChat(grp.sideChatId, uid);
               meshNotifyNewJoiner(callId, grp, uid);
               await notifyGroupEveryone(callId, grp);
               sendToUser(grp.initiatorId, { type: 'call:group-progress', callId, joinedCount: grp.joined.size });
@@ -458,7 +542,7 @@ export function attachCallSignaling(server: Server): void {
                 }
                 groupSessions.delete(callId);
                 await persistCallHistory({
-                  chatId: grpE.chatId,
+                  chatId: grpE.sideChatId,
                   callId,
                   mode: 'group',
                   callType: grpE.video ? 'video' : 'voice',
@@ -513,8 +597,65 @@ export function attachCallSignaling(server: Server): void {
             grp.joined.add(uid);
             grp.waitingApproval.delete(uid);
             grp.mediaState.set(uid, { micMuted: false, camOff: !grp.video });
+            await chatService.ensureUserInGroupCallChat(grp.sideChatId, uid);
             meshNotifyNewJoiner(callId, grp, uid);
             await notifyGroupEveryone(callId, grp);
+            break;
+          }
+
+          case 'call:group-add-invite': {
+            const callId = msg.callId as string;
+            const targetUserIds = (msg.targetUserIds as string[] | undefined)?.filter(Boolean) ?? [];
+            if (!callId || targetUserIds.length === 0) return;
+            const grpAdd = groupSessions.get(callId);
+            if (!grpAdd || !grpAdd.joined.has(uid)) return;
+
+            const membersAdd = await getGroupParticipantIds(grpAdd.chatId);
+            if (!membersAdd) return;
+
+            const uniq = Array.from(new Set(targetUserIds));
+            const allowed = uniq.filter(
+              (id) =>
+                id !== uid &&
+                membersAdd.includes(id) &&
+                !grpAdd.joined.has(id) &&
+                !grpAdd.ringing.has(id) &&
+                !grpAdd.waitingApproval.has(id)
+            );
+            if (allowed.length === 0) return;
+
+            const projectedMesh = grpAdd.joined.size + grpAdd.ringing.size + allowed.length;
+            if (projectedMesh > MAX_GROUP_MESH) {
+              sendToUser(uid, { type: 'call:error', callId, code: 'group-too-big', max: MAX_GROUP_MESH });
+              return;
+            }
+
+            const busyAdd = allowed.filter((id) => userInAnyCallSocket(id));
+            if (busyAdd.length > 0) {
+              sendToUser(uid, { type: 'call:group-busy', callId, busyUserIds: busyAdd });
+              return;
+            }
+
+            for (const id of allowed) grpAdd.ringing.add(id);
+            await chatService.addUsersToGroupCallChat(grpAdd.sideChatId, allowed);
+
+            const fromAdd = await prisma.user.findUnique({
+              where: { id: uid },
+              select: { name: true },
+            });
+            const memberCountAdd = grpAdd.joined.size + grpAdd.ringing.size;
+            for (const tid of allowed) {
+              sendToUser(tid, {
+                type: 'call:incoming',
+                callId,
+                chatId: grpAdd.chatId,
+                callSideChatId: grpAdd.sideChatId,
+                video: grpAdd.video,
+                isGroupCall: true,
+                groupExpectedCount: memberCountAdd,
+                from: { id: uid, name: fromAdd?.name || 'Usuário' },
+              });
+            }
             break;
           }
 
@@ -552,6 +693,7 @@ export function attachCallSignaling(server: Server): void {
               grp.waitingApproval.delete(targetUserId);
               grp.joined.add(targetUserId);
               grp.mediaState.set(targetUserId, { micMuted: false, camOff: !grp.video });
+              await chatService.ensureUserInGroupCallChat(grp.sideChatId, targetUserId);
               meshNotifyNewJoiner(callId, grp, targetUserId);
               await notifyGroupEveryone(callId, grp);
               sendToUser(targetUserId, { type: 'call:group-join-approved', callId });

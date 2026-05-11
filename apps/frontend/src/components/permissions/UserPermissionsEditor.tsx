@@ -33,7 +33,12 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 
 /** Orçamento e relatórios fotográficos: só pela aba «Contratos», não pela matriz «Acesso». */
-const HIDDEN_FROM_ACCESS_MATRIX = new Set(PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX);
+const HIDDEN_FROM_ACCESS_MATRIX = new Set<string>([
+  ...PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
+  // Registros de Ponto: a página só aparece para funcionários com `requiresTimeClock`,
+  // não é controlada pela matriz de permissões.
+  pathToModuleKey('/ponto'),
+]);
 
 type PermissionItem = { module: string; action: string };
 
@@ -167,6 +172,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/conversas-whatsapp',
       '/ponto/aprovacoes',
       '/ponto/financeiro/gestao-solicitacoes',
+      '/ponto/solicitacoes-dp',
       '/ponto/drive',
     ].some((p) => h === p)
   ) {
@@ -210,6 +216,9 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/gerenciar-materiais',
       '/ponto/mapa-cotacao',
       '/ponto/ordem-de-compra',
+      '/ponto/estoque',
+      '/ponto/furo-estoque',
+      '/ponto/ajuste-estoque',
     ].some((p) => h === p)
   ) {
     return 'Suprimentos';

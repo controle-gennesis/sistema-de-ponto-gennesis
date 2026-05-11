@@ -127,7 +127,7 @@ export function usePermissions() {
   /** Rescisão / alteração função-salário: admin, equipe DP (gerenciar), Controle «criar solicitações restritas» ou Gestor DP no contrato. */
   const canCreateSensitiveDpRequestType = (contractId: string | null | undefined) => {
     if (isAdministrator || permissionData?.isAdmin) return true;
-    if (can(pk('/ponto/gerenciar-solicitacoes-gerais'))) return true;
+    if (can(pk('/ponto/gerenciar-solicitacoes-dp'))) return true;
     if (can(pk('/ponto/controle/criar-tipos-restritos-dp'))) return true;
     if (!contractId) return false;
     return dpApprovalContractIdSet.has(contractId);
@@ -283,9 +283,9 @@ export function useRoutePermission(route: string) {
     '/ponto/solicitacoes': isAdministrator || can(pk('/ponto/solicitacoes')),
     '/ponto/gerenciar-solicitacoes': isAdministrator || can(pk('/ponto/gerenciar-solicitacoes')),
     '/ponto/solicitacoes-gerais':
-      isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-gerais')),
+      isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-dp')),
     '/ponto/gerenciar-solicitacoes-gerais':
-      isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-gerais')),
+      isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-feriados')),
@@ -312,12 +312,8 @@ export function useRoutePermission(route: string) {
     '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),
     '/ponto/ordem-de-compra': isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra')),
     '/ponto/estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
-    '/ponto/ajuste-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
-    '/ponto/furo-estoque':
-      isAdministrator ||
-      isDepartmentCompras ||
-      can(pk('/ponto/estoque')) ||
-      can(pk('/ponto/furo-estoque')),
+    '/ponto/ajuste-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/ajuste-estoque')),
+    '/ponto/furo-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque')),
     '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
     '/ponto/condicoes-pagamento':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),

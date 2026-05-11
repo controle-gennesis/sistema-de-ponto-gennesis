@@ -775,20 +775,20 @@ router.get('/modules', authorize('EMPLOYEE'), async (req: AuthRequest, res, next
       },
       {
         id: 'point-corrections',
-        name: 'Alterações de ponto',
+        name: 'Alterações de Ponto',
         description: 'Solicitar e acompanhar alterações de marcação do ponto',
         icon: 'FileText',
         href: '/ponto/solicitacoes',
-        category: 'Alterações de ponto',
+        category: 'Alterações de Ponto',
         permissions: ['EMPLOYEE']
       },
       {
         id: 'manage-point-corrections',
-        name: 'Gerenciar alterações de ponto',
+        name: 'Gerenciar Alterações de Ponto',
         description: 'Analisar e aprovar alterações de marcação dos colaboradores',
         icon: 'FileText',
         href: '/ponto/gerenciar-solicitacoes',
-        category: 'Alterações de ponto',
+        category: 'Alterações de Ponto',
         permissions: ['ADMIN', 'PROJETOS']
       },
       {

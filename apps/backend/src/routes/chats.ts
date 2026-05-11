@@ -117,6 +117,11 @@ router.patch('/direct/:id/read', (req, res, next) =>
   chatController.markAsRead(req, res, next)
 );
 
+// Chamada nativa em grupo em andamento (antes de GET /direct/:id)
+router.get('/direct/:id/active-native-call', (req, res, next) =>
+  chatController.getActiveNativeCall(req, res, next)
+);
+
 // Obter chat direto específico com mensagens
 router.get('/direct/:id', (req, res, next) =>
   chatController.getDirectChatById(req, res, next)

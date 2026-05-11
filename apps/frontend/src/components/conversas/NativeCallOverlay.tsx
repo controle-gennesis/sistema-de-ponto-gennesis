@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Mic, MicOff, Video, VideoOff, PhoneOff, MonitorUp, Minimize2, Maximize2, MessageSquare, Send, Users, Copy, Lock, Unlock, VolumeX, UserX } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, MonitorUp, Minimize2, Maximize2, MessageSquare, Send, Users, Copy, Lock, Unlock, VolumeX, UserX, UserPlus } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeCallHook } from '@/hooks/useNativeWebRTCCall';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
@@ -173,6 +173,7 @@ export function NativeCallOverlay({
     callIsVideo,
     isScreenSharing,
     activeChatId,
+    callSideChatId,
     callDurationSec,
     callQuality,
     callLatencyMs,
@@ -193,6 +194,7 @@ export function NativeCallOverlay({
     muteGroupPeer,
     kickGroupPeer,
     approveGroupJoin,
+    inviteMoreToGroupCall,
   } = call;
 
   const localPipRef = useRef<HTMLVideoElement>(null);
@@ -206,6 +208,8 @@ export function NativeCallOverlay({
   const [minimizedPos, setMinimizedPos] = useState<{ x: number; y: number } | null>(null);
   const [isCallChatOpen, setIsCallChatOpen] = useState(false);
   const [isGroupPanelOpen, setIsGroupPanelOpen] = useState(false);
+  const [addParticipantOpen, setAddParticipantOpen] = useState(false);
+  const [addParticipantPick, setAddParticipantPick] = useState<string[]>([]);
   const [callMessage, setCallMessage] = useState('');
   const prevMinimizedRef = useRef(false);
   const minimizedCardRef = useRef<HTMLDivElement>(null);
@@ -304,6 +308,8 @@ export function NativeCallOverlay({
       setMinimizedPos(null);
       setIsCallChatOpen(false);
       setCallMessage('');
+      setAddParticipantOpen(false);
+      setAddParticipantPick([]);
     }
   }, [phase]);
 
@@ -328,31 +334,56 @@ export function NativeCallOverlay({
   const localLabel = localDisplayName || 'Você';
   const amHost = isGroupCall && !Object.values(groupPeers).some((p) => p.isHost);
   const showLocalAsMain = primaryView === 'local' && callIsVideo && !!localStream;
-  const canUseCallChat = !!activeChatId && phase === 'connected';
+  const chatIdForCallMessages =
+    isGroupCall && callSideChatId ? callSideChatId : activeChatId;
+  const canUseCallChat = !!chatIdForCallMessages && phase === 'connected';
 
   const { data: callChatData } = useQuery({
-    queryKey: ['native-call-chat', activeChatId],
+    queryKey: ['native-call-chat', chatIdForCallMessages],
     queryFn: async () => {
-      if (!activeChatId) return null;
-      const res = await api.get(`/chats/direct/${activeChatId}`);
+      if (!chatIdForCallMessages) return null;
+      const res = await api.get(`/chats/direct/${chatIdForCallMessages}`);
       return res.data?.data ?? null;
     },
     enabled: canUseCallChat,
     refetchInterval: canUseCallChat ? 3000 : false,
   });
 
+  const { data: groupChatForInvite } = useQuery({
+    queryKey: ['native-call-group-invite', activeChatId],
+    queryFn: async () => {
+      if (!activeChatId) return null;
+      const res = await api.get(`/chats/direct/${activeChatId}`);
+      return res.data?.data as {
+        chatType?: string;
+        participants?: Array<{ userId: string; user?: { name?: string | null } | null }>;
+      } | null;
+    },
+    enabled: Boolean(isGroupCall && activeChatId && phase === 'connected'),
+  });
+
+  const eligibleAddParticipants = useMemo(() => {
+    if (!groupChatForInvite || groupChatForInvite.chatType !== 'GROUP') return [];
+    const parts = groupChatForInvite.participants ?? [];
+    return parts.filter((p) => {
+      if (!p.userId || p.userId === user?.id) return false;
+      if (groupPeers[p.userId]) return false;
+      return true;
+    });
+  }, [groupChatForInvite, groupPeers, user?.id]);
+
   const sendMessageMutation = useMutation({
     mutationFn: async () => {
-      if (!activeChatId || !callMessage.trim()) return;
+      if (!chatIdForCallMessages || !callMessage.trim()) return;
       const fd = new FormData();
-      fd.append('chatId', activeChatId);
+      fd.append('chatId', chatIdForCallMessages);
       fd.append('content', callMessage.trim());
       await api.post('/chats/direct/messages', fd);
     },
     onSuccess: async () => {
       setCallMessage('');
-      await queryClient.invalidateQueries({ queryKey: ['native-call-chat', activeChatId] });
-      await queryClient.invalidateQueries({ queryKey: ['directChat', activeChatId] });
+      await queryClient.invalidateQueries({ queryKey: ['native-call-chat', chatIdForCallMessages] });
+      await queryClient.invalidateQueries({ queryKey: ['directChat', chatIdForCallMessages] });
       await queryClient.invalidateQueries({ queryKey: ['directChats'] });
     }
   });
@@ -817,22 +848,87 @@ export function NativeCallOverlay({
             )}
             {isGroupCall && isGroupPanelOpen && (
               <div className={`absolute bottom-24 left-4 top-16 z-30 flex w-[min(92vw,340px)] flex-col overflow-hidden rounded-2xl backdrop-blur-md ${isDark ? 'border border-white/20 bg-black/75' : 'border border-gray-300 bg-white/90'}`}>
-                <div className={`flex items-center justify-between border-b px-3 py-2 text-sm font-semibold ${isDark ? 'border-white/15' : 'border-gray-300'}`}>
+                <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 text-sm font-semibold ${isDark ? 'border-white/15' : 'border-gray-300'}`}>
                   <span>Participantes</span>
-                  {groupInviteLink && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(groupInviteLink);
-                        toast.success('Link da chamada copiado');
-                      }}
-                      className="rounded-md bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
-                    >
-                      <Copy className="mr-1 inline h-3 w-3" />
-                      Copiar link
-                    </button>
-                  )}
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    {phase === 'connected' && eligibleAddParticipants.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddParticipantOpen((v) => !v);
+                          setAddParticipantPick([]);
+                        }}
+                        className={`rounded-md px-2 py-1 text-xs ${addParticipantOpen ? 'bg-emerald-700 text-white' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                      >
+                        <UserPlus className="mr-1 inline h-3 w-3" />
+                        Adicionar
+                      </button>
+                    )}
+                    {groupInviteLink && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(groupInviteLink);
+                          toast.success('Link da chamada copiado');
+                        }}
+                        className="rounded-md bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+                      >
+                        <Copy className="mr-1 inline h-3 w-3" />
+                        Copiar link
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {addParticipantOpen && phase === 'connected' && (
+                  <div className={`max-h-48 space-y-2 overflow-y-auto border-b px-3 py-2 ${isDark ? 'border-white/15 bg-white/5' : 'border-gray-300 bg-slate-50'}`}>
+                    <p className={`text-[11px] ${footerTextClass}`}>Membros do grupo ainda fora desta chamada:</p>
+                    {eligibleAddParticipants.length === 0 ? (
+                      <p className="text-xs opacity-80">Ninguém disponível para adicionar.</p>
+                    ) : (
+                      <>
+                        {eligibleAddParticipants.map((p) => {
+                          const checked = addParticipantPick.includes(p.userId);
+                          return (
+                            <label
+                              key={p.userId}
+                              className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${isDark ? 'hover:bg-white/10' : 'hover:bg-white'}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setAddParticipantPick((prev) =>
+                                    checked ? prev.filter((id) => id !== p.userId) : [...prev, p.userId]
+                                  );
+                                }}
+                                className="rounded border-gray-400"
+                              />
+                              <span className="truncate">{p.user?.name?.trim() || 'Membro'}</span>
+                            </label>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          disabled={addParticipantPick.length === 0}
+                          onClick={() => {
+                            if (addParticipantPick.length === 0) return;
+                            inviteMoreToGroupCall(addParticipantPick);
+                            toast.success(
+                              addParticipantPick.length === 1
+                                ? 'Convite enviado'
+                                : `${addParticipantPick.length} convites enviados`
+                            );
+                            setAddParticipantPick([]);
+                            setAddParticipantOpen(false);
+                          }}
+                          className="mt-1 w-full rounded-lg bg-emerald-600 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Convidar selecionados
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-2 overflow-y-auto px-3 py-3">
                   <div className={`rounded-lg border px-2 py-1.5 text-xs ${isDark ? 'border-white/20 bg-white/5' : 'border-gray-300 bg-white'}`}>
                     <div className="flex items-center justify-between">

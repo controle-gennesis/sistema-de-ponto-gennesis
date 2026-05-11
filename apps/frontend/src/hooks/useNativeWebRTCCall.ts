@@ -19,6 +19,8 @@ export interface IncomingCallPayload {
   from: { id: string; name: string };
   isGroupCall?: boolean;
   groupExpectedCount?: number;
+  /** Sala GROUP_CALL (mensagens / histórico da ligação). */
+  callSideChatId?: string;
 }
 
 interface CallCtx {
@@ -89,6 +91,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
   const [groupCallLocked, setGroupCallLocked] = useState(false);
   const [groupPendingJoinIds, setGroupPendingJoinIds] = useState<string[]>([]);
   const [groupInviteLink, setGroupInviteLink] = useState<string | null>(null);
+  /** ID do chat GROUP_CALL (texto da ligação); `activeChatId` continua sendo o grupo para sinalização. */
+  const [callSideChatId, setCallSideChatId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -171,7 +175,9 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     setIncoming(null);
     setPeerName('');
     setCallIsVideo(false);
+    setIsGroupCall(false);
     setActiveChatId(null);
+    setCallSideChatId(null);
   }, [closePeer, stopAllMedia]);
 
   endCallRef.current = endCall;
@@ -417,6 +423,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
         if (type === 'call:group-sync') {
           const callId = msg.callId as string;
           if (callCtxRef.current?.callId !== callId) return;
+          const side = msg.callSideChatId as string | undefined;
+          if (side) setCallSideChatId(side);
           const members = (msg.members ?? []) as Array<{
             id: string;
             name?: string | null;
@@ -475,6 +483,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
           const callId = msg.callId as string;
           const token = msg.inviteToken as string | undefined;
           if (!token || callCtxRef.current?.callId !== callId) return;
+          const side = msg.callSideChatId as string | undefined;
+          if (side) setCallSideChatId(side);
           const url = `${window.location.origin}/ponto/conversas?callInvite=${encodeURIComponent(token)}`;
           setGroupInviteLink(url);
           return;
@@ -577,6 +587,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
 
         if (type === 'call:incoming') {
           if (phaseRef.current === 'connected' || callCtxRef.current) return;
+          const sideIn = msg.callSideChatId as string | undefined;
+          if (sideIn) setCallSideChatId(sideIn);
           setIncoming({
             callId: msg.callId as string,
             chatId: msg.chatId as string,
@@ -584,6 +596,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
             from: msg.from as IncomingCallPayload['from'],
             isGroupCall: Boolean(msg.isGroupCall),
             groupExpectedCount: typeof msg.groupExpectedCount === 'number' ? msg.groupExpectedCount : undefined,
+            callSideChatId: sideIn,
           });
           setActiveChatId((msg.chatId as string) || null);
           setPhase('ringing');
@@ -635,6 +648,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
             if (cur?.callId === callId) {
               setPhase('idle');
               setActiveChatId(null);
+              setCallSideChatId(null);
               toast('Chamada encerrada');
               return null;
             }
@@ -836,6 +850,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
       setGroupPeers({});
       setPeerName(name);
       setActiveChatId(chatId);
+      setCallSideChatId(null);
       setPhase('calling');
       setRemoteStream(null);
       closePeer();
@@ -898,6 +913,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
       }
 
       const callId = crypto.randomUUID();
+      setCallSideChatId(null);
       closePeer();
       setRemoteStream(null);
       groupPcsRef.current.forEach((gpc) => {
@@ -959,6 +975,61 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     [opts.userId, closePeer, stopAllMedia]
   );
 
+  const rejoinActiveGroupCall = useCallback(
+    async (callId: string, chatId: string, video: boolean) => {
+      if (!opts.userId || !callId || !chatId) return;
+      setCallSideChatId(null);
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        toast.error('Conexão de chamadas não está pronta.');
+        return;
+      }
+
+      groupPcsRef.current.forEach((gpc) => {
+        try {
+          gpc.close();
+        } catch {
+          /* ignore */
+        }
+      });
+      groupPcsRef.current.clear();
+
+      closePeer();
+      setRemoteStream(null);
+      callCtxRef.current = {
+        callId,
+        chatId,
+        peerUserId: '',
+        peerName: 'Chamada em grupo',
+        video,
+        isCaller: false,
+        isGroupCall: true,
+      };
+      setIsGroupCall(true);
+      setGroupPeers({});
+      setPeerName('Chamada em grupo');
+      setCallIsVideo(video);
+      setActiveChatId(chatId);
+      setPhase('calling');
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: video ? { facingMode: 'user' } : false,
+          audio: true,
+        });
+        localMediaRef.current = stream;
+        cameraTrackRef.current = stream.getVideoTracks()[0] ?? null;
+        setLocalStream(stream);
+        setCamOff(!video);
+        ws.send(JSON.stringify({ type: 'call:request-join', callId }));
+      } catch {
+        toast.error('Não foi possível acessar microfone ou câmera');
+        endCallRef.current();
+      }
+    },
+    [opts.userId, closePeer]
+  );
+
   const joinGroupFromInvite = useCallback(
     async (inviteToken: string, video: boolean) => {
       if (!opts.userId || !inviteToken) return;
@@ -974,9 +1045,9 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
         toast.error('Link de chamada inválido.');
         return;
       }
-      let payload: { callId?: string; chatId?: string };
+      let payload: { callId?: string; chatId?: string; callSideChatId?: string };
       try {
-        payload = JSON.parse(decoded) as { callId?: string; chatId?: string };
+        payload = JSON.parse(decoded) as { callId?: string; chatId?: string; callSideChatId?: string };
       } catch {
         toast.error('Link de chamada inválido.');
         return;
@@ -985,6 +1056,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
         toast.error('Link de chamada inválido.');
         return;
       }
+      if (payload.callSideChatId) setCallSideChatId(payload.callSideChatId);
 
       closePeer();
       setRemoteStream(null);
@@ -1042,6 +1114,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     });
     groupPcsRef.current.clear();
 
+    if (inc.callSideChatId) setCallSideChatId(inc.callSideChatId);
     callCtxRef.current = {
       callId,
       chatId,
@@ -1090,7 +1163,17 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     setIncoming(null);
     setPhase('idle');
     setActiveChatId(null);
+    setCallSideChatId(null);
   }, [incoming]);
+
+  const inviteMoreToGroupCall = useCallback((targetUserIds: string[]) => {
+    const ctx = callCtxRef.current;
+    const ws = wsRef.current;
+    if (!ctx?.isGroupCall || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const ids = Array.from(new Set(targetUserIds.filter(Boolean)));
+    if (ids.length === 0) return;
+    ws.send(JSON.stringify({ type: 'call:group-add-invite', callId: ctx.callId, targetUserIds: ids }));
+  }, []);
 
   const emitGroupMediaState = useCallback(
     (nextMicMuted: boolean, nextCamOff: boolean) => {
@@ -1285,6 +1368,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     peerName,
     callIsVideo,
     activeChatId,
+    callSideChatId,
     callDurationSec,
     callQuality,
     callLatencyMs,
@@ -1293,6 +1377,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     startOutgoing,
     startGroupOutgoing,
     joinGroupFromInvite,
+    rejoinActiveGroupCall,
     acceptIncoming,
     rejectIncoming,
     endCall,
@@ -1310,6 +1395,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     muteGroupPeer,
     kickGroupPeer,
     approveGroupJoin,
+    inviteMoreToGroupCall,
   };
 }
 

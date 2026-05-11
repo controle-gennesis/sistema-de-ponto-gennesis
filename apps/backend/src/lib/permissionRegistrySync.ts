@@ -5,6 +5,7 @@ import {
 } from '@sistema-ponto/permission-modules';
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
+// Nota: reload do registro central de permission-modules (rename "Painel de solicitações" → "Processos do Fluig").
 
 const VALID_PERMISSION_ACTIONS = new Set<string>([
   PERMISSION_ACCESS_ACTION,

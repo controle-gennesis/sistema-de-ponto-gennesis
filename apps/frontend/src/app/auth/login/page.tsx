@@ -11,7 +11,6 @@ import { toast } from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '@/context/ThemeContext';
 import { Loading } from '@/components/ui/Loading';
-import api from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -43,37 +42,9 @@ export default function LoginPage() {
       queryClient.clear();
       toast.success('Login realizado com sucesso!');
       
-      // Verificar se o token foi salvo antes de fazer a chamada (localStorage ou sessionStorage)
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-      if (!token) {
-        // Se não tem token, redirecionar para /ponto por padrão
-        setTimeout(() => {
-          router.push('/ponto');
-        }, 500);
-        return;
-      }
-      
-      // Buscar dados do usuário para verificar cargo e se precisa bater ponto
-      // Usar um pequeno delay para garantir que o token está disponível
-      setTimeout(async () => {
-        try {
-          const userRes = await api.get('/auth/me');
-          const userData = userRes.data?.data;
-          const userPosition = userData?.employee?.position;
-          const requiresTimeClock = userData?.employee?.requiresTimeClock !== false;
-          
-          // Se for Administrador, redirecionar para dashboard
-          if (userPosition === 'Administrador') {
-            router.push('/ponto/dashboard');
-          } else {
-            // Outros funcionários vão para /ponto (a página mostra mensagem se não precisa bater ponto)
-            router.push('/ponto');
-          }
-        } catch (userError: any) {
-          console.error('Erro ao buscar dados do usuário:', userError);
-          // Se não conseguir buscar dados do usuário, redirecionar para /ponto por padrão
-          router.push('/ponto');
-        }
+      // Todos os usuários autenticados vão para a Home (página de boas-vindas).
+      setTimeout(() => {
+        router.push('/ponto/home');
       }, 300);
     } catch (error: any) {
       // Verificar se é erro de credenciais inválidas

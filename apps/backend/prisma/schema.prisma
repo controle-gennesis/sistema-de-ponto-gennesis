@@ -716,6 +716,10 @@ model Chat {
   closedAt            DateTime?       // Quando foi encerrada
   lastMessageAt       DateTime?       // Última mensagem enviada
   pinnedMessageId     String?         // Mensagem fixada no topo
+  /// Quando `chatType` = GROUP_CALL: conversa “sala” da chamada nativa (histórico fora do grupo).
+  parentGroupChatId   String?
+  /// ID da sessão WebRTC (mesmo valor de `callId`) para correlacionar.
+  groupCallSessionId  String?
   
   // Mensagens da conversa
   messages            Message[]
@@ -728,6 +732,8 @@ model Chat {
   recipient           User?           @relation("ChatRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
   pinnedMessage       Message?        @relation("ChatPinnedMessage", fields: [pinnedMessageId], references: [id], onDelete: SetNull)
   userPrivacySettings ChatUserPrivacy[]
+  parentGroupChat     Chat?           @relation("GroupCallSideChat", fields: [parentGroupChatId], references: [id], onDelete: SetNull)
+  groupCallSideChats  Chat[]          @relation("GroupCallSideChat")
   
   @@index([initiatorId])
   @@index([recipientDepartment])
@@ -736,6 +742,8 @@ model Chat {
   @@index([groupName])
   @@index([status])
   @@index([lastMessageAt])
+  @@index([parentGroupChatId])
+  @@index([groupCallSessionId])
   @@map("chats")
 }
 
@@ -872,6 +880,7 @@ enum ChatType {
   DEPARTMENT  // Chat com setor (modelo antigo)
   DIRECT      // Chat direto entre usuários (estilo WhatsApp)
   GROUP       // Chat em grupo
+  GROUP_CALL  // Sala temporária da chamada nativa em grupo (mensagens de chamada + chat paralelo)
 }
 
 // Modelo de Status da Folha de Pagamento
@@ -2129,4 +2138,59 @@ model WhatsAppSubmission {
   @@index([status])
   @@index([createdAt])
   @@map("whatsapp_submissions")
+}
+
+/// Status da OS no Controle Financeiro (planilha "CONTROLE FINANCEIRO - MATERIAL/SERVIÇO APLICADO")
+enum FinancialControlStatus {
+  PROCESSO_COMPLETO // CONCLUÍDO (verde)
+  PAGO              // PAGO (verde claro)
+  AGUARDAR_NOTA     // PENDENTE (amarelo)
+  CANCELADO         // CANCELADO (vermelho)
+}
+
+/// Lançamentos da página "Controle Financeiro" (Material/Serviço Aplicado).
+/// Cada linha representa uma OS e suas informações de pagamento.
+model FinancialControlEntry {
+  id              String                  @id @default(cuid())
+  /// Mês e ano de referência do pagamento (para agrupamento na UI: JANEIRO/2025, FEVEREIRO/2025...).
+  paymentMonth    Int // 1-12
+  paymentYear     Int
+  /// Status visual da linha (cor da primeira coluna).
+  status          FinancialControlStatus @default(AGUARDAR_NOTA)
+  /// "O.S." — código ou identificação da Ordem de Serviço (ex.: ADM, IMP-20/SC-01, AD-11/SC-02).
+  osCode          String?
+  /// "Código-Nome do Fornecedor".
+  supplierName    String?
+  /// "Prf-Numero Parcela" (ex.: 3167883, 000391-1, 000010-1/2).
+  parcelNumber    String?
+  /// "Data de Emissão" da nota/título.
+  emissionDate    DateTime?
+  /// "Boleto" — Sim/Não/CANCELADA (texto livre para refletir a planilha).
+  boleto          String?
+  /// "Data de Vencto" — vencimento do pagamento.
+  dueDate         DateTime?
+  /// "Valor Original" do título.
+  originalValue   Decimal?               @db.Decimal(15, 2)
+  /// "O. C." — Ordem de Compra ou número auxiliar.
+  ocNumber        String?
+  /// "Valor Final" (após acertos/encontro de contas).
+  finalValue      Decimal?               @db.Decimal(15, 2)
+  /// "PAGO DIA" — data em que o pagamento foi efetivamente realizado.
+  paidDate        DateTime?
+  /// "Falta Dias" — campo numérico calculado/manual na planilha.
+  remainingDays   Int?
+  /// "Recebido" — observação livre (ex.: PAGO TED, PAGO PIX, CANCELADO, PAGO pelo ÊNFASE).
+  receivedNote    String?
+  notes           String?
+
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  createdBy       String?
+  updatedBy       String?
+
+  @@index([paymentYear, paymentMonth])
+  @@index([status])
+  @@index([dueDate])
+  @@index([supplierName])
+  @@map("financial_control_entries")
 }

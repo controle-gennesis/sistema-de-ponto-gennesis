@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { ChatService } from '../services/ChatService';
 import multer from 'multer';
 import { prisma } from '../lib/prisma';
+import { getActiveGroupCallForChat } from '../realtime/wsCallSignaling';
 
 const chatService = new ChatService();
 
@@ -561,6 +562,43 @@ export class ChatController {
       const { id } = req.params;
       const chat = await chatService.getDirectChatById(id, userId);
       res.json({ success: true, data: chat });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Chamada WebRTC em grupo ainda ativa (para banner “Entrar” no chat).
+   */
+  async getActiveNativeCall(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw createError('Usuário não autenticado', 401);
+
+      const { id } = req.params;
+      const chat = await chatService.getDirectChatById(id, userId);
+      if (chat.chatType !== 'GROUP') {
+        res.json({ success: true, data: { active: false } });
+        return;
+      }
+
+      const active = getActiveGroupCallForChat(id);
+      if (!active) {
+        res.json({ success: true, data: { active: false } });
+        return;
+      }
+
+      const userInCall = active.joinedUserIds.includes(userId);
+      res.json({
+        success: true,
+        data: {
+          active: true,
+          callId: active.callId,
+          video: active.video,
+          joinedUserIds: active.joinedUserIds,
+          userInCall,
+        },
+      });
     } catch (error: any) {
       next(error);
     }

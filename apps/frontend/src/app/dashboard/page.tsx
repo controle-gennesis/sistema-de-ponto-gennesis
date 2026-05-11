@@ -54,9 +54,9 @@ export default function DashboardPage() {
   console.log('User object:', user);
   console.log('User role:', user.role);
 
-  // Redirecionar para a tela de registrar ponto
-  console.log('Redirecting to /ponto');
-  router.push('/ponto');
+  // Redireciona para a Home (página de boas-vindas — padrão para todos os usuários).
+  console.log('Redirecting to /ponto/home');
+  router.push('/ponto/home');
   return null;
 
   return (

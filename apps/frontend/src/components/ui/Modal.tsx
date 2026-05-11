@@ -54,7 +54,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   const modalContent = (
     <div className="fixed inset-0 z-[1000]">
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center p-4">
         {/* Overlay */}
         <div
           className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
@@ -64,13 +64,13 @@ export const Modal: React.FC<ModalProps> = ({
         {/* Modal */}
         <div
           className={clsx(
-            'relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4',
+            'relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-h-[calc(100vh-2rem)] flex flex-col',
             sizeClasses[size]
           )}
         >
           {/* Header */}
           {(title || showCloseButton || headerActions) && (
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
               {title && (
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
               )}
@@ -94,7 +94,7 @@ export const Modal: React.FC<ModalProps> = ({
           )}
 
           {/* Content */}
-          <div className="p-6">
+          <div className="p-6 overflow-y-auto flex-1 min-h-0">
             {children}
           </div>
         </div>

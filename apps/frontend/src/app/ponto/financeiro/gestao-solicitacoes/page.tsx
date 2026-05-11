@@ -8,7 +8,7 @@ export default function GestaoSolicitacoesFinanceiroPage() {
   return (
     <FluigSolicitacoesPage
       config={{
-        title: 'Painel de solicitações',
+        title: 'Processos do Fluig',
         subtitle: 'Acompanhe em tempo real as solicitações do Fluig na visão financeira',
         datasets: ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', 'G5-Relatorio-DF'],
         datasetTabLabels: {

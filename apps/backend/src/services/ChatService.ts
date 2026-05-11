@@ -44,6 +44,11 @@ export class ChatService {
     return dept.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   }
 
+  /** Grupo ou sala temporária de chamada (participantes em `ChatParticipant`). */
+  private isParticipantManagedDirectChat(chatType: ChatType): boolean {
+    return chatType === ChatType.GROUP || chatType === ChatType.GROUP_CALL;
+  }
+
   /**
    * Filtro por usuário (limpar só pra mim + apagar só pra mim), estilo WhatsApp.
    */
@@ -774,11 +779,14 @@ export class ChatService {
 
     if (!chat) throw new Error('Chat não encontrado');
 
-    if (chat.chatType === ChatType.GROUP || chat.chatType === ChatType.DIRECT) {
-      const hasAccess =
-        chat.chatType === ChatType.GROUP
-          ? chat.participants.some((p) => p.userId === userId)
-          : chat.initiatorId === userId || chat.recipientId === userId;
+    if (
+      chat.chatType === ChatType.GROUP ||
+      chat.chatType === ChatType.GROUP_CALL ||
+      chat.chatType === ChatType.DIRECT
+    ) {
+      const hasAccess = this.isParticipantManagedDirectChat(chat.chatType)
+        ? chat.participants.some((p) => p.userId === userId)
+        : chat.initiatorId === userId || chat.recipientId === userId;
       if (!hasAccess) throw new Error('Você não tem acesso a este chat');
     }
 
@@ -1026,13 +1034,16 @@ export class ChatService {
       include: { participants: { select: { userId: true } } }
     });
     if (!chat) throw new Error('Chat não encontrado');
-    if (chat.chatType !== ChatType.DIRECT && chat.chatType !== ChatType.GROUP) {
+    if (
+      chat.chatType !== ChatType.DIRECT &&
+      chat.chatType !== ChatType.GROUP &&
+      chat.chatType !== ChatType.GROUP_CALL
+    ) {
       throw new Error('Tipo de chat não suportado');
     }
-    const hasAccess =
-      chat.chatType === ChatType.GROUP
-        ? chat.participants.some((p) => p.userId === userId)
-        : chat.initiatorId === userId || chat.recipientId === userId;
+    const hasAccess = this.isParticipantManagedDirectChat(chat.chatType)
+      ? chat.participants.some((p) => p.userId === userId)
+      : chat.initiatorId === userId || chat.recipientId === userId;
     if (!hasAccess) throw new Error('Você não tem acesso a este chat');
 
     const pinTarget = await prisma.message.findUnique({
@@ -1080,10 +1091,16 @@ export class ChatService {
       include: { participants: { select: { userId: true } } }
     });
     if (!chat) throw new Error('Chat não encontrado');
-    const hasAccess =
-      chat.chatType === ChatType.GROUP
-        ? chat.participants.some((p) => p.userId === userId)
-        : chat.initiatorId === userId || chat.recipientId === userId;
+    if (
+      chat.chatType !== ChatType.DIRECT &&
+      chat.chatType !== ChatType.GROUP &&
+      chat.chatType !== ChatType.GROUP_CALL
+    ) {
+      throw new Error('Tipo de chat não suportado');
+    }
+    const hasAccess = this.isParticipantManagedDirectChat(chat.chatType)
+      ? chat.participants.some((p) => p.userId === userId)
+      : chat.initiatorId === userId || chat.recipientId === userId;
     if (!hasAccess) throw new Error('Você não tem acesso a este chat');
 
     await prisma.chat.update({
@@ -1533,6 +1550,78 @@ export class ChatService {
   }
 
   /**
+   * Cria conversa GROUP_CALL espelhando o grupo (histórico de chamada fora do feed do grupo).
+   */
+  async createGroupCallSideChat(params: {
+    parentGroupChatId: string;
+    initiatorId: string;
+    callId: string;
+    participantUserIds: string[];
+  }): Promise<string> {
+    const parent = await prisma.chat.findFirst({
+      where: { id: params.parentGroupChatId, chatType: ChatType.GROUP },
+      select: { id: true, groupName: true },
+    });
+    if (!parent) throw new Error('Grupo não encontrado');
+
+    const uniqueParticipants = Array.from(new Set(params.participantUserIds.filter(Boolean)));
+    if (!uniqueParticipants.includes(params.initiatorId)) {
+      uniqueParticipants.push(params.initiatorId);
+    }
+
+    const titleBase = parent.groupName?.trim() || 'Grupo';
+    const chat = await prisma.chat.create({
+      data: {
+        chatType: ChatType.GROUP_CALL,
+        groupName: `Chamada · ${titleBase}`,
+        initiatorId: params.initiatorId,
+        status: ChatStatus.ACCEPTED,
+        acceptedBy: params.initiatorId,
+        acceptedAt: new Date(),
+        parentGroupChatId: params.parentGroupChatId,
+        groupCallSessionId: params.callId,
+        lastMessageAt: new Date(),
+        participants: {
+          create: uniqueParticipants.map((userId) => ({
+            userId,
+            isAdmin: userId === params.initiatorId,
+          })),
+        },
+      },
+      select: { id: true },
+    });
+    return chat.id;
+  }
+
+  /** Inclui usuários na sala GROUP_CALL (ex.: novos convidados durante a ligação). */
+  async addUsersToGroupCallChat(sideChatId: string, userIds: string[]): Promise<void> {
+    if (userIds.length === 0) return;
+    const chat = await prisma.chat.findFirst({
+      where: { id: sideChatId, chatType: ChatType.GROUP_CALL },
+      select: { id: true },
+    });
+    if (!chat) return;
+
+    const existing = await prisma.chatParticipant.findMany({
+      where: { chatId: sideChatId, userId: { in: userIds } },
+      select: { userId: true },
+    });
+    const have = new Set(existing.map((e) => e.userId));
+    const toAdd = userIds.filter((id) => id && !have.has(id));
+    if (toAdd.length === 0) return;
+
+    await prisma.chatParticipant.createMany({
+      data: toAdd.map((userId) => ({ chatId: sideChatId, userId, isAdmin: false })),
+      skipDuplicates: true,
+    });
+  }
+
+  /** Garante que quem entrou na chamada tenha acesso ao chat da sala. */
+  async ensureUserInGroupCallChat(sideChatId: string, userId: string): Promise<void> {
+    await this.addUsersToGroupCallChat(sideChatId, [userId]);
+  }
+
+  /**
    * Lista todos os chats diretos/grupo de um usuário (com a última mensagem)
    */
   async getDirectChats(userId: string) {
@@ -1584,11 +1673,15 @@ export class ChatService {
     });
 
     if (!chat) throw new Error('Chat não encontrado');
-    if (chat.chatType !== ChatType.DIRECT && chat.chatType !== ChatType.GROUP) {
+    if (
+      chat.chatType !== ChatType.DIRECT &&
+      chat.chatType !== ChatType.GROUP &&
+      chat.chatType !== ChatType.GROUP_CALL
+    ) {
       throw new Error('Chat não é do tipo suportado por este endpoint');
     }
 
-    const hasAccess = chat.chatType === ChatType.GROUP
+    const hasAccess = this.isParticipantManagedDirectChat(chat.chatType)
       ? chat.participants.some((p) => p.userId === userId)
       : chat.initiatorId === userId || chat.recipientId === userId;
     if (!hasAccess) throw new Error('Você não tem acesso a este chat');
@@ -1617,10 +1710,14 @@ export class ChatService {
     if (!message) throw new Error('Mensagem não encontrada');
     if (message.isSystem) throw new Error('Mensagens de evento não podem ser favoritadas');
     const chat = message.chat;
-    if (chat.chatType !== ChatType.DIRECT && chat.chatType !== ChatType.GROUP) {
+    if (
+      chat.chatType !== ChatType.DIRECT &&
+      chat.chatType !== ChatType.GROUP &&
+      chat.chatType !== ChatType.GROUP_CALL
+    ) {
       throw new Error('Mensagem não suportada neste contexto');
     }
-    if (chat.chatType === ChatType.GROUP) {
+    if (this.isParticipantManagedDirectChat(chat.chatType)) {
       if (!chat.participants.some((p) => p.userId === userId)) {
         throw new Error('Você não participa deste chat');
       }
@@ -1752,11 +1849,15 @@ export class ChatService {
     const chat = await prisma.chat.findUnique({ where: { id: chatId } });
 
     if (!chat) throw new Error('Chat não encontrado');
-    if (chat.chatType !== ChatType.DIRECT && chat.chatType !== ChatType.GROUP) {
+    if (
+      chat.chatType !== ChatType.DIRECT &&
+      chat.chatType !== ChatType.GROUP &&
+      chat.chatType !== ChatType.GROUP_CALL
+    ) {
       throw new Error('Use o método de mensagem correto para este tipo de chat');
     }
 
-    const canSend = chat.chatType === ChatType.GROUP
+    const canSend = this.isParticipantManagedDirectChat(chat.chatType)
       ? !!(await prisma.chatParticipant.findUnique({
           where: { chatId_userId: { chatId, userId: senderId } },
           select: { id: true }
@@ -1886,10 +1987,14 @@ export class ChatService {
     });
     if (!message) throw new Error('Mensagem não encontrada');
     const ch = message.chat;
-    if (ch.chatType !== ChatType.GROUP && ch.chatType !== ChatType.DIRECT) {
+    if (
+      ch.chatType !== ChatType.GROUP &&
+      ch.chatType !== ChatType.GROUP_CALL &&
+      ch.chatType !== ChatType.DIRECT
+    ) {
       throw new Error('Mensagem não suportada neste contexto');
     }
-    if (ch.chatType === ChatType.GROUP) {
+    if (this.isParticipantManagedDirectChat(ch.chatType)) {
       if (!ch.participants.some((p) => p.userId === userId)) throw new Error('Você não participa deste chat');
     } else if (ch.initiatorId !== userId && ch.recipientId !== userId) {
       throw new Error('Você não tem acesso a esta mensagem');
@@ -1913,11 +2018,10 @@ export class ChatService {
     });
     if (!chat) throw new Error('Chat não encontrado');
 
-    const hasAccess =
-      chat.chatType === ChatType.GROUP
-        ? chat.participants.some((p) => p.userId === userId)
-        : chat.chatType === ChatType.DIRECT &&
-          (chat.initiatorId === userId || chat.recipientId === userId);
+    const hasAccess = this.isParticipantManagedDirectChat(chat.chatType)
+      ? chat.participants.some((p) => p.userId === userId)
+      : chat.chatType === ChatType.DIRECT &&
+        (chat.initiatorId === userId || chat.recipientId === userId);
 
     if (!hasAccess) throw new Error('Você não tem acesso a este chat');
 

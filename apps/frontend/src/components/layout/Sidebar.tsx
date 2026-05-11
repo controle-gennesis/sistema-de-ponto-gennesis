@@ -215,7 +215,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
           },
           {
-            name: 'Painel de solicitações',
+            name: 'Processos do Fluig',
             href: '/ponto/financeiro/gestao-solicitacoes',
             icon: BarChart3,
             description: 'Solicitações do Fluig na visão financeira',
@@ -241,6 +241,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileCheck,
             description: 'Caixa de entrada de aprovações',
             permission: can(pk('/ponto/aprovacoes')) || canAccessDpApproverPages,
+          },
+          {
+            name: 'Solicitações Gerais',
+            href: '/ponto/solicitacoes-gerais',
+            icon: MailPlus,
+            description: 'Minhas solicitações ao DP',
+            permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
           }
         ]
       },
@@ -278,25 +285,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-atestados'))
           },
           {
-            name: 'Alterações de ponto',
+            name: 'Alterações de Ponto',
             href: '/ponto/solicitacoes',
             icon: MailPlus,
             description: 'Solicitar e acompanhar alterações de marcação do ponto',
             permission: isAdministrator || can(pk('/ponto/solicitacoes'))
           },
           {
-            name: 'Gerenciar alterações de ponto',
+            name: 'Gerenciar Alterações de Ponto',
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
             description: 'Analisar e aprovar alterações de marcação dos colaboradores',
             permission: isAdministrator || can(pk('/ponto/gerenciar-solicitacoes'))
-          },
-          {
-            name: 'Solicitações Gerais',
-            href: '/ponto/solicitacoes-gerais',
-            icon: MailPlus,
-            description: 'Minhas solicitações ao DP',
-            permission: isAdministrator || can(pk('/ponto/solicitacoes-gerais'))
           },
           {
             name: 'Gerenciar Solicitações Gerais',
@@ -304,7 +304,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Aprovar solicitações do DP',
             permission:
-              isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-gerais')),
+              isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
           {
             name: 'Férias',
@@ -356,6 +356,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: DollarSign,
         items: [
           {
+            name: 'Controle Financeiro',
+            href: '/ponto/financeiro/controle-financeiro',
+            icon: ClipboardList,
+            description: 'Controle de Material/Serviço Aplicado por mês e ano',
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro'))
+          },
+          {
             name: 'Financeiro',
             href: '/ponto/financeiro',
             icon: DollarSign,
@@ -368,8 +375,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BarChart3,
             description: 'Importar planilha e gerar relatórios de análise financeira',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise'))
-          }
-          ,
+          },
           {
             name: 'Análise de Extrato',
             href: '/ponto/financeiro/analise-extrato',
@@ -480,18 +486,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/furo-estoque',
             icon: PackageX,
             description: 'Pendências de entrega após recebimento parcial',
-            permission:
-              isAdministrator ||
-              isDepartmentCompras ||
-              can(pk('/ponto/estoque')) ||
-              can(pk('/ponto/furo-estoque'))
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque'))
           },
           {
             name: 'Ajuste de Estoque',
             href: '/ponto/ajuste-estoque',
             icon: Package,
             description: 'Realizar entradas e saídas de ajuste no estoque',
-            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque'))
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/ajuste-estoque'))
           },
         ]
       },
@@ -687,9 +689,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             {isCollapsed ? (
               /* Quando colapsada: logo acima do botão */
               <>
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+                <Link
+                  href="/ponto/home"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-transform hover:scale-105"
+                  title="Ir para a página inicial"
+                  aria-label="Página inicial"
+                >
                   <img src="/loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
-                </div>
+                </Link>
                 <button
                   onClick={() => setIsCollapsed(!isCollapsed)}
                   className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
@@ -701,15 +708,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             ) : (
               /* Quando expandida: logo e texto à esquerda, botão à direita */
               <>
-                <div className="flex items-center space-x-3 transition-opacity duration-500 ease-in-out">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+                <Link
+                  href="/ponto/home"
+                  className="flex items-center space-x-3 transition-opacity duration-500 ease-in-out rounded-lg -ml-1 pl-1 hover:opacity-90"
+                  title="Ir para a página inicial"
+                  aria-label="Página inicial"
+                >
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-transform group-hover:scale-105">
                     <img src="/loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
                   </div>
                   <div className="transition-all duration-500 ease-in-out">
                     <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Gennesis</h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 transition-all duration-500">Attendance</p>
                   </div>
-                </div>
+                </Link>
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={() => setIsCollapsed(!isCollapsed)}
