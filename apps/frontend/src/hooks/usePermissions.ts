@@ -140,6 +140,12 @@ export function usePermissions() {
     dpApprovalContractIds.length > 0 ||
     can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
 
+  /** Bloco «Espelhos NF» na tela de Aprovações: aprovação de espelho de NF (Controle). */
+  const canApproveEspelhoNf =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/aprovar-espelho-nf'));
+
   /** Lista de orçamentos: módulo Contratos + permissão checklist «Orçamento» em pelo menos um contrato. */
   const canAccessOrcamentoRoutePage =
     isElevatedUser ||
@@ -218,6 +224,7 @@ export function usePermissions() {
     dpApprovalContractIds,
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
+    canApproveEspelhoNf,
     canAccessContract,
     contractModuleFlags,
     canAccessOrcamentoRoutePage,

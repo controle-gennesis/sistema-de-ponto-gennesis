@@ -300,7 +300,7 @@ export default function AprovacoesPage() {
     }
   };
 
-  const { canAccessDpApproverPages } = usePermissions();
+  const { canAccessDpApproverPages, canApproveEspelhoNf } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -325,6 +325,7 @@ export default function AprovacoesPage() {
   });
   const { data: espelhoResp, isLoading: loadingEspelhoApprovals } = useQuery({
     queryKey: ['approvals', 'espelho-nf'],
+    enabled: !loadingUser && canApproveEspelhoNf,
     queryFn: async () => {
       const res = await api.get('/espelho-nf/bootstrap');
       const data = res.data?.data || {};
@@ -356,7 +357,6 @@ export default function AprovacoesPage() {
         taxCodes
       } as EspelhoApprovalsData;
     },
-    enabled: !loadingUser,
   });
 
   const dpRequests = (dpResp as DpRequest[]) || [];
@@ -729,6 +729,7 @@ export default function AprovacoesPage() {
             </CardContent>
           </Card>
 
+          {canApproveEspelhoNf && (
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex items-center space-x-3">
@@ -875,6 +876,7 @@ export default function AprovacoesPage() {
               )}
             </CardContent>
           </Card>
+          )}
 
           <Modal
             isOpen={!!detailRequest}

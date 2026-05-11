@@ -120,6 +120,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/controle/alterar-senha-funcionarios',
     category: 'Controle',
   },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
+    name: 'Aprovar Espelho de NF',
+    href: '/ponto/controle/aprovar-espelho-nf',
+    category: 'Controle',
+  },
 ] as const;
 
 const keySet = new Set(PERMISSION_MODULES.map((m) => m.key));
