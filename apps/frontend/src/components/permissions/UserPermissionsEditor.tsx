@@ -153,6 +153,7 @@ const CATEGORY_ORDER = [
   'Departamento Pessoal',
   'Financeiro',
   'Engenharia',
+  'Contratações e Licitações',
   'Suprimentos',
   'Cadastros',
   'Registros de Ponto',
@@ -210,6 +211,9 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Engenharia';
   }
+  if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes') {
+    return 'Contratações e Licitações';
+  }
   if (
     [
       '/ponto/solicitar-materiais',
@@ -241,7 +245,9 @@ function inferCategoryFromHref(href: string): string {
 
 function moduleCategory(m: PermissionModuleDef): string {
   const c = (m as { category?: string }).category?.trim();
-  return c || inferCategoryFromHref(m.href);
+  const raw = c || inferCategoryFromHref(m.href);
+  if (raw === 'Contrações e Licitações') return 'Contratações e Licitações';
+  return raw;
 }
 
 /** Nome amigável — nunca exibe rota crua na UI (fallback se `name` vier como path). */

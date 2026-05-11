@@ -390,6 +390,14 @@ export class DpRequestController {
     }
   }
 
+  /**
+   * Lista solicitações DP que o gestor pode visualizar, filtradas pela fase:
+   *  - `PENDING` (padrão): aguardando decisão do gestor (`WAITING_MANAGER`).
+   *  - `APPROVED`: já aprovadas pelo gestor (`managerApprovedAt` preenchido).
+   *  - `REJECTED`: reprovadas pelo gestor (`managerRejectionReason` preenchido).
+   *  - `ALL`: união das três fases acima.
+   * O escopo (contratos visíveis ao gestor) é aplicado em todas as fases.
+   */
   async getWaitingManagerApprovals(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -399,8 +407,31 @@ export class DpRequestController {
         return res.json({ success: true, data: [] });
       }
 
+      const rawPhase = String(req.query.phase ?? 'PENDING').toUpperCase();
+      type Phase = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
+      const phase: Phase = (['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).includes(
+        rawPhase as Phase
+      )
+        ? (rawPhase as Phase)
+        : 'PENDING';
+
+      const phaseFilter =
+        phase === 'PENDING'
+          ? { status: 'WAITING_MANAGER' as const }
+          : phase === 'APPROVED'
+            ? { managerApprovedAt: { not: null } }
+            : phase === 'REJECTED'
+              ? { managerRejectionReason: { not: null } }
+              : {
+                  OR: [
+                    { status: 'WAITING_MANAGER' as const },
+                    { managerApprovedAt: { not: null } },
+                    { managerRejectionReason: { not: null } },
+                  ],
+                };
+
       const requests = await prisma.dpRequest.findMany({
-        where: { status: 'WAITING_MANAGER', ...scope },
+        where: { ...phaseFilter, ...scope },
         include: {
           employee: {
             select: {

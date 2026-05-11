@@ -1177,6 +1177,63 @@ export default function ContractDetailPage() {
     [producaoPorMes, faturamentoPorMes]
   );
 
+  /** Faturamento (bruto) por mês civil em todo o contrato, chave ano-mês. */
+  const faturamentoPorYmKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of billings) {
+      const d = parseDateSafe(b.issueDate);
+      if (!d) continue;
+      const k = toYearMonthKey(d.getFullYear(), d.getMonth() + 1);
+      m.set(k, (m.get(k) || 0) + b.grossValue);
+    }
+    return m;
+  }, [billings]);
+
+  const vigenciaMonthList = useMemo(() => {
+    if (!contractVigenciaDates) return [] as VigenciaMonth[];
+    return listVigenciaMonthKeys(contractVigenciaDates.start, contractVigenciaDates.end);
+  }, [contractVigenciaDates]);
+
+  /**
+   * Meta real na linha do tempo da vigência: mesma ideia de saldo ÷ meses restantes, usando o faturado acumulado.
+   * Enquanto ainda não houve faturamento no contrato, coincide com a meta ideal; após o primeiro faturamento,
+   * (soma das metas ideais em toda a vigência − faturamento já acumulado antes do mês) ÷ meses de vigência restantes.
+   */
+  const metaRealByScheduleKey = useMemo(() => {
+    const out = new Map<string, number>();
+    if (!vigenciaMonthList.length) return out;
+    let totalIdealVigencia = 0;
+    for (const { key } of vigenciaMonthList) {
+      totalIdealVigencia += metaSchedule.get(key) ?? 0;
+    }
+    let cumFat = 0;
+    for (let i = 0; i < vigenciaMonthList.length; i++) {
+      const { key } = vigenciaMonthList[i];
+      const ideal = metaSchedule.get(key) ?? 0;
+      const monthsLeft = vigenciaMonthList.length - i;
+      let metaR: number;
+      if (cumFat < 1e-6) {
+        metaR = ideal;
+      } else {
+        metaR = monthsLeft > 0 ? Math.max(0, (totalIdealVigencia - cumFat) / monthsLeft) : 0;
+      }
+      out.set(key, metaR);
+      cumFat += faturamentoPorYmKey.get(key) || 0;
+    }
+    return out;
+  }, [vigenciaMonthList, metaSchedule, faturamentoPorYmKey]);
+
+  const metaRealPorMes = useMemo(() => {
+    const year = safeSelectedYear;
+    const result: (number | null)[] = new Array(12).fill(null);
+    for (let i = 0; i < 12; i++) {
+      const key = toYearMonthKey(year, i + 1);
+      if ((metaSchedule.get(key) ?? null) === null) continue;
+      result[i] = metaRealByScheduleKey.get(key) ?? (metaSchedule.get(key) ?? 0);
+    }
+    return result;
+  }, [safeSelectedYear, metaSchedule, metaRealByScheduleKey]);
+
   // Soma dos pleitos por ano (para Metas Anuais)
   const pleitosPorAno = useMemo(() => {
     const result: Record<number, number> = {};
@@ -2216,7 +2273,7 @@ export default function ContractDetailPage() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 dark:text-gray-400">Meta Mensal ({safeSelectedYear})</p>
+                  <p className="text-gray-500 dark:text-gray-400">Meta Ideal ({safeSelectedYear})</p>
                   {metaMensalCardInfo.kind === 'empty' && (
                     <p className="font-medium text-green-600 dark:text-green-400">-</p>
                   )}
@@ -2236,7 +2293,7 @@ export default function ContractDetailPage() {
                     </div>
                   )}
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Meta = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot; recalculam a
+                    Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot; recalculam a
                     partir da data até o fim do contrato. Ajuste no &quot;Valor Anual&quot; (lápis) só altera a meta do mês da
                     data até dezembro daquele ano civil.
                   </p>
@@ -2308,9 +2365,12 @@ export default function ContractDetailPage() {
                     Controle Geral - {safeSelectedYear}
                   </h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Meta base = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot;
+                    Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot;
                     recalculam da data do evento até o fim do contrato; ajuste do valor anual recalcula só entre o mês da data
-                    e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência.
+                    e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência. Meta real recalcula como saldo ÷ meses
+                    restantes na vigência inteira: sem faturamento ainda, igual à meta ideal; depois do primeiro faturamento,
+                    usa (soma das metas ideais na vigência completa − faturamento já acumulado no contrato até o mês anterior)
+                    ÷ meses de vigência restantes.
                   </p>
                 </>
               )}
@@ -2450,7 +2510,7 @@ export default function ContractDetailPage() {
                     <tbody>
                       <tr className="divide-x divide-gray-200 dark:divide-gray-700">
                         <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800/50">
-                          Meta Mensal
+                          Meta Ideal
                         </td>
                         {MESES.map((mes, i) => {
                           const month = i + 1;
@@ -2462,6 +2522,22 @@ export default function ContractDetailPage() {
                           >
                             {cellMeta !== null ? formatCurrency(cellMeta) : '-'}
                           </td>
+                          );
+                        })}
+                      </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-emerald-50/40 dark:bg-emerald-900/15">
+                        <td className="px-4 py-4 text-sm font-medium text-emerald-800 dark:text-emerald-300 bg-gray-50 dark:bg-gray-800/50">
+                          Meta Real
+                        </td>
+                        {MESES.map((mes, i) => {
+                          const v = metaRealPorMes[i];
+                          return (
+                            <td
+                              key={mes}
+                              className="px-3 py-4 text-center text-sm font-medium text-emerald-800 dark:text-emerald-300"
+                            >
+                              {v !== null ? formatCurrency(v) : '-'}
+                            </td>
                           );
                         })}
                       </tr>
@@ -3151,7 +3227,7 @@ export default function ContractDetailPage() {
                 </div>
                 <div className="p-6 space-y-4">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Cada aditivo recalcula a meta mensal a partir da data informada até o fim da vigência.
+                    Cada aditivo recalcula a meta ideal a partir da data informada até o fim da vigência.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <input
@@ -3310,7 +3386,7 @@ export default function ContractDetailPage() {
                         {formatCurrency(valorAnualBase + parseCurrencyInput(adjFormDeltaStr || '0'))}
                       </span>
                       <span className="block mt-1 text-xs">
-                        A meta mensal pós-aditivo não é esse valor ÷ 12; use a tabela Controle Geral para ver o rateio.
+                        A meta ideal pós-aditivo não é esse valor ÷ 12; use a tabela Controle Geral para ver o rateio.
                       </span>
                     </p>
                   )}

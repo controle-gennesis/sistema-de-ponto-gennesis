@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { Check, Download, Eye, FileCheck, FileText, Wrench, Search, X } from 'lucide-react';
+import { Check, Download, Eye, FileCheck, FileText, Filter, Wrench, Search, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import {
   exportEspelhoNfPdf,
@@ -271,10 +271,17 @@ export default function AprovacoesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const [search, setSearch] = useState('');
+  /** Fase do bloco «Solicitações»: pendentes (padrão), aprovadas, reprovadas ou todas. */
+  type DpPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
+  const [searchDp, setSearchDp] = useState('');
+  const [dpPhase, setDpPhase] = useState<DpPhaseFilter>('PENDING');
+  const [isDpFiltersOpen, setIsDpFiltersOpen] = useState(false);
+  /** Busca + filtro de status do bloco «Espelhos NF». */
+  const [searchEspelho, setSearchEspelho] = useState('');
+  const [isEspelhoFiltersOpen, setIsEspelhoFiltersOpen] = useState(false);
   const [managerComment, setManagerComment] = useState<Record<string, string>>({});
   const [detailRequest, setDetailRequest] = useState<DpRequest | null>(null);
-  const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('PENDING_APPROVAL');
+  const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('ALL');
   const [attachmentPreview, setAttachmentPreview] = useState<{
     fileName: string;
     mimeType: string;
@@ -316,9 +323,9 @@ export default function AprovacoesPage() {
   };
 
   const { data: dpResp, isLoading: loadingDp } = useQuery({
-    queryKey: ['approvals', 'dp', 'WAITING_MANAGER'],
+    queryKey: ['approvals', 'dp', dpPhase],
     queryFn: async () => {
-      const res = await api.get('/solicitacoes-dp/aprovacoes');
+      const res = await api.get(`/solicitacoes-dp/aprovacoes?phase=${dpPhase}`);
       return (res.data?.data ?? []) as DpRequest[];
     },
     enabled: !loadingUser && canApproveDp,
@@ -480,15 +487,16 @@ export default function AprovacoesPage() {
   }, [detailRequest, detailModalRows, employeeNameByIdForDetail]);
 
   const dpFiltered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = searchDp.trim().toLowerCase();
     if (!q) return dpRequests;
     return dpRequests.filter((r) => {
       if (r.displayNumber != null && String(r.displayNumber).includes(q)) return true;
       return r.id.toLowerCase().includes(q);
     });
-  }, [dpRequests, search]);
+  }, [dpRequests, searchDp]);
+
   const espelhoFiltered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = searchEspelho.trim().toLowerCase();
     const byPhase =
       espelhoPhase === 'ALL'
         ? espelhoApprovals
@@ -498,17 +506,7 @@ export default function AprovacoesPage() {
       const title = `${m.takerName} ${m.measurementRef} ${m.measurementAmount} ${m.id}`.toLowerCase();
       return title.includes(q);
     });
-  }, [espelhoApprovals, espelhoPhase, search]);
-  const espelhoPhaseCounts = useMemo(
-    () => ({
-      ALL: espelhoApprovals.length,
-      PENDING_APPROVAL: espelhoApprovals.filter((m) => m.status === 'PENDING_APPROVAL').length,
-      SENT_FOR_CORRECTION: espelhoApprovals.filter((m) => m.status === 'SENT_FOR_CORRECTION').length,
-      APPROVED: espelhoApprovals.filter((m) => m.status === 'APPROVED').length,
-      CANCELLED: espelhoApprovals.filter((m) => m.status === 'CANCELLED').length
-    }),
-    [espelhoApprovals]
-  );
+  }, [espelhoApprovals, espelhoPhase, searchEspelho]);
 
   const approveMutation = useMutation({
     mutationFn: async ({ id }: { id: string }) => {
@@ -596,6 +594,7 @@ export default function AprovacoesPage() {
             </p>
           </div>
 
+          {canApproveDp && (
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -615,12 +614,38 @@ export default function AprovacoesPage() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
+                      value={searchDp}
+                      onChange={(e) => setSearchDp(e.target.value)}
                       placeholder="Buscar por Nº ou ID..."
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
+                    {searchDp && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchDp('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsDpFiltersOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      dpPhase !== 'PENDING'
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={dpPhase !== 'PENDING' ? 'Filtro (status ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {dpPhase !== 'PENDING' && (
+                      <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    )}
+                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -728,151 +753,176 @@ export default function AprovacoesPage() {
               )}
             </CardContent>
           </Card>
+          )}
 
           {canApproveEspelhoNf && (
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                  <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                    <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Espelhos NF</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Pendentes de aprovação/correção</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Espelhos NF</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Pendentes de aprovação/correção</p>
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={searchEspelho}
+                      onChange={(e) => setSearchEspelho(e.target.value)}
+                      placeholder="Buscar por tomador, medição ou ID..."
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {searchEspelho && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchEspelho('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEspelhoFiltersOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      espelhoPhase !== 'ALL'
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={espelhoPhase !== 'ALL' ? 'Filtro (status ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {espelhoPhase !== 'ALL' && (
+                      <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    )}
+                  </button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="mb-3 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs sm:text-sm">
-                  {([
-                    ['PENDING_APPROVAL', 'Pendentes'],
-                    ['SENT_FOR_CORRECTION', 'Correção'],
-                    ['APPROVED', 'Aprovados'],
-                    ['CANCELLED', 'Cancelados'],
-                    ['ALL', 'Todas']
-                  ] as const).map(([phaseKey, label]) => (
-                    <button
-                      key={phaseKey}
-                      type="button"
-                      onClick={() => setEspelhoPhase(phaseKey)}
-                      className={`relative pb-2 transition-colors ${
-                        espelhoPhase === phaseKey
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                      }`}
-                    >
-                      <span>{label}</span>
-                      <span className="ml-1 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] dark:bg-gray-700">
-                        {espelhoPhaseCounts[phaseKey]}
-                      </span>
-                      {espelhoPhase === phaseKey ? (
-                        <span className="absolute inset-x-0 -bottom-px h-0.5 bg-blue-600 dark:bg-blue-400" />
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
               {loadingEspelhoApprovals ? (
                 <Loading message="Carregando espelhos..." />
-              ) : espelhoFiltered.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum espelho pendente de decisão.</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="border-b border-gray-200 dark:border-gray-700">
-                      <tr>
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Tomador | Medição | Referência
-                        </th>
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Vencimento
-                        </th>
-                        <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Ações
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                      {espelhoFiltered.map((m) => {
-                        const med = parseEspelhoBrCurrencyToNumber(m.measurementAmount);
-                        const medTxt = med !== null ? fmtEspelhoBrl(med) : 'Medição não informada';
-                        const title = `${m.takerName || 'Tomador não informado'} | ${medTxt} | ${m.measurementRef || 'Sem referência'}`;
-                        return (
-                          <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                            <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium text-gray-900 dark:text-gray-100">
-                              <div className="space-y-0.5">
-                                <div>{title}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">ID: {m.id}</div>
-                              </div>
-                            </td>
-                            <td className="px-3 sm:px-6 py-3 align-middle">
-                              <span
-                                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                                  ESPELHO_BADGE_CLASS[m.status]
-                                }`}
-                              >
-                                {ESPELHO_APPROVAL_STATUS_LABELS[m.status]}
-                              </span>
-                            </td>
-                            <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
-                              {m.dueDate || '—'}
-                            </td>
-                            <td className="px-3 sm:px-6 py-3 align-middle">
-                              <div className="flex justify-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => void applyEspelhoDecision(m.id, 'APPROVED', 'Espelho aprovado.')}
-                                  className={`${TABLE_ACTION_ICON_BTN_CLASS} text-emerald-600 dark:text-emerald-400`}
-                                  title="Aprovar"
-                                  aria-label="Aprovar espelho"
+                <>
+                  <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                    <span>
+                      Mostrando {espelhoFiltered.length === 0 ? 0 : 1} a {espelhoFiltered.length} de {espelhoFiltered.length}{' '}
+                      espelhos
+                    </span>
+                    <span>Página 1 de 1</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Tomador | Medição | Referência
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Status
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Vencimento
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Ações
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {espelhoFiltered.map((m) => {
+                          const med = parseEspelhoBrCurrencyToNumber(m.measurementAmount);
+                          const medTxt = med !== null ? fmtEspelhoBrl(med) : 'Medição não informada';
+                          const title = `${m.takerName || 'Tomador não informado'} | ${medTxt} | ${m.measurementRef || 'Sem referência'}`;
+                          return (
+                            <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium text-gray-900 dark:text-gray-100">
+                                <div className="space-y-0.5">
+                                  <div>{title}</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">ID: {m.id}</div>
+                                </div>
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 align-middle">
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                    ESPELHO_BADGE_CLASS[m.status]
+                                  }`}
                                 >
-                                  <Check className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void applyEspelhoDecision(
-                                      m.id,
-                                      'SENT_FOR_CORRECTION',
-                                      'Espelho enviado para correção.'
-                                    )
-                                  }
-                                  className={`${TABLE_ACTION_ICON_BTN_CLASS} text-amber-500 dark:text-amber-400`}
-                                  title="Enviar para correção"
-                                  aria-label="Enviar espelho para correção"
-                                >
-                                  <Wrench className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void applyEspelhoDecision(m.id, 'CANCELLED', 'Espelho cancelado.')}
-                                  className={`${TABLE_ACTION_ICON_BTN_CLASS} text-red-600 dark:text-red-400`}
-                                  title="Cancelar"
-                                  aria-label="Cancelar espelho"
-                                >
-                                  <X className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDownloadEspelhoPdf(m)}
-                                  className={TABLE_ACTION_ICON_BTN_CLASS}
-                                  title="Baixar PDF do espelho"
-                                  aria-label="Baixar PDF do espelho"
-                                >
-                                  <Download className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                </button>
-                              </div>
+                                  {ESPELHO_APPROVAL_STATUS_LABELS[m.status]}
+                                </span>
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
+                                {m.dueDate || '—'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 align-middle">
+                                <div className="flex justify-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => void applyEspelhoDecision(m.id, 'APPROVED', 'Espelho aprovado.')}
+                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-emerald-600 dark:text-emerald-400`}
+                                    title="Aprovar"
+                                    aria-label="Aprovar espelho"
+                                  >
+                                    <Check className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void applyEspelhoDecision(
+                                        m.id,
+                                        'SENT_FOR_CORRECTION',
+                                        'Espelho enviado para correção.'
+                                      )
+                                    }
+                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-amber-500 dark:text-amber-400`}
+                                    title="Enviar para correção"
+                                    aria-label="Enviar espelho para correção"
+                                  >
+                                    <Wrench className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void applyEspelhoDecision(m.id, 'CANCELLED', 'Espelho cancelado.')}
+                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-red-600 dark:text-red-400`}
+                                    title="Cancelar"
+                                    aria-label="Cancelar espelho"
+                                  >
+                                    <X className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadEspelhoPdf(m)}
+                                    className={TABLE_ACTION_ICON_BTN_CLASS}
+                                    title="Baixar PDF do espelho"
+                                    aria-label="Baixar PDF do espelho"
+                                  >
+                                    <Download className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {espelhoFiltered.length === 0 && (
+                          <tr>
+                            <td className="py-8 text-center text-gray-500" colSpan={4}>
+                              Nenhum espelho pendente de decisão.
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -1024,6 +1074,95 @@ export default function AprovacoesPage() {
               </div>
             </div>
           )}
+
+          {/* Modal de Filtros — bloco «Solicitações» */}
+          <Modal
+            isOpen={isDpFiltersOpen}
+            onClose={() => setIsDpFiltersOpen(false)}
+            title="Filtros"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Status
+                </label>
+                <select
+                  value={dpPhase}
+                  onChange={(e) => setDpPhase(e.target.value as DpPhaseFilter)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="PENDING">Pendentes</option>
+                  <option value="APPROVED">Aprovadas</option>
+                  <option value="REJECTED">Reprovadas</option>
+                  <option value="ALL">Todas</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setDpPhase('PENDING')}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDpFiltersOpen(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Modal de Filtros — bloco «Espelhos NF» */}
+          <Modal
+            isOpen={isEspelhoFiltersOpen}
+            onClose={() => setIsEspelhoFiltersOpen(false)}
+            title="Filtros"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Status
+                </label>
+                <select
+                  value={espelhoPhase}
+                  onChange={(e) =>
+                    setEspelhoPhase(e.target.value as EspelhoPhaseFilter)
+                  }
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="ALL">Todos os status</option>
+                  <option value="PENDING_APPROVAL">Pendentes</option>
+                  <option value="SENT_FOR_CORRECTION">Correção</option>
+                  <option value="APPROVED">Aprovados</option>
+                  <option value="CANCELLED">Cancelados</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setEspelhoPhase('ALL')}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEspelhoFiltersOpen(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+          </Modal>
         </div>
       </MainLayout>
     </ProtectedRoute>

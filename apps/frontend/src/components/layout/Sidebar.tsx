@@ -96,6 +96,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     userDepartment,
     can,
     canAccessDpApproverPages,
+    canApproveEspelhoNf,
     canAccessOsRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
@@ -240,7 +241,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/aprovacoes',
             icon: FileCheck,
             description: 'Caixa de entrada de aprovações',
-            permission: can(pk('/ponto/aprovacoes')) || canAccessDpApproverPages,
+            // Aparece automaticamente para quem é gestor (decide Solicitações Gerais)
+            // ou tem a permissão «Aprovar Espelho de NF» (Controle).
+            permission: canAccessDpApproverPages || canApproveEspelhoNf,
           },
           {
             name: 'Solicitações Gerais',
@@ -422,7 +425,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       },
       {
         id: 'contratos-licitacoes',
-        name: 'Contrações e Licitações',
+        name: 'Contratações e Licitações',
         icon: FileText,
         items: [
           {

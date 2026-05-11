@@ -5,7 +5,7 @@ import {
 } from '@sistema-ponto/permission-modules';
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
-// Nota: reload do registro central de permission-modules — nova permissão «Aprovar Espelho de NF» (Controle).
+// Nota: reload do registro central de permission-modules — «Aprovações» removida da matriz; visibilidade agora é derivada (gestor + Espelho NF).
 
 const VALID_PERMISSION_ACTIONS = new Set<string>([
   PERMISSION_ACCESS_ACTION,
