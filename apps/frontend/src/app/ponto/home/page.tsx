@@ -1,5 +1,6 @@
 'use client';
 
+// Página padrão de entrada para todos os usuários autenticados (home minimalista).
 export const dynamic = 'force-dynamic';
 
 import React, { useEffect, useMemo, useState } from 'react';
