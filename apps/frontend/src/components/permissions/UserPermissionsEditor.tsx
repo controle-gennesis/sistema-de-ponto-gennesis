@@ -16,7 +16,6 @@ import {
   Package,
   FolderOpen,
   Clock,
-  SlidersHorizontal,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -149,7 +148,6 @@ type ContractOption = { id: string; name: string; number: string };
 
 const CATEGORY_ORDER = [
   'Principal',
-  'Painel de Controle',
   'Departamento Pessoal',
   'Financeiro',
   'Engenharia',
@@ -179,7 +177,6 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Principal';
   }
-  if (h === '/ponto/permissoes') return 'Painel de Controle';
   if (
     [
       '/ponto/funcionarios',
@@ -281,7 +278,6 @@ function moduleIcon(href: string): LucideIcon {
   if (href === '/ponto') return Clock;
   if (href.startsWith('/relatorios')) return Layers;
   if (href.startsWith('/ponto/controle')) return Settings;
-  if (href.includes('permissoes')) return SlidersHorizontal;
   if (href.includes('funcionarios') || href.includes('ferias') || href.includes('atestados')) return User;
   return Layers;
 }
