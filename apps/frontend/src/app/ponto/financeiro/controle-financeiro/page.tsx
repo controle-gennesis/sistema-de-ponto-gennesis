@@ -762,7 +762,7 @@ export default function ControleFinanceiroPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-8">
+            <div className="flex flex-col gap-4 sm:gap-6">
               {groupedByMonth.map((group) => (
                 <MonthGroup
                   key={`${group.year}-${group.month}`}
