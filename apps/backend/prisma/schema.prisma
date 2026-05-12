@@ -963,6 +963,12 @@ model EspelhoNfTaxCode {
   id                   String   @id @default(cuid())
   name                 String // Nome exibido no frontend (antes "cityName")
   abatesMaterial       Boolean  @default(false)
+  /// Possui garantia complementar (contrato)
+  hasComplementaryWarranty Boolean @default(false)
+  /// Se possui garantia: a garantia é retida na nota? (null = não se aplica)
+  garantiaRetidaNaNota Boolean?
+  /// Alíquota da garantia (%), texto pt-BR; vazio se não houver garantia complementar
+  garantiaAliquota     String   @default("")
   issRate              String
   cofinsCollectionType String   @default("RETIDO")
   csllCollectionType   String   @default("RETIDO")
@@ -1047,6 +1053,10 @@ model EspelhoNfMirror {
   measurementStartDate  String?
   measurementEndDate    String?
   buildingUnit          String?
+  /// Nº inscrição Obra / CNO (formato xx.xxx.xxxxx/xx)
+  obraCno               String?
+  /// Garantia complementar (texto livre)
+  garantiaComplementar  String?
   observations          String?
   notes                 String?
   measurementAmount     String
@@ -1064,6 +1074,10 @@ model EspelhoNfMirror {
   xmlAttachmentMimeType String?
   xmlAttachmentSize     Int?
   xmlAttachmentDataUrl  String?
+  /// Quais campos opcionais da NF o usuário escolheu exibir/preencher (JSON: processNumber, empenhoNumber, …)
+  nfConstarNaNota       Json?
+  /// Confirmação obrigatória de que o usuário revisou “constar na nota fiscal”
+  nfConstarNaNotaAcknowledged Boolean @default(false)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 

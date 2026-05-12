@@ -15,6 +15,8 @@ export type EspelhoMirrorDraft = {
   measurementStartDate?: string;
   measurementEndDate?: string;
   buildingUnit: string;
+  obraCno?: string;
+  garantiaComplementar?: string;
   observations: string;
   notes: string;
   /** Valores em pt-BR (ex.: 50.000,00) */
@@ -34,6 +36,8 @@ export type EspelhoMirrorDraft = {
   /** CNAE e lista de serviço escolhidos no espelho */
   cnae?: string;
   serviceIssqn?: string;
+  /** Campos opcionais visíveis no formulário (espelho-nf) */
+  nfConstarNaNota?: Record<string, boolean> | null;
 };
 
 export type EspelhoExportProvider = {
@@ -102,6 +106,12 @@ export type EspelhoExportTaxCode = {
   id: string;
   cityName: string;
   issRate: string;
+  /** Possui garantia complementar (código tributário) */
+  hasComplementaryWarranty?: boolean;
+  /** Se possui garantia: a garantia é retida na nota? (null = não se aplica) */
+  garantiaRetidaNaNota?: boolean | null;
+  /** Alíquota da garantia (%), texto pt-BR (sem o símbolo %) */
+  garantiaAliquota?: string;
   cofins: EspelhoTaxRule;
   csll: EspelhoTaxRule;
   inss: EspelhoTaxRule;
@@ -141,8 +151,95 @@ function fmtPct(v: string | undefined | null): string {
   return t ? `${t}%` : '—';
 }
 
+function ptNumeroExtenso(n: number): string {
+  const ones: Record<number, string> = {
+    0: 'zero',
+    1: 'um',
+    2: 'dois',
+    3: 'três',
+    4: 'quatro',
+    5: 'cinco',
+    6: 'seis',
+    7: 'sete',
+    8: 'oito',
+    9: 'nove',
+    10: 'dez',
+    11: 'onze',
+    12: 'doze',
+    13: 'treze',
+    14: 'quatorze',
+    15: 'quinze',
+    16: 'dezesseis',
+    17: 'dezessete',
+    18: 'dezoito',
+    19: 'dezenove'
+  };
+  const tens: Record<number, string> = {
+    20: 'vinte',
+    30: 'trinta',
+    40: 'quarenta',
+    50: 'cinquenta',
+    60: 'sessenta',
+    70: 'setenta',
+    80: 'oitenta',
+    90: 'noventa'
+  };
+  const round = Math.max(0, Math.min(100, Math.round(n)));
+  if (round === 100) return 'cem';
+  if (round < 20) return ones[round] ?? String(round);
+  const t = Math.floor(round / 10) * 10;
+  const u = round % 10;
+  if (u === 0) return tens[t] ?? String(round);
+  return `${tens[t] ?? ''} e ${ones[u] ?? ''}`.trim();
+}
+
+function buildReforcoGarantiaMensagem(
+  draft: EspelhoMirrorDraft,
+  taxCode: EspelhoExportTaxCode | null
+): string | null {
+  if (!taxCode?.hasComplementaryWarranty) return null;
+  const med = parseEspelhoBrCurrencyToNumber(draft.measurementAmount);
+  const aliquotaNum = parseEspelhoPercentToNumber(taxCode.garantiaAliquota);
+  if (med === null || aliquotaNum === null) return null;
+
+  const aliquotaInt = Math.round(aliquotaNum);
+  const aliquotaPctDisplay = taxCode.garantiaAliquota && taxCode.garantiaAliquota.trim() !== '';
+  const aliquotaPctForMsg = aliquotaPctDisplay ? `${taxCode.garantiaAliquota}%` : `${aliquotaInt}%`;
+  const porExtenso = `${ptNumeroExtenso(aliquotaInt)} por cento`;
+
+  const x =
+    taxCode.garantiaRetidaNaNota === true
+      ? med * (aliquotaNum / 100)
+      : med * (aliquotaNum / (100 - aliquotaNum));
+
+  const xDisplay = Number.isFinite(x) ? fmtEspelhoBrl(round2(x)) : '—';
+
+  if (taxCode.garantiaRetidaNaNota === true) {
+    return `Como Reforço de Garantia será Retido ${aliquotaPctForMsg} (${porExtenso}) sobre o valor da NF igual a: ${xDisplay}`;
+  }
+  if (taxCode.garantiaRetidaNaNota === false) {
+    return `Como Reforço de Garantia foi Retido ${aliquotaPctForMsg} (${porExtenso}) da Parcela na Medição no Valor de: ${xDisplay}`;
+  }
+  return null;
+}
+
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Valor (R$) do reforço de garantia retido na NF — medição × alíquota da garantia.
+ * Só aplica quando há garantia complementar e ela é retida na nota.
+ */
+export function computeEspelhoReforcoGarantiaRetidoRs(
+  draft: EspelhoMirrorDraft,
+  taxCode: EspelhoExportTaxCode | null
+): number {
+  if (!taxCode?.hasComplementaryWarranty || taxCode.garantiaRetidaNaNota !== true) return 0;
+  const med = parseEspelhoBrCurrencyToNumber(draft.measurementAmount);
+  const aliquotaNum = parseEspelhoPercentToNumber(taxCode.garantiaAliquota);
+  if (med === null || aliquotaNum === null) return 0;
+  return round2(med * (aliquotaNum / 100));
 }
 
 /** Converte texto de moeda pt-BR (ex.: 50.000,00 ou 50000) em número. */
@@ -308,7 +405,8 @@ function computeEspelhoValorLiquidoBundle(b: EspelhoExportBundle): string {
     imp.inss.value,
     imp.iss.value
   ].reduce((acc, raw) => acc + (parseEspelhoBrCurrencyToNumber(raw) ?? 0), 0);
-  return fmtEspelhoBrl(round2(med - retidos));
+  const reforcoGarantiaRetido = computeEspelhoReforcoGarantiaRetidoRs(b.draft, b.taxCode);
+  return fmtEspelhoBrl(round2(med - retidos - reforcoGarantiaRetido));
 }
 
 function fmtDateBr(iso: string): string {
@@ -642,7 +740,23 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   );
   merges.push({ s: { r, c: 4 }, e: { r, c: 5 } });
   r++;
-  aoa.push(row('Reforço de garantia (%)', '—', '', '', '', '', '', '', '', '', '', ''));
+  const reforcoGarantiaMensagem = buildReforcoGarantiaMensagem(draft, taxCode);
+  aoa.push(
+    row(
+      'Reforço de garantia (%)',
+      reforcoGarantiaMensagem ?? '—',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      ''
+    )
+  );
   r++;
   aoa.push(row());
   r++;
@@ -1092,9 +1206,17 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     { k: 'Conta (nome):', v: dash(bank?.name || draft.bankAccountName) }
   ]);
 
-  doc.setFontSize(7);
-  doc.text('Reforço de garantia (valor / %): —', margin + 1, y + 4);
-  y += 9;
+  const reforcoGarantiaMensagemPdf = buildReforcoGarantiaMensagem(draft, taxCode);
+  const reforcoGarantiaMsg = reforcoGarantiaMensagemPdf ?? '—';
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+  const reforcoLines = doc.splitTextToSize(reforcoGarantiaMsg, contentW);
+  reforcoLines.forEach((line: string) => {
+    y = pdfCheckPage(doc, y, 5, margin);
+    doc.text(line, margin + 1, y);
+    y += 4;
+  });
+  y += 2;
 
   y = pdfBar(doc, y, margin, contentW, 'RETENÇÕES');
   const retY = y;

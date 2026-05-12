@@ -26,6 +26,13 @@ router.get('/bootstrap', async (_req, res, next) => {
           id: t.id,
           cityName: t.name,
           abatesMaterial: t.abatesMaterial,
+          hasComplementaryWarranty: Boolean(t.hasComplementaryWarranty),
+          garantiaRetidaNaNota:
+            Boolean(t.hasComplementaryWarranty) &&
+            (t.garantiaRetidaNaNota === true || t.garantiaRetidaNaNota === false)
+              ? t.garantiaRetidaNaNota
+              : null,
+          garantiaAliquota: Boolean(t.hasComplementaryWarranty) ? String(t.garantiaAliquota ?? '') : '',
           issRate: t.issRate,
           cofins: { collectionType: t.cofinsCollectionType },
           csll: { collectionType: t.csllCollectionType },
@@ -51,6 +58,8 @@ router.get('/bootstrap', async (_req, res, next) => {
           measurementStartDate: m.measurementStartDate ?? '',
           measurementEndDate: m.measurementEndDate ?? '',
           buildingUnit: m.buildingUnit ?? '',
+          obraCno: m.obraCno ?? '',
+          garantiaComplementar: m.garantiaComplementar ?? '',
           observations: m.observations ?? '',
           notes: m.notes ?? '',
           measurementAmount: m.measurementAmount ?? '',
@@ -81,7 +90,9 @@ router.get('/bootstrap', async (_req, res, next) => {
                   size: m.xmlAttachmentSize ?? 0,
                   dataUrl: m.xmlAttachmentDataUrl
                 }
-              : undefined
+              : undefined,
+          nfConstarNaNota: m.nfConstarNaNota ?? null,
+          nfConstarNaNotaAcknowledged: Boolean(m.nfConstarNaNotaAcknowledged)
         }))
       }
     });
@@ -114,6 +125,39 @@ router.put('/bootstrap', async (req, res, next) => {
     const mirrorHasMeasurementEndDate = Boolean(
       p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some(
         (field: any) => field?.name === 'measurementEndDate'
+      )
+    );
+    const mirrorHasNfConstarNaNota = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some(
+        (field: any) => field?.name === 'nfConstarNaNota'
+      )
+    );
+    const mirrorHasNfConstarNaNotaAcknowledged = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some(
+        (field: any) => field?.name === 'nfConstarNaNotaAcknowledged'
+      )
+    );
+    const mirrorHasObraCno = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some((field: any) => field?.name === 'obraCno')
+    );
+    const mirrorHasGarantiaComplementar = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some(
+        (field: any) => field?.name === 'garantiaComplementar'
+      )
+    );
+    const taxCodeHasComplementaryWarranty = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfTaxCode?.fields?.some(
+        (field: any) => field?.name === 'hasComplementaryWarranty'
+      )
+    );
+    const taxCodeHasGarantiaRetidaNaNota = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfTaxCode?.fields?.some(
+        (field: any) => field?.name === 'garantiaRetidaNaNota'
+      )
+    );
+    const taxCodeHasGarantiaAliquota = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfTaxCode?.fields?.some(
+        (field: any) => field?.name === 'garantiaAliquota'
       )
     );
     const {
@@ -187,6 +231,25 @@ router.put('/bootstrap', async (req, res, next) => {
             id: String(item.id),
             name: String(item.cityName ?? ''),
             abatesMaterial: Boolean(item.abatesMaterial),
+            ...(taxCodeHasComplementaryWarranty
+              ? { hasComplementaryWarranty: Boolean(item.hasComplementaryWarranty) }
+              : {}),
+            ...(taxCodeHasGarantiaRetidaNaNota
+              ? {
+                  garantiaRetidaNaNota:
+                    Boolean(item.hasComplementaryWarranty) &&
+                    (item.garantiaRetidaNaNota === true || item.garantiaRetidaNaNota === false)
+                      ? item.garantiaRetidaNaNota
+                      : null
+                }
+              : {}),
+            ...(taxCodeHasGarantiaAliquota
+              ? {
+                  garantiaAliquota: Boolean(item.hasComplementaryWarranty)
+                    ? String(item.garantiaAliquota ?? '')
+                    : ''
+                }
+              : {}),
             issRate: String(item.issRate ?? ''),
             cofinsCollectionType: String(item?.cofins?.collectionType ?? 'RETIDO'),
             csllCollectionType: String(item?.csll?.collectionType ?? 'RETIDO'),
@@ -250,6 +313,16 @@ router.put('/bootstrap', async (req, res, next) => {
               ? { measurementEndDate: item.measurementEndDate ? String(item.measurementEndDate) : null }
               : {}),
             buildingUnit: item.buildingUnit ? String(item.buildingUnit) : null,
+            ...(mirrorHasObraCno
+              ? { obraCno: item.obraCno ? String(item.obraCno) : null }
+              : {}),
+            ...(mirrorHasGarantiaComplementar
+              ? {
+                  garantiaComplementar: item.garantiaComplementar
+                    ? String(item.garantiaComplementar)
+                    : null
+                }
+              : {}),
             observations: item.observations ? String(item.observations) : null,
             notes: item.notes ? String(item.notes) : null,
             measurementAmount: String(item.measurementAmount ?? ''),
@@ -273,7 +346,18 @@ router.put('/bootstrap', async (req, res, next) => {
               item?.xmlAttachment?.size != null && Number.isFinite(Number(item.xmlAttachment.size))
                 ? Number(item.xmlAttachment.size)
                 : null,
-            xmlAttachmentDataUrl: item?.xmlAttachment?.dataUrl ? String(item.xmlAttachment.dataUrl) : null
+            xmlAttachmentDataUrl: item?.xmlAttachment?.dataUrl ? String(item.xmlAttachment.dataUrl) : null,
+            ...(mirrorHasNfConstarNaNota
+              ? {
+                  nfConstarNaNota:
+                    item.nfConstarNaNota != null && typeof item.nfConstarNaNota === 'object'
+                      ? item.nfConstarNaNota
+                      : null
+                }
+              : {}),
+            ...(mirrorHasNfConstarNaNotaAcknowledged
+              ? { nfConstarNaNotaAcknowledged: Boolean(item.nfConstarNaNotaAcknowledged) }
+              : {})
           }))
         })
       );

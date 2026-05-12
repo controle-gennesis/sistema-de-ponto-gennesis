@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Sistema completo de controle de ponto para empresa de engenharia",
   "private": true,
+  "prisma": {
+    "schema": "apps/backend/prisma/schema.prisma"
+  },
   "workspaces": [
     "packages/*",
     "apps/backend",
@@ -20,7 +23,10 @@
     "start:backend": "cd apps/backend && npm run start",
     "install:all": "npm install && npm run install:backend && npm run install:frontend",
     "install:backend": "cd apps/backend && npm install",
-    "install:frontend": "cd apps/frontend && npm install"
+    "install:frontend": "cd apps/frontend && npm install",
+    "db:generate": "npm run db:generate -w @sistema-ponto/backend",
+    "db:deploy": "npm run db:deploy -w @sistema-ponto/backend",
+    "db:migrate": "npm run db:migrate -w @sistema-ponto/backend"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
