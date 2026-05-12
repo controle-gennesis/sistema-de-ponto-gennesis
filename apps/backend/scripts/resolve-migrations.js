@@ -14,7 +14,11 @@ const BACKEND_ROOT = path.join(__dirname, '..');
  * Migrations que falharam no deploy (ex.: tabela ainda não existia) e é seguro marcar
  * como rolled-back para o Prisma reaplicar na ordem correta após novas migrations.
  */
-const MIGRATIONS_TRY_ROLLBACK_IF_FAILED = ['20260416140000_dp_request_display_number'];
+const MIGRATIONS_TRY_ROLLBACK_IF_FAILED = [
+  '20260416140000_dp_request_display_number',
+  /** Falhou em prod quando `espelho_nf_mirrors` ainda não existia (só SQL manual). Corrigido por `20260511125000_espelho_nf_init_tables`. */
+  '20260511140000_espelho_nf_mirror_measurement_dates',
+];
 
 function tryRollbackFailedMigration(migrationName) {
   try {
