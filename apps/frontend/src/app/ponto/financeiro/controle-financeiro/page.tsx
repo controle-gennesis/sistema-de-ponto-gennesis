@@ -8,6 +8,8 @@ import {
   AlertCircle,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   CircleDollarSign,
   ClipboardList,
   Filter,
@@ -1323,6 +1325,8 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
 
   const titleMonth = monthLabel.charAt(0) + monthLabel.slice(1).toLowerCase();
 
+  const [listExpanded, setListExpanded] = useState(false);
+
   const [actionMenu, setActionMenu] = useState<{
     entryId: string;
     top: number;
@@ -1352,15 +1356,19 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
     }
   }, [actionMenu, items]);
 
+  useEffect(() => {
+    if (!listExpanded) setActionMenu(null);
+  }, [listExpanded]);
+
   return (
     <Card className="overflow-hidden">
-      <CardHeader className="border-b-0 pb-1">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <CardHeader className="border-b-0 !pb-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="flex items-center space-x-3">
             <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
               <CalendarDays className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 Pagamentos de {titleMonth} de {year}
               </h3>
@@ -1369,30 +1377,45 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-stretch gap-2 sm:justify-end">
-            <div className="min-w-[150px] px-4 py-2 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 text-center">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                Valor Original
-              </p>
-              <p className="mt-0.5 text-base font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
-                {formatCurrency(totalOriginal)}
-              </p>
-            </div>
-            <div className="min-w-[150px] px-4 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 text-center">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-red-600 dark:text-red-400">
-                Valor Final
-              </p>
-              <p className="mt-0.5 text-base font-bold text-red-700 dark:text-red-300 tabular-nums">
-                {formatCurrency(totalFinal)}
-              </p>
-            </div>
+          <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 shrink-0 border-t border-gray-100 dark:border-gray-700/80 pt-3 sm:border-t-0 sm:pt-0">
+            <dl className="flex items-baseline gap-4 sm:gap-5 text-sm">
+              <div>
+                <dt className="text-xs text-gray-500 dark:text-gray-400 font-medium">Original</dt>
+                <dd className="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                  {formatCurrency(totalOriginal)}
+                </dd>
+              </div>
+              <div className="hidden sm:block w-px h-9 self-center bg-gray-200 dark:bg-gray-600" aria-hidden />
+              <div>
+                <dt className="text-xs text-red-600/90 dark:text-red-400 font-medium">Final</dt>
+                <dd className="mt-0.5 font-semibold tabular-nums text-red-700 dark:text-red-300">
+                  {formatCurrency(totalFinal)}
+                </dd>
+              </div>
+            </dl>
+            <button
+              type="button"
+              onClick={() => setListExpanded((v) => !v)}
+              className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/80 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+              aria-expanded={listExpanded}
+              aria-controls={`month-list-${year}-${month}`}
+              title={listExpanded ? 'Recolher lista' : 'Expandir lista'}
+            >
+              {listExpanded ? (
+                <ChevronUp className="w-5 h-5" aria-hidden />
+              ) : (
+                <ChevronDown className="w-5 h-5" aria-hidden />
+              )}
+              <span className="sr-only">{listExpanded ? 'Recolher lista' : 'Expandir lista'}</span>
+            </button>
           </div>
         </div>
       </CardHeader>
-      <CardContent className="px-0 pt-2">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-gray-200 dark:border-gray-700">
+      <div id={`month-list-${year}-${month}`} className={listExpanded ? '' : 'hidden'}>
+        <CardContent className="px-0 !pt-0 pb-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+            <thead className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <tr>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Status
@@ -1431,7 +1454,7 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
                   Diferença de Dias
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Recebido
+                  Observação
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Ação
@@ -1553,7 +1576,8 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
             </tbody>
           </table>
         </div>
-      </CardContent>
+        </CardContent>
+      </div>
 
       {actionMenu &&
         entryForMenu &&
