@@ -151,7 +151,7 @@ const CATEGORY_ORDER = [
   'Departamento Pessoal',
   'Financeiro',
   'Engenharia',
-  'Contratações e Licitações',
+  'Contratos e Licitações',
   'Suprimentos',
   'Cadastros',
   'Registros de Ponto',
@@ -209,7 +209,7 @@ function inferCategoryFromHref(href: string): string {
     return 'Engenharia';
   }
   if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes') {
-    return 'Contratações e Licitações';
+    return 'Contratos e Licitações';
   }
   if (
     [
@@ -231,6 +231,10 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/fornecedores',
       '/ponto/condicoes-pagamento',
       '/ponto/natureza-orcamentaria',
+      '/ponto/prestadores-servico',
+      '/ponto/tomadores-servico',
+      '/ponto/contas-bancarias',
+      '/ponto/codigos-tributarios',
     ].some((p) => h === p)
   ) {
     return 'Cadastros';
@@ -243,7 +247,9 @@ function inferCategoryFromHref(href: string): string {
 function moduleCategory(m: PermissionModuleDef): string {
   const c = (m as { category?: string }).category?.trim();
   const raw = c || inferCategoryFromHref(m.href);
-  if (raw === 'Contrações e Licitações') return 'Contratações e Licitações';
+  if (raw === 'Contrações e Licitações' || raw === 'Contratações e Licitações') {
+    return 'Contratos e Licitações';
+  }
   return raw;
 }
 

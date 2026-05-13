@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -12,13 +13,27 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { Check, Download, Eye, FileCheck, FileText, Filter, Wrench, Search, X } from 'lucide-react';
+import { useCostCenters } from '@/hooks/useCostCenters';
+import {
+  Check,
+  Download,
+  Eye,
+  FileCheck,
+  FileText,
+  Filter,
+  MoreVertical,
+  Wrench,
+  Search,
+  X
+} from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import {
+  espelhoMirrorForExport,
   exportEspelhoNfPdf,
   fmtEspelhoBrl,
   parseEspelhoBrCurrencyToNumber,
-  type EspelhoFederalRates
+  type EspelhoFederalRates,
+  type EspelhoMirrorDraft
 } from '@/lib/exportEspelhoNfLayout';
 import {
   ESPELHO_APPROVAL_STATUS_LABELS,
@@ -244,6 +259,13 @@ const URGENCY_ROW_BADGE: Record<DpUrgency, string> = {
 const TABLE_ACTION_ICON_BTN_CLASS =
   'inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
 
+/** Largura fixa do menu de ações (alinhado à direita do botão), igual à lista em espelho-nf. */
+const ESPELHO_APPROVAL_ACTION_MENU_WIDTH_PX = 224;
+/** Altura aproximada do menu (4 itens), só para decidir posição vertical. */
+const ESPELHO_APPROVAL_ACTION_MENU_EST_HEIGHT_PX = 185;
+/** Só abre para cima se o menu não ficar sob a faixa de busca/filtros. */
+const ESPELHO_APPROVAL_ACTION_MENU_MIN_TOP_WHEN_ABOVE_PX = 100;
+
 const TYPE_LABELS: Record<DpRequestType, string> = {
   ADMISSAO: 'Admissão',
   ADVERTENCIA_SUSPENSAO: 'Medida disciplinar',
@@ -276,16 +298,21 @@ export default function AprovacoesPage() {
   const [searchDp, setSearchDp] = useState('');
   const [dpPhase, setDpPhase] = useState<DpPhaseFilter>('PENDING');
   const [isDpFiltersOpen, setIsDpFiltersOpen] = useState(false);
-  /** Busca + filtro de status do bloco «Espelhos NF». */
+  /** Busca + filtro de status do bloco «Espelhos da Nota Fiscal». */
   const [searchEspelho, setSearchEspelho] = useState('');
   const [isEspelhoFiltersOpen, setIsEspelhoFiltersOpen] = useState(false);
   const [managerComment, setManagerComment] = useState<Record<string, string>>({});
   const [detailRequest, setDetailRequest] = useState<DpRequest | null>(null);
-  const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('ALL');
+  const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('PENDING_APPROVAL');
   const [attachmentPreview, setAttachmentPreview] = useState<{
     fileName: string;
     mimeType: string;
     previewUrl: string;
+  } | null>(null);
+  const [espelhoApprovalActionMenu, setEspelhoApprovalActionMenu] = useState<{
+    mirrorId: string;
+    top: number;
+    left: number;
   } | null>(null);
 
   const downloadAttachment = async (att: { fileName: string; previewUrl: string }) => {
@@ -309,6 +336,17 @@ export default function AprovacoesPage() {
 
   const { canAccessDpApproverPages, canApproveEspelhoNf } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
+
+  const { costCenters: costCentersHook } = useCostCenters();
+  const costCentersForEspelho = useMemo(
+    () =>
+      costCentersHook.map((cc) => ({
+        id: cc.id,
+        code: cc.code,
+        name: cc.name ?? cc.description
+      })),
+    [costCentersHook]
+  );
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -508,6 +546,11 @@ export default function AprovacoesPage() {
     });
   }, [espelhoApprovals, espelhoPhase, searchEspelho]);
 
+  const espelhoApprovalMenuMirror = useMemo(() => {
+    if (!espelhoApprovalActionMenu) return null;
+    return espelhoApprovals.find((m) => m.id === espelhoApprovalActionMenu.mirrorId) ?? null;
+  }, [espelhoApprovalActionMenu, espelhoApprovals]);
+
   const approveMutation = useMutation({
     mutationFn: async ({ id }: { id: string }) => {
       const comment = managerComment[id] || '';
@@ -569,7 +612,7 @@ export default function AprovacoesPage() {
       federal = fallbackFederal;
     }
     exportEspelhoNfPdf(
-      item.mirror,
+      espelhoMirrorForExport(item.mirror as EspelhoMirrorDraft, costCentersForEspelho),
       espelhoData.providers,
       espelhoData.takers,
       espelhoData.bankAccounts,
@@ -764,7 +807,9 @@ export default function AprovacoesPage() {
                     <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Espelhos NF</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Espelhos da Nota Fiscal
+                    </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Pendentes de aprovação/correção</p>
                   </div>
                 </div>
@@ -793,15 +838,15 @@ export default function AprovacoesPage() {
                     type="button"
                     onClick={() => setIsEspelhoFiltersOpen(true)}
                     className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                      espelhoPhase !== 'ALL'
+                      espelhoPhase !== 'PENDING_APPROVAL'
                         ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                     }`}
                     aria-label="Abrir filtro"
-                    title={espelhoPhase !== 'ALL' ? 'Filtro (status ativo)' : 'Filtro'}
+                    title={espelhoPhase !== 'PENDING_APPROVAL' ? 'Filtro (status ativo)' : 'Filtro'}
                   >
                     <Filter className="h-4 w-4" />
-                    {espelhoPhase !== 'ALL' && (
+                    {espelhoPhase !== 'PENDING_APPROVAL' && (
                       <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     )}
                   </button>
@@ -827,13 +872,13 @@ export default function AprovacoesPage() {
                           <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Tomador | Medição | Referência
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Status
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Vencimento
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Ações
                           </th>
                         </tr>
@@ -851,61 +896,63 @@ export default function AprovacoesPage() {
                                   <div className="text-xs text-gray-500 dark:text-gray-400">ID: {m.id}</div>
                                 </div>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center">
                                 <span
-                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                  className={`inline-flex items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                                     ESPELHO_BADGE_CLASS[m.status]
                                   }`}
                                 >
                                   {ESPELHO_APPROVAL_STATUS_LABELS[m.status]}
                                 </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                 {m.dueDate || '—'}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle">
-                                <div className="flex justify-center gap-2">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-right">
+                                <div className="flex justify-end">
                                   <button
                                     type="button"
-                                    onClick={() => void applyEspelhoDecision(m.id, 'APPROVED', 'Espelho aprovado.')}
-                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-emerald-600 dark:text-emerald-400`}
-                                    title="Aprovar"
-                                    aria-label="Aprovar espelho"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                      setEspelhoApprovalActionMenu((prev) => {
+                                        if (prev?.mirrorId === m.id) return null;
+                                        let left = r.right - ESPELHO_APPROVAL_ACTION_MENU_WIDTH_PX;
+                                        left = Math.max(
+                                          8,
+                                          Math.min(
+                                            left,
+                                            window.innerWidth - ESPELHO_APPROVAL_ACTION_MENU_WIDTH_PX - 8
+                                          )
+                                        );
+                                        const edge = 8;
+                                        const gap = 6;
+                                        const vh = window.innerHeight;
+                                        // Só para decidir posição — não limitar por vh (isso fazia “não cabe” embaixo na 1ª linha).
+                                        const layoutH = ESPELHO_APPROVAL_ACTION_MENU_EST_HEIGHT_PX;
+                                        const topBelow = r.bottom + gap;
+                                        const topAbove = r.top - gap - layoutH;
+                                        const fitsBelow = topBelow + layoutH <= vh - edge;
+                                        const fitsAbove =
+                                          topAbove >= edge &&
+                                          topAbove >= ESPELHO_APPROVAL_ACTION_MENU_MIN_TOP_WHEN_ABOVE_PX;
+                                        let top: number;
+                                        if (fitsBelow) {
+                                          top = topBelow;
+                                        } else if (fitsAbove) {
+                                          top = topAbove;
+                                        } else {
+                                          top = topBelow;
+                                        }
+                                        return { mirrorId: m.id, top, left };
+                                      });
+                                    }}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                    aria-label="Menu de ações do espelho"
+                                    aria-expanded={espelhoApprovalActionMenu?.mirrorId === m.id}
+                                    aria-haspopup="menu"
                                   >
-                                    <Check className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void applyEspelhoDecision(
-                                        m.id,
-                                        'SENT_FOR_CORRECTION',
-                                        'Espelho enviado para correção.'
-                                      )
-                                    }
-                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-amber-500 dark:text-amber-400`}
-                                    title="Enviar para correção"
-                                    aria-label="Enviar espelho para correção"
-                                  >
-                                    <Wrench className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => void applyEspelhoDecision(m.id, 'CANCELLED', 'Espelho cancelado.')}
-                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-red-600 dark:text-red-400`}
-                                    title="Cancelar"
-                                    aria-label="Cancelar espelho"
-                                  >
-                                    <X className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDownloadEspelhoPdf(m)}
-                                    className={TABLE_ACTION_ICON_BTN_CLASS}
-                                    title="Baixar PDF do espelho"
-                                    aria-label="Baixar PDF do espelho"
-                                  >
-                                    <Download className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                                    <MoreVertical className="h-4 w-4" />
                                   </button>
                                 </div>
                               </td>
@@ -915,7 +962,7 @@ export default function AprovacoesPage() {
                         {espelhoFiltered.length === 0 && (
                           <tr>
                             <td className="py-8 text-center text-gray-500" colSpan={4}>
-                              Nenhum espelho pendente de decisão.
+                              Nenhum espelho neste filtro.
                             </td>
                           </tr>
                         )}
@@ -927,6 +974,93 @@ export default function AprovacoesPage() {
             </CardContent>
           </Card>
           )}
+
+          {espelhoApprovalActionMenu &&
+            espelhoApprovalMenuMirror &&
+            typeof document !== 'undefined' &&
+            createPortal(
+              <>
+                <div
+                  className="fixed inset-0 z-[200]"
+                  aria-hidden
+                  onClick={() => setEspelhoApprovalActionMenu(null)}
+                />
+                <div
+                  role="menu"
+                  className="fixed z-[201] w-56 max-h-[calc(100dvh-16px)] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  style={{
+                    top: espelhoApprovalActionMenu.top,
+                    left: espelhoApprovalActionMenu.left
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoApprovalActionMenu(null);
+                      void applyEspelhoDecision(
+                        espelhoApprovalMenuMirror.id,
+                        'APPROVED',
+                        'Espelho aprovado.'
+                      );
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" strokeWidth={2} />
+                    <span>Aprovar</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoApprovalActionMenu(null);
+                      void applyEspelhoDecision(
+                        espelhoApprovalMenuMirror.id,
+                        'SENT_FOR_CORRECTION',
+                        'Espelho enviado para correção.'
+                      );
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Wrench className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" strokeWidth={2} />
+                    <span>Enviar para correção</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoApprovalActionMenu(null);
+                      void applyEspelhoDecision(
+                        espelhoApprovalMenuMirror.id,
+                        'CANCELLED',
+                        'Espelho cancelado.'
+                      );
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" strokeWidth={2} />
+                    <span>Cancelar</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoApprovalActionMenu(null);
+                      handleDownloadEspelhoPdf(espelhoApprovalMenuMirror);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Download className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" strokeWidth={2} />
+                    <span>Baixar PDF do espelho</span>
+                  </button>
+                </div>
+              </>,
+              document.body
+            )}
 
           <Modal
             isOpen={!!detailRequest}
@@ -1118,7 +1252,7 @@ export default function AprovacoesPage() {
             </div>
           </Modal>
 
-          {/* Modal de Filtros — bloco «Espelhos NF» */}
+          {/* Modal de Filtros — bloco «Espelhos da Nota Fiscal» */}
           <Modal
             isOpen={isEspelhoFiltersOpen}
             onClose={() => setIsEspelhoFiltersOpen(false)}
@@ -1148,7 +1282,7 @@ export default function AprovacoesPage() {
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <button
                   type="button"
-                  onClick={() => setEspelhoPhase('ALL')}
+                  onClick={() => setEspelhoPhase('PENDING_APPROVAL')}
                   className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
                   Limpar filtros

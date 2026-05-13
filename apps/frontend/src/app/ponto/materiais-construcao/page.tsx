@@ -3,8 +3,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Package, Plus, Edit, Trash2, Search, X, Check, AlertCircle, Upload, Download, Filter, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { Package, Plus, Edit, Trash2, Search, X, Check, AlertCircle, Upload, Download, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -119,7 +120,9 @@ export default function MateriaisConstrucaoPage() {
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importData, setImportData] = useState('');
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  /** 'all' | 'true' | 'false' — alinhado à API de listagem. */
+  const [materialActiveFilter, setMaterialActiveFilter] = useState<string>('all');
   const [customUnits, setCustomUnits] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -138,13 +141,16 @@ export default function MateriaisConstrucaoPage() {
     }
   });
 
+  const hasActiveMaterialFilters = materialActiveFilter !== 'all';
+
   // Buscar materiais
   const { data: materialsData, isLoading: loadingMaterials } = useQuery({
-    queryKey: ['construction-materials', searchTerm, currentPage, itemsPerPage],
+    queryKey: ['construction-materials', searchTerm, materialActiveFilter, currentPage, itemsPerPage],
     queryFn: async () => {
       const res = await api.get('/construction-materials', {
         params: {
           search: searchTerm || undefined,
+          isActive: materialActiveFilter !== 'all' ? materialActiveFilter : undefined,
           page: currentPage,
           limit: itemsPerPage
         }
@@ -478,7 +484,7 @@ export default function MateriaisConstrucaoPage() {
   // Resetar página quando filtros mudarem
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, materialActiveFilter]);
 
   // Como a busca já é feita no backend, não precisamos filtrar no frontend
   const filteredMaterials = useMemo(() => {
@@ -518,62 +524,6 @@ export default function MateriaisConstrucaoPage() {
             </p>
           </div>
 
-          {/* Filtros */}
-          <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
-                </div>
-                <div className="flex items-center space-x-4">
-                  {!isFiltersMinimized && (
-                    <button
-                      onClick={() => {
-                        setSearchTerm('');
-                      }}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      title="Limpar filtros"
-                    >
-                      <RotateCcw className="w-5 h-5" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                    className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                    title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
-                  >
-                    {isFiltersMinimized ? (
-                      <ChevronDown className="w-5 h-5" />
-                    ) : (
-                      <ChevronUp className="w-5 h-5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </CardHeader>
-            {!isFiltersMinimized && (
-              <CardContent className="p-4 sm:p-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Buscar
-                  </label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por descrição, nome ou unidade..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            )}
-          </Card>
-
-          {/* Modal de Criar/Editar Material */}
           <MaterialFormModal
             isOpen={showForm}
             onClose={() => {
@@ -591,92 +541,190 @@ export default function MateriaisConstrucaoPage() {
             handleProductImageUpload={handleProductImageUpload}
           />
 
+          <Modal
+            isOpen={isFiltersModalOpen}
+            onClose={() => setIsFiltersModalOpen(false)}
+            title="Filtros"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status na listagem
+                </label>
+                <select
+                  value={materialActiveFilter}
+                  onChange={(e) => setMaterialActiveFilter(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="all">Todos (ativos e inativos)</option>
+                  <option value="true">Somente ativos</option>
+                  <option value="false">Somente inativos</option>
+                </select>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                A busca por texto fica na barra acima. Aqui você restringe por situação do cadastro.
+              </p>
+              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setMaterialActiveFilter('all')}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFiltersModalOpen(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+          </Modal>
+
           {/* Lista de materiais */}
           <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <Package className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex items-start space-x-3">
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <Package className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0">
+                  <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       Materiais de Construção
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {pagination.total} {pagination.total === 1 ? 'material cadastrado' : 'materiais cadastrados'}
+                      {pagination.total}{' '}
+                      {pagination.total === 1 ? 'material cadastrado' : 'materiais cadastrados'}
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 lg:justify-end">
+                  <div className="relative min-w-[240px] flex-1 lg:w-[280px] lg:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Pesquisar material..."
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {searchTerm ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
                   <button
-                    onClick={handleExport}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    type="button"
+                    onClick={() => setIsFiltersModalOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveMaterialFilters
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActiveMaterialFilters ? 'Filtro (status ativo)' : 'Filtro'}
                   >
-                    <Download className="w-4 h-4" />
-                    Exportar
+                    <Filter className="h-4 w-4" />
+                    {hasActiveMaterialFilters ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
                   </button>
                   <button
+                    type="button"
+                    onClick={handleExport}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <Download className="h-4 w-4 shrink-0" />
+                    <span>Exportar</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setShowImportModal(true);
                       setImportData('');
                     }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
                   >
-                    <Upload className="w-4 h-4" />
-                    Importar
+                    <Upload className="h-4 w-4 shrink-0" />
+                    <span>Importar</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       resetForm();
                       setShowForm(true);
                     }}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
-                    <Plus className="w-4 h-4" />
-                    Cadastrar Material
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Novo Material</span>
                   </button>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full min-w-[640px] table-fixed border-collapse">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th
+                        scope="col"
+                        className="w-[40%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                      >
                         Nome do Material
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th
+                        scope="col"
+                        className="w-[22%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                      >
                         Categoria
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th
+                        scope="col"
+                        className="w-[14%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                      >
                         Unidade
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th
+                        scope="col"
+                        className="w-[12%] px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                      >
                         Status
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th
+                        scope="col"
+                        className="w-[12%] min-w-[100px] px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                      >
                         Ações
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                     {loadingMaterials ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center">
-                          <div className="flex items-center justify-center">
-                            <div className="loading-spinner w-6 h-6 mr-2" />
+                        <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="loading-spinner h-6 w-6" />
                             <span className="text-gray-600 dark:text-gray-400">Carregando materiais...</span>
                           </div>
                         </td>
                       </tr>
                     ) : filteredMaterials.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center">
+                        <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
                           <div className="text-gray-500 dark:text-gray-400">
-                            <p>Nenhum material encontrado.</p>
-                            <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
+                            <p className="font-medium text-gray-700 dark:text-gray-300">Nenhum material encontrado.</p>
+                            <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
                           </div>
                         </td>
                       </tr>
@@ -686,11 +734,11 @@ export default function MateriaisConstrucaoPage() {
                           key={material.id}
                           className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
-                          <td className="px-3 sm:px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <td className="min-w-0 px-3 py-4 sm:px-6">
+                            <div className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
                               {material.name || '-'}
                             </div>
-                            <span className="text-sm text-gray-600 dark:text-gray-400">
+                            <span className="block truncate text-sm text-gray-600 dark:text-gray-400">
                               {material.description || 'Sem descrição'}
                             </span>
                           </td>
@@ -805,7 +853,7 @@ export default function MateriaisConstrucaoPage() {
 
         {/* Modal de confirmação de exclusão */}
         {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteModal(null)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
               <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-red-100 dark:bg-red-900/30 rounded-full">
@@ -838,7 +886,7 @@ export default function MateriaisConstrucaoPage() {
 
         {/* Modal de importação */}
         {showImportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => {
               setShowImportModal(false);
               setImportData('');
@@ -978,7 +1026,7 @@ function MaterialFormModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black bg-opacity-50">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">

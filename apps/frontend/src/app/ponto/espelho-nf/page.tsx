@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
   ChevronDown,
   ChevronUp,
@@ -11,16 +11,19 @@ import {
   Eye,
   FileSpreadsheet,
   FileText,
+  Filter,
   Pencil,
   Plus,
   Search,
   Trash2,
+  MoreVertical,
   X
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
+import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import {
@@ -35,6 +38,7 @@ import {
   parseEspelhoPercentToNumber,
   round2
 } from '@/lib/exportEspelhoNfLayout';
+import { maskCurrencyInputBr } from '@/lib/maskCurrencyBr';
 import {
   ESPELHO_APPROVAL_STATUS_LABELS,
   type EspelhoApprovalStatus,
@@ -43,6 +47,21 @@ import {
   updateEspelhoApprovalStatus
 } from '@/lib/espelhoNfApproval';
 import { useCostCenters } from '@/hooks/useCostCenters';
+import {
+  EspelhoNfTaxCodeContractFields,
+  emptyTaxCodeFormState,
+  INITIAL_FEDERAL_TAX_CONTEXT_ENABLED,
+  INITIAL_FEDERAL_TAX_RATES,
+  INITIAL_FEDERAL_TAX_RATES_BY_CONTEXT,
+  mergeFederalTaxStateFromApi,
+  normalizeEspelhoPercentBlur,
+  type FederalTaxContextEnabled,
+  type FederalTaxContextKey,
+  type FederalTaxRates,
+  type FederalTaxRatesByContext,
+  type TaxCodeFormState,
+  type TaxRule
+} from '@/components/espelho-nf/EspelhoNfTaxCodeContractFields';
 
 /** Campos opcionais que o usuário escolhe exibir no formulário (Constar na nota fiscal). */
 type NfConstarNaNotaFields = {
@@ -66,10 +85,10 @@ const DEFAULT_NF_CONSTAR_NA_NOTA: NfConstarNaNotaFields = {
 };
 
 const NF_CONSTAR_FIELD_LABELS: Record<keyof NfConstarNaNotaFields, string> = {
-  obraCno: 'Nº inscrição Obra / CNO',
+  obraCno: 'Número da nscrição da Obra / CNO',
   garantiaComplementar: 'Garantia complementar',
-  processNumber: 'Nº Processo',
-  empenhoNumber: 'Nº Empenho',
+  processNumber: 'Número do Processo',
+  empenhoNumber: 'Número do Empenho',
   serviceOrder: 'Ordem de Serviço',
   buildingUnit: 'Unidade Predial',
   observations: 'Observações'
@@ -259,29 +278,6 @@ type BankAccount = {
   account: string;
 };
 
-type FederalTaxRates = {
-  cofins: string;
-  csll: string;
-  inss: string;
-  irpj: string;
-  pis: string;
-};
-
-type FederalTaxContextKey =
-  | 'gdfObra'
-  | 'gdfManutencaoReforma'
-  | 'gdfMaoObraSemMaterial'
-  | 'foraGdfObra'
-  | 'foraGdfManutencaoReforma'
-  | 'foraGdfMaoObraSemMaterial';
-
-type FederalTaxRatesByContext = Record<FederalTaxContextKey, FederalTaxRates>;
-type FederalTaxContextEnabled = Record<FederalTaxContextKey, boolean>;
-
-type TaxRule = {
-  collectionType: 'RETIDO' | 'RECOLHIDO';
-};
-
 type TaxCode = {
   id: string;
   cityName: string;
@@ -301,6 +297,9 @@ type TaxCode = {
   iss: TaxRule;
   inssMaterialLimit: string;
   issMaterialLimit: string;
+  /** Alíquotas federais persistidas (GET bootstrap / PUT bootstrap / API tax-codes). */
+  federalRatesByContext?: FederalTaxRatesByContext | null;
+  federalTaxContextEnabled?: FederalTaxContextEnabled | null;
 };
 
 const INITIAL_DRAFT: MirrorDraft = {
@@ -335,67 +334,12 @@ const INITIAL_DRAFT: MirrorDraft = {
   nfConstarNaNotaAcknowledged: false
 };
 
-function sanitizeEspelhoMoneyTyping(raw: string): string {
-  return raw
-    .replace(/R\$/gi, '')
-    .replace(/\u00a0/g, '')
-    .replace(/\s/g, '')
-    .replace(/[^\d,.-]/g, '');
-}
-
 function normalizeEspelhoMoneyBlurToBrl(raw: string): string {
   const t = raw.trim();
   if (!t) return '';
   const n = parseEspelhoBrCurrencyToNumber(t);
   if (n === null || !Number.isFinite(n)) return '';
   return fmtEspelhoBrl(Math.max(0, n));
-}
-
-/** Digitando percentual pt-BR: permite vírgula decimal (ex.: 3,65). */
-function sanitizeEspelhoPercentTyping(raw: string): string {
-  let s = String(raw ?? '')
-    .replace(/%/g, '')
-    .replace(/[^\d,.]/g, '')
-    .replace(/\./g, ',');
-  if (!s) return '';
-  const firstComma = s.indexOf(',');
-  if (firstComma !== -1) {
-    s = s.slice(0, firstComma + 1) + s.slice(firstComma + 1).replace(/,/g, '');
-  }
-  const parts = s.split(',');
-  const intPart = (parts[0] ?? '').replace(/\D/g, '').slice(0, 6);
-  const decPartRaw = parts[1] ?? '';
-  const decPart = decPartRaw.replace(/\D/g, '').slice(0, 8);
-
-  const hasComma = s.includes(',');
-  if (hasComma && parts.length >= 2 && parts[1] === '' && decPart === '') {
-    if (intPart === '') return '';
-    return `${intPart},`;
-  }
-  if (hasComma) {
-    const left = intPart === '' ? '0' : intPart;
-    return `${left},${decPart}`;
-  }
-  return intPart;
-}
-
-function formatEspelhoPercentNormalized(n: number): string {
-  const c = Math.max(0, Math.min(100, n));
-  const rounded = Math.round(c * 1e12) / 1e12;
-  const s = rounded.toFixed(12).replace(/\.?0+$/, '');
-  return s.includes('.') ? s.replace('.', ',') : s;
-}
-
-/** No blur: interpreta número, limita ao intervalo [0, 100]. */
-function normalizeEspelhoPercentBlur(raw: string): string {
-  const s = sanitizeEspelhoPercentTyping(raw);
-  if (!s || s === ',') return '';
-  let numStr = s;
-  if (numStr.endsWith(',')) numStr = numStr.slice(0, -1);
-  else numStr = numStr.replace(',', '.');
-  const n = Number(numStr);
-  if (!Number.isFinite(n)) return '';
-  return formatEspelhoPercentNormalized(n);
 }
 
 function formatEspelhoDraftMoneyFields(d: MirrorDraft): MirrorDraft {
@@ -413,6 +357,8 @@ function round2EspelhoMoney(n: number): number {
 
 /** Diferença máxima aceita (R$) entre medição e mão de obra + material — ajuste fino de até 1 centavo. */
 const ESPELHO_MONEY_TRIPLET_TOLERANCE_RS = 0.01;
+
+type EspelhoMoneyTripletField = 'measurementAmount' | 'laborAmount' | 'materialAmount';
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -440,6 +386,10 @@ function espelhoSavedCalendarPartsFromIso(iso: string): { y: number; m: number }
 
 function espelhoSavedCreatedParts(item: SavedMirror): { y: number; m: number } | null {
   return item.createdAt ? espelhoSavedCalendarPartsFromIso(item.createdAt) : null;
+}
+
+function normalizeEspelhoPickerSearch(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
 function getEspelhoMoneyTripletMessage(d: MirrorDraft): string | null {
@@ -487,6 +437,10 @@ const FEDERAL_TAX_RATES_STORAGE_KEY = 'espelho-nf-federal-tax-rates';
 const FEDERAL_TAX_CONTEXT_ENABLED_STORAGE_KEY = 'espelho-nf-federal-tax-context-enabled';
 const SAVED_MIRRORS_STORAGE_KEY = 'espelho-nf-saved-mirrors';
 const MIRROR_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const MIRROR_ACTION_MENU_WIDTH_PX = 224;
+/** Altura aproximada do menu (4 itens), só para decidir posição vertical. */
+const MIRROR_ACTION_MENU_EST_HEIGHT_PX = 185;
+const MIRROR_ACTION_MENU_MIN_TOP_WHEN_ABOVE_PX = 100;
 const ESPELHO_APPROVAL_BADGE_CLASS: Record<EspelhoApprovalStatus, string> = {
   PENDING_APPROVAL:
     'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800',
@@ -522,81 +476,6 @@ const INITIAL_BANK_ACCOUNT_FORM: Omit<BankAccount, 'id'> = {
   account: ''
 };
 
-const INITIAL_TAX_RULE: TaxRule = {
-  collectionType: 'RETIDO'
-};
-
-const INITIAL_FEDERAL_TAX_RATES: FederalTaxRates = {
-  cofins: '',
-  csll: '',
-  inss: '',
-  irpj: '',
-  pis: ''
-};
-
-const INITIAL_FEDERAL_TAX_RATES_BY_CONTEXT: FederalTaxRatesByContext = {
-  gdfObra: { ...INITIAL_FEDERAL_TAX_RATES },
-  gdfManutencaoReforma: { ...INITIAL_FEDERAL_TAX_RATES },
-  gdfMaoObraSemMaterial: { ...INITIAL_FEDERAL_TAX_RATES },
-  foraGdfObra: { ...INITIAL_FEDERAL_TAX_RATES },
-  foraGdfManutencaoReforma: { ...INITIAL_FEDERAL_TAX_RATES },
-  foraGdfMaoObraSemMaterial: { ...INITIAL_FEDERAL_TAX_RATES }
-};
-
-const INITIAL_FEDERAL_TAX_CONTEXT_ENABLED: FederalTaxContextEnabled = {
-  gdfObra: false,
-  gdfManutencaoReforma: false,
-  gdfMaoObraSemMaterial: false,
-  foraGdfObra: false,
-  foraGdfManutencaoReforma: false,
-  foraGdfMaoObraSemMaterial: false
-};
-
-const FEDERAL_TAX_LAYOUT: Array<{
-  title: string;
-  contexts: Array<{ key: FederalTaxContextKey; label: string }>;
-}> = [
-  {
-    title: 'Cliente do GDF ou possui convêncio com GDF',
-    contexts: [
-      { key: 'gdfObra', label: 'Obra' },
-      { key: 'gdfManutencaoReforma', label: 'Manutenção ou reforma' },
-      { key: 'gdfMaoObraSemMaterial', label: 'Fornecimento de mão de obra. Sem material.' }
-    ]
-  },
-  {
-    title: 'Cliente fora da esfera GDF',
-    contexts: [
-      { key: 'foraGdfObra', label: 'Obra' },
-      { key: 'foraGdfManutencaoReforma', label: 'Manutenção ou reforma' },
-      { key: 'foraGdfMaoObraSemMaterial', label: 'Fornecimento de mão de obra. Sem material.' }
-    ]
-  }
-];
-
-type TaxCodeFormState = Omit<TaxCode, 'id' | 'abatesMaterial' | 'hasComplementaryWarranty' | 'garantiaRetidaNaNota'> & {
-  abatesMaterial: boolean | null;
-  hasComplementaryWarranty: boolean | null;
-  garantiaRetidaNaNota: boolean | null;
-};
-
-const INITIAL_TAX_CODE_FORM: TaxCodeFormState = {
-  cityName: '',
-  abatesMaterial: null,
-  hasComplementaryWarranty: null,
-  garantiaRetidaNaNota: null,
-  garantiaAliquota: '',
-  issRate: '',
-  cofins: { ...INITIAL_TAX_RULE },
-  csll: { ...INITIAL_TAX_RULE },
-  inss: { ...INITIAL_TAX_RULE },
-  irpj: { ...INITIAL_TAX_RULE },
-  pis: { ...INITIAL_TAX_RULE },
-  iss: { ...INITIAL_TAX_RULE },
-  inssMaterialLimit: '',
-  issMaterialLimit: ''
-};
-
 function EspelhoCentStepperMoneyInput({
   label,
   value,
@@ -619,15 +498,15 @@ function EspelhoCentStepperMoneyInput({
   return (
     <div className="space-y-1">
       <label className="text-xs font-medium text-gray-600 dark:text-gray-400">{label}</label>
-      <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/80 dark:focus-within:ring-blue-400/80">
+      <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 overflow-hidden focus-within:ring-0">
         <input
           type="text"
-          inputMode="decimal"
+          inputMode="numeric"
           placeholder="R$ 0,00"
           value={value}
           onChange={onChange}
           onBlur={onBlur}
-          className="flex-1 min-w-0 border-0 bg-transparent px-3 py-2 text-gray-900 dark:text-gray-100 text-right tabular-nums outline-none ring-0"
+          className="flex-1 min-w-0 border-0 bg-transparent px-3 py-2 text-gray-900 dark:text-gray-100 text-right tabular-nums outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0"
         />
         <div
           className="flex flex-col border-l border-gray-300 dark:border-gray-600 shrink-0 w-9"
@@ -671,9 +550,8 @@ function EspelhoCentStepperMoneyInput({
 
 export default function EspelhoNfPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<
-    'espelho' | 'prestadores' | 'tomadores' | 'contas-bancarias' | 'codigo-tributario'
-  >('espelho');
+  const queryClient = useQueryClient();
+  const [showEspelhoForm, setShowEspelhoForm] = useState(false);
   const [draft, setDraft] = useState<MirrorDraft>(INITIAL_DRAFT);
   const [savedDrafts, setSavedDrafts] = useState<SavedMirror[]>([]);
   const [savedMirrorsHydrated, setSavedMirrorsHydrated] = useState(false);
@@ -690,7 +568,7 @@ export default function EspelhoNfPage() {
   const [bankAccountForm, setBankAccountForm] = useState(INITIAL_BANK_ACCOUNT_FORM);
   const [editingBankAccountId, setEditingBankAccountId] = useState<string | null>(null);
   const [taxCodes, setTaxCodes] = useState<TaxCode[]>([]);
-  const [taxCodeForm, setTaxCodeForm] = useState<TaxCodeFormState>(INITIAL_TAX_CODE_FORM);
+  const [taxCodeForm, setTaxCodeForm] = useState<TaxCodeFormState>(() => emptyTaxCodeFormState());
   const [editingTaxCodeId, setEditingTaxCodeId] = useState<string | null>(null);
   const [federalTaxRatesByContext, setFederalTaxRatesByContext] = useState<FederalTaxRatesByContext>(
     INITIAL_FEDERAL_TAX_RATES_BY_CONTEXT
@@ -698,14 +576,30 @@ export default function EspelhoNfPage() {
   const [federalTaxContextEnabled, setFederalTaxContextEnabled] = useState<FederalTaxContextEnabled>(
     INITIAL_FEDERAL_TAX_CONTEXT_ENABLED
   );
-  const [espelhoProviderSearch, setEspelhoProviderSearch] = useState('');
-  const [espelhoTakerSearch, setEspelhoTakerSearch] = useState('');
   const [espelhoSavedFilterCostCenter, setEspelhoSavedFilterCostCenter] = useState('');
   const [espelhoSavedFilterTaker, setEspelhoSavedFilterTaker] = useState('');
   const [espelhoSavedFilterMonth, setEspelhoSavedFilterMonth] = useState('');
   const [espelhoSavedFilterYear, setEspelhoSavedFilterYear] = useState('');
+  const [espelhoSavedFiltersModalOpen, setEspelhoSavedFiltersModalOpen] = useState(false);
   const [nfConstarMenuOpen, setNfConstarMenuOpen] = useState(false);
+  const [openEspelhoPicker, setOpenEspelhoPicker] = useState<null | 'prestador' | 'tomador'>(null);
+  const [espelhoPrestadorPickerQuery, setEspelhoPrestadorPickerQuery] = useState('');
+  const [espelhoTomadorPickerQuery, setEspelhoTomadorPickerQuery] = useState('');
+  const prestadorPickerRef = useRef<HTMLDivElement>(null);
+  const tomadorPickerRef = useRef<HTMLDivElement>(null);
+  const espelhoPickerPopoverRef = useRef<HTMLDivElement>(null);
+
+  type EspelhoPickerPanelGeo = { left: number; top: number; width: number; maxHeight: number };
+  const [espelhoPickerPanelGeo, setEspelhoPickerPanelGeo] = useState<EspelhoPickerPanelGeo | null>(null);
   const nfConstarMenuRef = useRef<HTMLDivElement>(null);
+  const nfConstarBarRef = useRef<HTMLDivElement>(null);
+  const nfConstarPopoverRef = useRef<HTMLDivElement>(null);
+  const [nfConstarPanelGeo, setNfConstarPanelGeo] = useState<EspelhoPickerPanelGeo | null>(null);
+  const [mirrorActionMenu, setMirrorActionMenu] = useState<{
+    mirrorId: string;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const { costCenters: costCentersHook, isLoading: loadingCostCenters } = useCostCenters();
 
@@ -715,20 +609,74 @@ export default function EspelhoNfPage() {
   );
 
   const toggleNfConstarField = (key: keyof NfConstarNaNotaFields) => {
-    setDraft((prev) => ({
-      ...prev,
-      nfConstarNaNota: { ...prev.nfConstarNaNota, [key]: !prev.nfConstarNaNota[key] }
-    }));
+    setDraft((prev) => {
+      const nextVal = !prev.nfConstarNaNota[key];
+      return {
+        ...prev,
+        nfConstarNaNota: { ...prev.nfConstarNaNota, [key]: nextVal },
+        ...(key === 'obraCno' && !nextVal ? { obraCno: '' } : {})
+      };
+    });
   };
 
   useEffect(() => {
     if (!nfConstarMenuOpen) return;
     const onDown = (e: MouseEvent) => {
-      const el = nfConstarMenuRef.current;
-      if (el && !el.contains(e.target as Node)) setNfConstarMenuOpen(false);
+      const n = e.target as Node;
+      if (nfConstarMenuRef.current?.contains(n)) return;
+      if (nfConstarPopoverRef.current?.contains(n)) return;
+      setNfConstarMenuOpen(false);
     };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
+  }, [nfConstarMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!nfConstarMenuOpen) {
+      setNfConstarPanelGeo(null);
+      return;
+    }
+    const measure = () => {
+      const bar = nfConstarBarRef.current;
+      if (!bar) {
+        requestAnimationFrame(measure);
+        return;
+      }
+      const rect = bar.getBoundingClientRect();
+      const gap = 6;
+      const pad = 8;
+      const maxDesired = Math.min(window.innerHeight * 0.88, 560);
+      const spaceBelow = window.innerHeight - rect.bottom - gap - pad;
+      const spaceAbove = rect.top - gap - pad;
+      const preferBelow = spaceBelow >= 160 || spaceBelow >= spaceAbove;
+      const width = Math.min(Math.max(rect.width, 280), window.innerWidth - 2 * pad);
+      const left = Math.max(pad, Math.min(rect.left, window.innerWidth - width - pad));
+      if (preferBelow) {
+        const maxHeight = Math.max(280, Math.min(maxDesired, spaceBelow));
+        setNfConstarPanelGeo({
+          left,
+          top: rect.bottom + gap,
+          width,
+          maxHeight
+        });
+      } else {
+        const maxHeight = Math.max(280, Math.min(maxDesired, spaceAbove));
+        const top = Math.max(pad, rect.top - gap - maxHeight);
+        setNfConstarPanelGeo({
+          left,
+          top,
+          width,
+          maxHeight
+        });
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
   }, [nfConstarMenuOpen]);
 
   const selectedFederalTaxContextKey = useMemo(
@@ -798,6 +746,27 @@ export default function EspelhoNfPage() {
     espelhoSavedFilterYear
   ]);
 
+  const hasActiveEspelhoSavedFilters = useMemo(
+    () =>
+      Boolean(
+        espelhoSavedFilterCostCenter ||
+          espelhoSavedFilterTaker ||
+          espelhoSavedFilterMonth ||
+          espelhoSavedFilterYear
+      ),
+    [
+      espelhoSavedFilterCostCenter,
+      espelhoSavedFilterTaker,
+      espelhoSavedFilterMonth,
+      espelhoSavedFilterYear
+    ]
+  );
+
+  const mirrorMenuItem = useMemo(() => {
+    if (!mirrorActionMenu) return null;
+    return savedDrafts.find((m) => m.id === mirrorActionMenu.mirrorId) ?? null;
+  }, [mirrorActionMenu, savedDrafts]);
+
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
@@ -807,9 +776,6 @@ export default function EspelhoNfPage() {
   });
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
-
-  const normalizeForSearch = (value: string) =>
-    value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -836,30 +802,154 @@ export default function EspelhoNfPage() {
     [draft, espelhoMoneyTripletError]
   );
 
-  const filteredEspelhoProviders = useMemo(() => {
-    const q = normalizeForSearch(espelhoProviderSearch.trim());
-    if (!q) return serviceProviders;
-    return serviceProviders.filter((p) =>
-      normalizeForSearch(
+  const sortedEspelhoProviders = useMemo(
+    () =>
+      [...serviceProviders].sort((a, b) =>
+        a.corporateName.localeCompare(b.corporateName, 'pt-BR', { sensitivity: 'base' })
+      ),
+    [serviceProviders]
+  );
+
+  const sortedEspelhoTakers = useMemo(
+    () =>
+      [...serviceTakers].sort((a, b) =>
+        (a.corporateName || a.name).localeCompare(b.corporateName || b.name, 'pt-BR', {
+          sensitivity: 'base'
+        })
+      ),
+    [serviceTakers]
+  );
+
+  const filteredPrestadorPickerList = useMemo(() => {
+    const q = normalizeEspelhoPickerSearch(espelhoPrestadorPickerQuery.trim());
+    if (!q) return sortedEspelhoProviders;
+    return sortedEspelhoProviders.filter((p) =>
+      normalizeEspelhoPickerSearch(
         `${p.corporateName} ${p.tradeName} ${p.cnpj} ${p.city} ${p.state}`
       ).includes(q)
     );
-  }, [serviceProviders, espelhoProviderSearch]);
+  }, [sortedEspelhoProviders, espelhoPrestadorPickerQuery]);
 
-  const filteredEspelhoTakers = useMemo(() => {
-    const q = normalizeForSearch(espelhoTakerSearch.trim());
-    if (!q) return serviceTakers;
-    return serviceTakers.filter((t) =>
-      normalizeForSearch(
+  const filteredTomadorPickerList = useMemo(() => {
+    const q = normalizeEspelhoPickerSearch(espelhoTomadorPickerQuery.trim());
+    if (!q) return sortedEspelhoTakers;
+    return sortedEspelhoTakers.filter((t) =>
+      normalizeEspelhoPickerSearch(
         `${t.name} ${t.corporateName} ${t.cnpj} ${t.contractRef} ${t.city} ${t.state}`
       ).includes(q)
     );
-  }, [serviceTakers, espelhoTakerSearch]);
+  }, [sortedEspelhoTakers, espelhoTomadorPickerQuery]);
+
+  const espelhoPrestadorPickerLabel = useMemo(() => {
+    if (!draft.providerId) return '';
+    const p = sortedEspelhoProviders.find((x) => x.id === draft.providerId);
+    return p
+      ? `${p.corporateName} (${p.cnpj}) — ${p.city}/${p.state}`
+      : draft.providerName || '';
+  }, [draft.providerId, draft.providerName, sortedEspelhoProviders]);
+
+  const espelhoTomadorPickerLabel = useMemo(() => {
+    if (!draft.takerId) return '';
+    const t = sortedEspelhoTakers.find((x) => x.id === draft.takerId);
+    return t ? `${t.name} — ${t.corporateName} (${t.cnpj})` : draft.takerName || '';
+  }, [draft.takerId, draft.takerName, sortedEspelhoTakers]);
+
+  useEffect(() => {
+    if (!openEspelhoPicker) return;
+    const onDown = (e: MouseEvent) => {
+      const n = e.target as Node;
+      if (openEspelhoPicker === 'prestador' && prestadorPickerRef.current?.contains(n)) return;
+      if (openEspelhoPicker === 'tomador' && tomadorPickerRef.current?.contains(n)) return;
+      if (espelhoPickerPopoverRef.current?.contains(n)) return;
+      setOpenEspelhoPicker(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [openEspelhoPicker]);
+
+  useLayoutEffect(() => {
+    if (!openEspelhoPicker) {
+      setEspelhoPickerPanelGeo(null);
+      return;
+    }
+    const measure = () => {
+      const wrap =
+        openEspelhoPicker === 'prestador' ? prestadorPickerRef.current : tomadorPickerRef.current;
+      const btn = wrap?.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]');
+      if (!btn) {
+        requestAnimationFrame(measure);
+        return;
+      }
+      const rect = btn.getBoundingClientRect();
+      const gap = 6;
+      const pad = 8;
+      const maxDesired = Math.min(window.innerHeight * 0.55, 22 * 16);
+      const spaceBelow = window.innerHeight - rect.bottom - gap - pad;
+      const spaceAbove = rect.top - gap - pad;
+      const preferBelow = spaceBelow >= 140 || spaceBelow >= spaceAbove;
+      if (preferBelow) {
+        const maxHeight = Math.max(120, Math.min(maxDesired, spaceBelow));
+        setEspelhoPickerPanelGeo({
+          left: rect.left,
+          top: rect.bottom + gap,
+          width: rect.width,
+          maxHeight
+        });
+      } else {
+        const maxHeight = Math.max(120, Math.min(maxDesired, spaceAbove));
+        const top = Math.max(pad, rect.top - gap - maxHeight);
+        setEspelhoPickerPanelGeo({
+          left: rect.left,
+          top,
+          width: rect.width,
+          maxHeight
+        });
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [openEspelhoPicker]);
+
+  useEffect(() => {
+    if (!showEspelhoForm) {
+      setNfConstarMenuOpen(false);
+      return;
+    }
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [showEspelhoForm]);
 
   const draftTaxCode = useMemo(
     () => taxCodes.find((t) => t.id === draft.taxCodeId) ?? null,
     [taxCodes, draft.taxCodeId]
   );
+
+  /** Quando o código tributário do espelho tem JSON federal no estado (API/local), alinha a UI às alíquotas do cadastro. */
+  const lastAppliedEspelhoTaxFederalSigRef = useRef<string>('');
+  useEffect(() => {
+    const id = draft.taxCodeId;
+    if (!id) {
+      lastAppliedEspelhoTaxFederalSigRef.current = '';
+      return;
+    }
+    const tc = taxCodes.find((t) => t.id === id);
+    if (!tc) return;
+    if (tc.federalRatesByContext == null && tc.federalTaxContextEnabled == null) return;
+    const sig = `${id}:${JSON.stringify(tc.federalRatesByContext)}:${JSON.stringify(tc.federalTaxContextEnabled)}`;
+    if (sig === lastAppliedEspelhoTaxFederalSigRef.current) return;
+    lastAppliedEspelhoTaxFederalSigRef.current = sig;
+    const fed = mergeFederalTaxStateFromApi(tc.federalRatesByContext, tc.federalTaxContextEnabled);
+    setFederalTaxRatesByContext(fed.federalRatesByContext);
+    setFederalTaxContextEnabled(fed.federalTaxContextEnabled);
+  }, [draft.taxCodeId, taxCodes]);
   const draftTakerUf = useMemo(
     () => (serviceTakers.find((t) => t.id === draft.takerId)?.state ?? '').trim().toUpperCase(),
     [serviceTakers, draft.takerId]
@@ -1034,32 +1124,35 @@ export default function EspelhoNfPage() {
   }, [garantiaComplementarAuto, draftTaxCode, draft.measurementAmount]);
 
   const onEspelhoMoneyChange =
-    (field: 'measurementAmount' | 'laborAmount' | 'materialAmount') =>
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const v = sanitizeEspelhoMoneyTyping(e.target.value);
-      setDraft((prev) => ({ ...prev, [field]: v }));
+    (field: EspelhoMoneyTripletField) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      setDraft((prev) => ({ ...prev, [field]: maskCurrencyInputBr(e.target.value) }));
     };
 
   const onEspelhoMoneyBlur =
-    (field: 'measurementAmount' | 'laborAmount' | 'materialAmount') => () => {
+    (field: EspelhoMoneyTripletField) => () => {
       setDraft((prev) => ({
         ...prev,
         [field]: normalizeEspelhoMoneyBlurToBrl(prev[field])
       }));
     };
 
-  const nudgeEspelhoLaborMaterialCent =
-    (field: 'laborAmount' | 'materialAmount', deltaCents: 1 | -1) => () => {
+  const nudgeEspelhoMoneyFieldCent =
+    (field: EspelhoMoneyTripletField, deltaCents: 1 | -1) => () => {
       setDraft((prev) => {
         const parsed = parseEspelhoBrCurrencyToNumber(prev[field]);
         const currentCents = Math.round((parsed ?? 0) * 100);
         const nextCents = Math.max(0, currentCents + deltaCents);
         return {
           ...prev,
-          [field]: fmtEspelhoBrl(round2EspelhoMoney(nextCents / 100))
+          [field]: maskCurrencyInputBr(String(nextCents))
         };
       });
     };
+
+  const measurementCentCount = useMemo(() => {
+    const n = parseEspelhoBrCurrencyToNumber(draft.measurementAmount);
+    return Math.round((n ?? 0) * 100);
+  }, [draft.measurementAmount]);
 
   const laborCentCount = useMemo(() => {
     const n = parseEspelhoBrCurrencyToNumber(draft.laborAmount);
@@ -1174,7 +1267,13 @@ export default function EspelhoNfPage() {
           pis: normalizeRule(item.pis, true),
           iss: normalizeRule(item.iss),
           inssMaterialLimit: String(item.inssMaterialLimit || ''),
-          issMaterialLimit: String(item.issMaterialLimit || '')
+          issMaterialLimit: String(item.issMaterialLimit || ''),
+          ...(typeof (item as Partial<TaxCode>).federalRatesByContext !== 'undefined'
+            ? { federalRatesByContext: (item as Partial<TaxCode>).federalRatesByContext }
+            : {}),
+          ...(typeof (item as Partial<TaxCode>).federalTaxContextEnabled !== 'undefined'
+            ? { federalTaxContextEnabled: (item as Partial<TaxCode>).federalTaxContextEnabled }
+            : {})
         };
         });
         setTaxCodes(normalized);
@@ -1359,16 +1458,49 @@ export default function EspelhoNfPage() {
   useEffect(() => {
     if (!espelhoDbHydrated) return;
     const timer = setTimeout(() => {
-      void api.put('/espelho-nf/bootstrap', {
-        providers: serviceProviders,
-        takers: serviceTakers,
-        bankAccounts,
-        taxCodes,
-        mirrors: savedDrafts
-      });
+      const tid = draft.taxCodeId.trim();
+      const payloadTaxCodes =
+        tid === ''
+          ? taxCodes
+          : taxCodes.map((tc) =>
+              tc.id === tid
+                ? {
+                    ...tc,
+                    federalRatesByContext: JSON.parse(
+                      JSON.stringify(federalTaxRatesByContext)
+                    ) as FederalTaxRatesByContext,
+                    federalTaxContextEnabled: JSON.parse(
+                      JSON.stringify(federalTaxContextEnabled)
+                    ) as FederalTaxContextEnabled
+                  }
+                : tc
+            );
+      void api
+        .put('/espelho-nf/bootstrap', {
+          providers: serviceProviders,
+          takers: serviceTakers,
+          bankAccounts,
+          taxCodes: payloadTaxCodes,
+          mirrors: savedDrafts
+        })
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ['espelho-nf-bootstrap'] });
+        })
+        .catch(() => {});
     }, 600);
     return () => clearTimeout(timer);
-  }, [espelhoDbHydrated, serviceProviders, serviceTakers, bankAccounts, taxCodes, savedDrafts]);
+  }, [
+    espelhoDbHydrated,
+    serviceProviders,
+    serviceTakers,
+    bankAccounts,
+    taxCodes,
+    savedDrafts,
+    draft.taxCodeId,
+    federalTaxRatesByContext,
+    federalTaxContextEnabled,
+    queryClient
+  ]);
 
   const canSaveProvider = useMemo(
     () =>
@@ -1443,7 +1575,7 @@ export default function EspelhoNfPage() {
       state: provider.state,
       email: provider.email
     });
-    setActiveTab('prestadores');
+    router.push('/ponto/prestadores-servico');
   };
 
   const handleDeleteProvider = (providerId: string) => {
@@ -1553,7 +1685,7 @@ export default function EspelhoNfPage() {
       contractRef: taker.contractRef,
       serviceDescription: taker.serviceDescription
     });
-    setActiveTab('tomadores');
+    router.push('/ponto/tomadores-servico');
   };
 
   const handleDeleteTaker = (takerId: string) => {
@@ -1625,7 +1757,7 @@ export default function EspelhoNfPage() {
       agency: account.agency,
       account: account.account
     });
-    setActiveTab('contas-bancarias');
+    router.push('/ponto/contas-bancarias');
   };
 
   const handleDeleteBankAccount = (accountId: string) => {
@@ -1657,61 +1789,6 @@ export default function EspelhoNfPage() {
       ),
     [taxCodeForm]
   );
-
-  const handleTaxRuleFieldChange = (
-    taxName: 'cofins' | 'csll' | 'inss' | 'irpj' | 'pis' | 'iss',
-    value: 'RETIDO' | 'RECOLHIDO'
-  ) => {
-    setTaxCodeForm((prev) => ({
-      ...prev,
-      [taxName]: {
-        ...prev[taxName],
-        collectionType: value
-      }
-    }));
-  };
-
-  const handleFederalTaxRateChange = (
-    contextKey: FederalTaxContextKey,
-    taxName: keyof FederalTaxRates,
-    value: string
-  ) => {
-    setFederalTaxRatesByContext((prev) => ({
-      ...prev,
-      [contextKey]: { ...prev[contextKey], [taxName]: sanitizeEspelhoPercentTyping(value) }
-    }));
-  };
-
-  const handleFederalTaxRateBlur = (
-    contextKey: FederalTaxContextKey,
-    taxName: keyof FederalTaxRates,
-    value: string
-  ) => {
-    setFederalTaxRatesByContext((prev) => ({
-      ...prev,
-      [contextKey]: {
-        ...prev[contextKey],
-        [taxName]: normalizeEspelhoPercentBlur(value)
-      }
-    }));
-  };
-
-  const handleFederalTaxContextEnabledChange = (contextKey: FederalTaxContextKey, checked: boolean) => {
-    setFederalTaxContextEnabled((prev) => {
-      if (!checked) {
-        return { ...prev, [contextKey]: false };
-      }
-      return {
-        gdfObra: false,
-        gdfManutencaoReforma: false,
-        gdfMaoObraSemMaterial: false,
-        foraGdfObra: false,
-        foraGdfManutencaoReforma: false,
-        foraGdfMaoObraSemMaterial: false,
-        [contextKey]: true
-      };
-    });
-  };
 
   const handleCreateOrUpdateTaxCode = () => {
     if (!canSaveTaxCode) {
@@ -1749,6 +1826,8 @@ export default function EspelhoNfPage() {
       ? normalizeEspelhoPercentBlur(taxCodeForm.issMaterialLimit.trim())
       : '0';
     if (editingTaxCodeId) {
+      const fedRates = JSON.parse(JSON.stringify(federalTaxRatesByContext)) as FederalTaxRatesByContext;
+      const fedEn = JSON.parse(JSON.stringify(federalTaxContextEnabled)) as FederalTaxContextEnabled;
       setTaxCodes((prev) =>
         prev.map((taxCode) =>
           taxCode.id === editingTaxCodeId
@@ -1763,24 +1842,28 @@ export default function EspelhoNfPage() {
                     : null,
                 garantiaAliquota: normalizedGarantiaAliquota,
                 issRate: normalizedIssRate,
-                cofins: { collectionType: 'RETIDO' },
-                csll: { collectionType: 'RETIDO' },
-                inss: { collectionType: 'RETIDO' },
-                irpj: { collectionType: 'RETIDO' },
-                pis: { collectionType: 'RETIDO' },
+                cofins: { ...taxCodeForm.cofins },
+                csll: { ...taxCodeForm.csll },
+                inss: { ...taxCodeForm.inss },
+                irpj: { ...taxCodeForm.irpj },
+                pis: { ...taxCodeForm.pis },
                 iss: { ...taxCodeForm.iss },
                 inssMaterialLimit: normalizedInssLimit,
-                issMaterialLimit: normalizedIssLimit
+                issMaterialLimit: normalizedIssLimit,
+                federalRatesByContext: fedRates,
+                federalTaxContextEnabled: fedEn
               }
             : taxCode
         )
       );
       setEditingTaxCodeId(null);
-      setTaxCodeForm(INITIAL_TAX_CODE_FORM);
+      setTaxCodeForm(emptyTaxCodeFormState());
       toast.success('Código tributário atualizado.');
       return;
     }
 
+    const fedRatesNew = JSON.parse(JSON.stringify(federalTaxRatesByContext)) as FederalTaxRatesByContext;
+    const fedEnNew = JSON.parse(JSON.stringify(federalTaxContextEnabled)) as FederalTaxContextEnabled;
     const newTaxCode: TaxCode = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       cityName: taxCodeForm.cityName.trim(),
@@ -1790,17 +1873,19 @@ export default function EspelhoNfPage() {
         taxCodeForm.hasComplementaryWarranty === true ? taxCodeForm.garantiaRetidaNaNota : null,
       garantiaAliquota: normalizedGarantiaAliquota,
       issRate: normalizedIssRate,
-      cofins: { collectionType: 'RETIDO' },
-      csll: { collectionType: 'RETIDO' },
-      inss: { collectionType: 'RETIDO' },
-      irpj: { collectionType: 'RETIDO' },
-      pis: { collectionType: 'RETIDO' },
+      cofins: { ...taxCodeForm.cofins },
+      csll: { ...taxCodeForm.csll },
+      inss: { ...taxCodeForm.inss },
+      irpj: { ...taxCodeForm.irpj },
+      pis: { ...taxCodeForm.pis },
       iss: { ...taxCodeForm.iss },
       inssMaterialLimit: normalizedInssLimit,
-      issMaterialLimit: normalizedIssLimit
+      issMaterialLimit: normalizedIssLimit,
+      federalRatesByContext: fedRatesNew,
+      federalTaxContextEnabled: fedEnNew
     };
     setTaxCodes((prev) => [newTaxCode, ...prev]);
-    setTaxCodeForm(INITIAL_TAX_CODE_FORM);
+    setTaxCodeForm(emptyTaxCodeFormState());
     toast.success('Código tributário cadastrado.');
   };
 
@@ -1817,16 +1902,22 @@ export default function EspelhoNfPage() {
         : null,
       garantiaAliquota: taxCode.hasComplementaryWarranty ? taxCode.garantiaAliquota || '' : '',
       issRate: taxCode.issRate,
-      cofins: { collectionType: 'RETIDO' },
-      csll: { collectionType: 'RETIDO' },
-      inss: { collectionType: 'RETIDO' },
-      irpj: { collectionType: 'RETIDO' },
-      pis: { collectionType: 'RETIDO' },
+      cofins: { ...taxCode.cofins },
+      csll: { ...taxCode.csll },
+      inss: { ...taxCode.inss },
+      irpj: { ...taxCode.irpj },
+      pis: { ...taxCode.pis },
       iss: { ...taxCode.iss },
       inssMaterialLimit: taxCode.inssMaterialLimit,
       issMaterialLimit: taxCode.issMaterialLimit
     });
-    setActiveTab('codigo-tributario');
+    const fed = mergeFederalTaxStateFromApi(
+      taxCode.federalRatesByContext,
+      taxCode.federalTaxContextEnabled
+    );
+    setFederalTaxRatesByContext(fed.federalRatesByContext);
+    setFederalTaxContextEnabled(fed.federalTaxContextEnabled);
+    router.push('/ponto/codigos-tributarios');
   };
 
   const handleDeleteTaxCode = (taxCodeId: string) => {
@@ -1838,7 +1929,7 @@ export default function EspelhoNfPage() {
     );
     if (editingTaxCodeId === taxCodeId) {
       setEditingTaxCodeId(null);
-      setTaxCodeForm(INITIAL_TAX_CODE_FORM);
+      setTaxCodeForm(emptyTaxCodeFormState());
     }
     toast.success('Código tributário excluído.');
   };
@@ -1890,6 +1981,7 @@ export default function EspelhoNfPage() {
       );
       setEditingSavedMirrorId(null);
       setDraft(INITIAL_DRAFT);
+      setShowEspelhoForm(false);
       toast.success('Espelho atualizado.');
       return;
     }
@@ -1905,6 +1997,7 @@ export default function EspelhoNfPage() {
       ...prev
     ]);
     setDraft(INITIAL_DRAFT);
+    setShowEspelhoForm(false);
     toast.success('Espelho salvo.');
   };
 
@@ -1957,7 +2050,7 @@ export default function EspelhoNfPage() {
     } = saved;
     setDraft(formatEspelhoDraftMoneyFields(rest));
     setEditingSavedMirrorId(id);
-    setActiveTab('espelho');
+    setShowEspelhoForm(true);
     toast.success('Altere os campos e clique em Salvar para concluir a edição.');
   };
 
@@ -2016,6 +2109,12 @@ export default function EspelhoNfPage() {
   const handleCancelSavedMirrorEdit = () => {
     setEditingSavedMirrorId(null);
     setDraft(INITIAL_DRAFT);
+    setShowEspelhoForm(false);
+    setOpenEspelhoPicker(null);
+    setEspelhoPrestadorPickerQuery('');
+    setEspelhoTomadorPickerQuery('');
+    setNfConstarMenuOpen(false);
+    setEspelhoSavedFiltersModalOpen(false);
   };
 
   if (loadingUser) {
@@ -2027,311 +2126,185 @@ export default function EspelhoNfPage() {
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Espelho NF</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
+              Espelho da Nota Fiscal
+            </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
               Base para emissão de nota fiscal com regras tributárias (em evolução).
             </p>
           </div>
 
-          <div className="border-b border-gray-200 dark:border-gray-700">
-            <nav className="-mb-px flex space-x-6">
-              <button
-                type="button"
-                onClick={() => setActiveTab('espelho')}
-                className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'espelho'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                Espelho NF
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('prestadores')}
-                className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'prestadores'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                Prestadores de Serviço
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('tomadores')}
-                className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'tomadores'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                Tomadores de Serviço
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('contas-bancarias')}
-                className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'contas-bancarias'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                Contas Bancárias
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('codigo-tributario')}
-                className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'codigo-tributario'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                Código Tributário
-              </button>
-            </nav>
-          </div>
 
-          {activeTab === 'espelho' && (
-            <Card>
-              <CardHeader className="border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center">
-                  <div className="flex items-center gap-2">
-                    <FileSpreadsheet className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Novo espelho</h3>
-                  </div>
+          {showEspelhoForm && (
+            <div className="fixed inset-0 z-[200] flex min-h-0 items-center justify-center overflow-hidden p-2 sm:p-4">
+              <div className="absolute inset-0 bg-black/50" aria-hidden />
+              <div className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800 [&_button:focus]:outline-none [&_button:focus]:ring-0 [&_button:focus-visible]:outline-none [&_button:focus-visible]:ring-0 [&_input:not(.sr-only):focus]:outline-none [&_input:not(.sr-only):focus]:ring-0 [&_input:not(.sr-only):focus-visible]:outline-none [&_input:not(.sr-only):focus-visible]:ring-0 [&_select:focus]:outline-none [&_select:focus]:ring-0 [&_select:focus-visible]:outline-none [&_select:focus-visible]:ring-0 [&_textarea:focus]:outline-none [&_textarea:focus]:ring-0 [&_textarea:focus-visible]:outline-none [&_textarea:focus-visible]:ring-0">
+                <div className="z-10 flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-800">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 pr-2">
+                    {editingSavedMirrorId ? 'Editar espelho da nota fiscal' : 'Novo espelho da nota fiscal'}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => { setShowEspelhoForm(false); handleCancelSavedMirrorEdit(); }}
+                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                    aria-label="Fechar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-              </CardHeader>
-              <CardContent className="p-6">
-                {editingSavedMirrorId && (
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/25">
-                    <p className="text-sm text-amber-900 dark:text-amber-100">
-                      Você está editando um espelho já salvo. Salve para aplicar ou cancele para descartar as
-                      alterações no formulário.
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-5 sm:p-6 [scrollbar-gutter:stable]">
+                <div className="space-y-4">
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/60 dark:border-gray-600 dark:bg-gray-700/20 p-4">
+                    <label className="mb-1 block text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      Prestador de serviço
+                    </label>
+                    <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                      Escolha o prestador vinculado a esta nota.
                     </p>
-                    <button
-                      type="button"
-                      onClick={handleCancelSavedMirrorEdit}
-                      className="shrink-0 text-sm px-3 py-1.5 rounded-lg border border-amber-700 text-amber-900 hover:bg-amber-100 dark:border-amber-500 dark:text-amber-100 dark:hover:bg-amber-900/40"
-                    >
-                      Cancelar edição
-                    </button>
-                  </div>
-                )}
-                <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                    Prestador de serviço
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                    Selecione apenas 1 opção. Clique no card inteiro para marcar.
-                  </p>
-                  {serviceProviders.length === 0 ? (
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Cadastre pelo menos um prestador na aba Prestadores de Serviço para selecionar no espelho.
-                    </p>
-                  ) : (
-                    <>
-                      <div className="relative mb-2">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                        <input
-                          type="search"
-                          placeholder="Pesquisar prestador..."
-                          value={espelhoProviderSearch}
-                          onChange={(e) => setEspelhoProviderSearch(e.target.value)}
-                          className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    <div ref={prestadorPickerRef} className="relative">
+                      <button
+                        type="button"
+                        aria-expanded={openEspelhoPicker === 'prestador'}
+                        aria-haspopup="listbox"
+                        onClick={() => {
+                          setOpenEspelhoPicker((k) => (k === 'prestador' ? null : 'prestador'));
+                          setEspelhoPrestadorPickerQuery('');
+                        }}
+                        className="relative flex w-full items-center rounded-lg border border-gray-300 bg-white py-2.5 pl-3 pr-11 text-left text-sm shadow-sm transition-colors hover:border-gray-400 focus:border-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500 dark:focus:border-gray-600"
+                      >
+                        <span
+                          className={`min-w-0 flex-1 truncate ${!espelhoPrestadorPickerLabel ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}
+                        >
+                          {espelhoPrestadorPickerLabel || 'Selecione um prestador...'}
+                        </span>
+                        <ChevronDown
+                          className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 shrink-0 -translate-y-1/2 text-gray-500 transition-transform dark:text-gray-400 ${openEspelhoPicker === 'prestador' ? 'rotate-180' : ''}`}
+                          aria-hidden
                         />
-                      </div>
-                      <div className="max-h-64 overflow-y-auto overscroll-y-contain pr-1 space-y-2 [scrollbar-gutter:stable]">
-                        {filteredEspelhoProviders.length === 0 ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 py-2">
-                            Nenhum prestador encontrado para a pesquisa.
-                          </p>
-                        ) : (
-                          filteredEspelhoProviders.map((provider) => (
-                            <label
-                              key={provider.id}
-                              className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                                draft.providerId === provider.id
-                                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                                  : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/60'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={draft.providerId === provider.id}
-                                onChange={() =>
-                                  setDraft((prev) => ({
-                                    ...prev,
-                                    providerId: prev.providerId === provider.id ? '' : provider.id,
-                                    providerName:
-                                      prev.providerId === provider.id ? '' : provider.corporateName
-                                  }))
-                                }
-                                className="h-5 w-5 min-h-5 min-w-5 accent-blue-600 shrink-0"
-                              />
-                              <span className="text-sm text-gray-800 dark:text-gray-200 break-words">
-                                {provider.corporateName} ({provider.cnpj}) - {provider.city}/{provider.state}
-                              </span>
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="mb-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="space-y-4">
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                        Tomador de serviço
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                        Selecione apenas 1 opção. Clique no card inteiro para marcar.
-                      </p>
-                      {serviceTakers.length === 0 ? (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Cadastre pelo menos um tomador na aba Tomadores de Serviço para selecionar no espelho.
-                        </p>
-                      ) : (
-                        <>
-                          <div className="relative mb-2">
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                            <input
-                              type="search"
-                              placeholder="Pesquisar tomador..."
-                              value={espelhoTakerSearch}
-                              onChange={(e) => setEspelhoTakerSearch(e.target.value)}
-                              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            />
-                          </div>
-                          <div className="max-h-64 overflow-y-auto overscroll-y-contain pr-1 space-y-2 [scrollbar-gutter:stable]">
-                            {filteredEspelhoTakers.length === 0 ? (
-                              <p className="text-xs text-gray-500 dark:text-gray-400 py-2">
-                                Nenhum tomador encontrado para a pesquisa.
-                              </p>
-                            ) : (
-                              filteredEspelhoTakers.map((taker) => (
-                                <label
-                                  key={taker.id}
-                                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                                    draft.takerId === taker.id
-                                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                                      : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/60'
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={draft.takerId === taker.id}
-                                    onChange={() =>
-                                      setDraft((prev) => {
-                                        const deselect = prev.takerId === taker.id;
-                                        if (deselect) {
-                                          return {
-                                            ...prev,
-                                            takerId: '',
-                                            takerName: '',
-                                            municipality: '',
-                                            costCenterId: '',
-                                            bankAccountId: '',
-                                            bankAccountName: '',
-                                            taxCodeId: '',
-                                            taxCodeCityName: ''
-                                          };
-                                        }
-                                        const linkedTaxCode =
-                                          taxCodes.find((code) => code.id === taker.taxCodeId) ?? null;
-                                        const linkedBank =
-                                          bankAccounts.find((account) => account.id === taker.bankAccountId) ?? null;
-                                        return {
-                                          ...prev,
-                                          takerId: taker.id,
-                                          takerName: taker.corporateName,
-                                          municipality: taker.municipality || taker.city || '',
-                                          costCenterId: taker.costCenterId || '',
-                                          bankAccountId: taker.bankAccountId || '',
-                                          bankAccountName: linkedBank?.name || '',
-                                          taxCodeId: taker.taxCodeId || '',
-                                          taxCodeCityName: linkedTaxCode?.cityName || ''
-                                        };
-                                      })
-                                    }
-                                    className="h-5 w-5 min-h-5 min-w-5 accent-blue-600 shrink-0"
-                                  />
-                                  <span className="text-sm text-gray-800 dark:text-gray-200 break-words">
-                                    {taker.name} - {taker.corporateName} ({taker.cnpj}) - Contrato: {taker.contractRef}
-                                  </span>
-                                </label>
-                              ))
-                            )}
-                          </div>
-                        </>
-                      )}
+                      </button>
                     </div>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Centro de custo</label>
-                      <input
-                        type="text"
-                        readOnly
-                        tabIndex={-1}
-                        value={draftCostCenterLabel || 'Será preenchido automaticamente pelo tomador selecionado'}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
-                      />
+                    {serviceProviders.length === 0 ? (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        Nenhum prestador cadastrado. Inclua prestadores pelo cadastro do sistema.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/60 dark:border-gray-600 dark:bg-gray-700/20 p-4">
+                    <label className="mb-1 block text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      Tomador de serviço
+                    </label>
+                    <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                    Escolha o Tomador vinculado a esta nota.
+                    </p>
+                    <div ref={tomadorPickerRef} className="relative">
+                      <button
+                        type="button"
+                        aria-expanded={openEspelhoPicker === 'tomador'}
+                        aria-haspopup="listbox"
+                        onClick={() => {
+                          setOpenEspelhoPicker((k) => (k === 'tomador' ? null : 'tomador'));
+                          setEspelhoTomadorPickerQuery('');
+                        }}
+                        className="relative flex w-full items-center rounded-lg border border-gray-300 bg-white py-2.5 pl-3 pr-11 text-left text-sm shadow-sm transition-colors hover:border-gray-400 focus:border-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500 dark:focus:border-gray-600"
+                      >
+                        <span
+                          className={`min-w-0 flex-1 truncate ${!espelhoTomadorPickerLabel ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}
+                        >
+                          {espelhoTomadorPickerLabel || 'Selecione um tomador...'}
+                        </span>
+                        <ChevronDown
+                          className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 shrink-0 -translate-y-1/2 text-gray-500 transition-transform dark:text-gray-400 ${openEspelhoPicker === 'tomador' ? 'rotate-180' : ''}`}
+                          aria-hidden
+                        />
+                      </button>
+                    </div>
+                    {serviceTakers.length === 0 ? (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        Nenhum tomador cadastrado. Inclua tomadores pelo cadastro do sistema.
+                      </p>
+                    ) : null}
+                  </div>
+                {draft.takerId ? (
+                  <>
+                  <div>
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Dados do tomador
+                    </p>
+                    <div className="rounded-lg border border-gray-200/90 bg-gray-50/70 px-3 py-3 dark:border-gray-600 dark:bg-gray-700/30 sm:px-4">
+                      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-12 lg:gap-y-2.5">
+                        <div className="min-w-0 sm:col-span-2 lg:col-span-6">
+                          <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                            Centro de custo
+                          </dt>
+                          <dd
+                            className="mt-0.5 text-sm leading-snug text-gray-900 dark:text-gray-100"
+                            title={draftCostCenterLabel || undefined}
+                          >
+                            {draftCostCenterLabel || '—'}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-1 lg:col-span-3">
+                          <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                            Cód. tributário
+                          </dt>
+                          <dd
+                            className="mt-0.5 text-sm leading-snug text-gray-900 dark:text-gray-100"
+                            title={draft.taxCodeCityName || undefined}
+                          >
+                            {draft.taxCodeCityName || '—'}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-1 lg:col-span-3">
+                          <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                            Município
+                          </dt>
+                          <dd className="mt-0.5 text-sm leading-snug text-gray-900 dark:text-gray-100">
+                            {draft.municipality || '—'}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-2 lg:col-span-12 lg:border-t lg:border-gray-200/80 lg:pt-2.5 dark:lg:border-gray-700/80">
+                          <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                            Conta bancária
+                          </dt>
+                          <dd
+                            className="mt-0.5 text-sm leading-snug text-gray-900 dark:text-gray-100"
+                            title={draft.bankAccountName || undefined}
+                          >
+                            {draft.bankAccountName || '—'}
+                          </dd>
+                        </div>
+                      </dl>
                     </div>
                   </div>
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                        Código tributário
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                        Campo automático conforme o tomador selecionado.
-                      </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="espelho-draft-cnae"
+                        className="text-xs font-medium text-gray-600 dark:text-gray-400"
+                      >
+                        CNAE
+                      </label>
                       <input
-                        type="text"
-                        readOnly
-                        tabIndex={-1}
-                        value={draft.taxCodeCityName || 'Será preenchido automaticamente pelo tomador selecionado'}
-                        className="w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
-                      />
-                    </div>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Município</label>
-                      <input
-                        type="text"
-                        readOnly
-                        tabIndex={-1}
-                        value={draft.municipality || 'Será preenchido automaticamente pelo tomador selecionado'}
-                        className="w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
-                      />
-                    </div>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Conta bancária</label>
-                      <input
-                        type="text"
-                        readOnly
-                        tabIndex={-1}
-                        value={draft.bankAccountName || 'Será preenchido automaticamente pelo tomador selecionado'}
-                        className="w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
-                      />
-                    </div>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">CNAE</label>
-                      <input
+                        id="espelho-draft-cnae"
                         type="text"
                         value={draft.cnae}
                         onChange={(e) => setDraft((prev) => ({ ...prev, cnae: e.target.value }))}
-                        className="w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-0"
                       />
                     </div>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="espelho-draft-issqn"
+                        className="text-xs font-medium text-gray-600 dark:text-gray-400"
+                      >
                         Lista de Serviços - ISSQN
                       </label>
                       <select
+                        id="espelho-draft-issqn"
                         value={draft.serviceIssqn}
                         onChange={(e) => setDraft((prev) => ({ ...prev, serviceIssqn: e.target.value }))}
-                        className="w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-0"
                       >
                         <option value="">Selecione...</option>
                         <option value="07.02 - Obra">07.02 - Obra</option>
@@ -2339,17 +2312,17 @@ export default function EspelhoNfPage() {
                       </select>
                     </div>
                   </div>
+                  </>
+                ) : null}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    placeholder="Referência da medição (ex.: Medição 87 - Abril/2026)"
-                    value={draft.measurementRef}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, measurementRef: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 md:col-span-2"
-                  />
+
+                <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="md:col-span-2 relative" ref={nfConstarMenuRef}>
-                    <div className="flex flex-col gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/90 dark:bg-gray-900/40 p-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+                    <div
+                      ref={nfConstarBarRef}
+                      className="flex flex-col gap-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/90 dark:bg-gray-700/35 p-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4"
+                    >
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                           Constar na nota fiscal
@@ -2360,28 +2333,54 @@ export default function EspelhoNfPage() {
                             : `${nfConstarSelectedCount} campo(s) opcional(is) visível(is).`}
                         </p>
                       </div>
-                      <label className="inline-flex max-w-md shrink-0 cursor-pointer items-start gap-2 rounded-md border border-amber-200/80 bg-amber-50/90 px-2.5 py-2 dark:border-amber-800/60 dark:bg-amber-950/40">
-                        <input
-                          type="checkbox"
-                          checked={draft.nfConstarNaNotaAcknowledged}
-                          onChange={(e) =>
-                            setDraft((prev) => ({
-                              ...prev,
-                              nfConstarNaNotaAcknowledged: e.target.checked
-                            }))
-                          }
-                          className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
-                          aria-required="true"
-                          aria-label="Checagem de campos — obrigatório para salvar"
-                        />
-                        <span className="text-xs font-medium leading-snug text-amber-950 dark:text-amber-100">
+                      <label className="group inline-flex max-w-md shrink-0 cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white px-2.5 py-2 dark:border-gray-600 dark:bg-gray-800">
+                        <div className="relative shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={draft.nfConstarNaNotaAcknowledged}
+                            onChange={(e) =>
+                              setDraft((prev) => ({
+                                ...prev,
+                                nfConstarNaNotaAcknowledged: e.target.checked
+                              }))
+                            }
+                            className="sr-only"
+                            aria-required="true"
+                            aria-label="Checagem de campos — obrigatório para salvar"
+                          />
+                          <div
+                            className={`flex h-5 w-5 items-center justify-center rounded border-2 transition-all duration-200 ${
+                              draft.nfConstarNaNotaAcknowledged
+                                ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+                                : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800 group-hover:border-red-500 dark:group-hover:border-red-400'
+                            }`}
+                            aria-hidden
+                          >
+                            {draft.nfConstarNaNotaAcknowledged ? (
+                              <svg
+                                className="h-3 w-3 text-white"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={3}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                            ) : null}
+                          </div>
+                        </div>
+                        <span className="text-xs font-medium leading-snug text-gray-800 dark:text-gray-200">
                           Checagem de campos
                         </span>
                       </label>
                       <button
                         type="button"
                         onClick={() => setNfConstarMenuOpen((o) => !o)}
-                        className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 lg:self-center"
+                        className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-0 lg:self-center"
                         aria-expanded={nfConstarMenuOpen}
                         aria-haspopup="true"
                       >
@@ -2392,90 +2391,27 @@ export default function EspelhoNfPage() {
                         />
                       </button>
                     </div>
-                    {nfConstarMenuOpen && (
-                      <div
-                        className="absolute left-0 right-0 top-full z-40 mt-1 max-h-[min(70vh,22rem)] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 shadow-xl"
-                        role="menu"
-                      >
-                        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Marque os campos que devem aparecer no formulário:
-                        </p>
-                        <div className="space-y-2">
-                          {(Object.keys(NF_CONSTAR_FIELD_LABELS) as (keyof NfConstarNaNotaFields)[]).map((key) => (
-                            <label
-                              key={key}
-                              className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/80"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={draft.nfConstarNaNota[key]}
-                                onChange={() => toggleNfConstarField(key)}
-                                className="h-4 w-4 accent-blue-600"
-                              />
-                              <span>{NF_CONSTAR_FIELD_LABELS[key]}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Vencimento</label>
+                  <div className="space-y-1 md:col-span-2">
+                    <label
+                      htmlFor="espelho-draft-measurement-ref"
+                      className="mb-1.5 block text-sm font-semibold text-gray-900 dark:text-gray-100"
+                    >
+                      Referência da medição
+                    </label>
                     <input
-                      type="date"
-                      value={draft.dueDate}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, dueDate: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      id="espelho-draft-measurement-ref"
+                      type="text"
+                      placeholder="Ex.: Medição 87 - Abril/2026"
+                      value={draft.measurementRef}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, measurementRef: e.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
                     />
                   </div>
-                  {draft.nfConstarNaNota.processNumber && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Nº Processo</label>
-                      <input
-                        type="text"
-                        value={draft.processNumber}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, processNumber: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      />
-                    </div>
-                  )}
-                  {draft.nfConstarNaNota.empenhoNumber && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Nº Empenho</label>
-                      <input
-                        type="text"
-                        value={draft.empenhoNumber}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, empenhoNumber: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      />
-                    </div>
-                  )}
-                  {draft.nfConstarNaNota.serviceOrder && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Ordem de Serviço</label>
-                      <input
-                        type="text"
-                        value={draft.serviceOrder}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, serviceOrder: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      />
-                    </div>
-                  )}
-                  {draft.nfConstarNaNota.buildingUnit && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Unidade Predial</label>
-                      <input
-                        type="text"
-                        value={draft.buildingUnit}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, buildingUnit: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      />
-                    </div>
-                  )}
-                  {draft.nfConstarNaNota.obraCno && (
+                  {draft.nfConstarNaNota.obraCno ? (
                     <div className="space-y-1 md:col-span-2">
                       <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                        Nº inscrição da Obra / CNO
+                        Número da Inscrição da Obra / CNO
                       </label>
                       <input
                         type="text"
@@ -2486,7 +2422,51 @@ export default function EspelhoNfPage() {
                         onChange={(e) =>
                           setDraft((prev) => ({ ...prev, obraCno: maskCnoObraInput(e.target.value) }))
                         }
-                        className="w-full max-w-md px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono tracking-wide"
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono tracking-wide text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                  ) : null}
+                  {draft.nfConstarNaNota.processNumber && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Número do Processo</label>
+                      <input
+                        type="text"
+                        value={draft.processNumber}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, processNumber: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                  )}
+                  {draft.nfConstarNaNota.empenhoNumber && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Número do Empenho</label>
+                      <input
+                        type="text"
+                        value={draft.empenhoNumber}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, empenhoNumber: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                  )}
+                  {draft.nfConstarNaNota.serviceOrder && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Ordem de Serviço</label>
+                      <input
+                        type="text"
+                        value={draft.serviceOrder}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, serviceOrder: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                  )}
+                  {draft.nfConstarNaNota.buildingUnit && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Unidade Predial</label>
+                      <input
+                        type="text"
+                        value={draft.buildingUnit}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, buildingUnit: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-0"
                       />
                     </div>
                   )}
@@ -2494,7 +2474,7 @@ export default function EspelhoNfPage() {
                     draftTaxCode?.hasComplementaryWarranty === true) && (
                     <div className="space-y-1 md:col-span-2">
                       <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                        Garantia complementar
+                        Garantia Complementar
                       </label>
                       <textarea
                         rows={2}
@@ -2507,35 +2487,44 @@ export default function EspelhoNfPage() {
                           if (garantiaComplementarAuto) return;
                           setDraft((prev) => ({ ...prev, garantiaComplementar: e.target.value }));
                         }}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-y min-h-[3rem]"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-y min-h-[3rem] focus:outline-none focus:ring-0"
                       />
                     </div>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 self-end">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                          Início da medição
-                        </label>
-                        <input
-                          type="date"
-                          value={draft.measurementStartDate}
-                          onChange={(e) => setDraft((prev) => ({ ...prev, measurementStartDate: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                          required
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                          Fim da medição
-                        </label>
-                        <input
-                          type="date"
-                          value={draft.measurementEndDate}
-                          onChange={(e) => setDraft((prev) => ({ ...prev, measurementEndDate: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                          required
-                        />
-                      </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4 md:col-span-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Vencimento</label>
+                      <input
+                        type="date"
+                        value={draft.dueDate}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, dueDate: e.target.value }))}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Início da medição
+                      </label>
+                      <input
+                        type="date"
+                        value={draft.measurementStartDate}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, measurementStartDate: e.target.value }))}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-0"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Fim da medição
+                      </label>
+                      <input
+                        type="date"
+                        value={draft.measurementEndDate}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, measurementEndDate: e.target.value }))}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-0"
+                        required
+                      />
+                    </div>
                   </div>
                   {draft.nfConstarNaNota.observations && (
                     <div className="space-y-1 md:col-span-2">
@@ -2545,22 +2534,21 @@ export default function EspelhoNfPage() {
                         placeholder="Observações sobre este espelho..."
                         value={draft.observations}
                         onChange={(e) => setDraft((prev) => ({ ...prev, observations: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-y min-h-[4.5rem]"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-y min-h-[4.5rem] focus:outline-none focus:ring-0"
                       />
                     </div>
                   )}
                 </div>
-                <div className="mt-4 space-y-4">
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <EspelhoCentStepperMoneyInput
                       label="Medição (R$)"
                       value={draft.measurementAmount}
                       onChange={onEspelhoMoneyChange('measurementAmount')}
                       onBlur={onEspelhoMoneyBlur('measurementAmount')}
-                      showStepper={false}
-                      canStepDown={false}
-                      onStepUp={() => undefined}
-                      onStepDown={() => undefined}
+                      canStepDown={measurementCentCount >= 1}
+                      onStepUp={nudgeEspelhoMoneyFieldCent('measurementAmount', 1)}
+                      onStepDown={nudgeEspelhoMoneyFieldCent('measurementAmount', -1)}
                     />
                     <EspelhoCentStepperMoneyInput
                       label="Mão de obra (R$)"
@@ -2568,8 +2556,8 @@ export default function EspelhoNfPage() {
                       onChange={onEspelhoMoneyChange('laborAmount')}
                       onBlur={onEspelhoMoneyBlur('laborAmount')}
                       canStepDown={laborCentCount >= 1}
-                      onStepUp={nudgeEspelhoLaborMaterialCent('laborAmount', 1)}
-                      onStepDown={nudgeEspelhoLaborMaterialCent('laborAmount', -1)}
+                      onStepUp={nudgeEspelhoMoneyFieldCent('laborAmount', 1)}
+                      onStepDown={nudgeEspelhoMoneyFieldCent('laborAmount', -1)}
                     />
                     <EspelhoCentStepperMoneyInput
                       label="Material (R$)"
@@ -2577,8 +2565,8 @@ export default function EspelhoNfPage() {
                       onChange={onEspelhoMoneyChange('materialAmount')}
                       onBlur={onEspelhoMoneyBlur('materialAmount')}
                       canStepDown={materialCentCount >= 1}
-                      onStepUp={nudgeEspelhoLaborMaterialCent('materialAmount', 1)}
-                      onStepDown={nudgeEspelhoLaborMaterialCent('materialAmount', -1)}
+                      onStepUp={nudgeEspelhoMoneyFieldCent('materialAmount', 1)}
+                      onStepDown={nudgeEspelhoMoneyFieldCent('materialAmount', -1)}
                     />
                   </div>
                   {espelhoMoneyTripletError && (
@@ -2586,78 +2574,79 @@ export default function EspelhoNfPage() {
                       {espelhoMoneyTripletError}
                     </p>
                   )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                          Limite Material INSS
-                        </label>
-                        <div className="space-y-0.5">
-                          {limitMaterialPctHint(draftTaxCode?.inssMaterialLimit) && (
-                            <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
-                              Percentual: {limitMaterialPctHint(draftTaxCode?.inssMaterialLimit)}
-                            </p>
-                          )}
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/50 p-4 sm:p-5 dark:bg-gray-700/25">
+                    <div className="mb-4">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        Material, bases e retenções
+                      </h3>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Valores somente leitura, conforme o código tributário do tomador e os valores de medição e
+                        material informados acima.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-600 dark:bg-gray-700/40">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                            Limite Material INSS
+                          </label>
+                          <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
+                            Percentual: {limitMaterialPctHint(draftTaxCode?.inssMaterialLimit) ?? '—'}
+                          </p>
                           <input
                             type="text"
                             readOnly
                             tabIndex={-1}
                             value={espelhoMaterialLimits.inssBrl}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                            className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                            Base de cálculo INSS
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            tabIndex={-1}
+                            value={espelhoBasesCalculo.baseInss}
+                            className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                           />
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                          Base de cálculo INSS
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          tabIndex={-1}
-                          value={espelhoBasesCalculo.baseInss}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                          Limite Material ISS
-                        </label>
-                        <div className="space-y-0.5">
-                          {limitMaterialPctHint(draftTaxCode?.issMaterialLimit) && (
-                            <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
-                              Percentual: {limitMaterialPctHint(draftTaxCode?.issMaterialLimit)}
-                            </p>
-                          )}
+                      <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-600 dark:bg-gray-700/40">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                            Limite Material ISS
+                          </label>
+                          <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
+                            Percentual: {limitMaterialPctHint(draftTaxCode?.issMaterialLimit) ?? '—'}
+                          </p>
                           <input
                             type="text"
                             readOnly
                             tabIndex={-1}
                             value={espelhoMaterialLimits.issBrl}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                            className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                            Base de cálculo ISS
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            tabIndex={-1}
+                            value={espelhoBasesCalculo.baseIss}
+                            className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                           />
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                          Base de cálculo ISS
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          tabIndex={-1}
-                          value={espelhoBasesCalculo.baseIss}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
-                        />
-                      </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:items-stretch">
-                    <div className="flex h-full flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">COFINS</label>
-                      <div className="space-y-0.5">
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-600 dark:bg-gray-700/40">
+                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">COFINS</label>
                         <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
                           Percentual: {limitMaterialPctHint(federalTaxRates.cofins) ?? '—'}
                         </p>
@@ -2666,20 +2655,16 @@ export default function EspelhoNfPage() {
                           readOnly
                           tabIndex={-1}
                           value={espelhoImpostos.cofins.value}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                          className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                         />
-                      </div>
-                      <div className="min-h-[2.75rem]">
-                        {espelhoImpostos.cofins.recolher && (
-                          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        {espelhoImpostos.cofins.recolher ? (
+                          <p className="text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-300">
                             {espelhoImpostos.cofins.recolher}
                           </p>
-                        )}
+                        ) : null}
                       </div>
-                    </div>
-                    <div className="flex h-full flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">CSLL</label>
-                      <div className="space-y-0.5">
+                      <div className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-600 dark:bg-gray-700/40">
+                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">CSLL</label>
                         <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
                           Percentual: {limitMaterialPctHint(federalTaxRates.csll) ?? '—'}
                         </p>
@@ -2688,20 +2673,16 @@ export default function EspelhoNfPage() {
                           readOnly
                           tabIndex={-1}
                           value={espelhoImpostos.csll.value}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                          className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                         />
-                      </div>
-                      <div className="min-h-[2.75rem]">
-                        {espelhoImpostos.csll.recolher && (
-                          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        {espelhoImpostos.csll.recolher ? (
+                          <p className="text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-300">
                             {espelhoImpostos.csll.recolher}
                           </p>
-                        )}
+                        ) : null}
                       </div>
-                    </div>
-                    <div className="flex h-full flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">IRPJ</label>
-                      <div className="space-y-0.5">
+                      <div className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-600 dark:bg-gray-700/40">
+                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">IRPJ</label>
                         <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
                           Percentual: {limitMaterialPctHint(federalTaxRates.irpj) ?? '—'}
                         </p>
@@ -2710,20 +2691,16 @@ export default function EspelhoNfPage() {
                           readOnly
                           tabIndex={-1}
                           value={espelhoImpostos.irpj.value}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                          className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                         />
-                      </div>
-                      <div className="min-h-[2.75rem]">
-                        {espelhoImpostos.irpj.recolher && (
-                          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        {espelhoImpostos.irpj.recolher ? (
+                          <p className="text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-300">
                             {espelhoImpostos.irpj.recolher}
                           </p>
-                        )}
+                        ) : null}
                       </div>
-                    </div>
-                    <div className="flex h-full flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">PIS</label>
-                      <div className="space-y-0.5">
+                      <div className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-600 dark:bg-gray-700/40">
+                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">PIS</label>
                         <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
                           Percentual: {limitMaterialPctHint(federalTaxRates.pis) ?? '—'}
                         </p>
@@ -2732,20 +2709,16 @@ export default function EspelhoNfPage() {
                           readOnly
                           tabIndex={-1}
                           value={espelhoImpostos.pis.value}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                          className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                         />
-                      </div>
-                      <div className="min-h-[2.75rem]">
-                        {espelhoImpostos.pis.recolher && (
-                          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        {espelhoImpostos.pis.recolher ? (
+                          <p className="text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-300">
                             {espelhoImpostos.pis.recolher}
                           </p>
-                        )}
+                        ) : null}
                       </div>
-                    </div>
-                    <div className="flex h-full flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">INSS</label>
-                      <div className="space-y-0.5">
+                      <div className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-600 dark:bg-gray-700/40">
+                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">INSS</label>
                         <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
                           Percentual: {limitMaterialPctHint(federalTaxRates.inss) ?? '—'}
                         </p>
@@ -2754,20 +2727,16 @@ export default function EspelhoNfPage() {
                           readOnly
                           tabIndex={-1}
                           value={espelhoImpostos.inss.value}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                          className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                         />
-                      </div>
-                      <div className="min-h-[2.75rem]">
-                        {espelhoImpostos.inss.recolher && (
-                          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        {espelhoImpostos.inss.recolher ? (
+                          <p className="text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-300">
                             {espelhoImpostos.inss.recolher}
                           </p>
-                        )}
+                        ) : null}
                       </div>
-                    </div>
-                    <div className="flex h-full flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">ISS</label>
-                      <div className="space-y-0.5">
+                      <div className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-600 dark:bg-gray-700/40">
+                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">ISS</label>
                         <p className="text-[11px] font-medium leading-tight text-blue-700 dark:text-blue-300">
                           Percentual: {limitMaterialPctHint(draftTaxCode?.issRate) ?? '—'}
                         </p>
@@ -2776,22 +2745,23 @@ export default function EspelhoNfPage() {
                           readOnly
                           tabIndex={-1}
                           value={espelhoImpostos.iss.value}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 cursor-not-allowed"
+                          className="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-100"
                         />
-                      </div>
-                      <div className="min-h-[2.75rem]">
-                        {espelhoImpostos.iss.recolher && (
-                          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        {espelhoImpostos.iss.recolher ? (
+                          <p className="text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-300">
                             {espelhoImpostos.iss.recolher}
                           </p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </div>
-                  <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-stretch">
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
                     <div className="flex min-h-[140px] flex-1 flex-col gap-2">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Outras informações</label>
-                      <div className="space-y-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50/90 dark:bg-gray-900/50 px-3 py-3 text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
+                      <div className="space-y-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50/90 dark:bg-gray-700/40 px-3 py-3 text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
                         <p>
                           Retenção do INSS no Percentual de 11%. Dedução da BC do INSS conforme art. 117, inciso IV
                           da IN RFB No 2110/2022.
@@ -2815,7 +2785,7 @@ export default function EspelhoNfPage() {
                         placeholder="Informações complementares (opcional)..."
                         value={draft.notes}
                         onChange={(e) => setDraft((prev) => ({ ...prev, notes: e.target.value }))}
-                        className="min-h-[72px] w-full flex-1 resize-y px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
+                        className="min-h-[72px] w-full flex-1 resize-y px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-0"
                       />
                     </div>
                     <div
@@ -2854,714 +2824,405 @@ export default function EspelhoNfPage() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-4 flex justify-end">
+                </div>
+                </div>
+                <div className="shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/90 sm:px-6 flex flex-wrap items-center justify-between gap-3">
                   <button
                     type="button"
-                    onClick={handleSaveDraft}
-                    disabled={!canSave}
-                    title={espelhoMoneyTripletError ?? undefined}
-                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
+                    onClick={handleCancelSavedMirrorEdit}
+                    className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                   >
-                    {editingSavedMirrorId ? (
-                      <Pencil className="w-4 h-4" />
+                    Cancelar
+                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveDraft}
+                      disabled={!canSave}
+                      title={
+                        !canSave
+                          ? (espelhoMoneyTripletError ?? 'Preencha os obrigatórios.')
+                          : undefined
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      {editingSavedMirrorId ? (
+                        <Pencil className="h-4 w-4" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      {editingSavedMirrorId ? 'Salvar alterações' : 'Salvar espelho'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showEspelhoForm &&
+            openEspelhoPicker &&
+            espelhoPickerPanelGeo &&
+            typeof document !== 'undefined' &&
+            createPortal(
+              <div
+                ref={espelhoPickerPopoverRef}
+                role="listbox"
+                className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
+                style={{
+                  position: 'fixed',
+                  left: espelhoPickerPanelGeo.left,
+                  top: espelhoPickerPanelGeo.top,
+                  width: espelhoPickerPanelGeo.width,
+                  maxHeight: espelhoPickerPanelGeo.maxHeight,
+                  zIndex: 200
+                }}
+              >
+                <div className="shrink-0 border-b border-gray-200 p-2 dark:border-gray-600">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="search"
+                      value={
+                        openEspelhoPicker === 'prestador'
+                          ? espelhoPrestadorPickerQuery
+                          : espelhoTomadorPickerQuery
+                      }
+                      onChange={(e) =>
+                        openEspelhoPicker === 'prestador'
+                          ? setEspelhoPrestadorPickerQuery(e.target.value)
+                          : setEspelhoTomadorPickerQuery(e.target.value)
+                      }
+                      placeholder="Pesquisar..."
+                      className="w-full rounded-md border border-gray-300 bg-white py-2 pl-8 pr-2 text-sm text-gray-900 shadow-none placeholder:text-gray-400 outline-none focus:border-gray-300 focus:outline-none focus:ring-0 focus-visible:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-gray-600"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                <ul className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain py-1">
+                  {openEspelhoPicker === 'prestador' ? (
+                    filteredPrestadorPickerList.length === 0 ? (
+                      <li className="px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                        Nenhum prestador encontrado.
+                      </li>
                     ) : (
-                      <Plus className="w-4 h-4" />
-                    )}
-                    {editingSavedMirrorId ? 'Salvar alterações' : 'Salvar espelho'}
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === 'prestadores' && (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Cadastro de prestador de serviço
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input
-                    type="text"
-                    placeholder="CNPJ *"
-                    value={providerForm.cnpj}
-                    onChange={(e) => setProviderForm((prev) => ({ ...prev, cnpj: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Inscrição Municipal *"
-                    value={providerForm.municipalRegistration}
-                    onChange={(e) =>
-                      setProviderForm((prev) => ({ ...prev, municipalRegistration: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Inscrição Estadual *"
-                    value={providerForm.stateRegistration}
-                    onChange={(e) =>
-                      setProviderForm((prev) => ({ ...prev, stateRegistration: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Nome/Razão Social *"
-                    value={providerForm.corporateName}
-                    onChange={(e) =>
-                      setProviderForm((prev) => ({ ...prev, corporateName: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 md:col-span-2"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Nome Fantasia *"
-                    value={providerForm.tradeName}
-                    onChange={(e) => setProviderForm((prev) => ({ ...prev, tradeName: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Endereço *"
-                    value={providerForm.address}
-                    onChange={(e) => setProviderForm((prev) => ({ ...prev, address: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 md:col-span-2"
-                  />
-                  <input
-                    type="text"
-                    placeholder="UF *"
-                    value={providerForm.state}
-                    onChange={(e) => setProviderForm((prev) => ({ ...prev, state: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="email"
-                    placeholder="E-mail"
-                    value={providerForm.email}
-                    onChange={(e) => setProviderForm((prev) => ({ ...prev, email: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleCreateOrUpdateProvider}
-                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    {editingProviderId ? 'Salvar alteração' : 'Cadastrar prestador'}
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === 'tomadores' && (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Cadastro de tomador de serviço
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input
-                    type="text"
-                    placeholder="Nome do Tomador *"
-                    value={takerForm.name}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="CNPJ *"
-                    value={takerForm.cnpj}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, cnpj: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Inscrição Municipal *"
-                    value={takerForm.municipalRegistration}
-                    onChange={(e) =>
-                      setTakerForm((prev) => ({ ...prev, municipalRegistration: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Inscrição Estadual *"
-                    value={takerForm.stateRegistration}
-                    onChange={(e) =>
-                      setTakerForm((prev) => ({ ...prev, stateRegistration: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Nome do contrato *"
-                    value={takerForm.corporateName}
-                    onChange={(e) =>
-                      setTakerForm((prev) => ({ ...prev, corporateName: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 md:col-span-2"
-                  />
-                  <select
-                    value={takerForm.costCenterId}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, costCenterId: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Centro de Custo *</option>
-                    {costCentersForEspelho
-                      .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
-                      .map((cc) => (
-                        <option key={cc.id} value={cc.id}>
-                          {[cc.code, cc.name].filter(Boolean).join(' — ') || cc.name || '—'}
-                        </option>
-                      ))}
-                  </select>
-                  <select
-                    value={takerForm.taxCodeId}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, taxCodeId: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Código Tributário *</option>
-                    {[...taxCodes]
-                      .sort((a, b) => a.cityName.localeCompare(b.cityName, 'pt-BR'))
-                      .map((taxCode) => (
-                        <option key={taxCode.id} value={taxCode.id}>
-                          {taxCode.cityName}
-                        </option>
-                      ))}
-                  </select>
-                  <select
-                    value={takerForm.bankAccountId}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, bankAccountId: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Conta Bancária *</option>
-                    {[...bankAccounts]
-                      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-                      .map((acc) => (
-                        <option key={acc.id} value={acc.id}>
-                          {acc.name} - {acc.bank} | Ag: {acc.agency} | C/C: {acc.account}
-                        </option>
-                      ))}
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Contrato *"
-                    value={takerForm.contractRef}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, contractRef: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Endereço *"
-                    value={takerForm.address}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, address: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 md:col-span-2"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Município *"
-                    value={takerForm.municipality}
-                    onChange={(e) =>
-                      setTakerForm((prev) => ({
-                        ...prev,
-                        municipality: e.target.value,
-                        city: e.target.value
-                      }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="UF *"
-                    value={takerForm.state}
-                    onChange={(e) => setTakerForm((prev) => ({ ...prev, state: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Discriminação dos serviços *"
-                    value={takerForm.serviceDescription}
-                    onChange={(e) =>
-                      setTakerForm((prev) => ({ ...prev, serviceDescription: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 md:col-span-2"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleCreateOrUpdateTaker}
-                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    {editingTakerId ? 'Salvar alteração' : 'Cadastrar tomador'}
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === 'contas-bancarias' && (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Cadastro de conta bancária
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    placeholder="NOME *"
-                    value={bankAccountForm.name}
-                    onChange={(e) => setBankAccountForm((prev) => ({ ...prev, name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="BANCO *"
-                    value={bankAccountForm.bank}
-                    onChange={(e) => setBankAccountForm((prev) => ({ ...prev, bank: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="AGÊNCIA *"
-                    value={bankAccountForm.agency}
-                    onChange={(e) => setBankAccountForm((prev) => ({ ...prev, agency: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="C/C *"
-                    value={bankAccountForm.account}
-                    onChange={(e) => setBankAccountForm((prev) => ({ ...prev, account: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleCreateOrUpdateBankAccount}
-                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    {editingBankAccountId ? 'Salvar alteração' : 'Cadastrar conta'}
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === 'codigo-tributario' && (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Cadastro de código tributário
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6 space-y-4">
-                <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                  <p className="text-base md:text-lg font-bold text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-2 mb-2">
-                    Cadastro de código do contrato
-                  </p>
-                  <input
-                    type="text"
-                    placeholder="Nome do Contrato *"
-                    value={taxCodeForm.cityName}
-                    onChange={(e) => setTaxCodeForm((prev) => ({ ...prev, cityName: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {FEDERAL_TAX_LAYOUT.map((group) => (
-                      <div
-                        key={group.title}
-                        className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/40 p-3 space-y-2"
-                      >
-                        <p className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-2">
-                          {group.title}
-                        </p>
-                        {group.contexts.map((ctx) => (
-                          <div key={ctx.key} className="space-y-1.5">
-                            <label className="inline-flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-300 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={federalTaxContextEnabled[ctx.key]}
-                                onChange={(e) =>
-                                  handleFederalTaxContextEnabledChange(ctx.key, e.currentTarget.checked)
-                                }
-                                className="h-4 w-4 accent-blue-600"
-                              />
-                              <span>{ctx.label}</span>
-                            </label>
-                            <div className="flex flex-nowrap gap-1.5 pb-1">
-                              {([
-                                ['cofins', 'COFINS'],
-                                ['csll', 'CSLL'],
-                                ['inss', 'INSS'],
-                                ['irpj', 'IRPJ'],
-                                ['pis', 'PIS']
-                              ] as const).map(([taxKey, label]) => (
+                      filteredPrestadorPickerList.map((provider) => {
+                        const selected = draft.providerId === provider.id;
+                        return (
+                          <li key={provider.id} className="w-full" role="option" aria-selected={selected}>
+                            <button
+                              type="button"
+                              title={selected ? 'Clique novamente para limpar a seleção' : undefined}
+                              onClick={() => {
+                                setDraft((prev) => {
+                                  if (prev.providerId === provider.id) {
+                                    return { ...prev, providerId: '', providerName: '' };
+                                  }
+                                  return {
+                                    ...prev,
+                                    providerId: provider.id,
+                                    providerName: provider.corporateName
+                                  };
+                                });
+                                setOpenEspelhoPicker(null);
+                                setEspelhoPrestadorPickerQuery('');
+                              }}
+                              className={`group flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors ${
+                                selected
+                                  ? 'text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/60'
+                                  : 'text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60'
+                              }`}
+                            >
+                              <div className="relative shrink-0" aria-hidden>
                                 <div
-                                  key={`${ctx.key}-${taxKey}`}
-                                  className={`inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900/60 ${
-                                    taxKey === 'pis' ? 'gap-1 px-2 py-1' : 'gap-1.5 px-2.5 py-1.5'
+                                  className={`flex h-5 w-5 items-center justify-center rounded border-2 transition-all duration-200 ${
+                                    selected
+                                      ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+                                      : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800 group-hover:border-red-500 dark:group-hover:border-red-400'
                                   }`}
                                 >
-                                  <span
-                                    className={`text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200 shrink-0 ${
-                                      taxKey === 'cofins' ? 'w-11' : 'w-8'
-                                    }`}
-                                  >
-                                    {label}
-                                  </span>
-                                  <div className="flex items-center gap-0.5">
-                                    <input
-                                      type="text"
-                                      inputMode="decimal"
-                                      placeholder="0"
-                                      value={federalTaxRatesByContext[ctx.key][taxKey]}
-                                      onChange={(e) => handleFederalTaxRateChange(ctx.key, taxKey, e.target.value)}
-                                      onBlur={(e) => handleFederalTaxRateBlur(ctx.key, taxKey, e.target.value)}
-                                      className={`px-1.5 py-1 text-sm text-right tabular-nums border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
-                                        taxKey === 'pis' ? 'min-w-[3.5rem] w-14 sm:w-[4.25rem]' : 'min-w-[3.5rem] w-16 sm:w-[4.5rem]'
-                                      }`}
-                                    />
-                                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-4 shrink-0">
-                                      %
-                                    </span>
-                                  </div>
+                                  {selected ? (
+                                    <svg
+                                      className="h-3 w-3 text-white"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={3}
+                                        d="M5 13l4 4L19 7"
+                                      />
+                                    </svg>
+                                  ) : null}
                                 </div>
-                              ))}
+                              </div>
+                              <span className="min-w-0 flex-1 leading-snug">
+                                <span
+                                  className={`font-medium ${selected ? 'text-gray-800 dark:text-gray-200' : ''}`}
+                                >
+                                  {provider.corporateName}
+                                </span>
+                                <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                                  {provider.cnpj} · {provider.city}/{provider.state}
+                                </span>
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })
+                    )
+                  ) : filteredTomadorPickerList.length === 0 ? (
+                    <li className="px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                      Nenhum tomador encontrado.
+                    </li>
+                  ) : (
+                    filteredTomadorPickerList.map((taker) => {
+                      const selected = draft.takerId === taker.id;
+                      return (
+                        <li key={taker.id} className="w-full" role="option" aria-selected={selected}>
+                          <button
+                            type="button"
+                            title={selected ? 'Clique novamente para limpar a seleção' : undefined}
+                            onClick={() => {
+                              setDraft((prev) => {
+                                if (prev.takerId === taker.id) {
+                                  return {
+                                    ...prev,
+                                    takerId: '',
+                                    takerName: '',
+                                    municipality: '',
+                                    costCenterId: '',
+                                    bankAccountId: '',
+                                    bankAccountName: '',
+                                    taxCodeId: '',
+                                    taxCodeCityName: ''
+                                  };
+                                }
+                                const linkedTaxCode =
+                                  taxCodes.find((code) => code.id === taker.taxCodeId) ?? null;
+                                const linkedBank =
+                                  bankAccounts.find((account) => account.id === taker.bankAccountId) ?? null;
+                                return {
+                                  ...prev,
+                                  takerId: taker.id,
+                                  takerName: taker.corporateName,
+                                  municipality: taker.municipality || taker.city || '',
+                                  costCenterId: taker.costCenterId || '',
+                                  bankAccountId: taker.bankAccountId || '',
+                                  bankAccountName: linkedBank?.name || '',
+                                  taxCodeId: taker.taxCodeId || '',
+                                  taxCodeCityName: linkedTaxCode?.cityName || ''
+                                };
+                              });
+                              setOpenEspelhoPicker(null);
+                              setEspelhoTomadorPickerQuery('');
+                            }}
+                            className={`group flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors ${
+                              selected
+                                ? 'text-gray-900 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-700/60'
+                                : 'text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60'
+                            }`}
+                          >
+                            <div className="relative shrink-0" aria-hidden>
+                              <div
+                                className={`flex h-5 w-5 items-center justify-center rounded border-2 transition-all duration-200 ${
+                                  selected
+                                    ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+                                    : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800 group-hover:border-red-500 dark:group-hover:border-red-400'
+                                }`}
+                              >
+                                {selected ? (
+                                  <svg
+                                    className="h-3 w-3 text-white"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={3}
+                                      d="M5 13l4 4L19 7"
+                                    />
+                                  </svg>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
+                            <span className="min-w-0 flex-1 leading-snug">
+                              <span
+                                className={`font-medium ${selected ? 'text-gray-800 dark:text-gray-200' : ''}`}
+                              >
+                                {taker.name} — {taker.corporateName}
+                              </span>
+                              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                                {taker.cnpj}
+                                {taker.contractRef ? ` · Contrato: ${taker.contractRef}` : ''}
+                              </span>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })
+                  )}
+                </ul>
+              </div>,
+              document.body
+            )}
 
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-4 text-sm text-gray-900 dark:text-gray-100">
-                      <p className="font-medium mb-2">
-                        Deduz material? <span className="text-red-600 dark:text-red-400">*</span>
-                      </p>
-                      <div className="flex items-center gap-6">
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
+          {showEspelhoForm &&
+            nfConstarMenuOpen &&
+            nfConstarPanelGeo &&
+            typeof document !== 'undefined' &&
+            createPortal(
+              <div
+                ref={nfConstarPopoverRef}
+                role="menu"
+                className="overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-600 dark:bg-gray-800"
+                style={{
+                  position: 'fixed',
+                  left: nfConstarPanelGeo.left,
+                  top: nfConstarPanelGeo.top,
+                  width: nfConstarPanelGeo.width,
+                  maxHeight: nfConstarPanelGeo.maxHeight,
+                  zIndex: 200
+                }}
+              >
+                <p className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  Marque os campos que devem aparecer no formulário:
+                </p>
+                <div className="space-y-1">
+                  {(Object.keys(NF_CONSTAR_FIELD_LABELS) as (keyof NfConstarNaNotaFields)[]).map((key) => {
+                    const checked = draft.nfConstarNaNota[key];
+                    return (
+                      <label
+                        key={key}
+                        className="group flex w-full cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/80"
+                      >
+                        <div className="relative shrink-0">
                           <input
                             type="checkbox"
-                            checked={taxCodeForm.abatesMaterial === true}
-                            onChange={() =>
-                              setTaxCodeForm((prev) => ({
-                                ...prev,
-                                abatesMaterial: true,
-                                inssMaterialLimit: prev.inssMaterialLimit === '0' ? '' : prev.inssMaterialLimit,
-                                issMaterialLimit: prev.issMaterialLimit === '0' ? '' : prev.issMaterialLimit
-                              }))
-                            }
-                            className="h-5 w-5 accent-blue-600"
+                            checked={checked}
+                            onChange={() => toggleNfConstarField(key)}
+                            className="sr-only"
+                            aria-label={NF_CONSTAR_FIELD_LABELS[key]}
                           />
-                          <span>Sim</span>
-                        </label>
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={taxCodeForm.abatesMaterial === false}
-                            onChange={() =>
-                              setTaxCodeForm((prev) => ({
-                                ...prev,
-                                abatesMaterial: false,
-                                inssMaterialLimit: '0',
-                                issMaterialLimit: '0'
-                              }))
-                            }
-                            className="h-5 w-5 accent-blue-600"
-                          />
-                          <span>Não</span>
-                        </label>
-                      </div>
-                      {taxCodeForm.abatesMaterial === true && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="Limite Material INSS *"
-                              value={taxCodeForm.inssMaterialLimit}
-                              onChange={(e) =>
-                                setTaxCodeForm((prev) => ({
-                                  ...prev,
-                                  inssMaterialLimit: sanitizeEspelhoPercentTyping(e.target.value)
-                                }))
-                              }
-                              onBlur={(e) =>
-                                setTaxCodeForm((prev) => ({
-                                  ...prev,
-                                  inssMaterialLimit: normalizeEspelhoPercentBlur(e.target.value)
-                                }))
-                              }
-                              className="w-full px-3 py-2 rounded-l-lg bg-transparent text-gray-900 dark:text-gray-100"
-                            />
-                            <span className="px-3 text-sm text-gray-500 dark:text-gray-400">%</span>
-                          </div>
-                          <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="Limite Material ISS *"
-                              value={taxCodeForm.issMaterialLimit}
-                              onChange={(e) =>
-                                setTaxCodeForm((prev) => ({
-                                  ...prev,
-                                  issMaterialLimit: sanitizeEspelhoPercentTyping(e.target.value)
-                                }))
-                              }
-                              onBlur={(e) =>
-                                setTaxCodeForm((prev) => ({
-                                  ...prev,
-                                  issMaterialLimit: normalizeEspelhoPercentBlur(e.target.value)
-                                }))
-                              }
-                              className="w-full px-3 py-2 rounded-l-lg bg-transparent text-gray-900 dark:text-gray-100"
-                            />
-                            <span className="px-3 text-sm text-gray-500 dark:text-gray-400">%</span>
-                          </div>
-                        </div>
-                      )}
-                      <p className="font-medium mb-2 pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
-                        Possui garantia complementar? <span className="text-red-600 dark:text-red-400">*</span>
-                      </p>
-                      <div className="flex items-center gap-6">
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={taxCodeForm.hasComplementaryWarranty === true}
-                            onChange={() =>
-                              setTaxCodeForm((prev) => ({
-                                ...prev,
-                                hasComplementaryWarranty: true,
-                                garantiaRetidaNaNota: null
-                              }))
-                            }
-                            className="h-5 w-5 accent-blue-600"
-                          />
-                          <span>Sim</span>
-                        </label>
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={taxCodeForm.hasComplementaryWarranty === false}
-                            onChange={() =>
-                              setTaxCodeForm((prev) => ({
-                                ...prev,
-                                hasComplementaryWarranty: false,
-                                garantiaRetidaNaNota: null,
-                                garantiaAliquota: ''
-                              }))
-                            }
-                            className="h-5 w-5 accent-blue-600"
-                          />
-                          <span>Não</span>
-                        </label>
-                      </div>
-                      {taxCodeForm.hasComplementaryWarranty === true && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <p className="font-medium mb-2 pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
-                              Alíquota da garantia{' '}
-                              <span className="text-red-600 dark:text-red-400">*</span>
-                            </p>
-                            <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 max-w-xs">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="Alíquota (%) *"
-                                value={taxCodeForm.garantiaAliquota}
-                                onChange={(e) =>
-                                  setTaxCodeForm((prev) => ({
-                                    ...prev,
-                                    garantiaAliquota: sanitizeEspelhoPercentTyping(e.target.value)
-                                  }))
-                                }
-                                onBlur={(e) =>
-                                  setTaxCodeForm((prev) => ({
-                                    ...prev,
-                                    garantiaAliquota: normalizeEspelhoPercentBlur(e.target.value)
-                                  }))
-                                }
-                                className="w-full px-3 py-2 rounded-l-lg bg-transparent text-gray-900 dark:text-gray-100"
-                              />
-                              <span className="px-3 text-sm text-gray-500 dark:text-gray-400">%</span>
-                            </div>
-                          </div>
-                          <div>
-                            <p className="font-medium mb-2 pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
-                              A garantia é retida na nota?{' '}
-                              <span className="text-red-600 dark:text-red-400">*</span>
-                            </p>
-                            <div className="flex items-center gap-6">
-                              <label className="inline-flex items-center gap-2 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={taxCodeForm.garantiaRetidaNaNota === true}
-                                  onChange={() =>
-                                    setTaxCodeForm((prev) => ({
-                                      ...prev,
-                                      garantiaRetidaNaNota: true
-                                    }))
-                                  }
-                                  className="h-5 w-5 accent-blue-600"
+                          <div
+                            className={`flex h-5 w-5 items-center justify-center rounded border-2 transition-all duration-200 ${
+                              checked
+                                ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+                                : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800 group-hover:border-red-500 dark:group-hover:border-red-400'
+                            }`}
+                            aria-hidden
+                          >
+                            {checked ? (
+                              <svg
+                                className="h-3 w-3 text-white"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={3}
+                                  d="M5 13l4 4L19 7"
                                 />
-                                <span>Sim</span>
-                              </label>
-                              <label className="inline-flex items-center gap-2 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={taxCodeForm.garantiaRetidaNaNota === false}
-                                  onChange={() =>
-                                    setTaxCodeForm((prev) => ({
-                                      ...prev,
-                                      garantiaRetidaNaNota: false
-                                    }))
-                                  }
-                                  className="h-5 w-5 accent-blue-600"
-                                />
-                                <span>Não</span>
-                              </label>
-                            </div>
+                              </svg>
+                            ) : null}
                           </div>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2.5">
-                      <p className="text-sm md:text-base font-bold text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-1.5 mb-1.5">
-                        Impostos (apenas tipo por contrato)
-                      </p>
-                      {([
-                        ['iss', 'ISS'],
-                        ['cofins', 'COFINS'],
-                        ['csll', 'CSLL'],
-                        ['inss', 'INSS'],
-                        ['irpj', 'IRPJ'],
-                        ['pis', 'PIS']
-                      ] as const).map(([taxKey, label]) => (
-                        <div
-                          key={taxKey}
-                          className="grid grid-cols-1 md:grid-cols-[110px_220px_220px] md:justify-start gap-2 items-center"
-                        >
-                          <p className="text-xs font-semibold tracking-wide text-gray-800 dark:text-gray-200">
-                            {label}
-                          </p>
-                          {taxKey === 'iss' ? (
-                            <div className="flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="Alíquota ISS *"
-                                value={taxCodeForm.issRate}
-                                onChange={(e) =>
-                                  setTaxCodeForm((prev) => ({
-                                    ...prev,
-                                    issRate: sanitizeEspelhoPercentTyping(e.target.value)
-                                  }))
-                                }
-                                onBlur={(e) =>
-                                  setTaxCodeForm((prev) => ({
-                                    ...prev,
-                                    issRate: normalizeEspelhoPercentBlur(e.target.value)
-                                  }))
-                                }
-                                className="w-full px-2.5 py-1.5 text-sm rounded-l-md bg-transparent text-gray-900 dark:text-gray-100"
-                              />
-                              <span className="px-2 text-xs text-gray-500 dark:text-gray-400">%</span>
-                            </div>
-                          ) : (
-                            <input
-                              type="text"
-                              value={
-                                federalTaxRates[taxKey as Exclude<keyof FederalTaxRates, 'iss'>]
-                                  ? `${federalTaxRates[taxKey as Exclude<keyof FederalTaxRates, 'iss'>]}%`
-                                  : ''
-                              }
-                              readOnly
-                              placeholder={`Alíquota ${label} (%)`}
-                              className="w-full px-2.5 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 cursor-not-allowed"
-                            />
-                          )}
-                          {taxKey === 'iss' ? (
-                            <select
-                              value={taxCodeForm.iss.collectionType}
-                              onChange={(e) =>
-                                handleTaxRuleFieldChange('iss', e.target.value as 'RETIDO' | 'RECOLHIDO')
-                              }
-                              className="w-full px-2.5 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            >
-                              <option value="RETIDO">Retido</option>
-                              <option value="RECOLHIDO">Recolhido</option>
-                            </select>
-                          ) : (
-                            <input
-                              type="text"
-                              value="Retido"
-                              readOnly
-                              className="w-full px-2.5 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 cursor-not-allowed"
-                            />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
+                        <span className="min-w-0 flex-1 leading-snug">{NF_CONSTAR_FIELD_LABELS[key]}</span>
+                      </label>
+                    );
+                  })}
                 </div>
+              </div>,
+              document.body
+            )}
 
-                <div className="flex justify-end">
+
+          <Card className="w-full">
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                    <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Espelhos da Nota Fiscal
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Visualizar e gerenciar espelhos cadastrados para emissão de NF
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  {savedDrafts.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setEspelhoSavedFiltersModalOpen(true)}
+                      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                        hasActiveEspelhoSavedFilters
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                      aria-label="Abrir filtro"
+                      title={hasActiveEspelhoSavedFilters ? 'Filtros ativos' : 'Filtro'}
+                    >
+                      <Filter className="h-4 w-4" />
+                      {hasActiveEspelhoSavedFilters ? (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                      ) : null}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    onClick={handleCreateOrUpdateTaxCode}
-                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1.5"
+                    onClick={() => {
+                      setDraft(INITIAL_DRAFT);
+                      setEditingSavedMirrorId(null);
+                      setShowEspelhoForm(true);
+                    }}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
-                    <Plus className="w-4 h-4" />
-                    {editingTaxCodeId ? 'Salvar alteração' : 'Cadastrar código tributário'}
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Novo espelho da nota fiscal</span>
                   </button>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === 'espelho' ? (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Espelho criado</h3>
-              </CardHeader>
-              <CardContent className="p-6">
-                {savedDrafts.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Nenhum espelho salvo ainda. Use o formulário acima para criar a base.
+              </div>
+            </CardHeader>
+            <CardContent>
+              {savedDrafts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <div className="mb-4 rounded-lg bg-red-100 dark:bg-red-900/30 p-4">
+                    <FileSpreadsheet className="mx-auto h-8 w-8 text-red-600 dark:text-red-400" />
+                  </div>
+                  <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                    Nenhum espelho criado ainda
                   </p>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                    Clique em &ldquo;Novo espelho da nota fiscal&rdquo; para começar.
+                  </p>
+                </div>
                 ) : (
                   <>
-                    <div className="mb-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 p-4 space-y-3">
-                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
-                        Filtrar lista
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    <Modal
+                      isOpen={espelhoSavedFiltersModalOpen}
+                      onClose={() => setEspelhoSavedFiltersModalOpen(false)}
+                      title="Filtros"
+                      size="md"
+                    >
+                      <div className="space-y-4">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Centro de custo
                           </label>
                           <select
                             value={espelhoSavedFilterCostCenter}
                             onChange={(e) => setEspelhoSavedFilterCostCenter(e.target.value)}
                             disabled={loadingCostCenters}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
                             <option value="">Todos</option>
                             {costCentersForEspelho
@@ -3573,14 +3234,14 @@ export default function EspelhoNfPage() {
                               ))}
                           </select>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Tomador
                           </label>
                           <select
                             value={espelhoSavedFilterTaker}
                             onChange={(e) => setEspelhoSavedFilterTaker(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
                             <option value="">Todos</option>
                             {[...serviceTakers]
@@ -3594,12 +3255,14 @@ export default function EspelhoNfPage() {
                               ))}
                           </select>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Mês</label>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Mês
+                          </label>
                           <select
                             value={espelhoSavedFilterMonth}
                             onChange={(e) => setEspelhoSavedFilterMonth(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
                             <option value="">Todos</option>
                             {[
@@ -3622,12 +3285,14 @@ export default function EspelhoNfPage() {
                             ))}
                           </select>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Ano</label>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Ano
+                          </label>
                           <select
                             value={espelhoSavedFilterYear}
                             onChange={(e) => setEspelhoSavedFilterYear(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
                             <option value="">Todos</option>
                             {espelhoSavedYearOptions.map((yr) => (
@@ -3638,7 +3303,7 @@ export default function EspelhoNfPage() {
                           </select>
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                         <button
                           type="button"
                           onClick={() => {
@@ -3647,97 +3312,250 @@ export default function EspelhoNfPage() {
                             setEspelhoSavedFilterMonth('');
                             setEspelhoSavedFilterYear('');
                           }}
-                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                         >
                           Limpar filtros
                         </button>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {filteredSavedDrafts.length} de {savedDrafts.length} espelho(s)
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setEspelhoSavedFiltersModalOpen(false)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                        >
+                          Aplicar
+                        </button>
                       </div>
-                    </div>
+                    </Modal>
                     {filteredSavedDrafts.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
                         Nenhum espelho corresponde aos filtros selecionados.
                       </p>
                     ) : (
-                  <div className="space-y-2 max-h-[min(28rem,70vh)] overflow-y-auto pr-1">
-                    {filteredSavedDrafts.map((item) => {
-                      const approvalStatus = resolveEspelhoApprovalStatus(item.id, item.approvalStatus);
-                      const ccRow = costCentersForEspelho.find((c) => c.id === item.costCenterId);
-                      const ccLabel = ccRow
-                        ? [ccRow.code, ccRow.name].filter(Boolean).join(' — ')
-                        : item.costCenterId
-                          ? 'Centro não encontrado no cadastro'
-                          : '—';
-                      const takerTitle = item.takerName.trim() || 'Tomador não informado';
-                      const medValue = parseEspelhoBrCurrencyToNumber(item.measurementAmount);
-                      const medTitle = medValue !== null ? fmtEspelhoBrl(medValue) : 'Medição não informada';
-                      const refTitle = item.measurementRef.trim() || 'Sem referência';
-                      return (
-                      <div
-                        key={item.id}
-                        className="p-3 rounded-lg border border-gray-200 dark:border-gray-700"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {`${takerTitle} | ${medTitle} | ${refTitle}`}
-                          </p>
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                              ESPELHO_APPROVAL_BADGE_CLASS[approvalStatus]
-                            }`}
-                          >
-                            {ESPELHO_APPROVAL_STATUS_LABELS[approvalStatus]}
+                      <>
+                        <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                          <span>
+                            Mostrando 1 a {filteredSavedDrafts.length} de {filteredSavedDrafts.length}{' '}
+                            espelho(s)
+                            {savedDrafts.length !== filteredSavedDrafts.length ? (
+                              <span className="text-gray-500 dark:text-gray-500">
+                                {' '}
+                                ({filteredSavedDrafts.length} de {savedDrafts.length} no cadastro)
+                              </span>
+                            ) : null}
                           </span>
+                          <span>Página 1 de 1</span>
                         </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                          CC: {ccLabel} | Prestador: {item.providerName} | Tomador:{' '}
-                          {item.takerName} | Conta: {item.bankAccountName} | Cód. trib.:{' '}
-                          {item.taxCodeCityName}{' '}
-                          {item.dueDate ? `| Vencimento: ${item.dueDate}` : ''}
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="border-b border-gray-200 dark:border-gray-700">
+                              <tr>
+                                <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                  Espelho
+                                </th>
+                                <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                  Centro de custo
+                                </th>
+                                <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                  Status
+                                </th>
+                                <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                  Criado em
+                                </th>
+                                <th className="px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                  Ação
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                              {filteredSavedDrafts.map((item) => {
+                                const approvalStatus = resolveEspelhoApprovalStatus(
+                                  item.id,
+                                  item.approvalStatus
+                                );
+                                const ccRow = costCentersForEspelho.find((c) => c.id === item.costCenterId);
+                                const ccLabel = ccRow
+                                  ? [ccRow.code, ccRow.name].filter(Boolean).join(' — ')
+                                  : item.costCenterId
+                                    ? 'Centro não encontrado no cadastro'
+                                    : '—';
+                                const takerTitle = item.takerName.trim() || 'Tomador não informado';
+                                const medValue = parseEspelhoBrCurrencyToNumber(item.measurementAmount);
+                                const medTitle =
+                                  medValue !== null ? fmtEspelhoBrl(medValue) : 'Medição não informada';
+                                const refTitle = item.measurementRef.trim() || 'Sem referência';
+                                const statusBadgeClass =
+                                  approvalStatus === 'APPROVED'
+                                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                    : ESPELHO_APPROVAL_BADGE_CLASS[approvalStatus];
+                                const createdLabel = item.createdAt
+                                  ? new Date(item.createdAt).toLocaleDateString('pt-BR')
+                                  : '—';
+                                return (
+                                  <tr
+                                    key={item.id}
+                                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                  >
+                                    <td className="px-3 py-3 align-middle text-left sm:px-6">
+                                      <div className="min-w-0 text-left">
+                                        <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                          {takerTitle}
+                                        </p>
+                                        <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                                          {refTitle} · {medTitle}
+                                        </p>
+                                      </div>
+                                    </td>
+                                    <td
+                                      className="px-3 py-3 text-left text-sm text-gray-700 dark:text-gray-300 sm:px-6"
+                                      title={ccLabel}
+                                    >
+                                      <span className="line-clamp-2 sm:line-clamp-none">{ccLabel}</span>
+                                    </td>
+                                    <td className="px-3 py-3 text-center sm:px-6">
+                                      <span
+                                        className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${statusBadgeClass}`}
+                                      >
+                                        {ESPELHO_APPROVAL_STATUS_LABELS[approvalStatus]}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                      {createdLabel}
+                                    </td>
+                                    <td className="px-3 py-3 text-right sm:px-6">
+                                      <div className="flex justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                            setMirrorActionMenu((prev) => {
+                                              if (prev?.mirrorId === item.id) return null;
+                                              let left = r.right - MIRROR_ACTION_MENU_WIDTH_PX;
+                                              left = Math.max(
+                                                8,
+                                                Math.min(
+                                                  left,
+                                                  window.innerWidth - MIRROR_ACTION_MENU_WIDTH_PX - 8
+                                                )
+                                              );
+                                              const edge = 8;
+                                              const gap = 6;
+                                              const vh = window.innerHeight;
+                                              const layoutH = MIRROR_ACTION_MENU_EST_HEIGHT_PX;
+                                              const topBelow = r.bottom + gap;
+                                              const topAbove = r.top - gap - layoutH;
+                                              const fitsBelow = topBelow + layoutH <= vh - edge;
+                                              const fitsAbove =
+                                                topAbove >= edge && topAbove >= MIRROR_ACTION_MENU_MIN_TOP_WHEN_ABOVE_PX;
+                                              let top: number;
+                                              if (fitsBelow) {
+                                                top = topBelow;
+                                              } else if (fitsAbove) {
+                                                top = topAbove;
+                                              } else {
+                                                top = topBelow;
+                                              }
+                                              return { mirrorId: item.id, top, left };
+                                            });
+                                          }}
+                                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                          aria-label="Menu de ações"
+                                          aria-expanded={mirrorActionMenu?.mirrorId === item.id}
+                                          aria-haspopup="menu"
+                                        >
+                                          <MoreVertical className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+          {mirrorActionMenu && mirrorMenuItem && typeof document !== 'undefined'
+            ? createPortal(
+                <>
+                  <div
+                    className="fixed inset-0 z-[200]"
+                    aria-hidden
+                    onClick={() => setMirrorActionMenu(null)}
+                  />
+                  <div
+                    role="menu"
+                    className="fixed z-[201] w-56 max-h-[calc(100dvh-16px)] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                    style={{
+                      top: mirrorActionMenu.top,
+                      left: mirrorActionMenu.left
+                    }}
+                  >
+                    {(() => {
+                      const menuApproval = resolveEspelhoApprovalStatus(
+                        mirrorMenuItem.id,
+                        mirrorMenuItem.approvalStatus
+                      );
+                      return (
+                        <>
                           <button
                             type="button"
-                            onClick={() => setDetailMirror(item)}
-                            className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 inline-flex items-center gap-1"
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMirrorActionMenu(null);
+                              setDetailMirror(mirrorMenuItem);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
                           >
-                            <Eye className="w-3 h-3" />
-                            Ver detalhes
+                            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                            <span>Ver detalhes</span>
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleEditSavedMirror(item)}
-                            className="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20 inline-flex items-center gap-1"
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMirrorActionMenu(null);
+                              handleEditSavedMirror(mirrorMenuItem);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
                           >
-                            <Pencil className="w-3 h-3" />
-                            Editar
+                            <Pencil className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                            <span>Editar</span>
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDeleteSavedMirror(item.id)}
-                            disabled={approvalStatus === 'APPROVED'}
-                            title={
-                              approvalStatus === 'APPROVED'
-                                ? 'Espelho aprovado não pode ser excluído'
-                                : 'Excluir espelho'
-                            }
-                            className="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20 inline-flex items-center gap-1 disabled:opacity-50 disabled:pointer-events-none"
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMirrorActionMenu(null);
+                              handleDeleteSavedMirror(mirrorMenuItem.id);
+                            }}
+                            disabled={menuApproval === 'APPROVED'}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                           >
-                            <Trash2 className="w-3 h-3" />
-                            Excluir
+                            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                            <span>Excluir</span>
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              const msg = getEspelhoMoneyTripletMessage(item);
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMirrorActionMenu(null);
+                              const msg = getEspelhoMoneyTripletMessage(mirrorMenuItem);
                               if (msg) {
                                 toast.error(msg);
                                 return;
                               }
                               exportEspelhoNfPdf(
-                                espelhoMirrorForExport(item, costCentersForEspelho),
+                                espelhoMirrorForExport(mirrorMenuItem, costCentersForEspelho),
                                 serviceProviders,
                                 serviceTakers,
                                 bankAccounts,
@@ -3746,265 +3564,24 @@ export default function EspelhoNfPage() {
                               );
                               toast.success('Arquivo PDF gerado.');
                             }}
-                            disabled={approvalStatus !== 'APPROVED'}
-                            title={
-                              approvalStatus === 'APPROVED'
-                                ? 'Baixar PDF'
-                                : 'Disponível apenas para espelhos aprovados'
-                            }
-                            className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20 inline-flex items-center gap-1 disabled:opacity-50 disabled:pointer-events-none"
+                            disabled={menuApproval !== 'APPROVED'}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                           >
-                            <FileText className="w-3 h-3" />
-                            PDF
+                            <FileText className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
+                            <span>Exportar PDF</span>
                           </button>
-                        </div>
-                      </div>
-                    );
-                    })}
+                        </>
+                      );
+                    })()}
                   </div>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          ) : activeTab === 'prestadores' ? (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Prestadores de serviço criados
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6">
-                {serviceProviders.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Nenhum prestador cadastrado ainda.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {serviceProviders.map((provider) => (
-                      <div
-                        key={provider.id}
-                        className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {provider.corporateName}
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400">
-                            CNPJ: {provider.cnpj} | Município: {provider.city}/{provider.state}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditProvider(provider)}
-                            className="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20 inline-flex items-center gap-1"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteProvider(provider.id)}
-                            className="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20 inline-flex items-center gap-1"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Excluir
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : activeTab === 'tomadores' ? (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Tomadores de serviço criados
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6">
-                {serviceTakers.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Nenhum tomador cadastrado ainda.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {serviceTakers.map((taker) => (
-                      <div
-                        key={taker.id}
-                        className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {taker.name}
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400">
-                            Razão Social: {taker.corporateName} | CNPJ: {taker.cnpj} | Contrato: {taker.contractRef}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditTaker(taker)}
-                            className="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20 inline-flex items-center gap-1"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTaker(taker.id)}
-                            className="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20 inline-flex items-center gap-1"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Excluir
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : activeTab === 'contas-bancarias' ? (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Contas bancárias criadas
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6">
-                {bankAccounts.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Nenhuma conta bancária cadastrada ainda.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {bankAccounts.map((account) => (
-                      <div
-                        key={account.id}
-                        className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {account.name}
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400">
-                            Banco: {account.bank} | Agência: {account.agency} | C/C: {account.account}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditBankAccount(account)}
-                            className="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20 inline-flex items-center gap-1"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteBankAccount(account.id)}
-                            className="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20 inline-flex items-center gap-1"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Excluir
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Códigos tributários criados
-                </h3>
-              </CardHeader>
-              <CardContent className="p-6">
-                {taxCodes.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Nenhum código tributário cadastrado ainda.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {taxCodes.map((taxCode) => (
-                      <div
-                        key={taxCode.id}
-                        className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {taxCode.cityName}
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            {taxCode.abatesMaterial ? 'Deduz material' : 'Não deduz material'}
-                            {' · '}
-                            {taxCode.hasComplementaryWarranty
-                              ? `Garantia complementar: Sim · Alíq. garantia: ${
-                                  taxCode.garantiaAliquota ? `${taxCode.garantiaAliquota}%` : '—'
-                                } · Retida na nota: ${
-                                  taxCode.garantiaRetidaNaNota === true
-                                    ? 'Sim'
-                                    : taxCode.garantiaRetidaNaNota === false
-                                      ? 'Não'
-                                      : '—'
-                                }`
-                              : 'Garantia complementar: Não'}
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400">
-                            COFINS ({taxCode.cofins.collectionType}) | CSLL ({taxCode.csll.collectionType}) | INSS (
-                            {taxCode.inss.collectionType}) | IRPJ ({taxCode.irpj.collectionType}) | PIS (
-                            {taxCode.pis.collectionType}) | ISS ({taxCode.iss.collectionType})
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            Alíquotas gerais: COFINS {federalTaxRates.cofins || '-'}% | CSLL{' '}
-                            {federalTaxRates.csll || '-'}% | INSS {federalTaxRates.inss || '-'}% | IRPJ{' '}
-                            {federalTaxRates.irpj || '-'}% | PIS {federalTaxRates.pis || '-'}%
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            Alíquota ISS (contrato): {taxCode.issRate || '-'}%
-                          </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            Limite Material INSS: {taxCode.inssMaterialLimit}% | Limite Material ISS:{' '}
-                            {taxCode.issMaterialLimit}%
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditTaxCode(taxCode)}
-                            className="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20 inline-flex items-center gap-1"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTaxCode(taxCode.id)}
-                            className="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20 inline-flex items-center gap-1"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Excluir
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+                </>,
+                document.body
+              )
+            : null}
 
           {detailMirror && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+              className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-black/50 p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="espelho-detalhe-titulo"
@@ -4015,7 +3592,7 @@ export default function EspelhoNfPage() {
                 aria-label="Fechar"
                 onClick={() => setDetailMirror(null)}
               />
-              <div className="relative z-10 flex w-full max-w-lg max-h-[min(90vh,40rem)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
+              <div className="relative z-10 flex w-full max-w-lg max-h-[min(90vh,40rem)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800 [&_button:focus]:outline-none [&_button:focus]:ring-0 [&_button:focus-visible]:outline-none [&_button:focus-visible]:ring-0 [&_input:not(.sr-only):focus]:outline-none [&_input:not(.sr-only):focus]:ring-0 [&_input:not(.sr-only):focus-visible]:outline-none [&_input:not(.sr-only):focus-visible]:ring-0 [&_select:focus]:outline-none [&_select:focus]:ring-0 [&_select:focus-visible]:outline-none [&_select:focus-visible]:ring-0 [&_textarea:focus]:outline-none [&_textarea:focus]:ring-0 [&_textarea:focus-visible]:outline-none [&_textarea:focus-visible]:ring-0">
                 <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3 shrink-0">
                   <h4
                     id="espelho-detalhe-titulo"
@@ -4026,7 +3603,7 @@ export default function EspelhoNfPage() {
                   <button
                     type="button"
                     onClick={() => setDetailMirror(null)}
-                    className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-gray-400"
+                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -4048,13 +3625,13 @@ export default function EspelhoNfPage() {
                       </span>
                     </div>
                   ))}
-                  <div className="rounded-xl border border-gray-200/80 dark:border-gray-700/80 bg-gray-50/60 dark:bg-gray-800/30 p-4 space-y-4">
+                  <div className="rounded-lg border border-gray-200/80 dark:border-gray-600 bg-gray-50/60 dark:bg-gray-700/25 p-4 space-y-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
                       Anexos
                     </p>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/50 p-3 space-y-2">
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white/70 dark:bg-gray-700/40 p-3 space-y-2">
                       <p className="text-xs text-gray-600 dark:text-gray-400">Nota fiscal (PDF ou imagem)</p>
-                      <label className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                      <label className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors">
                         <Plus className="w-3.5 h-3.5" />
                         Selecionar arquivo
                         <input
@@ -4069,7 +3646,7 @@ export default function EspelhoNfPage() {
                         />
                       </label>
                       {detailMirror.nfAttachment ? (
-                        <div className="flex flex-wrap items-center gap-2 text-xs rounded-lg bg-gray-100/80 dark:bg-gray-800/60 px-2.5 py-2">
+                        <div className="flex flex-wrap items-center gap-2 text-xs rounded-lg bg-gray-100/80 dark:bg-gray-700/40 px-2.5 py-2">
                           <span className="text-gray-700 dark:text-gray-300 break-all grow min-w-[12rem]">
                             {detailMirror.nfAttachment.name} ({humanFileSize(detailMirror.nfAttachment.size)})
                           </span>
@@ -4091,9 +3668,9 @@ export default function EspelhoNfPage() {
                         </div>
                       ) : null}
                     </div>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/50 p-3 space-y-2">
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white/70 dark:bg-gray-700/40 p-3 space-y-2">
                       <p className="text-xs text-gray-600 dark:text-gray-400">XML da nota fiscal</p>
-                      <label className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                      <label className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors">
                         <Plus className="w-3.5 h-3.5" />
                         Selecionar arquivo
                         <input
@@ -4108,7 +3685,7 @@ export default function EspelhoNfPage() {
                         />
                       </label>
                       {detailMirror.xmlAttachment ? (
-                        <div className="flex flex-wrap items-center gap-2 text-xs rounded-lg bg-gray-100/80 dark:bg-gray-800/60 px-2.5 py-2">
+                        <div className="flex flex-wrap items-center gap-2 text-xs rounded-lg bg-gray-100/80 dark:bg-gray-700/40 px-2.5 py-2">
                           <span className="text-gray-700 dark:text-gray-300 break-all grow min-w-[12rem]">
                             {detailMirror.xmlAttachment.name} ({humanFileSize(detailMirror.xmlAttachment.size)})
                           </span>
@@ -4132,7 +3709,7 @@ export default function EspelhoNfPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2 border-t border-gray-200 dark:border-gray-700 px-4 py-3 shrink-0 bg-gray-50 dark:bg-gray-900/80">
+                <div className="flex flex-wrap gap-2 border-t border-gray-200 dark:border-gray-700 px-4 py-3 shrink-0 bg-gray-50 dark:bg-gray-800">
                   <button
                     type="button"
                     onClick={() => {

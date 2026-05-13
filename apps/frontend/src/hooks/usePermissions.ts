@@ -140,7 +140,7 @@ export function usePermissions() {
     dpApprovalContractIds.length > 0 ||
     can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
 
-  /** Bloco «Espelhos NF» na tela de Aprovações: aprovação de espelho de NF (Controle). */
+  /** Bloco «Espelhos da Nota Fiscal» na tela de Aprovações: aprovação pelo Controle. */
   const canApproveEspelhoNf =
     isAdministrator ||
     !!permissionData?.isAdmin ||
@@ -282,7 +282,7 @@ export function useRoutePermission(route: string) {
      * Aprovações: a página agora aparece automaticamente para quem precisa decidir
      * sobre algum bloco. Não há mais entrada na matriz de acessos.
      *  - Gestor de algum contrato (decide Solicitações Gerais) → vê o bloco de Solicitações.
-     *  - Permissão «Aprovar Espelho de NF» (Controle) → vê o bloco de Espelhos NF.
+     *  - Permissão «Aprovar Espelho da Nota Fiscal» (Controle) → vê o bloco de Espelhos da Nota Fiscal.
      * Cada bloco é renderizado independentemente dentro da própria página.
      */
     '/ponto/aprovacoes':
@@ -323,6 +323,22 @@ export function useRoutePermission(route: string) {
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/espelho-nf': isAdministrator || can(pk('/ponto/espelho-nf')),
+    '/ponto/prestadores-servico':
+      isAdministrator ||
+      can(pk('/ponto/espelho-nf/prestadores-servico')) ||
+      can(pk('/ponto/espelho-nf')),
+    '/ponto/tomadores-servico':
+      isAdministrator ||
+      can(pk('/ponto/espelho-nf/tomadores-servico')) ||
+      can(pk('/ponto/espelho-nf')),
+    '/ponto/contas-bancarias':
+      isAdministrator ||
+      can(pk('/ponto/espelho-nf/contas-bancarias')) ||
+      can(pk('/ponto/espelho-nf')),
+    '/ponto/codigos-tributarios':
+      isAdministrator ||
+      can(pk('/ponto/espelho-nf/codigos-tributarios')) ||
+      can(pk('/ponto/espelho-nf')),
     '/ponto/licitacoes': isAdministrator || can(pk('/ponto/licitacoes')),
     '/ponto/solicitar-materiais': isAdministrator || can(pk('/ponto/solicitar-materiais')),
     '/ponto/gerenciar-materiais': isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais')),

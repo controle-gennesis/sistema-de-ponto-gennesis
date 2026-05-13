@@ -220,7 +220,19 @@ export default function CondicoesPagamentoPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((r) => (
+                      {filtered.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-3 py-10 text-center sm:px-6">
+                            <div className="text-gray-500 dark:text-gray-400">
+                              <p className="font-medium text-gray-700 dark:text-gray-300">
+                                Nenhuma condição de pagamento encontrada.
+                              </p>
+                              <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        filtered.map((r) => (
                         <tr key={r.id} className="border-b border-gray-100 dark:border-gray-800/80">
                           <td className="py-3 pr-4 text-gray-900 dark:text-gray-100 font-medium">{r.label}</td>
                           <td className="py-3 pr-4 text-gray-600 dark:text-gray-400 text-xs max-w-[14rem]">
@@ -252,12 +264,10 @@ export default function CondicoesPagamentoPage() {
                             )}
                           </td>
                         </tr>
-                      ))}
+                        ))
+                      )}
                     </tbody>
                   </table>
-                  {filtered.length === 0 && (
-                    <p className="text-center text-gray-500 py-8">Nenhuma condição encontrada.</p>
-                  )}
                 </div>
               )}
             </CardContent>

@@ -315,8 +315,13 @@ export default function NaturezaOrcamentariaPage() {
                       ))}
                       {items.length === 0 && (
                         <tr>
-                          <td colSpan={3} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
-                            Nenhuma natureza orçamentária cadastrada.
+                          <td colSpan={3} className="px-3 py-10 text-center sm:px-6">
+                            <div className="text-gray-500 dark:text-gray-400">
+                              <p className="font-medium text-gray-700 dark:text-gray-300">
+                                Nenhuma natureza orçamentária encontrada.
+                              </p>
+                              <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
+                            </div>
                           </td>
                         </tr>
                       )}

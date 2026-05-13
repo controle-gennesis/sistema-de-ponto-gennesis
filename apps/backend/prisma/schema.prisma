@@ -978,6 +978,10 @@ model EspelhoNfTaxCode {
   issCollectionType    String   @default("RETIDO")
   inssMaterialLimit    String
   issMaterialLimit     String
+  /// Alíquotas federais (COFINS, CSLL, etc.) por tipo de contrato — espelhado na UI de cadastro.
+  federalRatesByContext    Json?
+  /// Qual linha de contrato federal está ativa na UI (checkboxes por contexto).
+  federalTaxContextEnabled Json?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

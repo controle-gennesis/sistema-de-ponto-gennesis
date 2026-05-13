@@ -18,6 +18,31 @@ const nextConfig = {
     `local-${Date.now()}`,
   skipTrailingSlashRedirect: true,
   skipMiddlewareUrlNormalize: true,
+  /** Cadastros do espelho NF: URLs antigas (sob /espelho-nf/) redirecionam para rotas em /ponto/. */
+  async redirects() {
+    return [
+      {
+        source: '/ponto/espelho-nf/codigos-tributarios',
+        destination: '/ponto/codigos-tributarios',
+        permanent: true
+      },
+      {
+        source: '/ponto/espelho-nf/prestadores-servico',
+        destination: '/ponto/prestadores-servico',
+        permanent: true
+      },
+      {
+        source: '/ponto/espelho-nf/tomadores-servico',
+        destination: '/ponto/tomadores-servico',
+        permanent: true
+      },
+      {
+        source: '/ponto/espelho-nf/contas-bancarias',
+        destination: '/ponto/contas-bancarias',
+        permanent: true
+      }
+    ];
+  },
   webpack: (config) => {
     // Recharts importa victory-vendor/d3-*; o Webpack nem sempre resolve subpaths do pacote no monorepo.
     // Redireciona para os pacotes d3 oficiais (mesma API que o victory-vendor reexporta).

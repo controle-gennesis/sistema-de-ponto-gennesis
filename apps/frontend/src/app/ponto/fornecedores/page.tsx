@@ -3,8 +3,9 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Building2, Plus, Edit, Trash2, Search, X, AlertCircle } from 'lucide-react';
+import { Store, Plus, Edit, Trash2, Search, X, AlertCircle, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -53,6 +54,11 @@ export default function FornecedoresPage() {
     isActive: true
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  /** 'all' | 'true' | 'false' — alinhado à API de listagem. */
+  const [supplierActiveFilter, setSupplierActiveFilter] = useState<string>('all');
+
+  const hasActiveSupplierFilters = supplierActiveFilter !== 'all';
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -69,13 +75,17 @@ export default function FornecedoresPage() {
   });
 
   const { data: suppliersData, isLoading, isError, error } = useQuery({
-    queryKey: ['suppliers', searchTerm],
+    queryKey: ['suppliers', searchTerm, supplierActiveFilter],
     queryFn: async () => {
       const res = await api.get('/suppliers', {
-        params: { search: searchTerm || undefined, limit: 500 }
+        params: {
+          search: searchTerm || undefined,
+          isActive: supplierActiveFilter !== 'all' ? supplierActiveFilter : undefined,
+          limit: 500,
+        },
       });
       return res.data;
-    }
+    },
   });
 
   const createMutation = useMutation({
@@ -204,14 +214,57 @@ export default function FornecedoresPage() {
           </div>
 
           {/* Card com lista */}
+          <Modal
+            isOpen={isFiltersModalOpen}
+            onClose={() => setIsFiltersModalOpen(false)}
+            title="Filtros"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status na listagem
+                </label>
+                <select
+                  value={supplierActiveFilter}
+                  onChange={(e) => setSupplierActiveFilter(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="all">Todos (ativos e inativos)</option>
+                  <option value="true">Somente ativos</option>
+                  <option value="false">Somente inativos</option>
+                </select>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                A busca por texto fica na barra acima. Aqui você restringe por situação do cadastro.
+              </p>
+              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setSupplierActiveFilter('all')}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFiltersModalOpen(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+          </Modal>
+
           <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <Building2 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start space-x-3">
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <Store className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0">
+                  <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Fornecedores</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {isError
@@ -220,82 +273,178 @@ export default function FornecedoresPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <div className="relative flex-1 sm:flex-initial sm:min-w-[200px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
-                      placeholder="Buscar por nome, código ou CNPJ..."
+                      placeholder="Pesquisar fornecedor..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
+                    {searchTerm ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
                   </div>
                   <button
-                    onClick={() => { setShowForm(true); setEditingSupplier(null); resetForm(); }}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    type="button"
+                    onClick={() => setIsFiltersModalOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveSupplierFilters
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActiveSupplierFilters ? 'Filtro (status ativo)' : 'Filtro'}
                   >
-                    <Plus className="w-4 h-4" />
-                    Novo Fornecedor
+                    <Filter className="h-4 w-4" />
+                    {hasActiveSupplierFilters ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(true);
+                      setEditingSupplier(null);
+                      resetForm();
+                    }}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Novo Fornecedor</span>
                   </button>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              {isLoading ? (
-                <div className="px-6 py-12 text-center">
-                  <Loading message="Carregando fornecedores..." />
-                </div>
-              ) : isError ? (
-                <div className="px-6 py-10 flex flex-col items-center gap-3 text-center">
-                  <AlertCircle className="w-10 h-10 text-red-500" />
-                  <p className="text-sm text-gray-700 dark:text-gray-300 max-w-md">{suppliersLoadError}</p>
+              {isError ? (
+                <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+                  <AlertCircle className="h-10 w-10 text-red-500" />
+                  <p className="max-w-md text-sm text-gray-700 dark:text-gray-300">{suppliersLoadError}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Se o problema persistir, confira se o backend está no ar e se as migrações do banco foram aplicadas (<code className="text-xs">npx prisma migrate deploy</code>).
+                    Se o problema persistir, confira se o backend está no ar e se as migrações do banco foram aplicadas (
+                    <code className="text-xs">npx prisma migrate deploy</code>).
                   </p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full min-w-[720px] table-fixed border-collapse">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Código</th>
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nome</th>
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">CNPJ</th>
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Contato</th>
-                        <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                        <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ações</th>
+                        <th
+                          scope="col"
+                          className="w-[10%] min-w-[72px] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                        >
+                          Código
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-[26%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                        >
+                          Nome
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-[18%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                        >
+                          CNPJ
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-[24%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                        >
+                          Contato
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-[10%] px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                        >
+                          Status
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-[12%] min-w-[100px] px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
+                        >
+                          Ações
+                        </th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                      {suppliers.map((s: Supplier) => (
-                        <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                          <td className="px-3 sm:px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-100">{s.code}</td>
-                          <td className="px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{s.name}</td>
-                          <td className="px-3 sm:px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{s.cnpj || '-'}</td>
-                          <td className="px-3 sm:px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{s.phone || s.email || '-'}</td>
-                          <td className="px-3 sm:px-6 py-4 text-center">
-                            <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${s.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
-                              {s.isActive ? 'Ativo' : 'Inativo'}
-                            </span>
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 text-right">
-                            <button onClick={() => handleEdit(s)} className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors" title="Editar">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => setShowDeleteModal(s.id)} className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors ml-1" title="Excluir">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                      {isLoading ? (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-10 text-center sm:px-6">
+                            <Loading message="Carregando fornecedores..." />
                           </td>
                         </tr>
-                      ))}
+                      ) : suppliers.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-10 text-center sm:px-6">
+                            <div className="text-gray-500 dark:text-gray-400">
+                              <p className="font-medium text-gray-700 dark:text-gray-300">Nenhum fornecedor encontrado.</p>
+                              <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        suppliers.map((s: Supplier) => (
+                          <tr key={s.id} className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                            <td className="whitespace-nowrap px-3 py-4 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6">
+                              {s.code}
+                            </td>
+                            <td className="min-w-0 px-3 py-4 sm:px-6">
+                              <span className="block truncate text-sm text-gray-900 dark:text-gray-100">{s.name}</span>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-400 sm:px-6">
+                              {s.cnpj || '-'}
+                            </td>
+                            <td className="min-w-0 px-3 py-4 sm:px-6">
+                              <span className="block truncate text-sm text-gray-600 dark:text-gray-400">
+                                {s.phone || s.email || '-'}
+                              </span>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                                  s.isActive
+                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                                }`}
+                              >
+                                {s.isActive ? 'Ativo' : 'Inativo'}
+                              </span>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-right sm:px-6">
+                              <button
+                                type="button"
+                                onClick={() => handleEdit(s)}
+                                className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                                title="Editar"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(s.id)}
+                                className="ml-1 rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                title="Excluir"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
-                  {suppliers.length === 0 && !isLoading && !isError && (
-                    <div className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
-                      Nenhum fornecedor cadastrado. Clique em &quot;Novo Fornecedor&quot; para começar.
-                    </div>
-                  )}
                 </div>
               )}
             </CardContent>
@@ -304,7 +453,7 @@ export default function FornecedoresPage() {
 
         {/* Modal Formulário */}
         {showForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={() => { setShowForm(false); setEditingSupplier(null); }} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -322,7 +471,7 @@ export default function FornecedoresPage() {
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                     required
                   />
                 </div>
@@ -333,7 +482,7 @@ export default function FornecedoresPage() {
                     value={formData.cnpj}
                     onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
                     placeholder="00.000.000/0001-00"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -343,7 +492,7 @@ export default function FornecedoresPage() {
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
                   <div>
@@ -352,7 +501,7 @@ export default function FornecedoresPage() {
                       type="text"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
                 </div>
@@ -363,7 +512,7 @@ export default function FornecedoresPage() {
                     value={formData.contactName}
                     onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
                     placeholder="Nome do contato principal"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                 </div>
                 <div>
@@ -372,7 +521,7 @@ export default function FornecedoresPage() {
                     type="text"
                     value={formData.address}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -382,7 +531,7 @@ export default function FornecedoresPage() {
                       type="text"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
                   <div>
@@ -393,7 +542,7 @@ export default function FornecedoresPage() {
                       onChange={(e) => setFormData({ ...formData, state: e.target.value })}
                       maxLength={2}
                       placeholder="DF"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
                 </div>
@@ -409,7 +558,7 @@ export default function FornecedoresPage() {
                         value={formData.bank}
                         onChange={(e) => setFormData({ ...formData, bank: e.target.value })}
                         placeholder="Ex.: ITAÚ ou 341"
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       />
                     </div>
                     <div>
@@ -418,7 +567,7 @@ export default function FornecedoresPage() {
                         type="text"
                         value={formData.agency}
                         onChange={(e) => setFormData({ ...formData, agency: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       />
                     </div>
                     <div>
@@ -427,7 +576,7 @@ export default function FornecedoresPage() {
                         type="text"
                         value={formData.account}
                         onChange={(e) => setFormData({ ...formData, account: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       />
                     </div>
                     <div>
@@ -437,7 +586,7 @@ export default function FornecedoresPage() {
                         value={formData.accountDigit}
                         onChange={(e) => setFormData({ ...formData, accountDigit: e.target.value })}
                         maxLength={2}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                       />
                     </div>
                   </div>
@@ -449,13 +598,13 @@ export default function FornecedoresPage() {
                       id="isActive"
                       checked={formData.isActive}
                       onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                      className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                      className="rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
                     />
                     <label htmlFor="isActive" className="text-sm text-gray-700 dark:text-gray-300">Ativo</label>
                   </div>
                 )}
                 <div className="flex gap-3 pt-4">
-                  <button type="submit" className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50" disabled={createMutation.isPending || updateMutation.isPending}>
+                  <button type="submit" className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700 disabled:opacity-50" disabled={createMutation.isPending || updateMutation.isPending}>
                     {createMutation.isPending || updateMutation.isPending ? 'Salvando...' : 'Salvar'}
                   </button>
                   <button type="button" onClick={() => { setShowForm(false); setEditingSupplier(null); }} className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
@@ -469,7 +618,7 @@ export default function FornecedoresPage() {
 
         {/* Modal Confirmação Exclusão */}
         {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteModal(null)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
               <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-red-100 dark:bg-red-900/30 rounded-full">

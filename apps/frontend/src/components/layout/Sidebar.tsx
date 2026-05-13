@@ -50,6 +50,10 @@ import {
   ClipboardList,
   CreditCard,
   HardDrive,
+  Truck,
+  Landmark,
+  Percent,
+  Contact,
   Image as ImageIcon,
   Camera,
   PencilLine,
@@ -242,7 +246,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileCheck,
             description: 'Caixa de entrada de aprovações',
             // Aparece automaticamente para quem é gestor (decide Solicitações Gerais)
-            // ou tem a permissão «Aprovar Espelho de NF» (Controle).
+            // ou tem a permissão «Aprovar Espelho da Nota Fiscal» (Controle).
             permission: canAccessDpApproverPages || canApproveEspelhoNf,
           },
           {
@@ -425,14 +429,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       },
       {
         id: 'contratos-licitacoes',
-        name: 'Contratações e Licitações',
+        name: 'Contratos e Licitações',
         icon: FileText,
         items: [
           {
-            name: 'Espelho NF',
+            name: 'Espelho da Nota Fiscal',
             href: '/ponto/espelho-nf',
             icon: FileSpreadsheet,
-            description: 'Montar espelho base para emissão de nota fiscal',
+            description: 'Montar o espelho da nota fiscal',
             permission: isAdministrator || can(pk('/ponto/espelho-nf'))
           },
           {
@@ -539,6 +543,46 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BookPlus,
             description: 'Cadastrar naturezas orçamentárias',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria'))
+          },
+          {
+            name: 'Prestadores de Serviço',
+            href: '/ponto/prestadores-servico',
+            icon: Truck,
+            description: 'Cadastro de prestadores para espelho de nota fiscal',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/espelho-nf/prestadores-servico')) ||
+              can(pk('/ponto/espelho-nf'))
+          },
+          {
+            name: 'Tomadores de Serviço',
+            href: '/ponto/tomadores-servico',
+            icon: Contact,
+            description: 'Cadastro de tomadores para espelho de nota fiscal',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/espelho-nf/tomadores-servico')) ||
+              can(pk('/ponto/espelho-nf'))
+          },
+          {
+            name: 'Contas Bancárias',
+            href: '/ponto/contas-bancarias',
+            icon: Landmark,
+            description: 'Contas usadas em tomadores e no espelho de nota fiscal',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/espelho-nf/contas-bancarias')) ||
+              can(pk('/ponto/espelho-nf'))
+          },
+          {
+            name: 'Códigos Tributários',
+            href: '/ponto/codigos-tributarios',
+            icon: Percent,
+            description: 'Parâmetros por município para espelho de nota fiscal',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/espelho-nf/codigos-tributarios')) ||
+              can(pk('/ponto/espelho-nf'))
           }
         ]
       },

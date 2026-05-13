@@ -78,9 +78,14 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/contratos/relatorios'), name: 'Relatórios Fotográficos', href: '/ponto/contratos/relatorios', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos/controle-geral'), name: 'Controle Geral de Contratos', href: '/ponto/contratos/controle-geral', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/andamento-da-os'), name: 'Ordem de Serviço', href: '/ponto/andamento-da-os', category: 'Engenharia' },
-  // Contratações e Licitações
-  { key: pathToModuleKey('/ponto/espelho-nf'), name: 'Espelho NF', href: '/ponto/espelho-nf', category: 'Contratações e Licitações' },
-  { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contratações e Licitações' },
+  // Contratos e Licitações
+  {
+    key: pathToModuleKey('/ponto/espelho-nf'),
+    name: 'Espelho da Nota Fiscal',
+    href: '/ponto/espelho-nf',
+    category: 'Contratos e Licitações',
+  },
+  { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contratos e Licitações' },
   { key: pathToModuleKey('/ponto/pleitos-gerados'), name: 'Pleitos Gerados', href: '/ponto/pleitos-gerados', category: 'Engenharia' },
   // Suprimentos
   { key: pathToModuleKey('/ponto/solicitar-materiais'), name: 'Solicitar Materiais', href: '/ponto/solicitar-materiais', category: 'Suprimentos' },
@@ -96,6 +101,31 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/fornecedores'), name: 'Fornecedores', href: '/ponto/fornecedores', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/condicoes-pagamento'), name: 'Condições de Pagamento', href: '/ponto/condicoes-pagamento', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/natureza-orcamentaria'), name: 'Natureza Orçamentária', href: '/ponto/natureza-orcamentaria', category: 'Cadastros' },
+  {
+    /** Chave mantida (path antigo) para não invalidar permissões já gravadas no banco. */
+    key: pathToModuleKey('/ponto/espelho-nf/prestadores-servico'),
+    name: 'Prestadores de Serviço',
+    href: '/ponto/prestadores-servico',
+    category: 'Cadastros',
+  },
+  {
+    key: pathToModuleKey('/ponto/espelho-nf/tomadores-servico'),
+    name: 'Tomadores de Serviço',
+    href: '/ponto/tomadores-servico',
+    category: 'Cadastros',
+  },
+  {
+    key: pathToModuleKey('/ponto/espelho-nf/contas-bancarias'),
+    name: 'Contas Bancárias',
+    href: '/ponto/contas-bancarias',
+    category: 'Cadastros',
+  },
+  {
+    key: pathToModuleKey('/ponto/espelho-nf/codigos-tributarios'),
+    name: 'Códigos Tributários',
+    href: '/ponto/codigos-tributarios',
+    category: 'Cadastros',
+  },
   // Registros de Ponto
   { key: pathToModuleKey('/ponto'), name: 'Registros de Ponto', href: '/ponto', category: 'Registros de Ponto' },
   /**
@@ -122,7 +152,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   {
     key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
-    name: 'Aprovar Espelho de NF',
+    name: 'Aprovar Espelho da Nota Fiscal',
     href: '/ponto/controle/aprovar-espelho-nf',
     category: 'Controle',
   },
