@@ -8,6 +8,7 @@ import {
   assertUserCanCreateContract,
   getContractAccessForUser
 } from '../lib/contractAccess';
+import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
 
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
@@ -441,6 +442,87 @@ export class ContractController {
         filterYear: year ? filterYear : null,
         availableYears
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Total pago (TOTVS RM) — soma linhas do RELATORIOFIN cujo centro de custo bate com o do contrato.
+   */
+  async getTotvsTotalPago(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { contractId } = req.params;
+
+      await assertContractAccess(req, contractId);
+
+      const contract = await prisma.contract.findUnique({
+        where: { id: contractId },
+        include: {
+          costCenter: { select: { code: true, name: true } }
+        }
+      });
+      if (!contract) {
+        throw createError('Contrato não encontrado', 404);
+      }
+
+      const svc = getTotvsRmRelatorioFinService();
+      if (!svc.isConfigured()) {
+        res.json({
+          success: true,
+          data: {
+            configured: false,
+            total: null as number | null,
+            message:
+              'Integração TOTVS RM não configurada. Defina TOTVS_RM_BASE_URL e TOTVS_RM_USER + TOTVS_RM_PASSWORD (Basic) ou TOTVS_RM_BEARER_TOKEN.'
+          }
+        });
+        return;
+      }
+
+      try {
+        const sum = await svc.sumForCostCenterAsync(contract.costCenter.code, contract.costCenter.name);
+        res.json({
+          success: true,
+          data: {
+            configured: true,
+            total: sum.total,
+            matchedRowCount: sum.matchedRowCount,
+            totalRowCount: sum.totalRowCount,
+            ccColumn: sum.ccColumn,
+            valueColumn: sum.valueColumn,
+            naturezaColumn: sum.naturezaColumn,
+            dateColumn: sum.dateColumn,
+            totalsByNatureza: sum.totalsByNatureza,
+            sampleCcValuesMatched: sum.sampleCcValuesMatched,
+            paidByCalendarMonth: sum.paidByCalendarMonth,
+            paidUndated: sum.paidUndated,
+            solicitacoesByCalendarMonth: sum.solicitacoesByCalendarMonth,
+            solicitacoesUndated: sum.solicitacoesUndated,
+            solicitacoesMatchedRowCount: sum.solicitacoesMatchedRowCount,
+            solicitacoesDateColumn: sum.solicitacoesDateColumn,
+            solicitacoesValueColumn: sum.solicitacoesValueColumn,
+            solicitacoesCcColumn: sum.solicitacoesCcColumn,
+            costCenterCode: contract.costCenter.code,
+            costCenterName: contract.costCenter.name
+          }
+        });
+      } catch (err) {
+        const message = svc.formatAxiosError(err);
+        console.warn(
+          `[TOTVS RM RELATORIOFIN] contrato=${contractId} cc=${contract.costCenter.code}: ${message}`
+        );
+        res.json({
+          success: false,
+          message,
+          data: {
+            configured: true,
+            total: null as number | null,
+            costCenterCode: contract.costCenter.code,
+            costCenterName: contract.costCenter.name
+          }
+        });
+      }
     } catch (error) {
       next(error);
     }

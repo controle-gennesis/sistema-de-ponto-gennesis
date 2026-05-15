@@ -69,6 +69,10 @@ router.get('/:contractId/annual-values', (req, res, next) =>
 router.put('/:contractId/annual-values/:year', (req, res, next) =>
   annualValueController.setAnnualValue(req, res, next)
 );
+router.get('/:contractId/totvs-total-pago', (req, res, next) =>
+  contractController.getTotvsTotalPago(req, res, next)
+);
+
 router.get('/:contractId/addenda', (req, res, next) =>
   addendumController.listByContract(req, res, next)
 );

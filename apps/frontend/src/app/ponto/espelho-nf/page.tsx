@@ -438,9 +438,6 @@ const FEDERAL_TAX_CONTEXT_ENABLED_STORAGE_KEY = 'espelho-nf-federal-tax-context-
 const SAVED_MIRRORS_STORAGE_KEY = 'espelho-nf-saved-mirrors';
 const MIRROR_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 const MIRROR_ACTION_MENU_WIDTH_PX = 224;
-/** Altura aproximada do menu (4 itens), só para decidir posição vertical. */
-const MIRROR_ACTION_MENU_EST_HEIGHT_PX = 185;
-const MIRROR_ACTION_MENU_MIN_TOP_WHEN_ABOVE_PX = 100;
 const ESPELHO_APPROVAL_BADGE_CLASS: Record<EspelhoApprovalStatus, string> = {
   PENDING_APPROVAL:
     'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800',
@@ -3438,24 +3435,7 @@ export default function EspelhoNfPage() {
                                                   window.innerWidth - MIRROR_ACTION_MENU_WIDTH_PX - 8
                                                 )
                                               );
-                                              const edge = 8;
-                                              const gap = 6;
-                                              const vh = window.innerHeight;
-                                              const layoutH = MIRROR_ACTION_MENU_EST_HEIGHT_PX;
-                                              const topBelow = r.bottom + gap;
-                                              const topAbove = r.top - gap - layoutH;
-                                              const fitsBelow = topBelow + layoutH <= vh - edge;
-                                              const fitsAbove =
-                                                topAbove >= edge && topAbove >= MIRROR_ACTION_MENU_MIN_TOP_WHEN_ABOVE_PX;
-                                              let top: number;
-                                              if (fitsBelow) {
-                                                top = topBelow;
-                                              } else if (fitsAbove) {
-                                                top = topAbove;
-                                              } else {
-                                                top = topBelow;
-                                              }
-                                              return { mirrorId: item.id, top, left };
+                                              return { mirrorId: item.id, top: r.bottom + 4, left };
                                             });
                                           }}
                                           className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -3490,7 +3470,7 @@ export default function EspelhoNfPage() {
                   />
                   <div
                     role="menu"
-                    className="fixed z-[201] w-56 max-h-[calc(100dvh-16px)] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                    className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
                     style={{
                       top: mirrorActionMenu.top,
                       left: mirrorActionMenu.left

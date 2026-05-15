@@ -70,16 +70,7 @@ router.get('/bootstrap', async (_req, res, next) => {
       p.espelhoNfServiceTaker.findMany({ orderBy: { createdAt: 'desc' } }),
       p.espelhoNfBankAccount.findMany({ orderBy: { createdAt: 'desc' } }),
       p.espelhoNfTaxCode.findMany({ orderBy: { createdAt: 'desc' } }),
-      p.espelhoNfMirror.findMany({
-        orderBy: { createdAt: 'desc' },
-        include: {
-          provider: true,
-          taker: true,
-          bankAccount: true,
-          taxCode: true,
-          costCenter: true
-        }
-      })
+      p.espelhoNfMirror.findMany({ orderBy: { createdAt: 'desc' } })
     ]);
 
     return res.status(200).json({
@@ -111,18 +102,11 @@ router.get('/bootstrap', async (_req, res, next) => {
           federalRatesByContext: t.federalRatesByContext ?? null,
           federalTaxContextEnabled: t.federalTaxContextEnabled ?? null
         })),
-        mirrors: mirrors.map((m: any) => {
-          const cc = m.costCenter;
-          const costCenterLabel =
-            cc && (cc.code || cc.name)
-              ? [String(cc.code ?? '').trim(), String(cc.name ?? '').trim()].filter(Boolean).join(' - ')
-              : '';
-          return {
+        mirrors: mirrors.map((m: any) => ({
           id: m.id,
           createdAt: m.createdAt?.toISOString?.() ?? m.createdAt,
           measurementRef: m.measurementRef ?? '',
           costCenterId: m.costCenterId ?? '',
-          costCenterLabel,
           dueDate: m.dueDate ? new Date(m.dueDate).toISOString().slice(0, 10) : '',
           municipality: m.municipality ?? '',
           cnae: m.cnae ?? '41.20-4-00',
@@ -141,13 +125,13 @@ router.get('/bootstrap', async (_req, res, next) => {
           laborAmount: m.laborAmount ?? '',
           materialAmount: m.materialAmount ?? '',
           providerId: m.providerId ?? '',
-          providerName: String(m.provider?.corporateName ?? '').trim(),
+          providerName: '',
           takerId: m.takerId ?? '',
-          takerName: String(m.taker?.corporateName ?? '').trim(),
+          takerName: '',
           bankAccountId: m.bankAccountId ?? '',
-          bankAccountName: String(m.bankAccount?.name ?? '').trim(),
+          bankAccountName: '',
           taxCodeId: m.taxCodeId ?? '',
-          taxCodeCityName: String(m.taxCode?.name ?? '').trim(),
+          taxCodeCityName: '',
           nfAttachment:
             m.nfAttachmentDataUrl && m.nfAttachmentName
               ? {
@@ -168,8 +152,7 @@ router.get('/bootstrap', async (_req, res, next) => {
               : undefined,
           nfConstarNaNota: m.nfConstarNaNota ?? null,
           nfConstarNaNotaAcknowledged: Boolean(m.nfConstarNaNotaAcknowledged)
-          };
-        })
+        }))
       }
     });
   } catch (error) {

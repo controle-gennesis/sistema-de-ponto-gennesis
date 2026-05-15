@@ -31,12 +31,14 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import * as XLSX from 'xlsx';
 
-const DEFAULT_BI_DATASETS = ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', 'DataSet_G5FollowUp'] as const;
+export const G5_RELATORIO_DATASET_ID = 'G5-Relatorio-DF-GO-TODOS-SETORES';
 
-const DEFAULT_DATASET_TAB_LABELS: Record<(typeof DEFAULT_BI_DATASETS)[number], string> = {
+const DEFAULT_BI_DATASETS = ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', G5_RELATORIO_DATASET_ID] as const;
+
+const DEFAULT_DATASET_TAB_LABELS: Record<string, string> = {
   DataSet_G3FollowUp: 'G3',
   DataSet_G4FollowUp: 'G4',
-  DataSet_G5FollowUp: 'G5',
+  [G5_RELATORIO_DATASET_ID]: 'G5',
 };
 
 const FILIAIS_PERMITIDAS = [
@@ -246,6 +248,85 @@ function formatValue(val: unknown): string {
   return String(val);
 }
 
+function stripDiacriticsKey(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Colunas onde vem "3.03.01.32-SALÁRIOS…" sem o rótulo "natureza" (relatório G5 DF). */
+function matchNaturezaExtendedFluigColumnKey(key: string): boolean {
+  const raw = key.trim();
+  const n = stripDiacriticsKey(raw).replace(/\s+/g, ' ').toLowerCase();
+  if (/titulo|historico|descricao|observ|mensagem|coment|anexo|link|email|telefone|celular|filial|fornecedor|pix|boleto|agencia|conta\s*corrente|chave|vencimento/i.test(n))
+    return false;
+  if (/^valor\b|\bvalor\s|quant|qtd|etapa|fase|status|idmov|num_proces|sequencia|processo\s*$/i.test(n)) return false;
+  if (/centro(\s+de)?\s*custo|^cc$|ccusto|centrocusto|custo\s*mecanismo|mecanismo.*custo|^contrato$/i.test(n)) return false;
+  if (/\belemento\b/.test(n) && !/elemento.*(pessoa|jurid)/i.test(n)) return true;
+  if (/classificacao.*(orc|despesa|desp)/i.test(n)) return true;
+  if (/carteira.*orc/i.test(n)) return true;
+  if (/evento.*(orc|desp)/i.test(n)) return true;
+  if (/conta.*orcament/i.test(n)) return true;
+  if (/plano.*(orc|desp)/i.test(n)) return true;
+  if (/cod(igo)?(\s+do)?\s*elemento/i.test(n)) return true;
+  if (/elemento\s*padrao/i.test(n)) return true;
+  if (/unidade.*orcament|ud\s*orc/i.test(n)) return true;
+  if (/despesa.*orcament|orcamento.*despesa/i.test(n)) return true;
+  if (/mascara|reduzid|nat(ureza)?(\s|_)*desp|elemento(\s|_)*(orcament|orc\.?)/i.test(n)) return true;
+  return false;
+}
+
+function isNaturezaOrcamentariaColumnCandidate(key: string): boolean {
+  return matchNaturezaOrcamentariaColumnKey(key) || matchNaturezaExtendedFluigColumnKey(key);
+}
+
+function cellLooksLikeOrcNaturezaDisplay(val: unknown): boolean {
+  const s = formatValue(val).trim();
+  if (s === '—' || s.length < 8) return false;
+  return /^\d{1,2}(\.\d{2,3}){2,6}\s*[-–—]/.test(s) || /^\d{1,2}(\.\d{2,3}){2,6}[A-Za-zÀ-ÿ]/.test(s);
+}
+
+function listNaturezaCandidateKeysFluig(columns: string[], firstRow: Record<string, unknown> | undefined): string[] {
+  const out: string[] = [];
+  const add = (k: string) => {
+    if (!k || out.includes(k)) return;
+    if (!isNaturezaOrcamentariaColumnCandidate(k)) return;
+    out.push(k);
+  };
+  for (const c of columns) add(c);
+  if (firstRow) for (const k of Object.keys(firstRow)) add(k);
+  return out;
+}
+
+function pickBestNaturezaOrcamentariaColumn(
+  columns: string[],
+  firstRow: Record<string, unknown> | undefined,
+  values: Record<string, unknown>[]
+): string | null {
+  const keys = listNaturezaCandidateKeysFluig(columns, firstRow).filter((k) => !/^valor\b/i.test(k.trim()));
+  if (keys.length === 0) return null;
+  if (keys.length === 1) return keys[0];
+  const sample = values.slice(0, Math.min(600, values.length));
+  let bestK: string | null = null;
+  let bestScore = -1;
+  for (const k of keys) {
+    let filled = 0;
+    let coded = 0;
+    for (const row of sample) {
+      const s = formatValue(row[k]).trim();
+      if (s.length < 4 || s === '—') continue;
+      filled++;
+      if (cellLooksLikeOrcNaturezaDisplay(row[k])) coded++;
+    }
+    let score = filled + coded * 4;
+    const kn = stripDiacriticsKey(k).replace(/\s+/g, ' ').toLowerCase();
+    if (/\belemento\b|mascara|classificacao|despesa.*orc|nat_?orc|natureza\b/i.test(kn)) score += 2;
+    if (score > bestScore) {
+      bestScore = score;
+      bestK = k;
+    }
+  }
+  return bestK;
+}
+
 function normKeyForSolicitacaoId(s: string): string {
   return s
     .normalize('NFD')
@@ -331,7 +412,7 @@ function fluigDetailModalSectionIndex(colRaw: string): number {
     (/\bsolicitante\b/i.test(h) && !/fornecedor/i.test(h))
   )
     return 4;
-  if (/(\bvalor\b|contrato|orcamento)/i.test(h) || matchNaturezaOrcamentariaColumnKey(colRaw)) return 5;
+  if (/(\bvalor\b|contrato|orcamento)/i.test(h) || isNaturezaOrcamentariaColumnCandidate(colRaw)) return 5;
   if (
     /idmov|num_proces|numero\s*processo|numeroprocesso|numero\s*sequencia|sequencia.*estado|fase\s*atual|\betapa\b|inicio\s*data|dh_/i.test(
       h,
@@ -438,12 +519,12 @@ export function FluigSolicitacoesPage({
   const datasets = config?.datasets?.length ? config.datasets : DEFAULT_BI_DATASETS;
   const datasetTabLabels = useMemo(() => {
     return datasets.reduce<Record<string, string>>((acc, ds) => {
-      acc[ds] = config?.datasetTabLabels?.[ds] ?? DEFAULT_DATASET_TAB_LABELS[ds as keyof typeof DEFAULT_DATASET_TAB_LABELS] ?? ds;
+      acc[ds] = config?.datasetTabLabels?.[ds] ?? DEFAULT_DATASET_TAB_LABELS[ds] ?? ds;
       return acc;
     }, {});
   }, [datasets, config?.datasetTabLabels]);
   const g5TitleDatasets = useMemo(
-    () => new Set(config?.g5TitleDatasets ?? ['DataSet_G5FollowUp']),
+    () => new Set(config?.g5TitleDatasets ?? [G5_RELATORIO_DATASET_ID]),
     [config?.g5TitleDatasets]
   );
   const datasetId = datasets[activeTab] ?? datasets[0];
@@ -489,18 +570,19 @@ export function FluigSolicitacoesPage({
       }
     }
 
-    if (datasetId === 'DataSet_G5FollowUp') {
-      if (/Etapa\s*390\b/i.test(s)) {
-        return { key: 'G5_ETAPA_390_ANEXAR_NF', label: 'Anexar NF' };
-      }
-    }
-
-    if (datasetId === 'G5-Relatorio-DF') {
+    if (datasetId.startsWith('G5-Relatorio-DF')) {
       if (/Etapa\s*390\b/i.test(s)) {
         return { key: 'G5_DF_ETAPA_390_ANEXAR_NF', label: 'Anexar NF' };
       }
       if (/Etapa\s*117\b/i.test(s)) {
         return { key: 'G5_DF_ETAPA_117_FINALIZADO', label: 'Finalizado' };
+      }
+      // Fluig às vezes envia etapa como objeto (display) ou texto sem o número 117; RH/salários costuma encerrar com outras redações.
+      if (/\b(finalizad[oa]|encerrad[oa]|conclu[íi]d[oa])\b/i.test(s) && !/\b(não|nao)\s+(finaliz|encerr|conclu)/i.test(s)) {
+        return { key: 'G5_DF_FINALIZADO_TEXTO', label: 'Finalizado' };
+      }
+      if (/\bEtapa\s*(11[0-9]|12[0-9])\b/i.test(s) && /\b(finaliz|pagamento|quitad|liquidad|efetuad|pago)\b/i.test(s)) {
+        return { key: 'G5_DF_ETAPA_PAGAMENTO_LIQ', label: 'Finalizado' };
       }
     }
 
@@ -586,7 +668,9 @@ export function FluigSolicitacoesPage({
     const byStatus: Record<string, { label: string; rows: Record<string, unknown>[] }> = {};
     if (statusCol) {
       values.forEach((row: Record<string, unknown>) => {
-        const rawStatus = String(row[statusCol] ?? '(sem etapa)');
+        const rawStatusCell = formatValue(row[statusCol]);
+        const rawStatus =
+          rawStatusCell === '—' || rawStatusCell.trim() === '' ? '(sem etapa)' : rawStatusCell.trim();
         const { key, label } = normalizeStatus(rawStatus);
         if (!byStatus[key]) byStatus[key] = { label, rows: [] };
         byStatus[key].rows.push(row);
@@ -792,12 +876,8 @@ export function FluigSolicitacoesPage({
       }
     }
 
-    const fromCols = currentColumns.find(matchNaturezaOrcamentariaColumnKey) ?? null;
-    if (fromCols) return fromCols;
-
     const first = currentValuesFilteredByFilial[0] as Record<string, unknown> | undefined;
-    if (!first) return null;
-    return Object.keys(first).find(matchNaturezaOrcamentariaColumnKey) ?? null;
+    return pickBestNaturezaOrcamentariaColumn(currentColumns, first, currentValuesFilteredByFilial);
   }, [currentColumns, currentValuesFilteredByFilial, config?.naturezaOrcamentariaColumn]);
 
   // Resolve coluna CC: usa columns, ou busca nas chaves reais das linhas (G4 usa "Centro De Custo Mecanismo")
@@ -1001,12 +1081,14 @@ export function FluigSolicitacoesPage({
       if (byNaturezasOrcamentarias && naturezaOrcamentariaCol && !byNaturezasOrcamentarias.has(getNaturezaOrcamentariaValue(row)))
         return false;
       if (search) {
-        const found = currentColumns.some((col) => {
-          const val = row[col];
-          const str = val != null && typeof val === 'object'
-            ? String((val as Record<string, unknown>).display ?? (val as Record<string, unknown>).displayValue ?? (val as Record<string, unknown>).value ?? val)
-            : String(val ?? '');
-          return str.toLowerCase().includes(search);
+        const colKeys = currentColumns.slice();
+        for (const k of Object.keys(row)) {
+          if (!colKeys.includes(k)) colKeys.push(k);
+        }
+        const found = colKeys.some((col) => {
+          const str = formatValue(row[col]).toLowerCase();
+          if (str === '—') return false;
+          return str.includes(search);
         });
         if (!found) return false;
       }
@@ -1041,6 +1123,16 @@ export function FluigSolicitacoesPage({
     naturezasOrcamentarias.length,
     activeFilterCategory,
   ]);
+
+  /** Com busca ativa, se a aba atual não tem linhas mas outra aba tem, muda para a primeira aba com resultado (evita “sumir” o IdMov em outra etapa). */
+  useEffect(() => {
+    const q = searchText.trim();
+    if (!q) return;
+    const currentRows = filteredStatusList[selectedEtapaIndex]?.[1];
+    if (currentRows && currentRows.length > 0) return;
+    const idx = filteredStatusList.findIndex(([, rows]) => rows.length > 0);
+    if (idx >= 0 && idx !== selectedEtapaIndex) setSelectedEtapaIndex(idx);
+  }, [searchText, filteredStatusList, selectedEtapaIndex]);
 
   useEffect(() => {
     setSelectedEtapaIndex((prev) => Math.min(prev, Math.max(0, filteredStatusList.length - 1)));
@@ -2095,6 +2187,7 @@ export function FluigSolicitacoesPage({
                       const start = currentPage * effectiveRecordsPerPage;
                       const listShowFilial = useEmployeeListLayout && !!filialCol && !hideFilialFilter;
                       const listShowCC = useEmployeeListLayout && !!ccColResolved;
+                      const listShowNatureza = useEmployeeListLayout && !!naturezaOrcamentariaCol;
                       const listShowSetor = useEmployeeListLayout && !!setorSolicitanteCol;
                       const listShowUrgencia = useEmployeeListLayout && !!urgenciaCol;
                       const listShowFornecedor = useEmployeeListLayout && !!fornecedorCol;
@@ -2105,6 +2198,7 @@ export function FluigSolicitacoesPage({
                         ? 2 +
                           (listShowFilial ? 1 : 0) +
                           (listShowCC ? 1 : 0) +
+                          (listShowNatureza ? 1 : 0) +
                           (listShowSetor ? 1 : 0) +
                           (listShowUrgencia ? 1 : 0) +
                           (listShowFornecedor ? 1 : 0) +
@@ -2150,6 +2244,13 @@ export function FluigSolicitacoesPage({
                                           className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`}
                                         >
                                           Centro de custo
+                                        </th>
+                                      )}
+                                      {listShowNatureza && (
+                                        <th
+                                          className={`px-3 sm:px-6 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
+                                        >
+                                          Natureza
                                         </th>
                                       )}
                                       {listShowSetor && (
@@ -2223,7 +2324,7 @@ export function FluigSolicitacoesPage({
                                 ) : (
                                   rowsToShow.map((row, i) => {
                                     const hist = getHistText(row);
-                                    const idStr = String(row[idCol] ?? '—');
+                                    const idStr = formatValue(row[idCol] ?? '');
                                     const openDetail = () => setDetail({ row, columns: currentColumns, datasetId });
                                     if (useEmployeeListLayout) {
                                       const urgVal = getUrgenciaValue(row);
@@ -2273,6 +2374,18 @@ export function FluigSolicitacoesPage({
                                                 title={ccNome && ccNome !== '—' ? ccNome : undefined}
                                               >
                                                 {ccNome || '—'}
+                                              </span>
+                                            </td>
+                                          )}
+                                          {listShowNatureza && (
+                                            <td
+                                              className={`px-3 sm:px-6 ${tdPad} text-sm text-left text-gray-700 dark:text-gray-300 max-w-[18rem]`}
+                                            >
+                                              <span
+                                                className="line-clamp-2"
+                                                title={getNaturezaOrcamentariaValue(row) || undefined}
+                                              >
+                                                {getNaturezaOrcamentariaValue(row) || '—'}
                                               </span>
                                             </td>
                                           )}

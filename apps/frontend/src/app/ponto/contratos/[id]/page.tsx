@@ -20,13 +20,19 @@ import {
   Percent,
   Calculator,
   FileImage,
+  Eye,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
+import { AxiosError } from 'axios';
 import api from '@/lib/api';
+import {
+  filterNaturezaRowsForPaidModalDisplay,
+  isNaturezaExcludedFromContractPaidTotal
+} from '@/lib/contractPaidNaturezaExclusions';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import {
   STATUS_ORCAMENTO_OPCOES,
@@ -567,6 +573,21 @@ function getHistoricoEtiqueta(p: ContractPleito): string | null {
   return null;
 }
 
+function totvsQueryTransportErrorMessage(err: unknown): string {
+  const ax = err as AxiosError<{ message?: string }>;
+  if (ax?.code === 'ECONNABORTED') {
+    return 'Tempo esgotado ao consultar o RM. O relatório pode demorar vários minutos — tente de novo ou verifique o backend.';
+  }
+  const fromBody =
+    ax?.response?.data &&
+    typeof ax.response.data === 'object' &&
+    'message' in ax.response.data &&
+    typeof (ax.response.data as { message?: string }).message === 'string'
+      ? (ax.response.data as { message: string }).message
+      : null;
+  return fromBody || ax?.message || 'Falha de rede ou servidor ao consultar o RM.';
+}
+
 export default function ContractDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -652,6 +673,12 @@ export default function ContractDetailPage() {
   const [adjFormDeltaStr, setAdjFormDeltaStr] = useState('');
   const [adjFormDate, setAdjFormDate] = useState('');
   const [showAddendumModal, setShowAddendumModal] = useState(false);
+  const [showNaturezaRmModal, setShowNaturezaRmModal] = useState(false);
+  const [solicitacoesMesModal, setSolicitacoesMesModal] = useState<{
+    mesIdx: number;
+    mesLabel: string;
+    celulaTotal: number;
+  } | null>(null);
   const [addendumDate, setAddendumDate] = useState('');
   const [addendumAmount, setAddendumAmount] = useState('');
   const [addendumNote, setAddendumNote] = useState('');
@@ -671,6 +698,72 @@ export default function ContractDetailPage() {
       return res.data;
     },
     enabled: !!contractId
+  });
+
+  type TotvsRmPaidLineDetail = {
+    valor: number;
+    natureza: string;
+    dataISO: string | null;
+  };
+
+  type TotvsTotalPagoApi = {
+    success: boolean;
+    message?: string;
+    data: {
+      configured: boolean;
+      total: number | null;
+      matchedRowCount?: number;
+      totalRowCount?: number;
+      ccColumn?: string | null;
+      valueColumn?: string | null;
+      naturezaColumn?: string | null;
+      dateColumn?: string | null;
+      totalsByNatureza?: { natureza: string; total: number; count: number }[];
+      sampleCcValuesMatched?: string[];
+      /** Total pago (exclui naturezas operacionais). */
+      paidByCalendarMonth?: {
+        year: number;
+        month: number;
+        total: number;
+        count: number;
+        lines: TotvsRmPaidLineDetail[];
+      }[];
+      paidUndated?: { total: number; count: number; lines: TotvsRmPaidLineDetail[] } | null;
+      /** Linha «Solicitações»: soma por mês (CC + data + valor), mesmas exclusões de natureza do Total Pago. */
+      solicitacoesByCalendarMonth?: {
+        year: number;
+        month: number;
+        total: number;
+        count: number;
+        lines: TotvsRmPaidLineDetail[];
+      }[];
+      solicitacoesUndated?: { total: number; count: number; lines: TotvsRmPaidLineDetail[] } | null;
+      solicitacoesMatchedRowCount?: number;
+      solicitacoesDateColumn?: string | null;
+      solicitacoesValueColumn?: string | null;
+      solicitacoesCcColumn?: string | null;
+      message?: string;
+      costCenterCode?: string;
+      costCenterName?: string;
+    };
+  };
+
+  const {
+    data: totvsTotalPagoRes,
+    isLoading: totvsTotalPagoLoading,
+    isFetching: totvsTotalPagoFetching,
+    isError: totvsTotalPagoIsError,
+    error: totvsTotalPagoError
+  } = useQuery({
+    queryKey: ['contract-totvs-total-pago', contractId],
+    queryFn: async () => {
+      const res = await api.get(`/contracts/${contractId}/totvs-total-pago`, { timeout: 180000 });
+      return res.data as TotvsTotalPagoApi;
+    },
+    enabled: !!contractId,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    retry: false
   });
 
   const { data: billingsData, isLoading: loadingBillings } = useQuery({
@@ -895,6 +988,111 @@ export default function ContractDetailPage() {
   });
 
   const contract = contractData?.data as Contract | undefined;
+
+  const paidDisplay = useMemo(() => {
+    const c = contract;
+    if (!c) {
+      return {
+        total: 0,
+        loading: true,
+        totvsConfigured: false,
+        totvsErrorMessage: null as string | null
+      };
+    }
+
+    const t = totvsTotalPagoRes;
+    const totvsLoading = totvsTotalPagoLoading || totvsTotalPagoFetching;
+
+    if (totvsTotalPagoIsError) {
+      return {
+        total: 0,
+        loading: totvsTotalPagoLoading || totvsTotalPagoFetching,
+        totvsConfigured: true,
+        totvsErrorMessage: totvsQueryTransportErrorMessage(totvsTotalPagoError)
+      };
+    }
+
+    const configured = Boolean(t?.data?.configured);
+    const totvsSuccessWithTotal =
+      Boolean(t?.success) &&
+      configured &&
+      typeof t?.data?.total === 'number' &&
+      !Number.isNaN(t.data.total);
+
+    if (totvsSuccessWithTotal) {
+      return {
+        total: t!.data.total as number,
+        loading: totvsLoading,
+        totvsConfigured: true,
+        totvsErrorMessage: null as string | null
+      };
+    }
+
+    const totvsCallFailed = configured && t?.success === false;
+    const waitingFirstTotvs =
+      configured && !totvsCallFailed && !totvsSuccessWithTotal && (t === undefined || totvsLoading);
+
+    if (waitingFirstTotvs) {
+      return {
+        total: 0,
+        loading: true,
+        totvsConfigured: true,
+        totvsErrorMessage: null as string | null
+      };
+    }
+
+    return {
+      total: 0,
+      loading: false,
+      totvsConfigured: configured,
+      totvsErrorMessage: totvsCallFailed ? t?.message || null : null
+    };
+  }, [contract, totvsTotalPagoRes, totvsTotalPagoLoading, totvsTotalPagoFetching, totvsTotalPagoIsError, totvsTotalPagoError]);
+
+  const rmTotalsByNatureza = useMemo((): { natureza: string; total: number; count: number }[] => {
+    const raw = totvsTotalPagoRes?.data?.totalsByNatureza;
+    if (!Array.isArray(raw)) return [];
+    const out: { natureza: string; total: number; count: number }[] = [];
+    for (const x of raw) {
+      if (!x || typeof x !== 'object') continue;
+      const o = x as { natureza?: unknown; total?: unknown; count?: unknown };
+      if (typeof o.natureza !== 'string' || typeof o.total !== 'number' || typeof o.count !== 'number') continue;
+      out.push({ natureza: o.natureza, total: o.total, count: o.count });
+    }
+    return out;
+  }, [totvsTotalPagoRes]);
+
+  const naturezaModalRowsRaw = rmTotalsByNatureza;
+  const naturezaModalRows = useMemo(
+    () => filterNaturezaRowsForPaidModalDisplay(naturezaModalRowsRaw),
+    [naturezaModalRowsRaw]
+  );
+
+  /** Total Pago no cabeçalho: só abate a lista fixa de naturezas operacionais (quando há detalhe por natureza). */
+  const paidHeaderTotal = useMemo(() => {
+    if (rmTotalsByNatureza.length) {
+      return rmTotalsByNatureza
+        .filter((r) => !isNaturezaExcludedFromContractPaidTotal(r.natureza))
+        .reduce((s, r) => s + r.total, 0);
+    }
+    return paidDisplay.total;
+  }, [paidDisplay.total, rmTotalsByNatureza]);
+
+  const naturezaModalTotals = useMemo(() => {
+    return naturezaModalRows.reduce(
+      (acc, r) => {
+        acc.total += r.total;
+        acc.count += r.count;
+        return acc;
+      },
+      { total: 0, count: 0 }
+    );
+  }, [naturezaModalRows]);
+
+  const canOpenNaturezaModal =
+    !paidDisplay.loading &&
+    Boolean(totvsTotalPagoRes?.success !== false && totvsTotalPagoRes?.data?.configured);
+
   const addenda = ((addendaResponse?.data || []) as ContractAddendumRow[])
     .slice()
     .sort((a, b) => {
@@ -1233,6 +1431,192 @@ export default function ContractDetailPage() {
     }
     return result;
   }, [safeSelectedYear, metaSchedule, metaRealByScheduleKey]);
+
+  type SolicitacaoControleMesLinha = {
+    solicitationId: string;
+    datasetId: string;
+    titulo: string;
+    natureza: string;
+    /** Valor que entra na soma deste mês (pode ser parcela de rateio). */
+    valor: number;
+    dataRef: Date | null;
+    parcelaRateio: boolean;
+    rateioMotivo?: 'sem_data' | 'fora_vigencia' | 'ano_diferente';
+    valorOriginal?: number;
+  };
+
+  /**
+   * Controle Geral — linha Solicitações: TOTVS RM — `solicitacoesByCalendarMonth` (CC + data + valor; exclui as mesmas naturezas operacionais que o Total Pago)
+   * com fallback ao `paidByCalendarMonth` em APIs antigas.
+   */
+  const controleSolicitacoesPorMes = useMemo(() => {
+    const valores: (number | null)[] = new Array(12).fill(null);
+    const detalhes: SolicitacaoControleMesLinha[][] = Array.from({ length: 12 }, () => []);
+    const year = safeSelectedYear;
+
+    const emVigencia = (mesIdx: number) =>
+      (metaSchedule.get(toYearMonthKey(year, mesIdx + 1)) ?? null) !== null;
+
+    const mesesVigenciaIdx: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      if (emVigencia(i)) mesesVigenciaIdx.push(i);
+    }
+    const nVm = mesesVigenciaIdx.length;
+
+    const t = totvsTotalPagoRes;
+    const api = t?.data;
+    const rmOk = t?.success !== false && Boolean(api?.configured) && nVm > 0;
+
+    if (!rmOk || !api) {
+      return { valores, detalhes };
+    }
+
+    const useSolicitacoesApi =
+      api.solicitacoesCcColumn != null &&
+      api.solicitacoesValueColumn != null &&
+      api.solicitacoesByCalendarMonth !== undefined;
+
+    const paidByCalendarMonth = useSolicitacoesApi
+      ? Array.isArray(api.solicitacoesByCalendarMonth)
+        ? api.solicitacoesByCalendarMonth
+        : []
+      : Array.isArray(api.paidByCalendarMonth)
+        ? api.paidByCalendarMonth
+        : [];
+    const paidUndated = useSolicitacoesApi
+      ? api.solicitacoesUndated !== undefined
+        ? api.solicitacoesUndated
+        : null
+      : api.paidUndated;
+
+    const porMes = new Array(12).fill(0);
+
+    const pushRmLinha = (
+      mi: number,
+      line: { valor: number; natureza: string; dataISO: string | null },
+      opts: {
+        parcelaRateio: boolean;
+        rateioMotivo?: SolicitacaoControleMesLinha['rateioMotivo'];
+        valorOriginal?: number;
+      },
+      idSuffix: string
+    ) => {
+      detalhes[mi].push({
+        solicitationId: idSuffix,
+        datasetId: 'TOTVS RM',
+        titulo: '—',
+        natureza: line.natureza,
+        valor: line.valor,
+        dataRef: line.dataISO ? parseDateSafe(line.dataISO) : null,
+        parcelaRateio: opts.parcelaRateio,
+        rateioMotivo: opts.rateioMotivo,
+        valorOriginal: opts.valorOriginal
+      });
+    };
+
+    for (const bm of paidByCalendarMonth) {
+      const yBm = Number(bm.year);
+      const moBm = Number(bm.month);
+      if (!Number.isFinite(yBm) || !Number.isFinite(moBm) || yBm !== year || moBm < 1 || moBm > 12) {
+        continue;
+      }
+      const mi = moBm - 1;
+
+      if (emVigencia(mi)) {
+        porMes[mi] += Number(bm.total) || 0;
+        let li = 0;
+        for (const line of bm.lines ?? []) {
+          pushRmLinha(
+            mi,
+            line,
+            { parcelaRateio: false },
+            `rm-${yBm}-${moBm}-${li++}`
+          );
+        }
+      } else if (nVm > 0) {
+        const slice = (Number(bm.total) || 0) / nVm;
+        const refData =
+          bm.lines?.find((ln) => ln.dataISO)?.dataISO ?? bm.lines?.[0]?.dataISO ?? null;
+        let oi = 0;
+        for (const vmi of mesesVigenciaIdx) {
+          porMes[vmi] += slice;
+          pushRmLinha(
+            vmi,
+            {
+              valor: slice,
+              natureza: '—',
+              dataISO: refData
+            },
+            {
+              parcelaRateio: true,
+              rateioMotivo: 'fora_vigencia',
+              valorOriginal: bm.total
+            },
+            `rm-out-${yBm}-${moBm}-${oi++}`
+          );
+        }
+      }
+    }
+
+    if (paidUndated && Number(paidUndated.total) > 0 && nVm > 0) {
+      const sliceTot = Number(paidUndated.total) / nVm;
+      for (const vmi of mesesVigenciaIdx) {
+        porMes[vmi] += sliceTot;
+      }
+      let ui = 0;
+      for (const vmi of mesesVigenciaIdx) {
+        for (const line of paidUndated.lines ?? []) {
+          pushRmLinha(
+            vmi,
+            {
+              valor: line.valor / nVm,
+              natureza: line.natureza,
+              dataISO: line.dataISO
+            },
+            {
+              parcelaRateio: true,
+              rateioMotivo: 'sem_data',
+              valorOriginal: line.valor
+            },
+            `rm-undated-${vmi}-${ui++}`
+          );
+        }
+      }
+    }
+
+    for (let i = 0; i < 12; i++) {
+      if (emVigencia(i)) {
+        valores[i] = porMes[i];
+      }
+    }
+    return { valores, detalhes };
+  }, [totvsTotalPagoRes, safeSelectedYear, metaSchedule]);
+
+  const solicitacoesControleTotvsPronto = useMemo(() => {
+    const t = totvsTotalPagoRes;
+    const api = t?.data;
+    return t?.success !== false && Boolean(api?.configured);
+  }, [totvsTotalPagoRes]);
+
+  /** Há linhas RM usadas na linha «Solicitações» (agregação CC+data+valor) ou, em API antiga, matchedRowCount do total pago. */
+  const solicitacoesRmTemLancamentosNoRelatorio = useMemo(() => {
+    const d = totvsTotalPagoRes?.data;
+    if (!d?.configured || totvsTotalPagoRes?.success === false) return false;
+    const solMc = Number(d.solicitacoesMatchedRowCount);
+    if (Number.isFinite(solMc) && solMc > 0) return true;
+    const solUnd = Number(d.solicitacoesUndated?.total) || 0;
+    if (solUnd > 0) return true;
+    if (d.solicitacoesByCalendarMonth !== undefined) {
+      const arr = Array.isArray(d.solicitacoesByCalendarMonth) ? d.solicitacoesByCalendarMonth : [];
+      if (arr.some((x) => Number(x?.total) > 0)) return true;
+    }
+    const mc = Number(d.matchedRowCount) || 0;
+    const und = Number(d.paidUndated?.total) || 0;
+    return mc > 0 || und > 0;
+  }, [totvsTotalPagoRes]);
+
+  const solicitacoesRateioPorMes = controleSolicitacoesPorMes.valores;
+  const solicitacoesDetalhePorMes = controleSolicitacoesPorMes.detalhes;
 
   // Soma dos pleitos por ano (para Metas Anuais)
   const pleitosPorAno = useMemo(() => {
@@ -2123,6 +2507,61 @@ export default function ContractDetailPage() {
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
                     Contrato nº {contract.number} • {contract.costCenter?.name || contract.costCenter?.code || '-'}
                   </p>
+                  <div className="mt-2 text-sm">
+                    {paidDisplay.loading ? (
+                      <p className="text-gray-500 dark:text-gray-400">Carregando total pago (RM)…</p>
+                    ) : paidDisplay.totvsErrorMessage ? (
+                      <p className="text-amber-600 dark:text-amber-400">
+                        <span className="opacity-90">
+                          {paidDisplay.totvsErrorMessage.length > 220
+                            ? `${paidDisplay.totvsErrorMessage.slice(0, 220)}…`
+                            : paidDisplay.totvsErrorMessage}
+                        </span>
+                      </p>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-gray-800 dark:text-gray-200">
+                            <span className="font-medium">Total Pago: </span>
+                            {paidHeaderTotal.toLocaleString('pt-BR', {
+                              style: 'currency',
+                              currency: 'BRL'
+                            })}
+                            <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                              (RM / TOTVS)
+                            </span>
+                          </p>
+                          {!canOpenNaturezaModal ? null : (
+                            <button
+                              type="button"
+                              onClick={() => setShowNaturezaRmModal(true)}
+                              className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-1.5 text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                              title="Ver totais por natureza (RM)"
+                              aria-label="Ver totais por natureza (RM)"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                        {totvsTotalPagoRes?.success !== false &&
+                        totvsTotalPagoRes?.data?.configured === false ? (
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            O servidor não está com o RM habilitado (faltam variáveis TOTVS_RM_* no ambiente do
+                            backend). Reinicie a API após alterar o .env.
+                          </p>
+                        ) : null}
+                        {!paidDisplay.loading &&
+                        totvsTotalPagoRes?.data?.configured === true &&
+                        paidHeaderTotal === 0 &&
+                        (totvsTotalPagoRes?.data?.matchedRowCount ?? 0) === 0 ? (
+                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            Nenhuma linha do relatório RM (RELATORIOFIN) encontrada para o centro de custo deste
+                            contrato.
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-3 shrink-0">
@@ -2372,6 +2811,20 @@ export default function ContractDetailPage() {
                     usa (soma das metas ideais na vigência completa − faturamento já acumulado no contrato até o mês anterior)
                     ÷ meses de vigência restantes.
                   </p>
+                  {solicitacoesControleTotvsPronto &&
+                  !solicitacoesRmTemLancamentosNoRelatorio &&
+                  !(totvsTotalPagoLoading || totvsTotalPagoFetching) ? (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      <span className="font-medium">Solicitações (RM):</span> não há linhas com o centro de custo deste
+                      contrato na consulta de solicitações (ou colunas não detectadas). Confira o cadastro do CC,{' '}
+                      <span className="font-mono">TOTVS_RM_SOLICITACOES_PATH</span> (se for outra consulta no RM),{' '}
+                      <span className="font-mono">TOTVS_RM_SOLICITACOES_CC_COLUMN</span>,{' '}
+                      <span className="font-mono">TOTVS_RM_SOLICITACOES_DATE_COLUMN</span>,{' '}
+                      <span className="font-mono">TOTVS_RM_SOLICITACOES_VALUE_COLUMN</span> e movimentos no ano{' '}
+                      {safeSelectedYear}. O filtro de status da linha Solicitações é opcional (
+                      <span className="font-mono">TOTVS_RM_SOLICITACOES_USE_STATUS_FILTER</span>).
+                    </p>
+                  ) : null}
                 </>
               )}
             </CardHeader>
@@ -2541,6 +2994,64 @@ export default function ContractDetailPage() {
                           );
                         })}
                       </tr>
+                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-violet-50/40 dark:bg-violet-900/15">
+                        <td className="px-4 py-4 text-sm font-medium text-violet-800 dark:text-violet-300 bg-gray-50 dark:bg-gray-800/50">
+                          Solicitações
+                        </td>
+                        {MESES.map((mes, i) => {
+                          const v = solicitacoesRateioPorMes[i];
+                          const detalheMes = solicitacoesDetalhePorMes[i];
+                          const semDadoRmSomado =
+                            solicitacoesControleTotvsPronto &&
+                            !solicitacoesRmTemLancamentosNoRelatorio &&
+                            !(totvsTotalPagoLoading || totvsTotalPagoFetching);
+                          const mostrarZeroComoTraco =
+                            v !== null && semDadoRmSomado && Math.abs(v) < 1e-9;
+                          const textoCelula =
+                            v === null ? '-' : mostrarZeroComoTraco ? '-' : formatCurrency(v);
+                          const clicavel =
+                            solicitacoesControleTotvsPronto &&
+                            !(totvsTotalPagoLoading || totvsTotalPagoFetching) &&
+                            v !== null &&
+                            !mostrarZeroComoTraco &&
+                            detalheMes.length > 0;
+                          const tituloCelula = clicavel
+                            ? 'Ver detalhes TOTVS RM somados neste mês'
+                            : mostrarZeroComoTraco
+                              ? 'Nenhum lançamento RM somado para este contrato; confira centro de custo e RELATORIOFIN'
+                              : v !== null && detalheMes.length === 0 && solicitacoesRmTemLancamentosNoRelatorio
+                                ? 'Sem movimento RM neste mês civil'
+                                : undefined;
+                          return (
+                            <td
+                              key={mes}
+                              className={`p-0 align-middle ${clicavel ? 'cursor-pointer' : ''}`}
+                            >
+                              <button
+                                type="button"
+                                disabled={!clicavel}
+                                onClick={() =>
+                                  clicavel &&
+                                  typeof v === 'number' &&
+                                  setSolicitacoesMesModal({
+                                    mesIdx: i,
+                                    mesLabel: `${mes}/${safeSelectedYear.toString().slice(-2)}`,
+                                    celulaTotal: v
+                                  })
+                                }
+                                title={tituloCelula}
+                                className={`flex min-h-[3.25rem] w-full items-center justify-center px-3 py-4 text-center text-sm font-medium text-violet-800 dark:text-violet-300 ${
+                                  clicavel
+                                    ? 'hover:bg-violet-200/60 dark:hover:bg-violet-800/35 focus-visible:outline focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-70'
+                                    : ''
+                                }`}
+                              >
+                                {textoCelula}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
                       <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-amber-50/50 dark:bg-amber-900/10">
                         <td className="px-4 py-4 text-sm font-medium text-amber-700 dark:text-amber-400 bg-gray-50 dark:bg-gray-800/50">
                           Produção
@@ -2627,6 +3138,147 @@ export default function ContractDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {solicitacoesMesModal ? (() => {
+            const modalRows = [...solicitacoesDetalhePorMes[solicitacoesMesModal.mesIdx]].sort(
+              (a, b) => b.valor - a.valor
+            );
+            const modalSum = modalRows.reduce((acc, r) => acc + r.valor, 0);
+            const celulaTotalModal = solicitacoesMesModal.celulaTotal;
+            const somaDifereCelula = Math.abs(modalSum - celulaTotalModal) > 0.02;
+            const motivoRateioLabel = (m?: SolicitacaoControleMesLinha['rateioMotivo']) => {
+              if (m === 'sem_data') return 'Sem data';
+              if (m === 'fora_vigencia') return 'Data fora da vigência';
+              if (m === 'ano_diferente') return 'Outro ano';
+              return '';
+            };
+            return (
+              <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+                <div
+                  className="absolute inset-0"
+                  role="presentation"
+                  onClick={() => setSolicitacoesMesModal(null)}
+                />
+                <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
+                  <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-6">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Solicitações (TOTVS RM) — {solicitacoesMesModal.mesLabel}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setSolicitacoesMesModal(null)}
+                      className="rounded p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                      aria-label="Fechar"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-6 sm:py-4">
+                    {modalRows.length === 0 ? (
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Nenhum lançamento RM entrando neste mês para o controle (vigência / ano
+                        selecionado).
+                      </p>
+                    ) : (
+                      <div className="w-full max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                        <table className="table-fixed w-[1240px] border-separate border-spacing-0 text-left text-xs sm:text-sm">
+                          <colgroup>
+                            <col className="w-[168px]" />
+                            <col className="w-[100px]" />
+                            <col className="w-[140px]" />
+                            <col className="w-[288px]" />
+                            <col className="w-[200px]" />
+                            <col className="w-[100px]" />
+                            <col className="w-[244px]" />
+                          </colgroup>
+                          <thead className="sticky top-0 z-[1] bg-gray-100 shadow-[0_1px_0_0_rgb(229_231_235)] dark:bg-gray-800 dark:shadow-[0_1px_0_0_rgb(55_65_81)]">
+                            <tr>
+                              <th className="px-3 py-2.5 text-left font-semibold">Valor (mês)</th>
+                              <th className="px-3 py-2.5 text-left font-semibold">Data ref.</th>
+                              <th className="px-3 py-2.5 text-left font-semibold">Ref.</th>
+                              <th className="px-3 py-2.5 text-left font-semibold">Natureza</th>
+                              <th className="px-3 py-2.5 text-left font-semibold">Título</th>
+                              <th className="px-3 py-2.5 text-left font-semibold">Fonte</th>
+                              <th className="px-3 py-2.5 text-left font-semibold">Obs.</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {modalRows.map((row, idx) => (
+                              <tr
+                                key={`${row.datasetId}-${row.solicitationId}-${idx}`}
+                                className="border-t border-gray-100 align-top dark:border-gray-700/80"
+                              >
+                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 tabular-nums font-medium text-gray-900 dark:text-gray-100" title={row.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}>
+                                  {row.valor.toLocaleString('pt-BR', {
+                                    style: 'currency',
+                                    currency: 'BRL'
+                                  })}
+                                </td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                                  {row.dataRef && !Number.isNaN(row.dataRef.getTime())
+                                    ? row.dataRef.toLocaleDateString('pt-BR')
+                                    : '—'}
+                                </td>
+                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 font-mono text-gray-700 dark:text-gray-300" title={row.solicitationId}>
+                                  {row.solicitationId}
+                                </td>
+                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-700 dark:text-gray-300" title={row.natureza}>
+                                  {row.natureza}
+                                </td>
+                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400" title={row.titulo}>
+                                  {row.titulo}
+                                </td>
+                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400">
+                                  {row.datasetId}
+                                </td>
+                                <td
+                                  className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400"
+                                  title={
+                                    !row.parcelaRateio
+                                      ? undefined
+                                      : row.valorOriginal != null
+                                        ? `${row.valorOriginal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} · Rateio (${motivoRateioLabel(row.rateioMotivo)})`
+                                        : `Rateio (${motivoRateioLabel(row.rateioMotivo)})`
+                                  }
+                                >
+                                  {!row.parcelaRateio
+                                    ? '—'
+                                    : `${
+                                        row.valorOriginal != null
+                                          ? `${row.valorOriginal.toLocaleString('pt-BR', {
+                                              style: 'currency',
+                                              currency: 'BRL'
+                                            })} · `
+                                          : ''
+                                      }Rateio (${motivoRateioLabel(row.rateioMotivo)})`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t-2 border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-gray-900/40">
+                              <td className="px-3 py-2 font-semibold text-gray-900 dark:text-gray-100" colSpan={4}>
+                                Total da célula
+                              </td>
+                              <td
+                                className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100"
+                                colSpan={3}
+                              >
+                                {modalSum.toLocaleString('pt-BR', {
+                                  style: 'currency',
+                                  currency: 'BRL'
+                                })}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })() : null}
 
           {canAccessOrdemServicoModulo ? (
           <>
@@ -3211,9 +3863,145 @@ export default function ContractDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Modal totais por natureza (RM / TOTVS) */}
+          {showNaturezaRmModal && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+              <div className="absolute inset-0" onClick={() => setShowNaturezaRmModal(false)} />
+              <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
+                <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-6">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Totais por natureza (RM)
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowNaturezaRmModal(false)}
+                    className="rounded p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                    aria-label="Fechar"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-6 sm:py-4">
+                  {totvsTotalPagoRes?.data?.costCenterCode ? (
+                    <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-xs dark:border-gray-600 dark:bg-gray-900/40">
+                      <p className="font-semibold text-gray-800 dark:text-gray-200">Conferência do filtro (centro de custo)</p>
+                      <ul className="mt-2 list-inside list-disc space-y-1 text-gray-600 dark:text-gray-300">
+                        <li>
+                          Centro de custo do <strong>contrato</strong> (cadastro no sistema):{' '}
+                          <span className="font-mono">{totvsTotalPagoRes.data.costCenterCode}</span>
+                          {totvsTotalPagoRes.data.costCenterName
+                            ? ` — ${totvsTotalPagoRes.data.costCenterName}`
+                            : ''}
+                        </li>
+                        <li>
+                          Coluna de centro de custo no RM:{' '}
+                          <span className="font-mono">{totvsTotalPagoRes.data.ccColumn || '—'}</span>
+                        </li>
+                        <li>
+                          Coluna de valor somada:{' '}
+                          <span className="font-mono">{totvsTotalPagoRes.data.valueColumn || '—'}</span>
+                        </li>
+                        <li>
+                          Coluna de natureza:{' '}
+                          <span className="font-mono">
+                            {totvsTotalPagoRes.data.naturezaColumn || 'não detectada (defina TOTVS_RM_NATUREZA_COLUMN)'}
+                          </span>
+                        </li>
+                        <li>
+                          Linhas no relatório completo: {totvsTotalPagoRes.data.totalRowCount ?? '—'} · Linhas que
+                          entraram na soma (CC compatível): {totvsTotalPagoRes.data.matchedRowCount ?? '—'}
+                        </li>
+                        {(totvsTotalPagoRes.data.sampleCcValuesMatched || []).length > 0 ? (
+                          <li>
+                            Valores distintos na coluna de CC <em>entre as linhas somadas</em> (amostra):{' '}
+                            {(totvsTotalPagoRes.data.sampleCcValuesMatched || []).join(' · ')}
+                          </li>
+                        ) : null}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {naturezaModalRows.length === 0 ? (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {naturezaModalRowsRaw.length > 0
+                        ? 'Todas as naturezas deste relatório estão na lista de exclusão operacional; não há linhas para exibir.'
+                        : 'Não foi possível montar o detalhe por natureza: o relatório RM não tem coluna reconhecida como natureza. Peça ao TI para definir TOTVS_RM_NATUREZA_COLUMN com o nome exato da coluna (ex.: NATUREZA, CODNATUR).'}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="mb-3 rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-800/60">
+                        <p className="text-xs text-gray-600 dark:text-gray-400">
+                          Lista só com naturezas que entram no <strong>Total Pago</strong>. Naturezas operacionais fixas
+                          (repasses, empréstimos, etc.) não aparecem aqui — estão cadastradas em código.
+                        </p>
+                      </div>
+                      <table className="w-full text-left text-xs sm:text-sm">
+                        <thead className="sticky top-0 z-[1] bg-gray-100 dark:bg-gray-800">
+                          <tr>
+                            <th className="p-2 font-semibold">Natureza</th>
+                            <th className="p-2 text-right font-semibold whitespace-nowrap">Qtd.</th>
+                            <th className="p-2 text-right font-semibold whitespace-nowrap">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {naturezaModalRows.map((row, idx) => (
+                            <tr
+                              key={`${row.natureza}-${idx}`}
+                              className="border-t border-gray-100 align-top dark:border-gray-700/80"
+                            >
+                              <td
+                                className="max-w-[min(100vw-8rem,26rem)] truncate p-2 text-gray-700 dark:text-gray-300"
+                                title={row.natureza === '—' ? 'Natureza vazia no RM' : row.natureza}
+                              >
+                                {row.natureza === '—' ? 'Sem natureza (RM)' : row.natureza}
+                              </td>
+                              <td className="whitespace-nowrap p-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
+                                {row.count}
+                              </td>
+                              <td className="whitespace-nowrap p-2 text-right tabular-nums font-medium text-gray-900 dark:text-gray-100">
+                                {row.total.toLocaleString('pt-BR', {
+                                  style: 'currency',
+                                  currency: 'BRL'
+                                })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-gray-300 bg-gray-50/90 dark:border-gray-600 dark:bg-gray-800/80">
+                            <td className="p-2 font-semibold text-gray-800 dark:text-gray-200">
+                              Total (RM)
+                            </td>
+                            <td className="whitespace-nowrap p-2 text-right font-semibold text-gray-800 dark:text-gray-200">
+                              {naturezaModalTotals.count}
+                            </td>
+                            <td className="whitespace-nowrap p-2 text-right font-semibold text-gray-900 dark:text-gray-100">
+                              {naturezaModalTotals.total.toLocaleString('pt-BR', {
+                                style: 'currency',
+                                currency: 'BRL'
+                              })}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </>
+                  )}
+
+                  {naturezaModalRows.length > 0 ? (
+                    <p className="mt-3 border-t border-gray-200 pt-3 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                      Estes totais vêm das <strong>mesmas</strong> linhas do RM já filtradas pelo centro de custo do
+                      contrato; a soma deve coincidir com o &quot;Total Pago&quot; do cabeçalho (já sem as naturezas
+                      operacionais fixas).
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Modal de aditivos do contrato */}
           {showAddendumModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowAddendumModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -3310,7 +4098,7 @@ export default function ContractDetailPage() {
 
           {/* Modal ajuste valor anual (orçamento do órgão) */}
           {showValorAnualAdjustModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowValorAnualAdjustModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -3439,7 +4227,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Cadastrar Produção Semanal */}
           {showProductionModal && !editingProduction && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
               <div className="absolute inset-0" onClick={() => setShowProductionModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -3565,7 +4353,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Editar Produção Semanal */}
           {editingProduction && selectedProduction && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
               <div className="absolute inset-0" onClick={() => setEditingProduction(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -3686,7 +4474,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Cadastrar Faturamento */}
           {showBillingModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
               <div className="absolute inset-0" onClick={() => setShowBillingModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -3835,7 +4623,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Informar Valores do Pleito */}
           {showPleitoValoresModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowPleitoValoresModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -3912,7 +4700,7 @@ export default function ContractDetailPage() {
           )}
 
           {showHistoricoPleitosModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowHistoricoPleitosModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -4127,7 +4915,7 @@ export default function ContractDetailPage() {
             </div>
           )}
           {showHistoricoOsModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowHistoricoOsModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -4239,7 +5027,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Resumo do Pleito */}
           {showPleitoResumoModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowPleitoResumoModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -4301,7 +5089,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Detalhes do Faturamento */}
           {selectedBilling && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => { setSelectedBilling(null); setEditingBilling(false); }} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -4491,7 +5279,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Detalhes do Ordem de Serviço */}
           {selectedPleitoId && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setSelectedPleitoId(null)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">

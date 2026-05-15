@@ -1971,6 +1971,8 @@ function ConversasContent() {
     setMsgSearchQuery('');
     setShowStarredMsgSidebar(false);
     setStarredMsgSearchQuery('');
+    setReplyingTo(null);
+    setAttachedFiles([]);
     closeEditModal();
   }, [selectedChatId, closeEditModal]);
 
@@ -3657,7 +3659,8 @@ function ConversasContent() {
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors [backface-visibility:hidden] hover:bg-black/[0.06] dark:text-gray-200 dark:hover:bg-white/10"
+                      disabled={sendMutation.isPending}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-600 transition-colors [backface-visibility:hidden] hover:bg-black/[0.06] dark:text-gray-200 dark:hover:bg-white/10 disabled:pointer-events-none disabled:opacity-40"
                       title="Anexar"
                       aria-label="Anexar arquivo"
                     >

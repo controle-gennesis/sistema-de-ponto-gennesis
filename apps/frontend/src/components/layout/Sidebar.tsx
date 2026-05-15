@@ -1070,11 +1070,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                             onClick={() => setProfileAvatarMenu(false)}
                           />
                           <div
-                            className={`absolute z-[120] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 ${
-                              isCollapsed
-                                ? 'left-1/2 -translate-x-1/2 top-[calc(100%+8px)]'
-                                : 'left-0 bottom-full mb-2'
-                            }`}
+                            className="absolute z-[120] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 left-0 bottom-full mb-2"
                           >
                             {profilePhotoHref && (
                               <button

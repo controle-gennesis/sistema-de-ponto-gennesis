@@ -1,11 +1,6 @@
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import {
-  mergeFederalTaxStateFromApi,
-  type FederalTaxContextKey,
-  type FederalTaxRates
-} from '@/components/espelho-nf/EspelhoNfTaxCodeContractFields';
 
 /** Campos mínimos do espelho (espelho-nf/page.tsx) */
 export type EspelhoMirrorDraft = {
@@ -125,9 +120,6 @@ export type EspelhoExportTaxCode = {
   iss: EspelhoTaxRule;
   inssMaterialLimit: string;
   issMaterialLimit: string;
-  /** JSON do cadastro — usado para alíquotas federais corretas no PDF */
-  federalRatesByContext?: unknown;
-  federalTaxContextEnabled?: unknown;
 };
 
 export type EspelhoFederalRates = {
@@ -148,99 +140,6 @@ export type EspelhoExportBundle = {
 };
 
 const COLS = 12;
-
-/** Ordem de prioridade para escolher contexto federal ativo (igual à tela espelho-nf). */
-const FEDERAL_CONTEXT_PRIORITY: FederalTaxContextKey[] = [
-  'gdfObra',
-  'gdfManutencaoReforma',
-  'gdfMaoObraSemMaterial',
-  'foraGdfObra',
-  'foraGdfManutencaoReforma',
-  'foraGdfMaoObraSemMaterial'
-];
-
-/** Alíquotas federais do código tributário do espelho; senão usa fallback (ex.: localStorage). */
-export function resolveEspelhoFederalRatesForExport(
-  taxCodes: EspelhoExportTaxCode[],
-  taxCodeId: string,
-  fallback: EspelhoFederalRates
-): EspelhoFederalRates {
-  const tc = taxCodes.find((t) => t.id === taxCodeId);
-  if (!tc) return fallback;
-  if (tc.federalRatesByContext == null && tc.federalTaxContextEnabled == null) {
-    return fallback;
-  }
-  try {
-    const merged = mergeFederalTaxStateFromApi(tc.federalRatesByContext, tc.federalTaxContextEnabled);
-    const activeKey = FEDERAL_CONTEXT_PRIORITY.find((k) => merged.federalTaxContextEnabled[k]);
-    if (activeKey) {
-      const row = merged.federalRatesByContext[activeKey] as FederalTaxRates | undefined;
-      if (row) {
-        return {
-          cofins: String(row.cofins ?? fallback.cofins),
-          csll: String(row.csll ?? fallback.csll),
-          inss: String(row.inss ?? fallback.inss),
-          irpj: String(row.irpj ?? fallback.irpj),
-          pis: String(row.pis ?? fallback.pis)
-        };
-      }
-    }
-  } catch {
-    /* mantém fallback */
-  }
-  return fallback;
-}
-
-/**
- * Garante strings e campos esperados pelo PDF/Excel a partir do espelho vindo da API ou do storage.
- */
-export function normalizeEspelhoMirrorDraft(
-  raw: Partial<EspelhoMirrorDraft> | null | undefined
-): EspelhoMirrorDraft {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  const str = (key: string, def = '') => {
-    const v = o[key];
-    if (v === null || v === undefined) return def;
-    if (typeof v === 'number' && Number.isFinite(v)) return String(v);
-    return String(v);
-  };
-  let nfConstarNaNota: Record<string, boolean> | null | undefined;
-  const nfRaw = o.nfConstarNaNota;
-  if (nfRaw && typeof nfRaw === 'object' && !Array.isArray(nfRaw)) {
-    nfConstarNaNota = nfRaw as Record<string, boolean>;
-  }
-  return {
-    measurementRef: str('measurementRef'),
-    costCenterId: str('costCenterId'),
-    costCenterLabel: str('costCenterLabel') || undefined,
-    dueDate: str('dueDate'),
-    empenhoNumber: str('empenhoNumber'),
-    processNumber: str('processNumber'),
-    serviceOrder: str('serviceOrder'),
-    measurementStartDate: str('measurementStartDate') || undefined,
-    measurementEndDate: str('measurementEndDate') || undefined,
-    buildingUnit: str('buildingUnit'),
-    obraCno: str('obraCno') || undefined,
-    garantiaComplementar: str('garantiaComplementar') || undefined,
-    observations: str('observations'),
-    notes: str('notes'),
-    measurementAmount: str('measurementAmount'),
-    laborAmount: str('laborAmount'),
-    materialAmount: str('materialAmount'),
-    providerId: str('providerId'),
-    providerName: str('providerName'),
-    takerId: str('takerId'),
-    takerName: str('takerName'),
-    bankAccountId: str('bankAccountId'),
-    bankAccountName: str('bankAccountName'),
-    taxCodeId: str('taxCodeId'),
-    taxCodeCityName: str('taxCodeCityName'),
-    municipality: str('municipality') || undefined,
-    cnae: str('cnae') || undefined,
-    serviceIssqn: str('serviceIssqn') || undefined,
-    nfConstarNaNota: nfConstarNaNota ?? null
-  };
-}
 
 function dash(s: string | undefined | null): string {
   const t = (s ?? '').trim();
@@ -562,10 +461,9 @@ function resolveBundle(
 /** Monta planilha no padrão “espelho para emissão de NF” (estrutura por seções e mesclagens). */
 function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merges: XLSX.Range[] } {
   const { draft, provider, taker, bank, taxCode } = b;
-  const municipioIssCorpo = ((draft.municipality ?? taker?.city) ?? '').trim() || undefined;
   const outrasInformacoesCorpo = buildEspelhoOutrasInformacoesBlock(
     draft.notes,
-    municipioIssCorpo,
+    draft.municipality,
     taker?.state,
     taxCode?.iss ?? null
   );
@@ -692,14 +590,6 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   aoa.push(row(refLine));
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
   r++;
-  const periodLine = `Período da medição: ${fmtDateBr(draft.measurementStartDate || '')} a ${fmtDateBr(draft.measurementEndDate || '')}`;
-  aoa.push(row(periodLine));
-  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
-  r++;
-  const codVenLine = `Cód. tributário: ${dash(taxCode?.cityName || draft.taxCodeCityName)} | Vencimento: ${fmtDateBr(draft.dueDate)}`;
-  aoa.push(row(codVenLine));
-  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
-  r++;
   const extraInfoLine1 = `Nº Empenho: ${dash(draft.empenhoNumber)} | Nº Processo: ${dash(draft.processNumber)}`;
   aoa.push(row(extraInfoLine1));
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
@@ -708,15 +598,6 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   aoa.push(row(extraInfoLine2));
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
   r++;
-  const cnoLine = `CNO (obra): ${dash(draft.obraCno)}`;
-  aoa.push(row(cnoLine));
-  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
-  r++;
-  if ((draft.garantiaComplementar ?? '').trim()) {
-    aoa.push(row(`Garantia complementar: ${String(draft.garantiaComplementar).trim()}`));
-    merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
-    r++;
-  }
   const obsLine = `Observações: ${dash(draft.observations)}`;
   aoa.push(row(obsLine));
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
@@ -1021,7 +902,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
   );
   merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } });
   r++;
-  aoa.push(row('Lista de Serviços - ISSQN', dash(draft.serviceIssqn), 'CNAE', dash(draft.cnae), '', '', '', '', '', '', '', ''));
+  aoa.push(row('Lista de Serviços - ISSQN', '—', 'CNAE', '—', '', '', '', '', '', '', '', ''));
   r++;
   aoa.push(row('Valor líquido a pagar', valorLiquidoExport, '', '', '', '', '', '', '', '', '', ''));
   r++;
@@ -1059,232 +940,74 @@ function pdfCheckPage(doc: jsPDF, y: number, step: number, margin: number): numb
   return y;
 }
 
-/** Paleta e ritmo visual do espelho (PDF não usa CSS — tudo via jsPDF). */
-const PDF = {
-  ink: [15, 23, 42] as [number, number, number],
-  muted: [71, 85, 105] as [number, number, number],
-  border: [203, 213, 225] as [number, number, number],
-  surface: [248, 250, 252] as [number, number, number],
-  accent: [185, 28, 28] as [number, number, number]
-};
-
-function pdfSetStroke(doc: jsPDF, rgb: [number, number, number], w = 0.25) {
-  doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
-  doc.setLineWidth(w);
-}
-
-/** Contorno do card; se o bloco passar de página, desenha um retângulo por página. */
-function pdfStrokeSectionCard(
-  doc: jsPDF,
-  x: number,
-  yTop: number,
-  width: number,
-  yBottom: number,
-  layoutMargin: number,
-  startPage: number,
-  padBottom = 2.2
-) {
-  const endPage = doc.getNumberOfPages();
-  const pageH = doc.internal.pageSize.getHeight();
-  const innerBottom = pageH - layoutMargin;
-  const r = 1.5;
-  pdfSetStroke(doc, PDF.border, 0.28);
-  for (let p = startPage; p <= endPage; p++) {
-    doc.setPage(p);
-    const top = p === startPage ? yTop : layoutMargin;
-    const rawBottom = p === endPage ? yBottom + padBottom : innerBottom;
-    const bottom = Math.min(rawBottom, innerBottom);
-    const h = bottom - top;
-    if (h > 1) doc.roundedRect(x, top, width, h, r, r, 'S');
-  }
-  doc.setPage(endPage);
-}
-
-function pdfSectionHeader(doc: jsPDF, y: number, margin: number, contentW: number, title: string): number {
-  const h = 7;
-  y = pdfCheckPage(doc, y, h + 3, margin);
+function pdfBar(doc: jsPDF, y: number, margin: number, contentW: number, title: string): number {
+  const h = 6;
+  y = pdfCheckPage(doc, y, h + 4, margin);
+  doc.setFillColor(0, 0, 0);
+  doc.rect(margin, y, contentW, h, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  doc.text(title.toUpperCase(), margin + contentW / 2, y + 4.6, { align: 'center' });
-  pdfSetStroke(doc, PDF.border, 0.16);
-  doc.line(margin + 10, y + h - 0.5, margin + contentW - 10, y + h - 0.5);
-  doc.setFont('helvetica', 'normal');
+  doc.text(title.toUpperCase(), margin + 2, y + 4.2);
   doc.setTextColor(0, 0, 0);
-  return y + h + 1.8;
+  doc.setFont('helvetica', 'normal');
+  return y + h + 3.2;
 }
 
-/** Linha(s) chave:valor — sem linhas verticais nem faixa entre campos. */
 function pdfKeyRow(
   doc: jsPDF,
   y: number,
   margin: number,
   contentW: number,
-  pairs: { k: string; v: string }[],
-  _options?: { zebra?: boolean; rowIndex?: number }
+  pairs: { k: string; v: string }[]
 ): number {
-  const n = Math.max(pairs.length, 1);
-  const colW = contentW / n;
-  const labelFrac = 0.38;
-  const lineH = 3.6;
+  const minLineH = 5.4;
   const topPad = 1.4;
-  const bottomPad = 1.4;
-  const labelW = colW * labelFrac;
-  const valueW = Math.max(colW - labelW - 2, 8);
-
-  const cells = pairs.map((p) => {
-    doc.setFontSize(7);
+  const bottomPad = 1.6;
+  const rowGap = 1.6;
+  const n = pairs.length;
+  const colW = contentW / Math.max(n, 1);
+  const prepared: Array<{ p: { k: string; v: string }; vxOffset: number; lines: string[] }> = [];
+  let maxLines = 1;
+  doc.setFontSize(7);
+  pairs.forEach((p) => {
     doc.setFont('helvetica', 'bold');
-    const labLines = doc.splitTextToSize(p.k, labelW);
+    const kw = doc.getTextWidth(p.k + ' ');
+    const vxOffset = Math.min(kw, colW * 0.42);
+    const lines = doc.splitTextToSize(p.v, colW - vxOffset - 1);
+    const normalizedLines = Array.isArray(lines) ? lines : [String(lines)];
+    prepared.push({ p, vxOffset, lines: normalizedLines });
+    maxLines = Math.max(maxLines, Array.isArray(lines) ? lines.length : 1);
+  });
+  const textBlockH = Math.max(minLineH, maxLines * 4.1);
+  const dynamicRowH = topPad + textBlockH + bottomPad;
+  y = pdfCheckPage(doc, y, dynamicRowH + rowGap, margin);
+  const textY = y + topPad + 2.2;
+  let x = margin;
+  prepared.forEach(({ p, vxOffset, lines }) => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(p.k, x, textY);
     doc.setFont('helvetica', 'normal');
-    const valLines = doc.splitTextToSize(p.v, valueW);
-    const lab = Array.isArray(labLines) ? labLines : [String(labLines)];
-    const val = Array.isArray(valLines) ? valLines : [String(valLines)];
-    const lines = Math.max(lab.length, val.length);
-    return { lab, val, lines };
+    doc.text(lines, x + vxOffset, textY);
+    x += colW;
   });
-  const maxLines = Math.max(1, ...cells.map((c) => c.lines));
-  const innerH = topPad + maxLines * lineH + bottomPad;
-  y = pdfCheckPage(doc, y, innerH + 1.2, margin);
-
-  cells.forEach((c, i) => {
-    const x0 = margin + i * colW;
-    const textY0 = y + topPad + 3;
-    for (let j = 0; j < maxLines; j++) {
-      const yy = textY0 + j * lineH;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7);
-      doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-      doc.text(c.lab[j] ?? '', x0 + 0.5, yy);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-      doc.text(c.val[j] ?? '', x0 + labelW + 1.5, yy);
-    }
-  });
-  doc.setTextColor(0, 0, 0);
-  return y + innerH + 1.2;
+  return y + dynamicRowH + rowGap;
 }
 
-/** Bloco label + texto longo — sem caixa ao redor do campo. */
 function pdfWrappedBlock(doc: jsPDF, y: number, margin: number, contentW: number, label: string, text: string): number {
-  const innerW = contentW;
-  const lineArr = doc.splitTextToSize(dash(text), innerW);
-  const lines = Array.isArray(lineArr) ? lineArr : [String(lineArr)];
-  y = pdfCheckPage(doc, y, 7 + lines.length * 3.5, margin);
+  y = pdfCheckPage(doc, y, 14, margin);
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  doc.text(label, margin, y + 3.6);
+  doc.text(label, margin, y);
+  y += 4;
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-  let yy = y + 7;
+  const lines = doc.splitTextToSize(dash(text), contentW);
   lines.forEach((line: string) => {
-    yy = pdfCheckPage(doc, yy, 4.5, margin);
-    doc.text(line, margin, yy);
-    yy += 3.5;
+    y = pdfCheckPage(doc, y, 5, margin);
+    doc.text(line, margin, y);
+    y += 4;
   });
-  doc.setTextColor(0, 0, 0);
-  return yy + 1.2;
-}
-
-/** Linha de referência (medição / CC) — sem fundo colorido. */
-function pdfReferenceCard(
-  doc: jsPDF,
-  y: number,
-  layoutMargin: number,
-  x: number,
-  contentW: number,
-  text: string
-): number {
-  const lineArr = doc.splitTextToSize(text, contentW);
-  const lines = Array.isArray(lineArr) ? lineArr : [String(lineArr)];
-  const lineH = 3.8;
-  const h = 2 + lines.length * lineH;
-  y = pdfCheckPage(doc, y, h + 2, layoutMargin);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  lines.forEach((line: string, i: number) => {
-    doc.text(line, x, y + 2.8 + i * lineH);
-  });
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'normal');
-  return y + h + 1.5;
-}
-
-function pdfHighlightAmount(
-  doc: jsPDF,
-  y: number,
-  layoutMargin: number,
-  x: number,
-  w: number,
-  label: string,
-  amount: string
-): number {
-  const h = 7.5;
-  y = pdfCheckPage(doc, y, h + 2, layoutMargin);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  doc.text(label, x + 0.5, y + 5.2);
-  doc.setFontSize(10);
-  doc.setTextColor(PDF.accent[0], PDF.accent[1], PDF.accent[2]);
-  doc.text(amount, x + w - 0.5, y + 5.5, { align: 'right' });
-  doc.setFontSize(7);
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'normal');
-  return y + h + 1.5;
-}
-
-function pdfRetentionGrid(
-  doc: jsPDF,
-  y: number,
-  layoutMargin: number,
-  x: number,
-  contentW: number,
-  retLabels: readonly string[],
-  retVals: string[]
-): number {
-  const n = retLabels.length;
-  const cellW = contentW / n;
-  const headH = 4.8;
-  const padX = 1;
-  const lineGap = 3.4;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
-  const bodyLinesPerCol: string[][] = retVals.map((val) => {
-    const raw = val ?? '—';
-    const wrapped = doc.splitTextToSize(raw, cellW - padX * 2);
-    const arr = Array.isArray(wrapped) ? wrapped : [String(wrapped)];
-    return arr.length ? arr : ['—'];
-  });
-  const maxBodyLines = Math.max(1, ...bodyLinesPerCol.map((a) => a.length));
-  const bodyH = 2.2 + maxBodyLines * lineGap;
-  const th = headH + bodyH;
-  y = pdfCheckPage(doc, y, th + 4, layoutMargin);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  retLabels.forEach((lb, i) => {
-    const cx = x + i * cellW + cellW / 2;
-    doc.text(lb, cx, y + 3.8, { align: 'center' });
-  });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
-  doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-  retVals.forEach((_val, i) => {
-    const cx = x + i * cellW + cellW / 2;
-    const lines = bodyLinesPerCol[i] ?? ['—'];
-    let vy = y + headH + 2.4;
-    lines.forEach((line) => {
-      doc.text(line, cx, vy, { align: 'center' });
-      vy += lineGap;
-    });
-  });
-  doc.setTextColor(0, 0, 0);
-  return y + th + 1.5;
+  return y + 2;
 }
 
 function buildPdf(b: EspelhoExportBundle): jsPDF {
@@ -1293,151 +1016,102 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   const contentW = doc.internal.pageSize.getWidth() - margin * 2;
   let y = margin;
   const { draft, provider, taker, bank, taxCode } = b;
-  const municipioIssCorpo = ((draft.municipality ?? taker?.city) ?? '').trim() || undefined;
   const outrasInformacoesCorpo = buildEspelhoOutrasInformacoesBlock(
     draft.notes,
-    municipioIssCorpo,
+    draft.municipality,
     taker?.state,
     taxCode?.iss ?? null
   );
 
-  doc.setFontSize(13);
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  const title = 'Espelho para emissão de NF-e';
+  const title = 'ESPELHO PARA EMISSÃO DE NOTA FISCAL';
   doc.text(title, margin + contentW / 2, y, { align: 'center' });
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.2);
-  doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-  doc.text(
-    'Documento de conferência — não substitui o XML autorizado pela SEFAZ.',
-    margin + contentW / 2,
-    y,
-    { align: 'center' }
-  );
-  y += 6;
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
+  y += 7;
+  doc.setFontSize(7);
   const metaRows: Array<{ label: string; value: string }> = [
     { label: 'Número da Nota:', value: '—' },
     { label: 'Data e Hora de Emissão:', value: nowEmissionBr() },
     { label: 'Código de Verificação:', value: '—' }
   ];
-  const metaPad = 3;
-  const labelColW = Math.min(contentW * 0.4, 52);
-  const metaBoxH = metaRows.length * 4.8 + metaPad * 2 + 2;
-  y = pdfCheckPage(doc, y, metaBoxH + 4, margin);
-  doc.setFillColor(PDF.surface[0], PDF.surface[1], PDF.surface[2]);
-  pdfSetStroke(doc, PDF.border, 0.18);
-  doc.roundedRect(margin, y, contentW, metaBoxH, 0.7, 0.7, 'FD');
-  const metaLabelX = margin + metaPad;
-  const metaValueX = margin + labelColW + 2;
-  const metaValueMaxW = Math.max(28, contentW - labelColW - metaPad * 2 - 4);
-  let metaY = y + metaPad + 3.2;
+  const metaLabelX = margin + contentW - 62;
+  const metaValueX = margin + contentW - 26;
+  const metaValueMaxW = 24;
+  const metaLineH = 4.2;
   metaRows.forEach(({ label, value }) => {
+    y = pdfCheckPage(doc, y, metaLineH + 1, margin);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-    doc.text(label, metaLabelX, metaY);
+    doc.text(label, metaLabelX, y);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
     const valueLines = doc.splitTextToSize(value, metaValueMaxW);
-    doc.text(valueLines, metaValueX, metaY);
-    const rowH = Math.max(4.6, (Array.isArray(valueLines) ? valueLines.length : 1) * 3.6);
-    metaY += rowH;
+    doc.text(valueLines, metaValueX, y);
+    y += Math.max(metaLineH, valueLines.length * 3.4);
   });
-  y += metaBoxH + 4;
+  y += 2.5;
 
-  const CARD_IN = 4;
-  const iLeft = margin + CARD_IN;
-  const iWide = contentW - 2 * CARD_IN;
-
-  y += 1;
-  const yPreTop = y;
-  const pgPre = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'PRESTADOR DE SERVIÇOS');
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfBar(doc, y, margin, contentW, 'PRESTADOR DE SERVIÇOS');
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'CNPJ:', v: dash(provider?.cnpj) },
     { k: 'Insc. Mun.:', v: dash(provider?.municipalRegistration) },
     { k: 'Insc. Est.:', v: dash(provider?.stateRegistration) }
   ]);
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Nome/Razão Social:', dash(provider?.corporateName || draft.providerName));
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Nome Fantasia:', dash(provider?.tradeName));
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Endereço:', dash(provider?.address));
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfWrappedBlock(doc, y, margin, contentW, 'Nome/Razão Social:', dash(provider?.corporateName || draft.providerName));
+  y = pdfWrappedBlock(doc, y, margin, contentW, 'Nome Fantasia:', dash(provider?.tradeName));
+  y = pdfWrappedBlock(doc, y, margin, contentW, 'Endereço:', dash(provider?.address));
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Município:', v: dash(provider?.city) },
     { k: 'UF:', v: dash(provider?.state) },
     { k: 'E-mail:', v: dash(provider?.email) }
   ]);
-  y += 1.5;
-  pdfStrokeSectionCard(doc, margin, yPreTop, contentW, y, margin, pgPre);
   y += 2;
 
-  y += 1;
-  const yTomTop = y;
-  const pgTom = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'TOMADOR DE SERVIÇOS');
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfBar(doc, y, margin, contentW, 'TOMADOR DE SERVIÇOS');
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'CNPJ:', v: dash(taker?.cnpj) },
     { k: 'Insc. Mun.:', v: dash(taker?.municipalRegistration) },
     { k: 'Insc. Est. (ÓRGÃO PÚBLICO):', v: dash(taker?.stateRegistration) }
   ]);
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Nome/Razão Social:', dash(taker?.corporateName || draft.takerName));
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Endereço:', dash(taker?.address));
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfWrappedBlock(doc, y, margin, contentW, 'Nome/Razão Social:', dash(taker?.corporateName || draft.takerName));
+  y = pdfWrappedBlock(doc, y, margin, contentW, 'Endereço:', dash(taker?.address));
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Município:', v: dash(taker?.city) },
     { k: 'UF:', v: dash(taker?.state) },
     { k: 'Contrato:', v: dash(taker?.contractRef) }
   ]);
-  y += 1.5;
-  pdfStrokeSectionCard(doc, margin, yTomTop, contentW, y, margin, pgTom);
   y += 2;
 
-  y += 1;
-  const yDisTop = y;
-  const pgDis = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'DISCRIMINAÇÃO DOS SERVIÇOS');
+  y = pdfBar(doc, y, margin, contentW, 'DISCRIMINAÇÃO DOS SERVIÇOS');
+  doc.setFontSize(7);
   const discPdf =
     (taker?.serviceDescription ?? '').trim() || (draft.notes ?? '').trim() || '—';
-  const discLines = doc.splitTextToSize(discPdf, iWide);
-  const discLineArr = Array.isArray(discLines) ? discLines : [String(discLines)];
-  y = pdfCheckPage(doc, y, 5 + discLineArr.length * 3.5, margin);
-  doc.setFontSize(7.2);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  let discY = y + 1.5;
-  discLineArr.forEach((line: string) => {
-    discY = pdfCheckPage(doc, discY, 4.5, margin);
-    doc.text(line, iLeft, discY);
-    discY += 3.4;
+  const discLines = doc.splitTextToSize(discPdf, contentW);
+  discLines.forEach((line: string) => {
+    y = pdfCheckPage(doc, y, 5, margin);
+    doc.text(line, margin, y);
+    y += 4;
   });
-  y = discY + 2;
+  y += 2;
+  doc.setTextColor(0, 120, 40);
   const refText = `REFERÊNCIA: ${dash(draft.measurementRef)} | CC: ${dash(draft.costCenterLabel)}`;
-  y = pdfReferenceCard(doc, y, margin, iLeft, iWide, refText);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
-    { k: 'Cód. tributário (contrato):', v: dash(taxCode?.cityName || draft.taxCodeCityName) },
-    { k: 'Vencimento:', v: fmtDateBr(draft.dueDate) }
+  const refLines = doc.splitTextToSize(refText, contentW);
+  refLines.forEach((line: string) => {
+    y = pdfCheckPage(doc, y, 5, margin);
+    doc.text(line, margin, y);
+    y += 4;
+  });
+  doc.setTextColor(0, 0, 0);
+  y = pdfKeyRow(doc, y, margin, contentW, [
+    { k: 'Nº Empenho:', v: dash(draft.empenhoNumber) },
+    { k: 'Nº Processo:', v: dash(draft.processNumber) }
   ]);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
-    { k: 'Início da medição:', v: fmtDateBr(draft.measurementStartDate || '') },
-    { k: 'Fim da medição:', v: fmtDateBr(draft.measurementEndDate || '') }
-  ]);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
-    { k: 'Número do Empenho:', v: dash(draft.empenhoNumber) },
-    { k: 'Número do Processo:', v: dash(draft.processNumber) }
-  ]);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Ordem de Serviço:', v: dash(draft.serviceOrder) },
     { k: 'Unidade Predial:', v: dash(draft.buildingUnit) }
   ]);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [{ k: 'CNO (inscrição obra):', v: dash(draft.obraCno) }]);
-  if ((draft.garantiaComplementar ?? '').trim()) {
-    y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Garantia complementar:', draft.garantiaComplementar ?? '');
+  if (draft.observations.trim()) {
+    y = pdfWrappedBlock(doc, y, margin, contentW, 'Observações:', draft.observations);
   }
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Observações:', draft.observations);
-  y += 1.5;
-  pdfStrokeSectionCard(doc, margin, yDisTop, contentW, y, margin, pgDis);
-  y += 2;
+  y += 3;
 
   const medValPdf = formatEspelhoMirrorCurrencyField(draft.measurementAmount);
   const laborValPdf = formatEspelhoMirrorCurrencyField(draft.laborAmount);
@@ -1457,44 +1131,41 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   const valorLiquidoPdf = computeEspelhoValorLiquidoBundle(b);
   const issRetidoPdf = taxCode?.iss?.collectionType === 'RETIDO' ? impostosPdf.iss.value : '—';
 
-  y += 1;
-  const yFinTop = y;
-  const pgFin = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'VALORES / INFORMAÇÕES FINANCEIRAS E BANCÁRIAS');
+  y = pdfBar(doc, y, margin, contentW, 'VALORES / INFORMAÇÕES FINANCEIRAS E BANCÁRIAS');
 
-  y = pdfHighlightAmount(doc, y, margin, iLeft, iWide, 'Medição (valor total)', medValPdf);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('Medição (valor total)', margin + 1, y + 4);
+  doc.setFont('helvetica', 'normal');
+  doc.text(medValPdf, margin + 55, y + 4);
+  y += 8;
 
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Mão-de-obra:', v: laborValPdf },
     { k: 'Material aplicado:', v: matValPdf }
   ]);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Vale-transporte:', v: '—' },
     { k: 'Vale-alimentação:', v: '—' }
   ]);
+  doc.setFontSize(6.5);
   y = pdfCheckPage(doc, y, 6, margin);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Limite Material INSS:', v: matLimitsPdf.inssBrl },
     { k: 'Limite Material ISS:', v: matLimitsPdf.issBrl }
   ]);
-  y = pdfCheckPage(doc, y, 6, margin);
-  doc.setFontSize(6.3);
-  doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-  const hintTax = `Referência código tributário — INSS mat.: ${fmtPct(taxCode?.inssMaterialLimit)} | ISS mat.: ${fmtPct(taxCode?.issMaterialLimit)}`;
-  const hintWrapped = doc.splitTextToSize(hintTax, iWide);
-  const hintLines = Array.isArray(hintWrapped) ? hintWrapped : [String(hintWrapped)];
-  hintLines.forEach((line: string) => {
-    y = pdfCheckPage(doc, y, 4, margin);
-    doc.text(line, iLeft, y);
-    y += 3.6;
-  });
-  doc.setTextColor(0, 0, 0);
-  y += 1;
+  y = pdfCheckPage(doc, y, 5, margin);
+  doc.text(
+    `Referência código tributário — INSS mat.: ${fmtPct(taxCode?.inssMaterialLimit)} | ISS mat.: ${fmtPct(taxCode?.issMaterialLimit)}`,
+    margin,
+    y
+  );
+  y += 5;
   y = pdfKeyRow(
     doc,
     y,
-    iLeft,
-    iWide,
+    margin,
+    contentW,
     [
       { k: 'Base de cálculo INSS:', v: basesPdf.baseInss },
       { k: 'Base de cálculo ISS:', v: basesPdf.baseIss }
@@ -1503,20 +1174,33 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y = pdfKeyRow(
     doc,
     y,
-    iLeft,
-    iWide,
+    margin,
+    contentW,
     [{ k: 'ISS retido (R$):', v: issRetidoPdf }]
   );
 
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Outras informações (corpo da NF):', outrasInformacoesCorpo);
-  y += 1;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('OUTRAS INFORMAÇÕES (corpo da NF)', margin + 1, y + 3.5);
+  y += 7;
+  doc.setFont('helvetica', 'normal');
+  doc.splitTextToSize(outrasInformacoesCorpo, contentW).forEach((line: string) => {
+    y = pdfCheckPage(doc, y, 5, margin);
+    doc.text(line, margin, y);
+    y += 4;
+  });
+  y += 2;
 
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  doc.setFontSize(7);
+  doc.text(`Número da Ordem de Serviço / Inscrição da Obra (CNO): ${dash(draft.serviceOrder)}`, margin, y);
+  y += 5;
+
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Centro de custo:', v: dash(draft.costCenterLabel) },
     { k: 'Vencimento:', v: fmtDateBr(draft.dueDate) },
     { k: 'Banco:', v: dash(bank?.bank) }
   ]);
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Agência:', v: dash(bank?.agency) },
     { k: 'C/C:', v: dash(bank?.account) },
     { k: 'Conta (nome):', v: dash(bank?.name || draft.bankAccountName) }
@@ -1524,15 +1208,19 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
 
   const reforcoGarantiaMensagemPdf = buildReforcoGarantiaMensagem(draft, taxCode);
   const reforcoGarantiaMsg = reforcoGarantiaMensagemPdf ?? '—';
-  y = pdfWrappedBlock(doc, y, iLeft, iWide, 'Reforço de garantia:', reforcoGarantiaMsg);
-  y += 1.5;
-  pdfStrokeSectionCard(doc, margin, yFinTop, contentW, y, margin, pgFin);
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+  const reforcoLines = doc.splitTextToSize(reforcoGarantiaMsg, contentW);
+  reforcoLines.forEach((line: string) => {
+    y = pdfCheckPage(doc, y, 5, margin);
+    doc.text(line, margin + 1, y);
+    y += 4;
+  });
   y += 2;
 
-  y += 1;
-  const yRetTop = y;
-  const pgRet = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'RETENÇÕES');
+  y = pdfBar(doc, y, margin, contentW, 'RETENÇÕES');
+  const retY = y;
+  const cellW = contentW / 6;
   const retLabels = ['COFINS', 'CSLL', 'INSS', 'IRPJ', 'PIS', 'ISS'] as const;
   const retVals = [
     impostosPdf.cofins.value,
@@ -1542,7 +1230,17 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     impostosPdf.pis.value,
     impostosPdf.iss.value
   ];
-  y = pdfRetentionGrid(doc, y, margin, iLeft, iWide, retLabels, retVals);
+  retLabels.forEach((lb, i) => {
+    doc.setFillColor(255, 255, 255);
+    doc.rect(margin + i * cellW, retY - 4, cellW - 0.5, 12, 'FD');
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'bold');
+    doc.text(lb, margin + i * cellW + 1, retY);
+    doc.setFont('helvetica', 'normal');
+    const vLines = doc.splitTextToSize(retVals[i] ?? '—', cellW - 2);
+    doc.text(vLines, margin + i * cellW + 1, retY + 4.5);
+  });
+  y = retY + 15;
   doc.setFontSize(5);
   const recHints = [
     impostosPdf.cofins.recolher,
@@ -1555,64 +1253,37 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     .filter(Boolean)
     .join('  |  ');
   if (recHints) {
-    doc.setFontSize(5.5);
-    doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-    const rh = doc.splitTextToSize(recHints, iWide);
-    const rlines = Array.isArray(rh) ? rh : [String(rh)];
-    rlines.forEach((line: string) => {
+    doc.splitTextToSize(recHints, contentW).forEach((line: string) => {
       y = pdfCheckPage(doc, y, 5, margin);
-      doc.text(line, iLeft, y);
+      doc.text(line, margin, y);
       y += 3.5;
     });
-    doc.setTextColor(0, 0, 0);
     y += 2;
   }
   doc.setFontSize(6);
-  doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-  const aliqLine = `Alíq. COFINS ${fmtPct(b.federal.cofins)} (${taxCode?.cofins?.collectionType}) | CSLL ${fmtPct(b.federal.csll)} | INSS ${fmtPct(b.federal.inss)} | IRPJ ${fmtPct(b.federal.irpj)} | PIS ${fmtPct(b.federal.pis)} | ISS ${fmtPct(taxCode?.issRate)} (${taxCode?.iss?.collectionType})`;
-  const aliqW = doc.splitTextToSize(aliqLine, iWide);
-  const aliqArr = Array.isArray(aliqW) ? aliqW : [String(aliqW)];
-  aliqArr.forEach((line: string) => {
-    y = pdfCheckPage(doc, y, 4, margin);
-    doc.text(line, iLeft, y);
-    y += 3.8;
-  });
-  doc.setTextColor(0, 0, 0);
-  y += 2;
-  pdfStrokeSectionCard(doc, margin, yRetTop, contentW, y, margin, pgRet);
-  y += 2;
+  doc.text(
+    `Alíq. COFINS ${fmtPct(b.federal.cofins)} (${taxCode?.cofins?.collectionType}) | CSLL ${fmtPct(b.federal.csll)} | INSS ${fmtPct(b.federal.inss)} | IRPJ ${fmtPct(b.federal.irpj)} | PIS ${fmtPct(b.federal.pis)} | ISS ${fmtPct(taxCode?.issRate)} (${taxCode?.iss?.collectionType})`,
+    margin,
+    y
+  );
+  y += 6;
 
-  y += 1;
-  const yNotaTop = y;
-  const pgNota = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'VALOR DA NOTA');
-  y = pdfHighlightAmount(doc, y, margin, iLeft, iWide, 'Valor bruto da medição', medValPdf);
-  y += 1;
-  pdfStrokeSectionCard(doc, margin, yNotaTop, contentW, y, margin, pgNota);
-  y += 2;
+  y = pdfBar(doc, y, margin, contentW, 'VALOR DA NOTA');
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text(medValPdf, margin + contentW / 2, y + 2, { align: 'center' });
+  y += 10;
 
-  y += 1;
-  const yIssTop = y;
-  const pgIss = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'TRIBUTAÇÃO DO ISSQN');
-  const svcLine = serviceCodeLine(taxCode);
-  const svcWrapped0 = doc.splitTextToSize(svcLine, iWide);
-  const sl = Array.isArray(svcWrapped0) ? svcWrapped0 : [String(svcWrapped0)];
-  y = pdfCheckPage(doc, y, 3 + sl.length * 3.5, margin);
+  y = pdfBar(doc, y, margin, contentW, 'TRIBUTAÇÃO DO ISSQN');
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  let sy = y + 1.5;
-  sl.forEach((line: string) => {
-    doc.text(line, iLeft, sy);
-    sy += 3.5;
-  });
-  y = sy + 1.2;
+  doc.text(serviceCodeLine(taxCode), margin, y);
+  y += 5;
   y = pdfKeyRow(
     doc,
     y,
-    iLeft,
-    iWide,
+    margin,
+    contentW,
     [
       { k: 'Deduções:', v: '—' },
       { k: 'Desc. incond.:', v: '—' },
@@ -1622,82 +1293,54 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y = pdfKeyRow(
     doc,
     y,
-    iLeft,
-    iWide,
+    margin,
+    contentW,
     [
       { k: 'Alíq.:', v: fmtPct(taxCode?.issRate) },
       { k: 'Valor ISS:', v: impostosPdf.iss.value },
       { k: 'ISS recolher:', v: impostosPdf.iss.recolher ?? '—' }
     ]
   );
-  y += 1.2;
-  pdfStrokeSectionCard(doc, margin, yIssTop, contentW, y, margin, pgIss);
-  y += 2;
+  y += 4;
 
-  y += 1;
-  const yOutTop = y;
-  const pgOut = doc.getNumberOfPages();
-  y = pdfSectionHeader(doc, y, margin, contentW, 'OUTRAS INFORMAÇÕES');
+  y = pdfBar(doc, y, margin, contentW, 'OUTRAS INFORMAÇÕES');
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
   const legal =
     'Retenções e contribuições observam alíquotas e regras cadastradas (federais e municipais) e a legislação aplicável.';
-  const legalLines = doc.splitTextToSize(legal, iWide);
-  const legalArr = Array.isArray(legalLines) ? legalLines : [String(legalLines)];
-  legalArr.forEach((line: string) => {
+  doc.splitTextToSize(legal, contentW).forEach((line: string) => {
     y = pdfCheckPage(doc, y, 5, margin);
-    doc.text(line, iLeft, y);
+    doc.text(line, margin, y);
     y += 4;
   });
   y += 2;
-  const issRetidoQuestion = `O ISS desta NF-e será RETIDO pelo tomador? ${issRetidoLine(taxCode)}`;
-  const issQ = doc.splitTextToSize(issRetidoQuestion, iWide);
-  const issQArr = Array.isArray(issQ) ? issQ : [String(issQ)];
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  issQArr.forEach((line: string) => {
+  doc.splitTextToSize(
+    `O ISS desta NF-e será RETIDO pelo tomador? ${issRetidoLine(taxCode)}`,
+    contentW
+  ).forEach((line: string) => {
     y = pdfCheckPage(doc, y, 5, margin);
-    doc.text(line, iLeft, y);
-    y += 3.4;
+    doc.text(line, margin, y);
+    y += 4;
   });
-  doc.setTextColor(0, 0, 0);
-  y += 2.5;
+  y += 5;
   const municipioComUfPdf = (() => {
-    const mun = ((draft.municipality ?? taker?.city) ?? '').trim();
+    const mun = (draft.municipality ?? '').trim();
     const uf = (taker?.state ?? '').trim().toUpperCase();
     if (!mun) return '—';
     return uf ? `${mun} (${uf})` : mun;
   })();
-  doc.setFontSize(7.2);
-  doc.setTextColor(PDF.ink[0], PDF.ink[1], PDF.ink[2]);
-  const munLine = `O ISS desta NF-e é devido no Município de ${municipioComUfPdf}`;
-  const munWrapped = doc.splitTextToSize(munLine, iWide);
-  const munArr = Array.isArray(munWrapped) ? munWrapped : [String(munWrapped)];
-  munArr.forEach((line: string) => {
-    y = pdfCheckPage(doc, y, 5, margin);
-    doc.text(line, iLeft, y);
-    y += 4;
-  });
-  y += 2;
-  y = pdfKeyRow(doc, y, iLeft, iWide, [
+  doc.text(`O ISS desta NF-e é devido no Município de ${municipioComUfPdf}`, margin, y + 1);
+  y += 8;
+  y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'Lista Serv. ISSQN:', v: dash(draft.serviceIssqn) },
     { k: 'CNAE:', v: dash(draft.cnae) }
   ]);
-  y = pdfHighlightAmount(doc, y, margin, iLeft, iWide, 'Valor líquido a pagar', valorLiquidoPdf);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Valor líquido a pagar: ${valorLiquidoPdf}`, margin + contentW / 2, y + 2, { align: 'center' });
+  y += 8;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
-  doc.setTextColor(PDF.muted[0], PDF.muted[1], PDF.muted[2]);
-  const rodape = `Documento gerado em ${nowEmissionBr()} — Espelho para emissão de NF-e (conferência fiscal).`;
-  const rodW = doc.splitTextToSize(rodape, iWide);
-  const rodLines = Array.isArray(rodW) ? rodW : [String(rodW)];
-  rodLines.forEach((line: string) => {
-    y = pdfCheckPage(doc, y, 4, margin);
-    doc.text(line, iLeft, y);
-    y += 3.5;
-  });
-  doc.setTextColor(0, 0, 0);
-  y += 1.5;
-  pdfStrokeSectionCard(doc, margin, yOutTop, contentW, y, margin, pgOut);
+  doc.text(`Medição — Início: ${dash(draft.measurementStartDate)}`, margin + contentW * 0.55, y + 2);
+  doc.text(`Término: ${dash(draft.measurementEndDate)}`, margin + contentW * 0.55, y + 6);
 
   return doc;
 }
@@ -1713,15 +1356,13 @@ export function exportEspelhoNfExcel(
   takers: EspelhoExportTaker[],
   banks: EspelhoExportBank[],
   taxCodes: EspelhoExportTaxCode[],
-  federalFallback: EspelhoFederalRates
+  federal: EspelhoFederalRates
 ): void {
-  const normalized = normalizeEspelhoMirrorDraft(draft);
-  const federal = resolveEspelhoFederalRatesForExport(taxCodes, normalized.taxCodeId, federalFallback);
-  const b = resolveBundle(normalized, providers, takers, banks, taxCodes, federal);
+  const b = resolveBundle(draft, providers, takers, banks, taxCodes, federal);
   const { sheet } = buildExcelSheet(b);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, sheet, 'Espelho da Nota Fiscal');
-  const base = sanitizeEspelhoFilenameBase(normalized.measurementRef || normalized.costCenterLabel || 'espelho-nf');
+  const base = sanitizeEspelhoFilenameBase(draft.measurementRef || draft.costCenterLabel || 'espelho-nf');
   XLSX.writeFile(wb, `espelho-nf_${base}.xlsx`);
 }
 
@@ -1731,13 +1372,11 @@ export function exportEspelhoNfPdf(
   takers: EspelhoExportTaker[],
   banks: EspelhoExportBank[],
   taxCodes: EspelhoExportTaxCode[],
-  federalFallback: EspelhoFederalRates
+  federal: EspelhoFederalRates
 ): void {
-  const normalized = normalizeEspelhoMirrorDraft(draft);
-  const federal = resolveEspelhoFederalRatesForExport(taxCodes, normalized.taxCodeId, federalFallback);
-  const b = resolveBundle(normalized, providers, takers, banks, taxCodes, federal);
+  const b = resolveBundle(draft, providers, takers, banks, taxCodes, federal);
   const doc = buildPdf(b);
-  const base = sanitizeEspelhoFilenameBase(normalized.measurementRef || normalized.costCenterLabel || 'espelho-nf');
+  const base = sanitizeEspelhoFilenameBase(draft.measurementRef || draft.costCenterLabel || 'espelho-nf');
   doc.save(`espelho-nf_${base}.pdf`);
 }
 
@@ -1790,13 +1429,6 @@ export function buildEspelhoDetailRows(
     ['Início da medição', dash(m.measurementStartDate)],
     ['Fim da medição', dash(m.measurementEndDate)],
     ['Unidade Predial', dash(m.buildingUnit)],
-    ['CNO (obra)', dash(m.obraCno)],
-    [
-      'Garantia complementar',
-      (m.garantiaComplementar ?? '').trim() ? String(m.garantiaComplementar).trim() : '—'
-    ],
-    ['CNAE', dash(m.cnae)],
-    ['Lista Serv. ISSQN', dash(m.serviceIssqn)],
     ['Observações', m.observations.trim() ? m.observations : '—'],
     ['Prestador', m.providerName],
     ['Tomador', m.takerName],
@@ -1814,7 +1446,6 @@ export function espelhoMirrorForExport(
   draft: EspelhoMirrorDraft,
   costCenters: Array<{ id?: string; code?: string; name?: string }>
 ): EspelhoMirrorDraft {
-  const normalized = normalizeEspelhoMirrorDraft(draft);
-  const label = resolveCostCenterRowLabel(normalized, costCenters);
-  return { ...normalized, costCenterLabel: label || normalized.costCenterLabel };
+  const label = resolveCostCenterRowLabel(draft, costCenters);
+  return { ...draft, costCenterLabel: label || draft.costCenterLabel };
 }

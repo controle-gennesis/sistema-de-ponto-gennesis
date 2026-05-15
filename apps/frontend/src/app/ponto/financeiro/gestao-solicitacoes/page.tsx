@@ -10,13 +10,13 @@ export default function GestaoSolicitacoesFinanceiroPage() {
       config={{
         title: 'Processos do Fluig',
         subtitle: 'Acompanhe em tempo real as solicitações do Fluig na visão financeira',
-        datasets: ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', 'G5-Relatorio-DF'],
+        datasets: ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', 'G5-Relatorio-DF-GO-TODOS-SETORES'],
         datasetTabLabels: {
           DataSet_G3FollowUp: 'G3',
           DataSet_G4FollowUp: 'G4',
-          'G5-Relatorio-DF': 'G5',
+          'G5-Relatorio-DF-GO-TODOS-SETORES': 'G5',
         },
-        g5TitleDatasets: ['G5-Relatorio-DF'],
+        g5TitleDatasets: ['G5-Relatorio-DF-GO-TODOS-SETORES'],
         allowedFiliais: null,
         allowedFiliaisDatasets: ['DataSet_G3FollowUp'],
         excludedFiliais: ['FILIAL PB'],

@@ -12,6 +12,12 @@ console.log(`   🔐 JWT Secret: ${process.env.JWT_SECRET ? '✅ Configurada' : 
 console.log(`   ☁️  AWS S3: ${process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? '✅ Configurado' : '❌ Não configurado'}`);
 console.log(`   📦 Bucket: ${process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos'}`);
 console.log(`   📊 Fluig API: ${process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN ? '✅ Configurado' : '❌ Não configurado'}`);
+const totvsRmOk =
+  !!(process.env.TOTVS_RM_BASE_URL || '').trim() &&
+  (!!(process.env.TOTVS_RM_BEARER_TOKEN || '').trim() ||
+    (!!(process.env.TOTVS_RM_USER || process.env.TOTVS_RM_USERNAME || '').trim() &&
+      !!(process.env.TOTVS_RM_PASSWORD || '').trim()));
+console.log(`   📈 TOTVS RM (RELATORIOFIN): ${totvsRmOk ? '✅ Configurado' : '❌ Não configurado'}`);
 console.log('');
 
 import http from 'http';

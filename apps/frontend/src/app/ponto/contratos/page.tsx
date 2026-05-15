@@ -580,16 +580,6 @@ export default function ContratosPage() {
                         </div>
                       </div>
                       <div className="flex w-full shrink-0 flex-col gap-2 sm:max-w-sm sm:flex-row sm:items-center sm:justify-end">
-                        {canEditContrato && (
-                          <button
-                            type="button"
-                            onClick={() => handleEdit(permissionsContract)}
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                          >
-                            <Pencil className="h-4 w-4" />
-                            Editar contrato
-                          </button>
-                        )}
                         <div className="relative w-full sm:max-w-xs">
                           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                           <input
@@ -990,7 +980,7 @@ export default function ContratosPage() {
 
         {/* Modal Exclusão */}
         {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[140] flex items-center justify-center">
             <div
               className="absolute inset-0 bg-black/50"
               onClick={() => setShowDeleteModal(null)}
@@ -1221,7 +1211,7 @@ function ContractFormModal({
       {typeof document !== 'undefined' && ccDropdownPanel
         ? createPortal(ccDropdownPanel, document.body)
         : null}
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black bg-opacity-50">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
