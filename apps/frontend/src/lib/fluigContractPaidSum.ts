@@ -350,7 +350,7 @@ function listNaturezaCandidateKeys(columns: string[], firstRow: Record<string, u
       if (isNaturezaCandidateColumnKey(c)) set.add(c);
     }
   }
-  return [...set];
+  return Array.from(set);
 }
 
 function pickBestNaturezaColumn(

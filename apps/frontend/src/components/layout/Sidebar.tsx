@@ -370,6 +370,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro'))
           },
           {
+            name: 'Extrato de Caixa',
+            href: '/ponto/financeiro/analise-extrato',
+            icon: BarChart3,
+            description: 'Acompanhe o extrato de caixa',
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
+          },
+          {
             name: 'Financeiro',
             href: '/ponto/financeiro',
             icon: DollarSign,
@@ -382,13 +389,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: BarChart3,
             description: 'Importar planilha e gerar relatórios de análise financeira',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise'))
-          },
-          {
-            name: 'Análise de Extrato',
-            href: '/ponto/financeiro/analise-extrato',
-            icon: BarChart3,
-            description: 'Importar e validar extratos bancários',
-            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           },
         ]
       },

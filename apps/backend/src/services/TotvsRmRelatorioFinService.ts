@@ -514,6 +514,17 @@ export class TotvsRmRelatorioFinService {
     return this.fetchRowsForPath(this.defaultRelatorioPath());
   }
 
+  private defaultExtratoCaixaPath(): string {
+    return (
+      (process.env.TOTVS_RM_EXTRATO_CAIXA_PATH || '').trim() ||
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/EXTRATOPROJETOS/1/G'
+    );
+  }
+
+  async fetchExtratoCaixaRows(): Promise<Record<string, unknown>[]> {
+    return this.fetchRowsForPath(this.defaultExtratoCaixaPath());
+  }
+
   async sumForCostCenterAsync(code: string, name: string): Promise<TotvsRelatorioFinSumResult> {
     const rows = await this.fetchRelatorioRows();
     if (!rows.length) {
