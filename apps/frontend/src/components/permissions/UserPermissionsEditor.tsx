@@ -152,6 +152,7 @@ const CATEGORY_ORDER = [
   'Financeiro',
   'Engenharia',
   'Contratos e Licitações',
+  'Jurídico',
   'Suprimentos',
   'Cadastros',
   'Registros de Ponto',

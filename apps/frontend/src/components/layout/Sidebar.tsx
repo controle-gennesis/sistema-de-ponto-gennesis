@@ -54,6 +54,7 @@ import {
   Landmark,
   Percent,
   Contact,
+  Scale,
   Image as ImageIcon,
   Camera,
   PencilLine,
@@ -124,6 +125,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   
   // Verificar se é do departamento Financeiro
   const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
+
+  // Verificar se é do departamento Jurídico
+  const isDepartmentJuridico = userDepartment?.toLowerCase().includes('jurídico') ||
+    userDepartment?.toLowerCase().includes('juridico');
 
   const handleLogout = () => {
     setShowUserMenu(false);
@@ -445,6 +450,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: ClipboardList,
             description: 'Acompanhar processos de licitação',
             permission: isAdministrator || can(pk('/ponto/licitacoes'))
+          }
+        ]
+      },
+      {
+        id: 'juridico',
+        name: 'Jurídico',
+        icon: Scale,
+        items: [
+          {
+            name: 'Jurídico',
+            href: '/ponto/juridico',
+            icon: Scale,
+            description: 'Gestão jurídica e documentos legais',
+            permission: isAdministrator || isDepartmentJuridico || can(pk('/ponto/juridico'))
           }
         ]
       },
