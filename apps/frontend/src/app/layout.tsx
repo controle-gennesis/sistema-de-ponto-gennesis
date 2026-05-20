@@ -30,6 +30,7 @@ export default function RootLayout({
           {children}
         </Providers>
         <ToasterWrapper />
+        <div id="dropdown-portal-root" aria-hidden="true" />
       </body>
     </html>
   );

@@ -12,6 +12,8 @@ export interface ModalProps {
   closeOnOverlayClick?: boolean;
   showCloseButton?: boolean;
   headerActions?: React.ReactNode;
+  /** Permite dropdowns absolutos saírem do conteúdo sem serem cortados. */
+  contentOverflowVisible?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -23,6 +25,7 @@ export const Modal: React.FC<ModalProps> = ({
   closeOnOverlayClick = true,
   showCloseButton = true,
   headerActions,
+  contentOverflowVisible = false,
 }) => {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -65,6 +68,7 @@ export const Modal: React.FC<ModalProps> = ({
         <div
           className={clsx(
             'relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-h-[calc(100vh-2rem)] flex flex-col',
+            contentOverflowVisible && 'overflow-visible',
             sizeClasses[size]
           )}
         >
@@ -94,7 +98,12 @@ export const Modal: React.FC<ModalProps> = ({
           )}
 
           {/* Content */}
-          <div className="p-6 overflow-y-auto flex-1 min-h-0">
+          <div
+            className={clsx(
+              'p-6 flex-1 min-h-0',
+              contentOverflowVisible ? 'overflow-visible' : 'overflow-y-auto'
+            )}
+          >
             {children}
           </div>
         </div>

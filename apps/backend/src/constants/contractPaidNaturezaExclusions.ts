@@ -1,12 +1,12 @@
 /**
- * Espelha apps/frontend/src/lib/contractPaidNaturezaExclusions.ts (naturezas desmarcadas nas telas).
+ * Espelha apps/frontend/src/lib/contractPaidNaturezaExclusions.ts
  */
 
 function stripDiacritics(s: string): string {
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-function normalizeNaturezaLabel(natureza: string): string {
+export function normalizeNaturezaLabel(natureza: string): string {
   return stripDiacritics(String(natureza ?? ''))
     .trim()
     .replace(/\s+/g, ' ')
@@ -44,4 +44,10 @@ export function isNaturezaExcludedFromContractPaidTotal(natureza: string): boole
   const key = normalizeNaturezaLabel(natureza);
   if (!key || key === '—' || key === '-') return false;
   return EXCLUDED_NORMALIZED.has(key);
+}
+
+export function isNaturezaIncludedInContractPaidTotal(natureza: string): boolean {
+  const key = normalizeNaturezaLabel(natureza);
+  if (!key || key === '—' || key === '-') return false;
+  return !isNaturezaExcludedFromContractPaidTotal(natureza);
 }

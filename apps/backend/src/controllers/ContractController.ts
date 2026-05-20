@@ -9,6 +9,7 @@ import {
   getContractAccessForUser
 } from '../lib/contractAccess';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
+import { totvsRmContractLookupCodes } from '../lib/totvsRmContractCostCenterCode';
 
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
@@ -481,7 +482,11 @@ export class ContractController {
       }
 
       try {
-        const sum = await svc.sumForCostCenterAsync(contract.costCenter.code, contract.costCenter.name);
+        const ccCode = contract.costCenter.code;
+        const ccName = contract.costCenter.name;
+        const lookupCandidates = totvsRmContractLookupCodes(ccCode, ccName);
+        const { result: sum, lookupCodeUsed: rmLookupCode } =
+          await svc.sumForCostCenterCodesAsync(lookupCandidates, ccName, { omitLines: false });
         res.json({
           success: true,
           data: {
@@ -503,14 +508,17 @@ export class ContractController {
             solicitacoesDateColumn: sum.solicitacoesDateColumn,
             solicitacoesValueColumn: sum.solicitacoesValueColumn,
             solicitacoesCcColumn: sum.solicitacoesCcColumn,
-            costCenterCode: contract.costCenter.code,
-            costCenterName: contract.costCenter.name
+            costCenterCode: ccCode,
+            costCenterName: ccName,
+            costCenterCodeRm: rmLookupCode !== ccCode ? rmLookupCode : undefined
           }
         });
       } catch (err) {
         const message = svc.formatAxiosError(err);
+        const ccCode = contract.costCenter.code;
+        const rmTried = totvsRmContractLookupCodes(ccCode, contract.costCenter.name).join(' | ');
         console.warn(
-          `[TOTVS RM RELATORIOFIN] contrato=${contractId} cc=${contract.costCenter.code}: ${message}`
+          `[TOTVS RM RELATORIOFIN] contrato=${contractId} cc=${ccCode} rm=[${rmTried}]: ${message}`
         );
         res.json({
           success: false,

@@ -253,6 +253,12 @@ export default function ControleFinanceiroPage() {
   const [form, setForm] = useState<EntryFormState>(() => buildInitialForm(now.getMonth() + 1, currentYear));
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => searchInputRef.current?.blur());
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -533,6 +539,63 @@ export default function ControleFinanceiroPage() {
             </p>
           </div>
 
+          {/* Barra de ações */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={filters.search}
+                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                placeholder="Pesquisar lançamento..."
+                className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              />
+              {filters.search && (
+                <button
+                  type="button"
+                  onClick={() => setFilters({ ...filters, search: '' })}
+                  aria-label="Limpar busca"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsFiltersModalOpen(true)}
+              className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                filters.overdueOnly
+                  ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+              }`}
+              aria-label="Abrir filtro"
+              title={filters.overdueOnly ? 'Filtro (em atraso ativo)' : 'Filtro'}
+            >
+              <Filter className="h-4 w-4" />
+              {filters.overdueOnly && (
+                <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={openImportModal}
+              className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+            >
+              <Upload className="h-4 w-4 shrink-0" />
+              <span>Importar</span>
+            </button>
+            <button
+              type="button"
+              onClick={openCreateModal}
+              className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              <span>Novo Lançamento</span>
+            </button>
+          </div>
+
           {/* Dashboards — métricas do recorte filtrado */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
             <Card>
@@ -652,62 +715,6 @@ export default function ControleFinanceiroPage() {
               </CardContent>
             </Card>
           )}
-
-          {/* Barra de ações */}
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-              <input
-                type="text"
-                value={filters.search}
-                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                placeholder="Pesquisar lançamento..."
-                className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              />
-              {filters.search && (
-                <button
-                  type="button"
-                  onClick={() => setFilters({ ...filters, search: '' })}
-                  aria-label="Limpar busca"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsFiltersModalOpen(true)}
-              className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                filters.overdueOnly
-                  ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
-                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
-              }`}
-              aria-label="Abrir filtro"
-              title={filters.overdueOnly ? 'Filtro (em atraso ativo)' : 'Filtro'}
-            >
-              <Filter className="h-4 w-4" />
-              {filters.overdueOnly && (
-                <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={openImportModal}
-              className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-            >
-              <Upload className="h-4 w-4 shrink-0" />
-              <span>Importar</span>
-            </button>
-            <button
-              type="button"
-              onClick={openCreateModal}
-              className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-            >
-              <Plus className="h-4 w-4 shrink-0" />
-              <span>Novo Lançamento</span>
-            </button>
-          </div>
 
           {/* Conteúdo */}
           {isLoading ? (

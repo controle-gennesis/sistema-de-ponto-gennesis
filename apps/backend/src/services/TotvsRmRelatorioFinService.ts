@@ -61,6 +61,14 @@ function isoDateOnly(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/** Solicitações no contrato: agrupar por mês usando somente data de pagamento. */
+function scorePaymentDateColumn(key: string): number {
+  const u = normHeaderKey(key);
+  const c = u.replace(/\s/g, '');
+  if (c.includes('DATAPAGAMENTO') || (u.includes('DATA') && u.includes('PAG'))) return 36;
+  return 0;
+}
+
 function scoreDateColumn(key: string): number {
   const u = normHeaderKey(key);
   const c = u.replace(/\s/g, '');
@@ -444,7 +452,23 @@ export interface TotvsRelatorioFinSumResult {
   solicitacoesCcColumn: string | null;
 }
 
+export type TotvsRmSumOptions = {
+  /** Não monta arrays `lines` (resposta mais leve e rápida para contratos). */
+  omitLines?: boolean;
+  /** Datasets já carregados (evita nova consulta HTTP ao RM). */
+  rows?: Record<string, unknown>[];
+  solicitationRows?: Record<string, unknown>[];
+};
+
+export type TotvsRmSumForCodesResult = {
+  result: TotvsRelatorioFinSumResult;
+  lookupCodeUsed: string;
+};
+
 export class TotvsRmRelatorioFinService {
+  private relatorioRowsCache: { rows: Record<string, unknown>[]; at: number } | null = null;
+  private pathRowsCache = new Map<string, { rows: Record<string, unknown>[]; at: number }>();
+
   isConfigured(): boolean {
     const base = (process.env.TOTVS_RM_BASE_URL || '').trim();
     const bearer = (process.env.TOTVS_RM_BEARER_TOKEN || '').trim();
@@ -471,6 +495,33 @@ export class TotvsRmRelatorioFinService {
     const pass = (process.env.TOTVS_RM_PASSWORD || '').trim();
     if (!user || !pass) return '';
     return `Basic ${Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')}`;
+  }
+
+  private rmCacheTtlMs(): number {
+    const n = Number(process.env.TOTVS_RM_CACHE_TTL_MS);
+    if (Number.isFinite(n) && n >= 0) return n;
+    return 10 * 60 * 1000;
+  }
+
+  private cacheFresh(entry: { at: number } | null | undefined): entry is { at: number } {
+    return !!entry && Date.now() - entry.at < this.rmCacheTtlMs();
+  }
+
+  /** Cache em memória do RELATORIOFIN — vários contratos reutilizam a mesma carga. */
+  private async getRelatorioRowsCached(): Promise<Record<string, unknown>[]> {
+    if (this.cacheFresh(this.relatorioRowsCache)) return this.relatorioRowsCache!.rows;
+    const rows = await this.fetchRelatorioRows();
+    this.relatorioRowsCache = { rows, at: Date.now() };
+    return rows;
+  }
+
+  private async getRowsForPathCached(pathRel: string): Promise<Record<string, unknown>[]> {
+    const key = normPathRel(pathRel);
+    const hit = this.pathRowsCache.get(key);
+    if (this.cacheFresh(hit)) return hit!.rows;
+    const rows = await this.fetchRowsForPath(pathRel);
+    this.pathRowsCache.set(key, { rows, at: Date.now() });
+    return rows;
   }
 
   async fetchRowsForPath(pathRel: string): Promise<Record<string, unknown>[]> {
@@ -514,19 +565,167 @@ export class TotvsRmRelatorioFinService {
     return this.fetchRowsForPath(this.defaultRelatorioPath());
   }
 
-  private defaultExtratoCaixaPath(): string {
-    return (
-      (process.env.TOTVS_RM_EXTRATO_CAIXA_PATH || '').trim() ||
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/EXTRATOPROJETOS/1/G'
-    );
+  private static readonly EXTRATO_CAIXA_DEFAULT_CONSULTA = 'EXTRATOCX2026';
+
+  /** Ano configurado para o extrato (env ou extraído do path EXTRATOCX{ano}). */
+  getExtratoCaixaConfiguredYears(): number[] {
+    const paths = this.extratoCaixaPaths();
+    const fromPaths = paths
+      .map((p) => TotvsRmRelatorioFinService.yearFromExtratoCaixaPath(p))
+      .filter((y): y is number => y != null);
+    if (fromPaths.length > 0) {
+      return [...new Set(fromPaths)].sort((a, b) => b - a);
+    }
+    return this.parseExtratoCaixaYearsEnv();
   }
 
-  async fetchExtratoCaixaRows(): Promise<Record<string, unknown>[]> {
-    return this.fetchRowsForPath(this.defaultExtratoCaixaPath());
+  private static yearFromExtratoCaixaPath(path: string): number | null {
+    const match = path.match(/EXTRATOCX(\d{4})/i);
+    if (!match) return null;
+    const year = Number(match[1]);
+    return year >= 1980 && year <= 2100 ? year : null;
   }
 
-  async sumForCostCenterAsync(code: string, name: string): Promise<TotvsRelatorioFinSumResult> {
-    const rows = await this.fetchRelatorioRows();
+  private extratoCaixaPathForConsulta(consulta: string): string {
+    const slug = consulta.replace(/^\/+|\/+$/g, '');
+    return `/api/framework/v1/consultaSQLServer/RealizaConsulta/${slug}/1/G`;
+  }
+
+  private parseExtratoCaixaYearsEnv(): number[] {
+    const years = (process.env.TOTVS_RM_EXTRATO_CAIXA_YEARS || '2026')
+      .split(/[,;\s]+/)
+      .map((y) => Number(y.trim()))
+      .filter((y) => Number.isFinite(y) && y >= 1980 && y <= 2100);
+    return [...new Set(years)].sort((a, b) => b - a);
+  }
+
+  /** Caminho RM do extrato de caixa (padrão: EXTRATOCX2026). */
+  private extratoCaixaPaths(): string[] {
+    const pathsEnv = (process.env.TOTVS_RM_EXTRATO_CAIXA_PATHS || '').trim();
+    if (pathsEnv) {
+      return pathsEnv
+        .split(/[,;\n]+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+    }
+
+    const singlePath = (process.env.TOTVS_RM_EXTRATO_CAIXA_PATH || '').trim();
+    if (singlePath) return [singlePath];
+
+    const years = (process.env.TOTVS_RM_EXTRATO_CAIXA_YEARS || '2026')
+      .split(/[,;\s]+/)
+      .map((y) => y.trim())
+      .filter(Boolean);
+
+    if (years.length > 0) {
+      return years.map((year) =>
+        this.extratoCaixaPathForConsulta(`EXTRATOCX${year}`)
+      );
+    }
+
+    return [
+      this.extratoCaixaPathForConsulta(TotvsRmRelatorioFinService.EXTRATO_CAIXA_DEFAULT_CONSULTA),
+    ];
+  }
+
+  async fetchExtratoCaixaRows(): Promise<{
+    rows: Record<string, unknown>[];
+    configuredYears: number[];
+    pathFailures: Array<{ path: string; error: string }>;
+  }> {
+    const paths = this.extratoCaixaPaths();
+    const configuredYears = this.getExtratoCaixaConfiguredYears();
+    const results = await Promise.allSettled(paths.map((p) => this.fetchRowsForPath(p)));
+    const rows: Record<string, unknown>[] = [];
+    const pathFailures: Array<{ path: string; error: string }> = [];
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const path = paths[i];
+      if (result.status === 'fulfilled') {
+        rows.push(...result.value);
+        continue;
+      }
+      const msg =
+        result.reason instanceof Error ? result.reason.message : String(result.reason);
+      pathFailures.push({ path, error: msg });
+      console.warn(`[TOTVS RM EXTRATO CAIXA] Falha em ${path}: ${msg}`);
+    }
+
+    if (!rows.length && pathFailures.length) {
+      throw new Error(pathFailures.map((f) => `${f.path}: ${f.error}`).join(' | '));
+    }
+
+    return { rows, configuredYears, pathFailures };
+  }
+
+  /**
+   * Uma carga do RM + tentativa de vários códigos de CC (ex.: 102… e 02…) só em memória.
+   */
+  async sumForCostCenterCodesAsync(
+    codes: string[],
+    name: string,
+    options?: Pick<TotvsRmSumOptions, 'omitLines'>
+  ): Promise<TotvsRmSumForCodesResult> {
+    const unique = [...new Set(codes.map((c) => String(c ?? '').trim()).filter(Boolean))];
+    const list = unique.length ? unique : [''];
+
+    const rows = await this.getRelatorioRowsCached();
+    const solicitationRows = await this.resolveSolicitationRows(rows);
+
+    const sumOpts: TotvsRmSumOptions = {
+      omitLines: options?.omitLines ?? true,
+      rows,
+      solicitationRows
+    };
+
+    let best = await this.sumForCostCenterAsync(list[0], name, sumOpts);
+    let used = list[0];
+
+    for (let i = 1; i < list.length; i++) {
+      if (best.matchedRowCount > 0) break;
+      const attempt = await this.sumForCostCenterAsync(list[i], name, sumOpts);
+      const better =
+        attempt.matchedRowCount > best.matchedRowCount ||
+        (attempt.matchedRowCount > 0 &&
+          attempt.matchedRowCount === best.matchedRowCount &&
+          attempt.total > best.total);
+      if (better) {
+        best = attempt;
+        used = list[i];
+      }
+    }
+
+    return { result: best, lookupCodeUsed: used };
+  }
+
+  private async resolveSolicitationRows(
+    relatorioRows: Record<string, unknown>[]
+  ): Promise<Record<string, unknown>[]> {
+    const solPathRaw = (process.env.TOTVS_RM_SOLICITACOES_PATH || '').trim();
+    const defaultPath = this.defaultRelatorioPath();
+    if (!solPathRaw || normPathRel(solPathRaw) === normPathRel(defaultPath)) {
+      return relatorioRows;
+    }
+    try {
+      const alt = await this.getRowsForPathCached(solPathRaw);
+      return alt.length ? alt : relatorioRows;
+    } catch (e) {
+      console.warn(
+        '[TOTVS RM SOLICITACOES] Falha ao buscar TOTVS_RM_SOLICITACOES_PATH; usando RELATORIOFIN.',
+        e instanceof Error ? e.message : e
+      );
+      return relatorioRows;
+    }
+  }
+
+  async sumForCostCenterAsync(
+    code: string,
+    name: string,
+    options?: TotvsRmSumOptions
+  ): Promise<TotvsRelatorioFinSumResult> {
+    const omitLines = options?.omitLines ?? false;
+    const rows = options?.rows ?? (await this.getRelatorioRowsCached());
     if (!rows.length) {
       return {
         total: 0,
@@ -599,6 +798,7 @@ export class TotvsRmRelatorioFinService {
     let undatedAgg: MonthAgg = { total: 0, count: 0, lines: [] };
 
     const pushLimited = (bucket: MonthAgg, line: TotvsRmPaidLineDetail) => {
+      if (omitLines) return;
       if (bucket.lines.length < LINE_CAP) bucket.lines.push(line);
     };
 
@@ -664,22 +864,9 @@ export class TotvsRmRelatorioFinService {
       }
     }
 
-    // --- Solicitações (contrato): CC + data + valor, sem exclusão por natureza (linha Controle Geral) ---
-    const solPathRaw = (process.env.TOTVS_RM_SOLICITACOES_PATH || '').trim();
-    const defaultPath = this.defaultRelatorioPath();
-    let solicitationRows = rows;
-    if (solPathRaw && normPathRel(solPathRaw) !== normPathRel(defaultPath)) {
-      try {
-        const alt = await this.fetchRowsForPath(solPathRaw);
-        if (alt.length) solicitationRows = alt;
-      } catch (e) {
-        console.warn(
-          '[TOTVS RM SOLICITACOES] Falha ao buscar TOTVS_RM_SOLICITACOES_PATH; usando o mesmo dataset do RELATORIOFIN.',
-          e instanceof Error ? e.message : e
-        );
-        solicitationRows = rows;
-      }
-    }
+    // --- Solicitações (contrato): CC + data + valor ---
+    const solicitationRows =
+      options?.solicitationRows ?? (await this.resolveSolicitationRows(rows));
 
     const solCcCol = pickColumn(
       solicitationRows,
@@ -716,12 +903,28 @@ export class TotvsRmRelatorioFinService {
     const solDateExcludeKeys = new Set<string>(
       [solCcCol, solValCol, solNatCol, solStatusCol].filter(Boolean) as string[]
     );
-    const solDateCol = pickColumn(
+    const solDateEnv =
+      process.env.TOTVS_RM_SOLICITACOES_DATE_COLUMN || process.env.TOTVS_RM_DATE_COLUMN;
+    let solDateCol = pickColumn(
       solicitationRows,
-      scoreDateColumn,
-      process.env.TOTVS_RM_SOLICITACOES_DATE_COLUMN || process.env.TOTVS_RM_DATE_COLUMN,
+      scorePaymentDateColumn,
+      solDateEnv,
       solDateExcludeKeys
     );
+    if (!solDateCol && !solDateEnv?.trim()) {
+      solDateCol = pickColumn(
+        solicitationRows,
+        scoreDateColumn,
+        undefined,
+        solDateExcludeKeys
+      );
+      if (solDateCol) {
+        console.warn(
+          '[TOTVS RM SOLICITACOES] Coluna de data de pagamento não detectada; usando coluna genérica:',
+          solDateCol
+        );
+      }
+    }
 
     let solicitacoesMatchedRowCount = 0;
     const solByYm = new Map<string, MonthAgg>();
@@ -777,7 +980,7 @@ export class TotvsRmRelatorioFinService {
         for (const row of solicitationRows) {
           accumulateSolicitacao(row);
         }
-      } else if (solPathRaw) {
+      } else if ((process.env.TOTVS_RM_SOLICITACOES_PATH || '').trim()) {
         console.warn(
           '[TOTVS RM SOLICITACOES] Dataset de solicitações sem coluna de centro de custo detectada. Defina TOTVS_RM_SOLICITACOES_CC_COLUMN ou TOTVS_RM_CC_COLUMN.'
         );

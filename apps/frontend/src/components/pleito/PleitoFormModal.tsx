@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -67,6 +68,18 @@ export function PleitoFormModal({ contractId, contractDisplay, pleitoToEdit, onC
   const [form, setForm] = useState(() => (pleitoToEdit ? pleitoToForm(pleitoToEdit) : emptyForm()));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleEscape);
+    document.body.classList.add('modal-open');
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.classList.remove('modal-open');
+    };
+  }, [onClose]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.serviceDescription.trim()) {
@@ -92,9 +105,9 @@ export function PleitoFormModal({ contractId, contractDisplay, pleitoToEdit, onC
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
-      <div className="absolute inset-0" onClick={onClose} />
+  const modalContent = (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-2">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} aria-hidden />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-5xl max-h-[95vh] overflow-y-auto">
         <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b bg-white dark:bg-gray-800">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{isEdit ? 'Editar Ordem de Serviço' : 'Novo Ordem de Serviço'}</h3>
@@ -283,4 +296,6 @@ export function PleitoFormModal({ contractId, contractDisplay, pleitoToEdit, onC
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }

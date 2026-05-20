@@ -313,7 +313,6 @@ export function useRoutePermission(route: string) {
     '/ponto/permissoes': true,
     '/ponto/conversas-whatsapp': isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp')),
     '/ponto/financeiro': isAdministrator || can(pk('/ponto/financeiro')),
-    '/ponto/financeiro/analise': isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise')),
     '/ponto/financeiro/analise-extrato':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato')),
     '/ponto/financeiro/gestao-solicitacoes':

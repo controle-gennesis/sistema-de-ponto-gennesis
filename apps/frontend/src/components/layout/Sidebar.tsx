@@ -383,13 +383,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Gerar borderô e CNAB400 para pagamentos',
             permission: isAdministrator || can(pk('/ponto/financeiro'))
           },
-          {
-            name: 'Análise Financeira',
-            href: '/ponto/financeiro/analise',
-            icon: BarChart3,
-            description: 'Importar planilha e gerar relatórios de análise financeira',
-            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise'))
-          },
         ]
       },
       {

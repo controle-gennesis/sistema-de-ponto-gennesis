@@ -20,9 +20,13 @@ import {
   Percent,
   Calculator,
   FileImage,
+  Loader2,
   Eye,
+  ChevronDown,
+  Info,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -31,7 +35,8 @@ import { AxiosError } from 'axios';
 import api from '@/lib/api';
 import {
   filterNaturezaRowsForPaidModalDisplay,
-  isNaturezaExcludedFromContractPaidTotal
+  isNaturezaIncludedInContractPaidTotal,
+  normalizeNaturezaLabel
 } from '@/lib/contractPaidNaturezaExclusions';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import {
@@ -141,6 +146,50 @@ const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
 const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
 const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
 
+type RmPaidLineRow = { valor: number; natureza: string; dataISO: string | null };
+type RmNaturezaAggRow = { natureza: string; total: number; count: number };
+type RmLinhaComCompetencia = RmPaidLineRow & { competencia?: string };
+
+function aggregateGastosNaturezaFromLines(lines: RmPaidLineRow[]): RmNaturezaAggRow[] {
+  const map = new Map<string, RmNaturezaAggRow>();
+  for (const line of lines) {
+    if (!isNaturezaIncludedInContractPaidTotal(line.natureza)) continue;
+    const key = normalizeNaturezaLabel(line.natureza);
+    const prev = map.get(key);
+    const valor = Number(line.valor) || 0;
+    if (prev) {
+      prev.total += valor;
+      prev.count += 1;
+    } else {
+      map.set(key, { natureza: line.natureza, total: valor, count: 1 });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+}
+
+function buildGastosLinesMapFromLines(
+  lines: RmPaidLineRow[],
+  competencia?: string
+): Map<string, RmLinhaComCompetencia[]> {
+  const map = new Map<string, RmLinhaComCompetencia[]>();
+  for (const line of lines) {
+    if (!isNaturezaIncludedInContractPaidTotal(line.natureza)) continue;
+    const key = normalizeNaturezaLabel(line.natureza);
+    const list = map.get(key) ?? [];
+    list.push({ ...line, competencia });
+    map.set(key, list);
+  }
+  map.forEach((arr, key) => {
+    arr.sort((a, b) => {
+      const ta = a.dataISO ? new Date(`${a.dataISO}T12:00:00`).getTime() : 0;
+      const tb = b.dataISO ? new Date(`${b.dataISO}T12:00:00`).getTime() : 0;
+      return tb - ta;
+    });
+    map.set(key, arr);
+  });
+  return map;
+}
+
 const MESES_FILTRO = [
   { value: 0, label: 'Todos os meses' },
   { value: 1, label: 'Janeiro' },
@@ -156,6 +205,9 @@ const MESES_FILTRO = [
   { value: 11, label: 'Novembro' },
   { value: 12, label: 'Dezembro' }
 ];
+
+const CONTROLE_GERAL_META_AJUDA =
+  'Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em "Valor + Aditivos" recalculam da data do evento até o fim do contrato; ajuste do valor anual recalcula só entre o mês da data e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência. Meta real recalcula como saldo ÷ meses restantes na vigência inteira: sem faturamento ainda, igual à meta ideal; depois do primeiro faturamento, usa (soma das metas ideais na vigência completa − faturamento já acumulado no contrato até o mês anterior) ÷ meses de vigência restantes.';
 
 const TIMEZONE_BRASILIA = 'America/Sao_Paulo';
 const pk = pathToModuleKey;
@@ -673,12 +725,15 @@ export default function ContractDetailPage() {
   const [adjFormDeltaStr, setAdjFormDeltaStr] = useState('');
   const [adjFormDate, setAdjFormDate] = useState('');
   const [showAddendumModal, setShowAddendumModal] = useState(false);
-  const [showNaturezaRmModal, setShowNaturezaRmModal] = useState(false);
-  const [solicitacoesMesModal, setSolicitacoesMesModal] = useState<{
-    mesIdx: number;
-    mesLabel: string;
-    celulaTotal: number;
-  } | null>(null);
+  const [showPaidNaturezaModal, setShowPaidNaturezaModal] = useState(false);
+  const [naturezaModalMesIdx, setNaturezaModalMesIdx] = useState<number | null>(null);
+  const [expandedNaturezaKey, setExpandedNaturezaKey] = useState<string | null>(null);
+
+  const openPaidNaturezaModal = (mesIdx: number | null) => {
+    setNaturezaModalMesIdx(mesIdx);
+    setExpandedNaturezaKey(null);
+    setShowPaidNaturezaModal(true);
+  };
   const [addendumDate, setAddendumDate] = useState('');
   const [addendumAmount, setAddendumAmount] = useState('');
   const [addendumNote, setAddendumNote] = useState('');
@@ -729,7 +784,7 @@ export default function ContractDetailPage() {
         lines: TotvsRmPaidLineDetail[];
       }[];
       paidUndated?: { total: number; count: number; lines: TotvsRmPaidLineDetail[] } | null;
-      /** Linha «Solicitações»: soma por mês (CC + data + valor), mesmas exclusões de natureza do Total Pago. */
+      /** Linha «Solicitações»: soma por mês (CC + data de pagamento + valor), mesmas exclusões de natureza do Total Pago. */
       solicitacoesByCalendarMonth?: {
         year: number;
         month: number;
@@ -750,6 +805,7 @@ export default function ContractDetailPage() {
 
   const {
     data: totvsTotalPagoRes,
+    isPending: totvsTotalPagoPending,
     isLoading: totvsTotalPagoLoading,
     isFetching: totvsTotalPagoFetching,
     isError: totvsTotalPagoIsError,
@@ -761,10 +817,18 @@ export default function ContractDetailPage() {
       return res.data as TotvsTotalPagoApi;
     },
     enabled: !!contractId,
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: false,
     retry: false
   });
+
+  /** RM ainda sem resposta definitiva (1ª carga ou refetch). */
+  const totvsRmCarregando =
+    totvsTotalPagoPending ||
+    totvsTotalPagoLoading ||
+    totvsTotalPagoFetching ||
+    (totvsTotalPagoRes === undefined && !totvsTotalPagoIsError);
 
   const { data: billingsData, isLoading: loadingBillings } = useQuery({
     queryKey: ['contract-billings', contractId],
@@ -1000,54 +1064,45 @@ export default function ContractDetailPage() {
       };
     }
 
-    const t = totvsTotalPagoRes;
-    const totvsLoading = totvsTotalPagoLoading || totvsTotalPagoFetching;
-
     if (totvsTotalPagoIsError) {
       return {
         total: 0,
-        loading: totvsTotalPagoLoading || totvsTotalPagoFetching,
+        loading: totvsRmCarregando,
         totvsConfigured: true,
         totvsErrorMessage: totvsQueryTransportErrorMessage(totvsTotalPagoError)
       };
     }
 
+    if (totvsRmCarregando) {
+      const t = totvsTotalPagoRes;
+      const partialTotal =
+        typeof t?.data?.total === 'number' && !Number.isNaN(t.data.total) ? t.data.total : 0;
+      return {
+        total: partialTotal,
+        loading: true,
+        totvsConfigured: Boolean(t?.data?.configured),
+        totvsErrorMessage: null as string | null
+      };
+    }
+
+    const t = totvsTotalPagoRes;
     const configured = Boolean(t?.data?.configured);
-    const totvsSuccessWithTotal =
+    const totvsCallFailed = configured && t?.success === false;
+    const total =
       Boolean(t?.success) &&
       configured &&
       typeof t?.data?.total === 'number' &&
-      !Number.isNaN(t.data.total);
-
-    if (totvsSuccessWithTotal) {
-      return {
-        total: t!.data.total as number,
-        loading: totvsLoading,
-        totvsConfigured: true,
-        totvsErrorMessage: null as string | null
-      };
-    }
-
-    const totvsCallFailed = configured && t?.success === false;
-    const waitingFirstTotvs =
-      configured && !totvsCallFailed && !totvsSuccessWithTotal && (t === undefined || totvsLoading);
-
-    if (waitingFirstTotvs) {
-      return {
-        total: 0,
-        loading: true,
-        totvsConfigured: true,
-        totvsErrorMessage: null as string | null
-      };
-    }
+      !Number.isNaN(t.data.total)
+        ? (t!.data!.total as number)
+        : 0;
 
     return {
-      total: 0,
+      total,
       loading: false,
       totvsConfigured: configured,
       totvsErrorMessage: totvsCallFailed ? t?.message || null : null
     };
-  }, [contract, totvsTotalPagoRes, totvsTotalPagoLoading, totvsTotalPagoFetching, totvsTotalPagoIsError, totvsTotalPagoError]);
+  }, [contract, totvsTotalPagoRes, totvsRmCarregando, totvsTotalPagoIsError, totvsTotalPagoError]);
 
   const rmTotalsByNatureza = useMemo((): { natureza: string; total: number; count: number }[] => {
     const raw = totvsTotalPagoRes?.data?.totalsByNatureza;
@@ -1062,36 +1117,83 @@ export default function ContractDetailPage() {
     return out;
   }, [totvsTotalPagoRes]);
 
-  const naturezaModalRowsRaw = rmTotalsByNatureza;
-  const naturezaModalRows = useMemo(
-    () => filterNaturezaRowsForPaidModalDisplay(naturezaModalRowsRaw),
-    [naturezaModalRowsRaw]
-  );
-
-  /** Total Pago no cabeçalho: só abate a lista fixa de naturezas operacionais (quando há detalhe por natureza). */
+  /** Total Pago no cabeçalho: soma apenas naturezas da allowlist (quando há detalhe por natureza). */
   const paidHeaderTotal = useMemo(() => {
     if (rmTotalsByNatureza.length) {
       return rmTotalsByNatureza
-        .filter((r) => !isNaturezaExcludedFromContractPaidTotal(r.natureza))
+        .filter((r) => isNaturezaIncludedInContractPaidTotal(r.natureza))
         .reduce((s, r) => s + r.total, 0);
     }
     return paidDisplay.total;
   }, [paidDisplay.total, rmTotalsByNatureza]);
 
-  const naturezaModalTotals = useMemo(() => {
-    return naturezaModalRows.reduce(
-      (acc, r) => {
-        acc.total += r.total;
-        acc.count += r.count;
-        return acc;
-      },
-      { total: 0, count: 0 }
-    );
-  }, [naturezaModalRows]);
+  const naturezaModalRows = useMemo(
+    () =>
+      filterNaturezaRowsForPaidModalDisplay(rmTotalsByNatureza).sort((a, b) => b.total - a.total),
+    [rmTotalsByNatureza]
+  );
 
-  const canOpenNaturezaModal =
-    !paidDisplay.loading &&
-    Boolean(totvsTotalPagoRes?.success !== false && totvsTotalPagoRes?.data?.configured);
+  type RmSolicitacaoLinha = TotvsRmPaidLineDetail & { competencia?: string };
+
+  const { solicitacoesLinesByNaturezaKey, rmLinhasDetalheFonte } = useMemo(() => {
+    const map = new Map<string, RmSolicitacaoLinha[]>();
+    const d = totvsTotalPagoRes?.data;
+    if (!d) {
+      return { solicitacoesLinesByNaturezaKey: map, rmLinhasDetalheFonte: 'none' as const };
+    }
+
+    const push = (line: TotvsRmPaidLineDetail, competencia?: string) => {
+      if (!isNaturezaIncludedInContractPaidTotal(line.natureza)) return;
+      const key = normalizeNaturezaLabel(line.natureza);
+      const list = map.get(key) ?? [];
+      list.push({ ...line, competencia });
+      map.set(key, list);
+    };
+
+    const collectSolicitacoes = () => {
+      for (const bm of d.solicitacoesByCalendarMonth ?? []) {
+        const competencia = `${String(bm.month).padStart(2, '0')}/${bm.year}`;
+        for (const line of bm.lines ?? []) push(line, competencia);
+      }
+      for (const line of d.solicitacoesUndated?.lines ?? []) push(line, 'Sem data');
+    };
+
+    const collectPaid = () => {
+      for (const bm of d.paidByCalendarMonth ?? []) {
+        const competencia = `${String(bm.month).padStart(2, '0')}/${bm.year}`;
+        for (const line of bm.lines ?? []) push(line, competencia);
+      }
+      for (const line of d.paidUndated?.lines ?? []) push(line, 'Sem data');
+    };
+
+    collectSolicitacoes();
+    let fonte: 'solicitacoes' | 'paid' | 'none' = 'solicitacoes';
+    let totalLinhas = 0;
+    map.forEach((arr) => {
+      totalLinhas += arr.length;
+    });
+    if (totalLinhas === 0) {
+      map.clear();
+      collectPaid();
+      fonte = 'paid';
+      totalLinhas = 0;
+      map.forEach((arr) => {
+        totalLinhas += arr.length;
+      });
+      if (totalLinhas === 0) fonte = 'none';
+    }
+
+    map.forEach((lines, key) => {
+      lines.sort((a: RmSolicitacaoLinha, b: RmSolicitacaoLinha) => {
+        const ta = a.dataISO ? new Date(`${a.dataISO}T12:00:00`).getTime() : 0;
+        const tb = b.dataISO ? new Date(`${b.dataISO}T12:00:00`).getTime() : 0;
+        return tb - ta;
+      });
+      map.set(key, lines);
+    });
+
+    return { solicitacoesLinesByNaturezaKey: map, rmLinhasDetalheFonte: fonte };
+  }, [totvsTotalPagoRes]);
 
   const addenda = ((addendaResponse?.data || []) as ContractAddendumRow[])
     .slice()
@@ -1432,26 +1534,12 @@ export default function ContractDetailPage() {
     return result;
   }, [safeSelectedYear, metaSchedule, metaRealByScheduleKey]);
 
-  type SolicitacaoControleMesLinha = {
-    solicitationId: string;
-    datasetId: string;
-    titulo: string;
-    natureza: string;
-    /** Valor que entra na soma deste mês (pode ser parcela de rateio). */
-    valor: number;
-    dataRef: Date | null;
-    parcelaRateio: boolean;
-    rateioMotivo?: 'sem_data' | 'fora_vigencia' | 'ano_diferente';
-    valorOriginal?: number;
-  };
-
   /**
-   * Controle Geral — linha Solicitações: TOTVS RM — `solicitacoesByCalendarMonth` (CC + data + valor; exclui as mesmas naturezas operacionais que o Total Pago)
+   * Controle Geral — linha Solicitações: TOTVS RM — `solicitacoesByCalendarMonth` (CC + data de pagamento + valor; exclui as mesmas naturezas operacionais que o Total Pago)
    * com fallback ao `paidByCalendarMonth` em APIs antigas.
    */
-  const controleSolicitacoesPorMes = useMemo(() => {
+  const solicitacoesRateioPorMes = useMemo((): (number | null)[] => {
     const valores: (number | null)[] = new Array(12).fill(null);
-    const detalhes: SolicitacaoControleMesLinha[][] = Array.from({ length: 12 }, () => []);
     const year = safeSelectedYear;
 
     const emVigencia = (mesIdx: number) =>
@@ -1468,7 +1556,7 @@ export default function ContractDetailPage() {
     const rmOk = t?.success !== false && Boolean(api?.configured) && nVm > 0;
 
     if (!rmOk || !api) {
-      return { valores, detalhes };
+      return valores;
     }
 
     const useSolicitacoesApi =
@@ -1491,29 +1579,6 @@ export default function ContractDetailPage() {
 
     const porMes = new Array(12).fill(0);
 
-    const pushRmLinha = (
-      mi: number,
-      line: { valor: number; natureza: string; dataISO: string | null },
-      opts: {
-        parcelaRateio: boolean;
-        rateioMotivo?: SolicitacaoControleMesLinha['rateioMotivo'];
-        valorOriginal?: number;
-      },
-      idSuffix: string
-    ) => {
-      detalhes[mi].push({
-        solicitationId: idSuffix,
-        datasetId: 'TOTVS RM',
-        titulo: '—',
-        natureza: line.natureza,
-        valor: line.valor,
-        dataRef: line.dataISO ? parseDateSafe(line.dataISO) : null,
-        parcelaRateio: opts.parcelaRateio,
-        rateioMotivo: opts.rateioMotivo,
-        valorOriginal: opts.valorOriginal
-      });
-    };
-
     for (const bm of paidByCalendarMonth) {
       const yBm = Number(bm.year);
       const moBm = Number(bm.month);
@@ -1522,64 +1587,42 @@ export default function ContractDetailPage() {
       }
       const mi = moBm - 1;
 
+      const totalIncluidoBm =
+        typeof bm.total === 'number' && !Number.isNaN(bm.total)
+          ? bm.total
+          : (bm.lines ?? []).reduce(
+              (s, line) =>
+                isNaturezaIncludedInContractPaidTotal(line.natureza)
+                  ? s + (Number(line.valor) || 0)
+                  : s,
+              0
+            );
+
       if (emVigencia(mi)) {
-        porMes[mi] += Number(bm.total) || 0;
-        let li = 0;
-        for (const line of bm.lines ?? []) {
-          pushRmLinha(
-            mi,
-            line,
-            { parcelaRateio: false },
-            `rm-${yBm}-${moBm}-${li++}`
-          );
-        }
-      } else if (nVm > 0) {
-        const slice = (Number(bm.total) || 0) / nVm;
-        const refData =
-          bm.lines?.find((ln) => ln.dataISO)?.dataISO ?? bm.lines?.[0]?.dataISO ?? null;
-        let oi = 0;
+        porMes[mi] += totalIncluidoBm;
+      } else if (nVm > 0 && totalIncluidoBm > 0) {
+        const slice = totalIncluidoBm / nVm;
         for (const vmi of mesesVigenciaIdx) {
           porMes[vmi] += slice;
-          pushRmLinha(
-            vmi,
-            {
-              valor: slice,
-              natureza: '—',
-              dataISO: refData
-            },
-            {
-              parcelaRateio: true,
-              rateioMotivo: 'fora_vigencia',
-              valorOriginal: bm.total
-            },
-            `rm-out-${yBm}-${moBm}-${oi++}`
-          );
         }
       }
     }
 
-    if (paidUndated && Number(paidUndated.total) > 0 && nVm > 0) {
-      const sliceTot = Number(paidUndated.total) / nVm;
-      for (const vmi of mesesVigenciaIdx) {
-        porMes[vmi] += sliceTot;
-      }
-      let ui = 0;
-      for (const vmi of mesesVigenciaIdx) {
-        for (const line of paidUndated.lines ?? []) {
-          pushRmLinha(
-            vmi,
-            {
-              valor: line.valor / nVm,
-              natureza: line.natureza,
-              dataISO: line.dataISO
-            },
-            {
-              parcelaRateio: true,
-              rateioMotivo: 'sem_data',
-              valorOriginal: line.valor
-            },
-            `rm-undated-${vmi}-${ui++}`
-          );
+    if (paidUndated && nVm > 0) {
+      const undatedIncluido =
+        typeof paidUndated.total === 'number' && !Number.isNaN(paidUndated.total)
+          ? paidUndated.total
+          : (paidUndated.lines ?? []).reduce(
+              (s, line) =>
+                isNaturezaIncludedInContractPaidTotal(line.natureza)
+                  ? s + (Number(line.valor) || 0)
+                  : s,
+              0
+            );
+      if (undatedIncluido > 0) {
+        const sliceTot = undatedIncluido / nVm;
+        for (const vmi of mesesVigenciaIdx) {
+          porMes[vmi] += sliceTot;
         }
       }
     }
@@ -1589,8 +1632,71 @@ export default function ContractDetailPage() {
         valores[i] = porMes[i];
       }
     }
-    return { valores, detalhes };
+    return valores;
   }, [totvsTotalPagoRes, safeSelectedYear, metaSchedule]);
+
+  const gastosDetalhePorMes = useMemo(() => {
+    const linesPerMonth: RmPaidLineRow[][] = Array.from({ length: 12 }, () => []);
+    const competenciaPerMonth: string[] = Array.from({ length: 12 }, () => '');
+    const d = totvsTotalPagoRes?.data;
+    const year = safeSelectedYear;
+
+    if (d) {
+      const useSolicitacoesApi =
+        d.solicitacoesCcColumn != null &&
+        d.solicitacoesValueColumn != null &&
+        d.solicitacoesByCalendarMonth !== undefined;
+      const buckets = useSolicitacoesApi
+        ? d.solicitacoesByCalendarMonth ?? []
+        : d.paidByCalendarMonth ?? [];
+
+      for (const bm of buckets) {
+        const yBm = Number(bm.year);
+        const moBm = Number(bm.month);
+        if (!Number.isFinite(yBm) || !Number.isFinite(moBm) || yBm !== year || moBm < 1 || moBm > 12) {
+          continue;
+        }
+        const mi = moBm - 1;
+        competenciaPerMonth[mi] = `${String(moBm).padStart(2, '0')}/${yBm}`;
+        const linhas = bm.lines ?? [];
+        if (linhas.length) {
+          linesPerMonth[mi].push(...linhas);
+        }
+      }
+    }
+
+    const rowsByMonth: RmNaturezaAggRow[][] = [];
+    const linesByMonth: Map<string, RmLinhaComCompetencia[]>[] = [];
+    for (let mi = 0; mi < 12; mi++) {
+      rowsByMonth.push(aggregateGastosNaturezaFromLines(linesPerMonth[mi]));
+      linesByMonth.push(
+        buildGastosLinesMapFromLines(linesPerMonth[mi], competenciaPerMonth[mi] || undefined)
+      );
+    }
+    return { rowsByMonth, linesByMonth };
+  }, [totvsTotalPagoRes, safeSelectedYear]);
+
+  const naturezaModalRowsAtivos = useMemo(() => {
+    if (naturezaModalMesIdx === null) return naturezaModalRows;
+    return gastosDetalhePorMes.rowsByMonth[naturezaModalMesIdx] ?? [];
+  }, [naturezaModalMesIdx, naturezaModalRows, gastosDetalhePorMes]);
+
+  const solicitacoesLinesAtivos = useMemo(() => {
+    if (naturezaModalMesIdx === null) return solicitacoesLinesByNaturezaKey;
+    return gastosDetalhePorMes.linesByMonth[naturezaModalMesIdx] ?? new Map();
+  }, [naturezaModalMesIdx, solicitacoesLinesByNaturezaKey, gastosDetalhePorMes]);
+
+  const naturezaModalTotalAtivo = useMemo(() => {
+    if (naturezaModalMesIdx === null) return paidHeaderTotal;
+    const v = solicitacoesRateioPorMes[naturezaModalMesIdx];
+    return v ?? 0;
+  }, [naturezaModalMesIdx, paidHeaderTotal, solicitacoesRateioPorMes]);
+
+  const naturezaModalTitulo = useMemo(() => {
+    if (naturezaModalMesIdx === null) return 'Totais por natureza (RM)';
+    const mesLabel = MESES_FILTRO[naturezaModalMesIdx + 1]?.label ?? MESES[naturezaModalMesIdx];
+    return `Gastos — ${mesLabel} ${safeSelectedYear}`;
+  }, [naturezaModalMesIdx, safeSelectedYear]);
 
   const solicitacoesControleTotvsPronto = useMemo(() => {
     const t = totvsTotalPagoRes;
@@ -1614,9 +1720,6 @@ export default function ContractDetailPage() {
     const und = Number(d.paidUndated?.total) || 0;
     return mc > 0 || und > 0;
   }, [totvsTotalPagoRes]);
-
-  const solicitacoesRateioPorMes = controleSolicitacoesPorMes.valores;
-  const solicitacoesDetalhePorMes = controleSolicitacoesPorMes.detalhes;
 
   // Soma dos pleitos por ano (para Metas Anuais)
   const pleitosPorAno = useMemo(() => {
@@ -2490,157 +2593,173 @@ export default function ContractDetailPage() {
         <div ref={containerRef} className="space-y-6">
           {/* Header */}
           <div className="space-y-4">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-              <div className="flex items-start gap-3 min-w-0 flex-1">
-                <Link
-                  href="/ponto/contratos"
-                  className="p-2 -ml-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 transition-colors shrink-0"
-                  title="Voltar"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </Link>
-                <div className="min-w-0 flex-1">
-                  <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 break-words">
-                    <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400 shrink-0" />
-                    {contract.name}
-                  </h1>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
-                    Contrato nº {contract.number} • {contract.costCenter?.name || contract.costCenter?.code || '-'}
-                  </p>
-                  <div className="mt-2 text-sm">
-                    {paidDisplay.loading ? (
-                      <p className="text-gray-500 dark:text-gray-400">Carregando total pago (RM)…</p>
-                    ) : paidDisplay.totvsErrorMessage ? (
-                      <p className="text-amber-600 dark:text-amber-400">
-                        <span className="opacity-90">
-                          {paidDisplay.totvsErrorMessage.length > 220
-                            ? `${paidDisplay.totvsErrorMessage.slice(0, 220)}…`
-                            : paidDisplay.totvsErrorMessage}
-                        </span>
-                      </p>
-                    ) : (
-                      <>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-gray-800 dark:text-gray-200">
-                            <span className="font-medium">Total Pago: </span>
-                            {paidHeaderTotal.toLocaleString('pt-BR', {
-                              style: 'currency',
-                              currency: 'BRL'
-                            })}
-                            <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
-                              (RM / TOTVS)
-                            </span>
-                          </p>
-                          {!canOpenNaturezaModal ? null : (
-                            <button
-                              type="button"
-                              onClick={() => setShowNaturezaRmModal(true)}
-                              className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-1.5 text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                              title="Ver totais por natureza (RM)"
-                              aria-label="Ver totais por natureza (RM)"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                        {totvsTotalPagoRes?.success !== false &&
-                        totvsTotalPagoRes?.data?.configured === false ? (
-                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            O servidor não está com o RM habilitado (faltam variáveis TOTVS_RM_* no ambiente do
-                            backend). Reinicie a API após alterar o .env.
-                          </p>
-                        ) : null}
-                        {!paidDisplay.loading &&
-                        totvsTotalPagoRes?.data?.configured === true &&
-                        paidHeaderTotal === 0 &&
-                        (totvsTotalPagoRes?.data?.matchedRowCount ?? 0) === 0 ? (
-                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                            Nenhuma linha do relatório RM (RELATORIOFIN) encontrada para o centro de custo deste
-                            contrato.
-                          </p>
-                        ) : null}
-                      </>
-                    )}
+            <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
+              <Link
+                href="/ponto/contratos"
+                aria-label="Voltar para contratos"
+                className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              >
+                <ArrowLeft className="h-4 w-4 shrink-0" />
+                Voltar
+              </Link>
+              <div className="absolute right-0 top-1/2 z-10 max-w-[45%] -translate-y-1/2 text-right sm:max-w-none">
+                {paidDisplay.loading || totvsRmCarregando ? (
+                  <div className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    <span className="hidden sm:inline">Carregando…</span>
                   </div>
-                </div>
+                ) : paidDisplay.totvsErrorMessage ? (
+                  <span className="text-xs text-amber-600 dark:text-amber-400" title={paidDisplay.totvsErrorMessage}>
+                    RM indisponível
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => openPaidNaturezaModal(null)}
+                    className="rounded-lg px-1 py-0.5 text-base font-bold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 sm:text-lg"
+                    title="Ver totais por natureza (RM)"
+                  >
+                    {paidHeaderTotal.toLocaleString('pt-BR', {
+                      style: 'currency',
+                      currency: 'BRL'
+                    })}
+                  </button>
+                )}
               </div>
-              <div className="flex flex-wrap items-center gap-3 shrink-0">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400 shrink-0">Mês</label>
-                  <select
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                    className="h-9 sm:h-10 min-w-[8rem] sm:min-w-[10rem] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    {MESES_FILTRO.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400 shrink-0">Ano</label>
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(Number(e.target.value))}
-                    className="h-9 sm:h-10 min-w-[5rem] sm:min-w-[6rem] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value={0}>Todos os anos</option>
-                    {availableYears.map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div className="w-full max-w-3xl px-24 text-center sm:px-32">
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl break-words">
+                  {contract.name}
+                </h1>
+                <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                  Contrato nº {contract.number}
+                </p>
               </div>
             </div>
 
-            {/* Barra de ações */}
-            <div className="flex flex-wrap items-center gap-3 p-4 sm:p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
-              {canAccessOrdemServicoModulo ? (
-                <button
-                  onClick={() => setShowPleitoModal(true)}
-                  disabled={!canCreateContrato}
-                  className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-                >
-                  <ClipboardList className="w-4 h-4 shrink-0" />
-                  Ordem de Serviço
-                </button>
-              ) : null}
-              {canAccessProducaoSemanalModulo ? (
-                <button
-                  onClick={() => {
-                    setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
-                    setShowProductionModal(true);
-                  }}
-                  disabled={!canCreateContrato}
-                  className="h-10 px-4 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-                >
-                  <BarChart3 className="w-4 h-4 shrink-0" />
-                  Produção Semanal
-                </button>
-              ) : null}
-              {canAccessOrcamento ? (
-                <Link
-                  href={`/ponto/contratos/${contractId}/orcamento`}
-                  className="h-10 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-                >
-                  <Calculator className="w-4 h-4 shrink-0" />
-                  Orçamento
-                </Link>
-              ) : null}
-              {canAccessRelatorios ? (
-                <Link
-                  href={`/ponto/contratos/${contractId}/relatorios`}
-                  className="h-10 px-4 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium shrink-0"
-                >
-                  <FileImage className="w-4 h-4 shrink-0" />
-                  Relatórios
-                </Link>
-              ) : null}
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Período</span>
+              <select
+                aria-label="Mês"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="h-9 min-w-[9.5rem] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              >
+                {MESES_FILTRO.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Ano"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="h-9 min-w-[5.5rem] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              >
+                <option value={0}>Todos os anos</option>
+                {availableYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {!paidDisplay.loading &&
+            !paidDisplay.totvsErrorMessage &&
+            totvsTotalPagoRes?.success !== false &&
+            totvsTotalPagoRes?.data?.configured === false ? (
+              <p className="text-center text-xs text-amber-600 dark:text-amber-400">
+                O servidor não está com o RM habilitado (faltam variáveis TOTVS_RM_* no ambiente do backend).
+                Reinicie a API após alterar o .env.
+              </p>
+            ) : null}
+            {!paidDisplay.loading &&
+            !paidDisplay.totvsErrorMessage &&
+            totvsTotalPagoRes?.data?.configured === true &&
+            paidHeaderTotal === 0 &&
+            (totvsTotalPagoRes?.data?.matchedRowCount ?? 0) === 0 ? (
+              <p className="text-center text-xs text-gray-500 dark:text-gray-400">
+                Nenhuma linha do relatório RM (RELATORIOFIN) encontrada para o centro de custo deste contrato.
+              </p>
+            ) : null}
+
+            {(canAccessOrdemServicoModulo ||
+              canAccessProducaoSemanalModulo ||
+              canAccessOrcamento ||
+              canAccessRelatorios) && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {canAccessOrdemServicoModulo ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowPleitoModal(true)}
+                    disabled={!canCreateContrato}
+                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-blue-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-blue-600"
+                  >
+                    <div className="rounded-lg bg-blue-100 p-2.5 dark:bg-blue-900/30">
+                      <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 dark:text-gray-100">Ordem de Serviço</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Cadastrar e consultar OS</p>
+                    </div>
+                  </button>
+                ) : null}
+                {canAccessProducaoSemanalModulo ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductionForm({
+                        fillingDate: toInputDate(new Date()),
+                        divSe: '',
+                        weeklyProductionValue: '',
+                        responsiblePerson: ''
+                      });
+                      setShowProductionModal(true);
+                    }}
+                    disabled={!canCreateContrato}
+                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-amber-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-amber-600"
+                  >
+                    <div className="rounded-lg bg-amber-100 p-2.5 dark:bg-amber-900/30">
+                      <BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 dark:text-gray-100">Produção Semanal</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Registrar produção</p>
+                    </div>
+                  </button>
+                ) : null}
+                {canAccessOrcamento ? (
+                  <Link
+                    href={`/ponto/contratos/${contractId}/orcamento`}
+                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-emerald-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-emerald-600"
+                  >
+                    <div className="rounded-lg bg-emerald-100 p-2.5 dark:bg-emerald-900/30">
+                      <Calculator className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 dark:text-gray-100">Orçamento</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Planilhas e valores</p>
+                    </div>
+                  </Link>
+                ) : null}
+                {canAccessRelatorios ? (
+                  <Link
+                    href={`/ponto/contratos/${contractId}/relatorios`}
+                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-rose-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-rose-600"
+                  >
+                    <div className="rounded-lg bg-rose-100 p-2.5 dark:bg-rose-900/30">
+                      <FileImage className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 dark:text-gray-100">Relatórios</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Relatórios fotográficos</p>
+                    </div>
+                  </Link>
+                ) : null}
+              </div>
+            )}
+
           </div>
 
           {/* Card com resumo do contrato */}
@@ -2788,126 +2907,135 @@ export default function ContractDetailPage() {
 
           {/* Controle Geral - Metas Mensais ou Metas Anuais conforme filtro */}
           <Card>
-            <CardHeader className="border-b border-gray-200 dark:border-gray-700">
-              {isAllYears ? (
-                <>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Acumulado Anual
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Indicadores anuais por ano
-                  </p>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Controle Geral - {safeSelectedYear}
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot;
-                    recalculam da data do evento até o fim do contrato; ajuste do valor anual recalcula só entre o mês da data
-                    e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência. Meta real recalcula como saldo ÷ meses
-                    restantes na vigência inteira: sem faturamento ainda, igual à meta ideal; depois do primeiro faturamento,
-                    usa (soma das metas ideais na vigência completa − faturamento já acumulado no contrato até o mês anterior)
-                    ÷ meses de vigência restantes.
-                  </p>
-                  {solicitacoesControleTotvsPronto &&
-                  !solicitacoesRmTemLancamentosNoRelatorio &&
-                  !(totvsTotalPagoLoading || totvsTotalPagoFetching) ? (
-                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                      <span className="font-medium">Solicitações (RM):</span> não há linhas com o centro de custo deste
-                      contrato na consulta de solicitações (ou colunas não detectadas). Confira o cadastro do CC,{' '}
-                      <span className="font-mono">TOTVS_RM_SOLICITACOES_PATH</span> (se for outra consulta no RM),{' '}
-                      <span className="font-mono">TOTVS_RM_SOLICITACOES_CC_COLUMN</span>,{' '}
-                      <span className="font-mono">TOTVS_RM_SOLICITACOES_DATE_COLUMN</span>,{' '}
-                      <span className="font-mono">TOTVS_RM_SOLICITACOES_VALUE_COLUMN</span> e movimentos no ano{' '}
-                      {safeSelectedYear}. O filtro de status da linha Solicitações é opcional (
-                      <span className="font-mono">TOTVS_RM_SOLICITACOES_USE_STATUS_FILTER</span>).
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className="p-2 sm:p-3 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg shrink-0">
+                    <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {isAllYears ? 'Acumulado Anual' : `Controle Geral - ${safeSelectedYear}`}
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {isAllYears ? 'Indicadores anuais por ano' : 'Indicadores mensais do contrato'}
                     </p>
-                  ) : null}
-                </>
-              )}
+                  </div>
+                </div>
+                {!isAllYears ? (
+                  <div className="relative shrink-0 group">
+                    <button
+                      type="button"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-indigo-600 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
+                      aria-label="Como funcionam meta ideal e meta real"
+                    >
+                      <Info className="h-4 w-4 shrink-0" aria-hidden />
+                    </button>
+                    <div
+                      role="tooltip"
+                      className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white p-3 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                    >
+                      {CONTROLE_GERAL_META_AJUDA}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              {!isAllYears &&
+              solicitacoesControleTotvsPronto &&
+              !solicitacoesRmTemLancamentosNoRelatorio &&
+              !totvsRmCarregando ? (
+                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                  <span className="font-medium">Gastos (RM):</span> não há linhas com o centro de custo deste
+                  contrato na consulta de gastos (ou colunas não detectadas). Confira o cadastro do CC,{' '}
+                  <span className="font-mono">TOTVS_RM_SOLICITACOES_PATH</span> (se for outra consulta no RM),{' '}
+                  <span className="font-mono">TOTVS_RM_SOLICITACOES_CC_COLUMN</span>,{' '}
+                  <span className="font-mono">TOTVS_RM_SOLICITACOES_DATE_COLUMN</span>,{' '}
+                  <span className="font-mono">TOTVS_RM_SOLICITACOES_VALUE_COLUMN</span> e movimentos no ano{' '}
+                  {safeSelectedYear}. O filtro de status da linha Gastos é opcional (
+                  <span className="font-mono">TOTVS_RM_SOLICITACOES_USE_STATUS_FILTER</span>).
+                </p>
+              ) : null}
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent>
               <div className="overflow-x-auto">
                 {isAllYears ? (
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-gray-700">
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-32">
+                  <table className="w-full" data-cc-skip-column-customizer="1">
+                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-36 whitespace-nowrap">
                           Indicador
                         </th>
                         {availableYears.map((year) => (
                           <th
                             key={year}
-                            className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[100px]"
+                            className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap"
                           >
                             {year}
                           </th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700">
-                        <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800/50">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      <tr>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                           Meta Anual
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-3 py-4 text-center text-sm font-medium text-gray-900 dark:text-gray-100"
+                            className="px-4 py-3 text-center text-sm font-medium text-gray-900 dark:text-gray-100"
                           >
                             {valorAnualPorAno[year] != null ? formatCurrency(valorAnualPorAno[year]!) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-amber-50/50 dark:bg-amber-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-amber-700 dark:text-amber-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-amber-50/50 dark:bg-amber-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-amber-700 dark:text-amber-400">
                           Produção
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-3 py-4 text-center text-sm font-medium text-amber-700 dark:text-amber-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-amber-700 dark:text-amber-400"
                           >
                             {producaoPorAno[year] > 0 ? formatCurrency(producaoPorAno[year]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700">
-                        <td className="px-4 py-4 text-sm font-medium text-red-600 dark:text-red-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr>
+                        <td className="px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400">
                           Pleitos
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-3 py-4 text-center text-sm font-medium text-red-600 dark:text-red-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-red-600 dark:text-red-400"
                           >
                             {pleitosPorAno[year] > 0 ? formatCurrency(pleitosPorAno[year]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-green-50/50 dark:bg-green-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-green-50/50 dark:bg-green-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                           Faturamento
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-3 py-4 text-center text-sm font-medium text-green-700 dark:text-green-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-green-700 dark:text-green-400"
                           >
                             {faturamentoPorAno[year] > 0 ? formatCurrency(faturamentoPorAno[year]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-teal-50/50 dark:bg-teal-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-teal-800 dark:text-teal-300 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-teal-50/50 dark:bg-teal-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-teal-800 dark:text-teal-300">
                           Prod. - Fat.
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-3 py-4 text-center text-sm font-medium text-teal-700 dark:text-teal-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-teal-700 dark:text-teal-400"
                           >
                             {prodMenosFatPorAno[year] !== 0
                               ? formatCurrency(prodMenosFatPorAno[year])
@@ -2915,27 +3043,27 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-sky-50/50 dark:bg-sky-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-sky-700 dark:text-sky-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-sky-50/50 dark:bg-sky-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-sky-700 dark:text-sky-400">
                           Valor Orçado
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-3 py-4 text-center text-sm font-medium text-sky-700 dark:text-sky-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-sky-700 dark:text-sky-400"
                           >
                             {valorOrcadoPorAno[year] > 0 ? formatCurrency(valorOrcadoPorAno[year]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-orange-50/50 dark:bg-orange-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-orange-700 dark:text-orange-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-orange-50/50 dark:bg-orange-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-orange-700 dark:text-orange-400">
                           Pendente Faturamento
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-3 py-4 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
                           >
                             {pendenteFaturamentoPorAno[year] !== 0 ? formatCurrency(pendenteFaturamentoPorAno[year]) : '-'}
                           </td>
@@ -2944,25 +3072,25 @@ export default function ContractDetailPage() {
                     </tbody>
                   </table>
                 ) : (
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-gray-700">
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-32">
-                          Mês
+                  <table className="w-full" data-cc-skip-column-customizer="1">
+                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-36 whitespace-nowrap">
+                          Indicador
                         </th>
                         {MESES.map((mes) => (
                           <th
                             key={mes}
-                            className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[100px]"
+                            className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap"
                           >
                             {mes}/{safeSelectedYear.toString().slice(-2)}
                           </th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700">
-                        <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800/50">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      <tr>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                           Meta Ideal
                         </td>
                         {MESES.map((mes, i) => {
@@ -2971,15 +3099,15 @@ export default function ContractDetailPage() {
                           return (
                           <td
                             key={mes}
-                            className="px-3 py-4 text-center text-sm font-medium text-gray-900 dark:text-gray-100"
+                            className="px-4 py-3 text-center text-sm font-medium text-gray-900 dark:text-gray-100"
                           >
                             {cellMeta !== null ? formatCurrency(cellMeta) : '-'}
                           </td>
                           );
                         })}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-emerald-50/40 dark:bg-emerald-900/15">
-                        <td className="px-4 py-4 text-sm font-medium text-emerald-800 dark:text-emerald-300 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-emerald-50/40 dark:bg-emerald-900/15">
+                        <td className="px-4 py-3 text-sm font-medium text-emerald-800 dark:text-emerald-300">
                           Meta Real
                         </td>
                         {MESES.map((mes, i) => {
@@ -2987,118 +3115,118 @@ export default function ContractDetailPage() {
                           return (
                             <td
                               key={mes}
-                              className="px-3 py-4 text-center text-sm font-medium text-emerald-800 dark:text-emerald-300"
+                              className="px-4 py-3 text-center text-sm font-medium text-emerald-800 dark:text-emerald-300"
                             >
                               {v !== null ? formatCurrency(v) : '-'}
                             </td>
                           );
                         })}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-violet-50/40 dark:bg-violet-900/15">
-                        <td className="px-4 py-4 text-sm font-medium text-violet-800 dark:text-violet-300 bg-gray-50 dark:bg-gray-800/50">
-                          Solicitações
+                      <tr className="bg-red-50/40 dark:bg-red-900/15">
+                        <td className="px-4 py-3 text-sm font-medium text-red-800 dark:text-red-300">
+                          <div className="flex items-center gap-2">
+                            <span>
+                              {totvsRmCarregando ? 'Gastos (carregando…)' : 'Gastos'}
+                            </span>
+                            {totvsRmCarregando ? (
+                              <Loader2
+                                className="h-3.5 w-3.5 shrink-0 animate-spin text-red-600 dark:text-red-400"
+                                aria-label="Carregando gastos RM"
+                              />
+                            ) : null}
+                          </div>
                         </td>
                         {MESES.map((mes, i) => {
                           const v = solicitacoesRateioPorMes[i];
-                          const detalheMes = solicitacoesDetalhePorMes[i];
                           const semDadoRmSomado =
                             solicitacoesControleTotvsPronto &&
                             !solicitacoesRmTemLancamentosNoRelatorio &&
-                            !(totvsTotalPagoLoading || totvsTotalPagoFetching);
+                            !totvsRmCarregando;
                           const mostrarZeroComoTraco =
                             v !== null && semDadoRmSomado && Math.abs(v) < 1e-9;
-                          const textoCelula =
-                            v === null ? '-' : mostrarZeroComoTraco ? '-' : formatCurrency(v);
-                          const clicavel =
-                            solicitacoesControleTotvsPronto &&
-                            !(totvsTotalPagoLoading || totvsTotalPagoFetching) &&
-                            v !== null &&
-                            !mostrarZeroComoTraco &&
-                            detalheMes.length > 0;
-                          const tituloCelula = clicavel
-                            ? 'Ver detalhes TOTVS RM somados neste mês'
-                            : mostrarZeroComoTraco
-                              ? 'Nenhum lançamento RM somado para este contrato; confira centro de custo e RELATORIOFIN'
-                              : v !== null && detalheMes.length === 0 && solicitacoesRmTemLancamentosNoRelatorio
-                                ? 'Sem movimento RM neste mês civil'
-                                : undefined;
+                          const textoCelula = totvsRmCarregando
+                            ? '…'
+                            : v === null
+                              ? '-'
+                              : mostrarZeroComoTraco
+                                ? '-'
+                                : formatCurrency(v);
+                          const celulaClicavel =
+                            !totvsRmCarregando && v !== null && !mostrarZeroComoTraco;
                           return (
                             <td
                               key={mes}
-                              className={`p-0 align-middle ${clicavel ? 'cursor-pointer' : ''}`}
-                            >
-                              <button
-                                type="button"
-                                disabled={!clicavel}
-                                onClick={() =>
-                                  clicavel &&
-                                  typeof v === 'number' &&
-                                  setSolicitacoesMesModal({
-                                    mesIdx: i,
-                                    mesLabel: `${mes}/${safeSelectedYear.toString().slice(-2)}`,
-                                    celulaTotal: v
-                                  })
+                              role={celulaClicavel ? 'button' : undefined}
+                              tabIndex={celulaClicavel ? 0 : undefined}
+                              onClick={() => {
+                                if (celulaClicavel) openPaidNaturezaModal(i);
+                              }}
+                              onKeyDown={(e) => {
+                                if (!celulaClicavel) return;
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  openPaidNaturezaModal(i);
                                 }
-                                title={tituloCelula}
-                                className={`flex min-h-[3.25rem] w-full items-center justify-center px-3 py-4 text-center text-sm font-medium text-violet-800 dark:text-violet-300 ${
-                                  clicavel
-                                    ? 'hover:bg-violet-200/60 dark:hover:bg-violet-800/35 focus-visible:outline focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-70'
-                                    : ''
-                                }`}
-                              >
-                                {textoCelula}
-                              </button>
+                              }}
+                              title={celulaClicavel ? 'Ver gastos por natureza' : undefined}
+                              className={`px-4 py-3 text-center text-sm font-medium text-red-800 dark:text-red-300 ${
+                                celulaClicavel
+                                  ? 'cursor-pointer transition-colors hover:bg-red-100/70 hover:underline dark:hover:bg-red-900/35'
+                                  : ''
+                              }`}
+                            >
+                              {textoCelula}
                             </td>
                           );
                         })}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-amber-50/50 dark:bg-amber-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-amber-700 dark:text-amber-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-amber-50/50 dark:bg-amber-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-amber-700 dark:text-amber-400">
                           Produção
                         </td>
                         {MESES.map((mes, i) => (
                           <td
                             key={mes}
-                            className="px-3 py-4 text-center text-sm font-medium text-amber-700 dark:text-amber-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-amber-700 dark:text-amber-400"
                           >
                             {producaoPorMes[i] > 0 ? formatCurrency(producaoPorMes[i]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700">
-                        <td className="px-4 py-4 text-sm font-medium text-red-600 dark:text-red-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr>
+                        <td className="px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400">
                           Pleitos
                         </td>
                         {MESES.map((mes, i) => (
                           <td
                             key={mes}
-                            className="px-3 py-4 text-center text-sm font-medium text-red-600 dark:text-red-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-red-600 dark:text-red-400"
                           >
                             {pleitosPorMes[i] > 0 ? formatCurrency(pleitosPorMes[i]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-green-50/50 dark:bg-green-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-green-50/50 dark:bg-green-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                           Faturamento
                         </td>
                         {MESES.map((mes, i) => (
                           <td
                             key={mes}
-                            className="px-3 py-4 text-center text-sm font-medium text-green-700 dark:text-green-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-green-700 dark:text-green-400"
                           >
                             {faturamentoPorMes[i] > 0 ? formatCurrency(faturamentoPorMes[i]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-teal-50/50 dark:bg-teal-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-teal-800 dark:text-teal-300 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-teal-50/50 dark:bg-teal-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-teal-800 dark:text-teal-300">
                           Prod. - Fat.
                         </td>
                         {MESES.map((mes, i) => (
                           <td
                             key={mes}
-                            className="px-3 py-4 text-center text-sm font-medium text-teal-700 dark:text-teal-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-teal-700 dark:text-teal-400"
                           >
                             {prodMenosFatPorMes[i] !== 0
                               ? formatCurrency(prodMenosFatPorMes[i])
@@ -3106,27 +3234,27 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-sky-50/50 dark:bg-sky-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-sky-700 dark:text-sky-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-sky-50/50 dark:bg-sky-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-sky-700 dark:text-sky-400">
                           Valor Orçado
                         </td>
                         {MESES.map((mes, i) => (
                           <td
                             key={mes}
-                            className="px-3 py-4 text-center text-sm font-medium text-sky-700 dark:text-sky-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-sky-700 dark:text-sky-400"
                           >
                             {valorOrcadoPorMes[i] > 0 ? formatCurrency(valorOrcadoPorMes[i]) : '-'}
                           </td>
                         ))}
                       </tr>
-                      <tr className="divide-x divide-gray-200 dark:divide-gray-700 bg-orange-50/50 dark:bg-orange-900/10">
-                        <td className="px-4 py-4 text-sm font-medium text-orange-700 dark:text-orange-400 bg-gray-50 dark:bg-gray-800/50">
+                      <tr className="bg-orange-50/50 dark:bg-orange-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-orange-700 dark:text-orange-400">
                           Pendente Faturamento
                         </td>
                         {MESES.map((mes, i) => (
                           <td
                             key={mes}
-                            className="px-3 py-4 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
                           >
                             {pendenteFaturamentoPorMes[i] !== 0 ? formatCurrency(pendenteFaturamentoPorMes[i]) : '-'}
                           </td>
@@ -3139,170 +3267,40 @@ export default function ContractDetailPage() {
             </CardContent>
           </Card>
 
-          {solicitacoesMesModal ? (() => {
-            const modalRows = [...solicitacoesDetalhePorMes[solicitacoesMesModal.mesIdx]].sort(
-              (a, b) => b.valor - a.valor
-            );
-            const modalSum = modalRows.reduce((acc, r) => acc + r.valor, 0);
-            const celulaTotalModal = solicitacoesMesModal.celulaTotal;
-            const somaDifereCelula = Math.abs(modalSum - celulaTotalModal) > 0.02;
-            const motivoRateioLabel = (m?: SolicitacaoControleMesLinha['rateioMotivo']) => {
-              if (m === 'sem_data') return 'Sem data';
-              if (m === 'fora_vigencia') return 'Data fora da vigência';
-              if (m === 'ano_diferente') return 'Outro ano';
-              return '';
-            };
-            return (
-              <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
-                <div
-                  className="absolute inset-0"
-                  role="presentation"
-                  onClick={() => setSolicitacoesMesModal(null)}
-                />
-                <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
-                  <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-6">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Solicitações (TOTVS RM) — {solicitacoesMesModal.mesLabel}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setSolicitacoesMesModal(null)}
-                      className="rounded p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
-                      aria-label="Fechar"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-6 sm:py-4">
-                    {modalRows.length === 0 ? (
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Nenhum lançamento RM entrando neste mês para o controle (vigência / ano
-                        selecionado).
-                      </p>
-                    ) : (
-                      <div className="w-full max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                        <table className="table-fixed w-[1240px] border-separate border-spacing-0 text-left text-xs sm:text-sm">
-                          <colgroup>
-                            <col className="w-[168px]" />
-                            <col className="w-[100px]" />
-                            <col className="w-[140px]" />
-                            <col className="w-[288px]" />
-                            <col className="w-[200px]" />
-                            <col className="w-[100px]" />
-                            <col className="w-[244px]" />
-                          </colgroup>
-                          <thead className="sticky top-0 z-[1] bg-gray-100 shadow-[0_1px_0_0_rgb(229_231_235)] dark:bg-gray-800 dark:shadow-[0_1px_0_0_rgb(55_65_81)]">
-                            <tr>
-                              <th className="px-3 py-2.5 text-left font-semibold">Valor (mês)</th>
-                              <th className="px-3 py-2.5 text-left font-semibold">Data ref.</th>
-                              <th className="px-3 py-2.5 text-left font-semibold">Ref.</th>
-                              <th className="px-3 py-2.5 text-left font-semibold">Natureza</th>
-                              <th className="px-3 py-2.5 text-left font-semibold">Título</th>
-                              <th className="px-3 py-2.5 text-left font-semibold">Fonte</th>
-                              <th className="px-3 py-2.5 text-left font-semibold">Obs.</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {modalRows.map((row, idx) => (
-                              <tr
-                                key={`${row.datasetId}-${row.solicitationId}-${idx}`}
-                                className="border-t border-gray-100 align-top dark:border-gray-700/80"
-                              >
-                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 tabular-nums font-medium text-gray-900 dark:text-gray-100" title={row.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}>
-                                  {row.valor.toLocaleString('pt-BR', {
-                                    style: 'currency',
-                                    currency: 'BRL'
-                                  })}
-                                </td>
-                                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
-                                  {row.dataRef && !Number.isNaN(row.dataRef.getTime())
-                                    ? row.dataRef.toLocaleDateString('pt-BR')
-                                    : '—'}
-                                </td>
-                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 font-mono text-gray-700 dark:text-gray-300" title={row.solicitationId}>
-                                  {row.solicitationId}
-                                </td>
-                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-700 dark:text-gray-300" title={row.natureza}>
-                                  {row.natureza}
-                                </td>
-                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400" title={row.titulo}>
-                                  {row.titulo}
-                                </td>
-                                <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400">
-                                  {row.datasetId}
-                                </td>
-                                <td
-                                  className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400"
-                                  title={
-                                    !row.parcelaRateio
-                                      ? undefined
-                                      : row.valorOriginal != null
-                                        ? `${row.valorOriginal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} · Rateio (${motivoRateioLabel(row.rateioMotivo)})`
-                                        : `Rateio (${motivoRateioLabel(row.rateioMotivo)})`
-                                  }
-                                >
-                                  {!row.parcelaRateio
-                                    ? '—'
-                                    : `${
-                                        row.valorOriginal != null
-                                          ? `${row.valorOriginal.toLocaleString('pt-BR', {
-                                              style: 'currency',
-                                              currency: 'BRL'
-                                            })} · `
-                                          : ''
-                                      }Rateio (${motivoRateioLabel(row.rateioMotivo)})`}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot>
-                            <tr className="border-t-2 border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-gray-900/40">
-                              <td className="px-3 py-2 font-semibold text-gray-900 dark:text-gray-100" colSpan={4}>
-                                Total da célula
-                              </td>
-                              <td
-                                className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100"
-                                colSpan={3}
-                              >
-                                {modalSum.toLocaleString('pt-BR', {
-                                  style: 'currency',
-                                  currency: 'BRL'
-                                })}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })() : null}
-
           {canAccessOrdemServicoModulo ? (
           <>
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
           <Card>
-            <CardHeader className="border-b border-gray-200 dark:border-gray-700">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                <div className="flex-1">
-                  <div className="flex items-center justify-between gap-3 w-full flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <ClipboardList className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        Ordem de Serviço
-                      </h3>
-                      <button
-                        onClick={() => setShowPleitoModal(true)}
-                        disabled={!canCreateContrato}
-                        className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
-                        title="Nova ordem de serviço"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                      {!loadingPleitos && pleitos.length > 0 && (
-                        <>
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                    <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Ordem de Serviço
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Visualizar e gerenciar ordens de serviço do contrato
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPleitoModal(true)}
+                  disabled={!canCreateContrato}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Nova Ordem de Serviço</span>
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!loadingPleitos && pleitos.length > 0 && (
+                <div className="mb-4 flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
                           <button
                             onClick={handleVisualizarPleito}
                             className="px-3 py-1.5 rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-sm font-medium transition-colors"
@@ -3343,11 +3341,8 @@ export default function ContractDetailPage() {
                             <Trash2 className="w-4 h-4 shrink-0" />
                             {deletePleitosSelecionadosMutation.isPending ? 'Excluindo...' : 'Excluir selecionadas'}
                           </button>
-                        </>
-                      )}
-                    </div>
-                    {!loadingPleitos && allPleitos.length > 0 && (
-                      <div className="flex items-center gap-2 shrink-0">
+                    {allPleitos.length > 0 && (
+                      <>
                         <button
                           onClick={() => setShowHistoricoOsModal(true)}
                           className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
@@ -3360,16 +3355,10 @@ export default function ContractDetailPage() {
                         >
                           Histórico de Pleitos
                         </button>
-                      </div>
+                      </>
                     )}
                   </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                {filteredPleitos.length} {filteredPleitos.length === 1 ? 'ordem de serviço' : 'ordens de serviço'}
-                {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
-                {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
-              </p>
-              {!loadingPleitos && pleitos.length > 0 && (
-                <div className="flex flex-nowrap items-center gap-4 mt-3 overflow-x-auto pb-1">
+                  <div className="flex flex-nowrap items-center gap-4 overflow-x-auto pb-1">
                   <div className="flex items-center gap-2 shrink-0">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Orçamento:</label>
                     <select
@@ -3415,12 +3404,22 @@ export default function ContractDetailPage() {
                       <option value="sem-orcamento">Sem orçamento</option>
                     </select>
                   </div>
+                  </div>
                 </div>
               )}
+              {!loadingPleitos && filteredPleitos.length > 0 && (
+                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                  <span>
+                    Mostrando 1 a {Math.min(LIST_DISPLAY_LIMIT, filteredPleitos.length)} de {filteredPleitos.length}{' '}
+                    {filteredPleitos.length === 1 ? 'ordem de serviço' : 'ordens de serviço'}
+                    {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
+                    {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
+                  </span>
+                  {filteredPleitos.length > LIST_DISPLAY_LIMIT && (
+                    <span>Exibindo os {LIST_DISPLAY_LIMIT} primeiros</span>
+                  )}
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
+              )}
               {loadingPleitos ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   Carregando ordens de serviço...
@@ -3604,28 +3603,44 @@ export default function ContractDetailPage() {
           <>
           {/* Produção Semanal */}
           <Card>
-            <CardHeader className="border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Produção Semanal
-                </h3>
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 sm:p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+                    <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Produção Semanal
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Visualizar e gerenciar produções semanais do contrato
+                    </p>
+                  </div>
+                </div>
                 <button
+                  type="button"
                   onClick={() => {
                     setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
                     setShowProductionModal(true);
                   }}
-                  className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
-                  title="Nova produção semanal"
+                  disabled={!canCreateContrato}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Nova Produção Semanal</span>
                 </button>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                {filteredProductions.length} {filteredProductions.length === 1 ? 'registro' : 'registros'}
-              </p>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent>
+              {!loadingProductions && filteredProductions.length > 0 && (
+                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                  <span>
+                    Mostrando 1 a {filteredProductions.length} de {filteredProductions.length}{' '}
+                    {filteredProductions.length === 1 ? 'registro' : 'registros'}
+                  </span>
+                </div>
+              )}
               {loadingProductions ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   Carregando...
@@ -3726,45 +3741,46 @@ export default function ContractDetailPage() {
 
           {/* Faturamento - Lista de notas */}
           <Card>
-            <CardHeader className="border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Faturamento
-                </h3>
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                    <Receipt className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Faturamento
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Visualizar e gerenciar faturamentos do contrato
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBillingModal(true)}
+                  disabled={!canCreateContrato}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition-colors hover:bg-green-100 dark:border-green-800/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Novo Faturamento</span>
+                </button>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                {filteredBillings.length} {filteredBillings.length === 1 ? 'registro' : 'registros'}
-                {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
-                {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
-              </p>
-              {!loadingBillings && billings.length > 0 && (
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    value={filterBillingOsSe}
-                    onChange={(e) => setFilterBillingOsSe(e.target.value)}
-                    placeholder="Filtrar OS / SE"
-                    className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    value={filterBillingInvoice}
-                    onChange={(e) => setFilterBillingInvoice(e.target.value)}
-                    placeholder="Filtrar Nº nota fiscal"
-                    className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    value={filterBillingGross}
-                    onChange={(e) => setFilterBillingGross(e.target.value)}
-                    placeholder="Filtrar valor bruto"
-                    className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
+            </CardHeader>
+            <CardContent>
+              {!loadingBillings && filteredBillings.length > 0 && (
+                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                  <span>
+                    Mostrando 1 a {Math.min(LIST_DISPLAY_LIMIT, filteredBillings.length)} de {filteredBillings.length}{' '}
+                    {filteredBillings.length === 1 ? 'registro' : 'registros'}
+                    {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
+                    {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
+                  </span>
+                  {filteredBillings.length > LIST_DISPLAY_LIMIT && (
+                    <span>Exibindo os {LIST_DISPLAY_LIMIT} primeiros</span>
+                  )}
                 </div>
               )}
-            </CardHeader>
-            <CardContent className="p-0">
               {loadingBillings ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   Carregando...
@@ -3863,141 +3879,190 @@ export default function ContractDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Modal totais por natureza (RM / TOTVS) */}
-          {showNaturezaRmModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
-              <div className="absolute inset-0" onClick={() => setShowNaturezaRmModal(false)} />
-              <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
-                <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-6">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Totais por natureza (RM)
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowNaturezaRmModal(false)}
-                    className="rounded p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
-                    aria-label="Fechar"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-                <div className="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-6 sm:py-4">
-                  {totvsTotalPagoRes?.data?.costCenterCode ? (
-                    <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-xs dark:border-gray-600 dark:bg-gray-900/40">
-                      <p className="font-semibold text-gray-800 dark:text-gray-200">Conferência do filtro (centro de custo)</p>
-                      <ul className="mt-2 list-inside list-disc space-y-1 text-gray-600 dark:text-gray-300">
-                        <li>
-                          Centro de custo do <strong>contrato</strong> (cadastro no sistema):{' '}
-                          <span className="font-mono">{totvsTotalPagoRes.data.costCenterCode}</span>
-                          {totvsTotalPagoRes.data.costCenterName
-                            ? ` — ${totvsTotalPagoRes.data.costCenterName}`
-                            : ''}
-                        </li>
-                        <li>
-                          Coluna de centro de custo no RM:{' '}
-                          <span className="font-mono">{totvsTotalPagoRes.data.ccColumn || '—'}</span>
-                        </li>
-                        <li>
-                          Coluna de valor somada:{' '}
-                          <span className="font-mono">{totvsTotalPagoRes.data.valueColumn || '—'}</span>
-                        </li>
-                        <li>
-                          Coluna de natureza:{' '}
-                          <span className="font-mono">
-                            {totvsTotalPagoRes.data.naturezaColumn || 'não detectada (defina TOTVS_RM_NATUREZA_COLUMN)'}
-                          </span>
-                        </li>
-                        <li>
-                          Linhas no relatório completo: {totvsTotalPagoRes.data.totalRowCount ?? '—'} · Linhas que
-                          entraram na soma (CC compatível): {totvsTotalPagoRes.data.matchedRowCount ?? '—'}
-                        </li>
-                        {(totvsTotalPagoRes.data.sampleCcValuesMatched || []).length > 0 ? (
-                          <li>
-                            Valores distintos na coluna de CC <em>entre as linhas somadas</em> (amostra):{' '}
-                            {(totvsTotalPagoRes.data.sampleCcValuesMatched || []).join(' · ')}
-                          </li>
-                        ) : null}
-                      </ul>
-                    </div>
-                  ) : null}
+          <Modal
+            isOpen={showPaidNaturezaModal}
+            onClose={() => {
+              setShowPaidNaturezaModal(false);
+              setNaturezaModalMesIdx(null);
+              setExpandedNaturezaKey(null);
+            }}
+            title={naturezaModalTitulo}
+            size="xl"
+          >
+            <p className="mb-2 text-sm text-gray-600 dark:text-gray-400">
+              {naturezaModalMesIdx === null
+                ? 'Naturezas que entram no Total Pago deste contrato (centro de custo no relatório RM).'
+                : `Gastos do mês com data de pagamento no RM (${safeSelectedYear}).`}
+            </p>
+            <p className="mb-4 text-xs text-gray-500 dark:text-gray-500">
+              Clique em uma natureza para expandir os lançamentos
+              {rmLinhasDetalheFonte === 'solicitacoes'
+                ? ' (data de pagamento no RM).'
+                : rmLinhasDetalheFonte === 'paid'
+                  ? ' (relatório financeiro RM — detalhe de solicitações indisponível).'
+                  : '.'}
+            </p>
+            {naturezaModalRowsAtivos.length === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                {naturezaModalMesIdx === null
+                  ? 'Nenhuma natureza com valor no RM para este contrato.'
+                  : 'Nenhuma natureza com lançamento detalhado neste mês.'}
+              </p>
+            ) : (
+              <div className="overflow-x-auto max-h-[70vh]">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        Natureza
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        Valor
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        Lançamentos
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                    {naturezaModalRowsAtivos.map((row) => {
+                      const naturezaKey = normalizeNaturezaLabel(row.natureza);
+                      const isExpanded = expandedNaturezaKey === naturezaKey;
+                      const linhas = solicitacoesLinesAtivos.get(naturezaKey) ?? [];
+                      const linhasTotal = linhas.reduce((s, l) => s + l.valor, 0);
 
-                  {naturezaModalRows.length === 0 ? (
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {naturezaModalRowsRaw.length > 0
-                        ? 'Todas as naturezas deste relatório estão na lista de exclusão operacional; não há linhas para exibir.'
-                        : 'Não foi possível montar o detalhe por natureza: o relatório RM não tem coluna reconhecida como natureza. Peça ao TI para definir TOTVS_RM_NATUREZA_COLUMN com o nome exato da coluna (ex.: NATUREZA, CODNATUR).'}
-                    </p>
-                  ) : (
-                    <>
-                      <div className="mb-3 rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-800/60">
-                        <p className="text-xs text-gray-600 dark:text-gray-400">
-                          Lista só com naturezas que entram no <strong>Total Pago</strong>. Naturezas operacionais fixas
-                          (repasses, empréstimos, etc.) não aparecem aqui — estão cadastradas em código.
-                        </p>
-                      </div>
-                      <table className="w-full text-left text-xs sm:text-sm">
-                        <thead className="sticky top-0 z-[1] bg-gray-100 dark:bg-gray-800">
-                          <tr>
-                            <th className="p-2 font-semibold">Natureza</th>
-                            <th className="p-2 text-right font-semibold whitespace-nowrap">Qtd.</th>
-                            <th className="p-2 text-right font-semibold whitespace-nowrap">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {naturezaModalRows.map((row, idx) => (
-                            <tr
-                              key={`${row.natureza}-${idx}`}
-                              className="border-t border-gray-100 align-top dark:border-gray-700/80"
-                            >
-                              <td
-                                className="max-w-[min(100vw-8rem,26rem)] truncate p-2 text-gray-700 dark:text-gray-300"
-                                title={row.natureza === '—' ? 'Natureza vazia no RM' : row.natureza}
-                              >
-                                {row.natureza === '—' ? 'Sem natureza (RM)' : row.natureza}
-                              </td>
-                              <td className="whitespace-nowrap p-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
-                                {row.count}
-                              </td>
-                              <td className="whitespace-nowrap p-2 text-right tabular-nums font-medium text-gray-900 dark:text-gray-100">
-                                {row.total.toLocaleString('pt-BR', {
-                                  style: 'currency',
-                                  currency: 'BRL'
-                                })}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr className="border-t-2 border-gray-300 bg-gray-50/90 dark:border-gray-600 dark:bg-gray-800/80">
-                            <td className="p-2 font-semibold text-gray-800 dark:text-gray-200">
-                              Total (RM)
+                      return (
+                        <React.Fragment key={row.natureza}>
+                          <tr
+                            role="button"
+                            tabIndex={0}
+                            onClick={() =>
+                              setExpandedNaturezaKey(isExpanded ? null : naturezaKey)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setExpandedNaturezaKey(isExpanded ? null : naturezaKey);
+                              }
+                            }}
+                            className={`cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
+                              isExpanded ? 'bg-gray-50 dark:bg-gray-800/60' : ''
+                            }`}
+                          >
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                              <span className="flex items-start gap-2">
+                                <ChevronDown
+                                  className={`mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition-transform ${
+                                    isExpanded ? 'rotate-180' : ''
+                                  }`}
+                                />
+                                <span>{row.natureza}</span>
+                              </span>
                             </td>
-                            <td className="whitespace-nowrap p-2 text-right font-semibold text-gray-800 dark:text-gray-200">
-                              {naturezaModalTotals.count}
-                            </td>
-                            <td className="whitespace-nowrap p-2 text-right font-semibold text-gray-900 dark:text-gray-100">
-                              {naturezaModalTotals.total.toLocaleString('pt-BR', {
+                            <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {row.total.toLocaleString('pt-BR', {
                                 style: 'currency',
                                 currency: 'BRL'
                               })}
                             </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-400">
+                              {row.count}
+                            </td>
                           </tr>
-                        </tfoot>
-                      </table>
-                    </>
-                  )}
-
-                  {naturezaModalRows.length > 0 ? (
-                    <p className="mt-3 border-t border-gray-200 pt-3 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                      Estes totais vêm das <strong>mesmas</strong> linhas do RM já filtradas pelo centro de custo do
-                      contrato; a soma deve coincidir com o &quot;Total Pago&quot; do cabeçalho (já sem as naturezas
-                      operacionais fixas).
-                    </p>
-                  ) : null}
-                </div>
+                          {isExpanded ? (
+                            <tr className="bg-gray-50/80 dark:bg-gray-800/40">
+                              <td colSpan={3} className="px-4 py-3">
+                                {linhas.length === 0 ? (
+                                  <p className="py-2 text-center text-sm text-gray-500 dark:text-gray-400">
+                                    Nenhum lançamento detalhado retornado pelo RM para esta natureza.
+                                    Reinicie a API após atualizar o backend se o detalhe ainda não carregar.
+                                  </p>
+                                ) : (
+                                  <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <table className="min-w-full text-sm">
+                                      <thead className="bg-white dark:bg-gray-900">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                            Data pagamento
+                                          </th>
+                                          <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                            Competência
+                                          </th>
+                                          <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                            Valor
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-gray-900">
+                                        {linhas.map((linha, idx) => (
+                                          <tr key={`${linha.dataISO ?? 'nd'}-${linha.valor}-${idx}`}>
+                                            <td className="whitespace-nowrap px-3 py-2 text-gray-800 dark:text-gray-200">
+                                              {linha.dataISO
+                                                ? formatDate(linha.dataISO)
+                                                : '—'}
+                                            </td>
+                                            <td className="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400">
+                                              {linha.competencia ?? '—'}
+                                            </td>
+                                            <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-gray-900 dark:text-gray-100">
+                                              {linha.valor.toLocaleString('pt-BR', {
+                                                style: 'currency',
+                                                currency: 'BRL'
+                                              })}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                      <tfoot className="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
+                                        <tr>
+                                          <td
+                                            colSpan={2}
+                                            className="px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-400"
+                                          >
+                                            {linhas.length}{' '}
+                                            {linhas.length === 1 ? 'lançamento' : 'lançamentos'}
+                                            {linhas.length < row.count
+                                              ? ` (amostra; total RM: ${row.count})`
+                                              : ''}
+                                          </td>
+                                          <td className="px-3 py-2 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                            {linhasTotal.toLocaleString('pt-BR', {
+                                              style: 'currency',
+                                              currency: 'BRL'
+                                            })}
+                                          </td>
+                                        </tr>
+                                      </tfoot>
+                                    </table>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ) : null}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="border-t-2 border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-800">
+                    <tr>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        Total
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {naturezaModalTotalAtivo.toLocaleString('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL'
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-400">
+                        {naturezaModalRowsAtivos.reduce((s, r) => s + r.count, 0)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
-            </div>
-          )}
+            )}
+          </Modal>
 
           {/* Modal de aditivos do contrato */}
           {showAddendumModal && (

@@ -308,12 +308,21 @@
     padding: 0 !important;
   }
   
-  /* Garantir que o body não tenha scroll quando modal está aberta */
+  /* Bloqueia scroll da página com modal aberto (sem position:fixed no body — quebra portais/dropdowns fixed) */
   body.modal-open {
     overflow: hidden !important;
-    position: fixed !important;
-    width: 100% !important;
-    height: 100% !important;
+  }
+
+  /* Raiz para dropdowns em portal (não intercepta cliques quando vazio) */
+  #dropdown-portal-root {
+    position: fixed;
+    inset: 0;
+    z-index: 99990;
+    pointer-events: none;
+  }
+
+  #dropdown-portal-root > * {
+    pointer-events: auto;
   }
 }
 

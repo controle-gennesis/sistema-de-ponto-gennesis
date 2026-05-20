@@ -331,6 +331,7 @@ export function useContractTableColumnCustomizer(
 
     tables.forEach((tableEl, idx) => {
       if (!(tableEl instanceof HTMLTableElement)) return;
+      if (tableEl.getAttribute('data-cc-skip-column-customizer') === '1') return;
 
       const key = `${STORAGE_PREFIX}${storageKeyPrefix}:table${idx}`;
       attachTableInteractions(tableEl, key, runtimeRef);
