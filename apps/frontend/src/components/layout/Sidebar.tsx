@@ -438,6 +438,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: ClipboardList,
             description: 'Acompanhar processos de licitação',
             permission: isAdministrator || can(pk('/ponto/licitacoes'))
+          },
+          {
+            name: 'Medições',
+            href: '/ponto/contratos/medicao',
+            icon: FileSpreadsheet,
+            description: 'Importar e visualizar planilhas de medição',
+            permission: isAdministrator || can(pk('/ponto/contratos'))
           }
         ]
       },
