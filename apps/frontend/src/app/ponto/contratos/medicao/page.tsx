@@ -841,69 +841,23 @@ export default function MedicaoPage() {
             {/* Área de importação */}
             <Card>
               <CardContent className="p-6">
-                <div
-                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
-                    dragOver
-                      ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-slate-300 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600'
-                  }`}
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                >
-                  <Upload size={36} className="mx-auto mb-3 text-slate-400" />
-                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Arraste arquivos aqui ou use os botões abaixo
-                  </p>
-                  <p className="text-xs text-slate-400 mb-5">
-                    Suporta múltiplos arquivos .xlsx, .xlsm e .xls. Detecta automaticamente a aba de medição.
-                  </p>
-
-                  <div className="flex flex-wrap justify-center gap-3">
-                    {/* Importar arquivos individuais */}
-                    <label className={BTN_AZUL}>
-                      <FilePlus size={16} />
-                      Importar Arquivos
-                      <input
-                        ref={inputFilesRef}
-                        type="file"
-                        accept=".xlsx,.xlsm,.xlsb,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                        multiple
-                        className="hidden"
-                        disabled={processando}
-                        onChange={(e) => void processarArquivos(e.target.files)}
-                      />
-                    </label>
-
-                    {/* Importar pasta inteira */}
-                    <label className={BTN_VERDE}>
-                      <FolderOpen size={16} />
-                      Importar Pasta
-                      <input
-                        ref={inputFolderRef}
-                        type="file"
-                        accept=".xlsx,.xlsm,.xlsb,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                        multiple
-                        // @ts-expect-error - atributo não padrão suportado por Chrome/Edge
-                        webkitdirectory="true"
-                        className="hidden"
-                        disabled={processando}
-                        onChange={(e) => void processarArquivos(e.target.files)}
-                      />
-                    </label>
-                  </div>
-
-                  {processando && progressoImport && (
-                    <div className="mt-5 w-full max-w-lg mx-auto text-left">
-                      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1.5">
-                        <span>Processando planilhas…</span>
-                        <span className="tabular-nums font-medium">
+                {processando && progressoImport ? (
+                  <div className="py-10 px-4 text-center">
+                    <div className="w-full max-w-md mx-auto text-left">
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4 text-center">
+                        Processando planilhas…
+                      </p>
+                      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-2">
+                        <span>Progresso</span>
+                        <span className="tabular-nums font-semibold text-gray-800 dark:text-gray-100">
                           {progressoImport.atual} / {progressoImport.total}
                           {' '}
-                          ({Math.round((progressoImport.atual / progressoImport.total) * 100)}%)
+                          <span className="font-normal text-gray-500 dark:text-gray-400">
+                            ({Math.round((progressoImport.atual / progressoImport.total) * 100)}%)
+                          </span>
                         </span>
                       </div>
-                      <div className="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                      <div className="h-3 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
                         <div
                           className="h-full rounded-full bg-blue-600 transition-all duration-150 ease-out"
                           style={{
@@ -914,13 +868,66 @@ export default function MedicaoPage() {
                           }}
                         />
                       </div>
+                      <p className="mt-3 text-xs text-center text-gray-500 dark:text-gray-400">
+                        Aguarde, não feche esta página.
+                      </p>
                     </div>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div
+                    className={`border-2 border-dashed rounded-xl text-center transition-colors p-8 ${
+                      dragOver
+                        ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                        : 'border-slate-300 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600'
+                    }`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleDrop}
+                  >
+                    <>
+                      <Upload size={36} className="mx-auto mb-3 text-slate-400" />
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Arraste arquivos aqui ou use os botões abaixo
+                      </p>
+                      <p className="text-xs text-slate-400 mb-5">
+                        Suporta múltiplos arquivos .xlsx, .xlsm e .xls. Detecta automaticamente a aba de medição.
+                      </p>
 
-                <p className="mt-3 text-xs text-slate-400 text-center">
-                  Estrutura esperada de pasta: <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">ZN / 4ª MED / arquivo.xlsm</code>. A aba buscada é <strong>Medição</strong> ou <strong>Orçamento Sintético</strong> (ou a 2ª aba da planilha).
-                </p>
+                      <div className="flex flex-wrap justify-center gap-3">
+                        <label className={BTN_AZUL}>
+                          <FilePlus size={16} />
+                          Importar Arquivos
+                          <input
+                            ref={inputFilesRef}
+                            type="file"
+                            accept=".xlsx,.xlsm,.xlsb,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => void processarArquivos(e.target.files)}
+                          />
+                        </label>
+
+                        <label className={BTN_VERDE}>
+                          <FolderOpen size={16} />
+                          Importar Pasta
+                          <input
+                            ref={inputFolderRef}
+                            type="file"
+                            accept=".xlsx,.xlsm,.xlsb,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                            multiple
+                            // @ts-expect-error - atributo não padrão suportado por Chrome/Edge
+                            webkitdirectory="true"
+                            className="hidden"
+                            onChange={(e) => void processarArquivos(e.target.files)}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
