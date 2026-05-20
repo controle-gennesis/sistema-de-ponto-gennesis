@@ -4,7 +4,6 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import * as XLSX from 'xlsx';
 import {
   Upload,
-  FileSpreadsheet,
   X,
   FolderOpen,
   ChevronDown,
@@ -341,6 +340,37 @@ function uid() {
 }
 
 // ─── Resumo do arquivo (lista + modal) ───────────────────────────────────────
+
+function CabecalhoGrupoMedicao({
+  med,
+  arquivos,
+}: {
+  med: string;
+  arquivos: ArquivoMedicao[];
+}) {
+  const totalItens = arquivos.reduce(
+    (s, a) => s + a.items.filter((i) => !i.isGrupo).length,
+    0
+  );
+  const qtdErros = arquivos.filter((a) => a.erro).length;
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+      <h3 className="text-[15px] font-semibold text-gray-900 dark:text-gray-100">{med}</h3>
+      <span className="text-xs text-gray-500 dark:text-gray-400">
+        {arquivos.length} {arquivos.length === 1 ? 'orçamento' : 'orçamentos'}
+        <span className="mx-1.5 text-gray-300 dark:text-gray-600">·</span>
+        {totalItens} {totalItens === 1 ? 'item' : 'itens'}
+        {qtdErros > 0 && (
+          <span className="text-red-500 dark:text-red-400">
+            <span className="mx-1.5 text-gray-300 dark:text-gray-600">·</span>
+            {qtdErros} com erro
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
 
 function ResumoArquivoMedicao({ arquivo }: { arquivo: ArquivoMedicao }) {
   const totalItens = arquivo.items.filter((i) => !i.isGrupo).length;
@@ -733,7 +763,7 @@ export default function MedicaoPage() {
     }
 
     const rows: (string | number)[][] = [
-      ['Zona', 'Medição', 'Escola / Local', 'Aba', 'Descrição', 'Und', 'Qtde.'],
+      ['Zona', 'Medição', 'Orçamento / Local', 'Aba', 'Descrição', 'Und', 'Qtde.'],
     ];
 
     for (const arq of arquivos) {
@@ -1010,19 +1040,9 @@ export default function MedicaoPage() {
 
                     {Object.entries(medicoes).map(([med, arqs]) => (
                       <div key={med} className="mb-4">
-                        {/* Subtítulo da medição */}
-                        <div className="flex items-center gap-2 mb-2">
-                          <FileSpreadsheet size={14} className="text-blue-500" />
-                          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                            {med}
-                          </span>
-                          <span className="text-xs text-slate-400">
-                            ({arqs.length} {arqs.length === 1 ? 'escola' : 'escolas'} ·{' '}
-                            {arqs.reduce((s, a) => s + a.items.filter((i) => !i.isGrupo).length, 0)} itens)
-                          </span>
-                        </div>
+                        <CabecalhoGrupoMedicao med={med} arquivos={arqs} />
 
-                        <div className="space-y-2 pl-4 border-l-2 border-blue-200 dark:border-blue-800">
+                        <div className="space-y-2 pl-3 sm:pl-4 border-l border-gray-200 dark:border-gray-700 ml-0.5">
                           {arqs.map((arq) => (
                             <ArquivoCard
                               key={arq.id}
@@ -1074,9 +1094,10 @@ export default function MedicaoPage() {
                 <div className="space-y-4">
                   {quantidadeErros > 1 && (
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Arquivo <strong className="text-gray-900 dark:text-gray-100">{indiceErroNavegacao + 1}</strong> de{' '}
-                      <strong className="text-gray-900 dark:text-gray-100">{quantidadeErros}</strong>
-                      {' '}— use as setas no topo ou a lista abaixo para alternar.
+                      Arquivo{' '}
+                      <strong className="text-gray-900 dark:text-gray-100">
+                        {indiceErroNavegacao + 1} de {quantidadeErros}
+                      </strong>
                     </p>
                   )}
 
@@ -1114,31 +1135,6 @@ export default function MedicaoPage() {
                       </button>
                     )}
                   </div>
-
-                  {quantidadeErros > 1 && (
-                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">
-                        Todos com erro
-                      </p>
-                      <ul className="max-h-48 overflow-y-auto space-y-1">
-                        {arquivosComErro.map((arq, idx) => (
-                          <li key={arq.id}>
-                            <button
-                              type="button"
-                              onClick={() => setIndiceErroNavegacao(idx)}
-                              className={`w-full text-left px-3 py-2 rounded-xl border text-sm transition-colors ${
-                                idx === indiceErroNavegacao
-                                  ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/50'
-                                  : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-800'
-                              }`}
-                            >
-                              <ResumoArquivoMedicao arquivo={arq} />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
               )}
             </Modal>
