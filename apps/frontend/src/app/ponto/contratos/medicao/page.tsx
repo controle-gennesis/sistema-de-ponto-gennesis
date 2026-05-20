@@ -842,12 +842,12 @@ export default function MedicaoPage() {
             <Card>
               <CardContent className="p-6">
                 {processando && progressoImport ? (
-                  <div className="py-10 px-4 text-center">
-                    <div className="w-full max-w-md mx-auto text-left">
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4 text-center">
-                        Processando planilhas…
-                      </p>
-                      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-2">
+                  <div className="py-8 space-y-5">
+                    <p className="text-sm font-medium text-center text-gray-800 dark:text-gray-200">
+                      Processando planilhas…
+                    </p>
+                    <div className="w-full space-y-2">
+                      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
                         <span>Progresso</span>
                         <span className="tabular-nums font-semibold text-gray-800 dark:text-gray-100">
                           {progressoImport.atual} / {progressoImport.total}
@@ -868,10 +868,10 @@ export default function MedicaoPage() {
                           }}
                         />
                       </div>
-                      <p className="mt-3 text-xs text-center text-gray-500 dark:text-gray-400">
-                        Aguarde, não feche esta página.
-                      </p>
                     </div>
+                    <p className="text-xs text-center text-gray-500 dark:text-gray-400">
+                      Aguarde, não feche esta página.
+                    </p>
                   </div>
                 ) : (
                   <div
