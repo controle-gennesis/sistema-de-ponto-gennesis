@@ -18,6 +18,8 @@ const MIGRATIONS_TRY_ROLLBACK_IF_FAILED = [
   '20260416140000_dp_request_display_number',
   /** Falhou em prod quando `espelho_nf_mirrors` ainda não existia (só SQL manual). Corrigido por `20260511125000_espelho_nf_init_tables`. */
   '20260511140000_espelho_nf_mirror_measurement_dates',
+  /** Falhou em prod quando `kanban_boards` ainda não existia. Corrigido por `20260520110000_kanban_init_tables`. */
+  '20260520120000_kanban_board_per_department',
 ];
 
 function tryRollbackFailedMigration(migrationName) {
