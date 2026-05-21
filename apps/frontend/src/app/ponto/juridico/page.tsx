@@ -9,10 +9,8 @@ import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent } from '@/components/ui/Card';
 import api from '@/lib/api';
 import {
-  Scale,
   FileText,
   DollarSign,
-  TrendingUp,
   Archive,
   Clock,
   PauseCircle,
@@ -74,32 +72,29 @@ interface KpiCardProps {
   value: string | number;
   subtitle?: string;
   icon: React.ReactNode;
-  color: string;
-  trend?: { value: number; positive: boolean };
+  iconBgClass: string;
 }
 
-function KpiCard({ title, value, subtitle, icon, color, trend }: KpiCardProps) {
+function KpiCard({ title, value, subtitle, icon, iconBgClass }: KpiCardProps) {
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md transition-shadow`}>
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
-          <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
-          {subtitle && (
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{subtitle}</p>
-          )}
-          {trend && (
-            <div className={`flex items-center mt-2 text-xs ${trend.positive ? 'text-green-600' : 'text-red-600'}`}>
-              {trend.positive ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingUp className="w-3 h-3 mr-1 rotate-180" />}
-              {trend.value}% vs mês anterior
-            </div>
-          )}
+    <Card>
+      <CardContent className="p-4 sm:p-6">
+        <div className="flex items-center">
+          <div className={`p-2 sm:p-3 ${iconBgClass} rounded-lg flex-shrink-0`}>
+            {icon}
+          </div>
+          <div className="ml-3 sm:ml-4 min-w-0 flex-1">
+            <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+              {title}
+            </p>
+            <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{value}</p>
+            {subtitle && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{subtitle}</p>
+            )}
+          </div>
         </div>
-        <div className={`p-3 rounded-lg ${color.replace('text-', 'bg-').replace('600', '100')} dark:bg-opacity-20`}>
-          {icon}
-        </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -236,25 +231,18 @@ export default function JuridicoPage() {
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-                  <Scale className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Jurídico</h1>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Controle de processos trabalhistas
-                  </p>
-                </div>
-              </div>
+          <div className="relative flex flex-col items-center gap-4 md:block md:min-h-[4.5rem]">
+            <div className="text-center">
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Processos Trabalhistas</h1>
+              <p className="mt-2 text-gray-600 dark:text-gray-400">
+                Acompanhe status, acordos e valores dos processos
+              </p>
             </div>
             <a
               href="https://app.powerbi.com/view?r=eyJrIjoiYWJmNzI0ZDQtOTRiMC00YmVlLTg4OTEtNzk1N2IxYmE5YmVkIiwidCI6IjRhOTU2YmJhLTU0ZWItNDk0NS1hNTgzLTdiNWNjMTMwMDA4ZiJ9"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors shadow-sm shrink-0 md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
             >
               <BarChart3 className="w-5 h-5" />
               Dashboard Jurídico
@@ -263,105 +251,74 @@ export default function JuridicoPage() {
           </div>
 
           {/* KPIs Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <KpiCard
-              title="Total de Processos"
-              value={estatisticas.totalProcessos}
-              icon={<FileText className="w-5 h-5 text-indigo-600" />}
-              color="text-indigo-600"
-            />
-            <KpiCard
-              title="Arquivados"
-              value={estatisticas.arquivados}
-              subtitle={`${((estatisticas.arquivados / estatisticas.totalProcessos) * 100).toFixed(0)}% do total`}
-              icon={<Archive className="w-5 h-5 text-green-600" />}
-              color="text-green-600"
-            />
-            <KpiCard
-              title="Em Andamento"
-              value={estatisticas.emAndamento}
-              icon={<Clock className="w-5 h-5 text-blue-600" />}
-              color="text-blue-600"
-            />
-            <KpiCard
-              title="Suspensos"
-              value={estatisticas.suspensos}
-              icon={<PauseCircle className="w-5 h-5 text-amber-600" />}
-              color="text-amber-600"
-            />
-            <KpiCard
-              title="Taxa de Acordo"
-              value={`${estatisticas.taxaAcordo.toFixed(0)}%`}
-              subtitle={`${estatisticas.processosComAcordo} processos`}
-              icon={<CheckCircle2 className="w-5 h-5 text-purple-600" />}
-              color="text-purple-600"
-            />
-            <KpiCard
-              title="Em Instrução"
-              value={estatisticas.instrucao}
-              icon={<AlertTriangle className="w-5 h-5 text-red-600" />}
-              color="text-red-600"
-            />
+          <div className="space-y-4 sm:space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+              <KpiCard
+                title="Total de Processos"
+                value={estatisticas.totalProcessos}
+                icon={<FileText className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600 dark:text-indigo-400" />}
+                iconBgClass="bg-indigo-100 dark:bg-indigo-900/30"
+              />
+              <KpiCard
+                title="Em Andamento"
+                value={estatisticas.emAndamento}
+                icon={<Clock className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />}
+                iconBgClass="bg-blue-100 dark:bg-blue-900/30"
+              />
+              <KpiCard
+                title="Suspensos"
+                value={estatisticas.suspensos}
+                icon={<PauseCircle className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />}
+                iconBgClass="bg-amber-100 dark:bg-amber-900/30"
+              />
+              <KpiCard
+                title="Em Instrução"
+                value={estatisticas.instrucao}
+                icon={<AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />}
+                iconBgClass="bg-red-100 dark:bg-red-900/30"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+              <KpiCard
+                title="Arquivados"
+                value={estatisticas.arquivados}
+                subtitle={`${((estatisticas.arquivados / estatisticas.totalProcessos) * 100).toFixed(0)}% do total`}
+                icon={<Archive className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />}
+                iconBgClass="bg-green-100 dark:bg-green-900/30"
+              />
+              <KpiCard
+                title="Taxa de Acordo"
+                value={`${estatisticas.taxaAcordo.toFixed(0)}%`}
+                subtitle={`${estatisticas.processosComAcordo} processos`}
+                icon={<CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600 dark:text-purple-400" />}
+                iconBgClass="bg-purple-100 dark:bg-purple-900/30"
+              />
+            </div>
           </div>
 
           {/* Financial KPIs */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Valor das Causas</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                      {formatCompactCurrency(estatisticas.totalValorCausa)}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Média: {formatCurrency(estatisticas.totalValorCausa / estatisticas.totalProcessos)}
-                    </p>
-                  </div>
-                  <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                    <DollarSign className="w-6 h-6 text-red-600 dark:text-red-400" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total em Acordos</p>
-                    <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">
-                      {formatCompactCurrency(estatisticas.totalValorAcordo)}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {((estatisticas.totalValorAcordo / estatisticas.totalValorCausa) * 100).toFixed(1)}% do valor das causas
-                    </p>
-                  </div>
-                  <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                    <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total em Sentenças</p>
-                    <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
-                      {formatCompactCurrency(estatisticas.totalValorSentenca)}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {((estatisticas.totalValorSentenca / estatisticas.totalValorCausa) * 100).toFixed(1)}% do valor das causas
-                    </p>
-                  </div>
-                  <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                    <Briefcase className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4 sm:gap-6">
+            <KpiCard
+              title="Total Valor das Causas"
+              value={formatCompactCurrency(estatisticas.totalValorCausa)}
+              subtitle={`Média: ${formatCurrency(estatisticas.totalValorCausa / estatisticas.totalProcessos)}`}
+              icon={<DollarSign className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />}
+              iconBgClass="bg-red-100 dark:bg-red-900/30"
+            />
+            <KpiCard
+              title="Total em Acordos"
+              value={formatCompactCurrency(estatisticas.totalValorAcordo)}
+              subtitle={`${((estatisticas.totalValorAcordo / estatisticas.totalValorCausa) * 100).toFixed(1)}% do valor das causas`}
+              icon={<CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />}
+              iconBgClass="bg-green-100 dark:bg-green-900/30"
+            />
+            <KpiCard
+              title="Total em Sentenças"
+              value={formatCompactCurrency(estatisticas.totalValorSentenca)}
+              subtitle={`${((estatisticas.totalValorSentenca / estatisticas.totalValorCausa) * 100).toFixed(1)}% do valor das causas`}
+              icon={<Briefcase className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />}
+              iconBgClass="bg-blue-100 dark:bg-blue-900/30"
+            />
           </div>
 
           {/* Charts Row */}

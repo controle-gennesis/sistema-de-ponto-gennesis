@@ -90,6 +90,10 @@ export function usePermissions() {
 
   const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
 
+  const isDepartmentJuridico =
+    userDepartment?.toLowerCase().includes('jurídico') ||
+    userDepartment?.toLowerCase().includes('juridico');
+
   const employeesKey = pk('/ponto/funcionarios');
   /** Ações granulares persistidas além do `acesso` do módulo (matriz Ver/Criar/Editar/Excluir). */
   const EMPLOYEE_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
@@ -223,6 +227,7 @@ export function usePermissions() {
     isDepartmentProjetos,
     isDepartmentFinanceiro,
     isDepartmentCompras,
+    isDepartmentJuridico,
     permissions: finalPermissions,
     can,
     canAction,
@@ -268,6 +273,7 @@ export function useRoutePermission(route: string) {
     isDepartmentProjetos,
     isDepartmentFinanceiro,
     isDepartmentCompras,
+    isDepartmentJuridico,
     userPosition,
     can,
     dpApprovalContractIds,
@@ -359,6 +365,10 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),
     '/ponto/natureza-orcamentaria':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria')),
+    '/ponto/juridico':
+      isAdministrator || isDepartmentJuridico || can(pk('/ponto/juridico')),
+    '/ponto/financeiro/controle-financeiro':
+      isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro')),
   };
 
   return {

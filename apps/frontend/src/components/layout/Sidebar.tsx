@@ -467,10 +467,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Scale,
         items: [
           {
-            name: 'Jurídico',
+            name: 'Processos Trabalhistas',
             href: '/ponto/juridico',
             icon: Scale,
-            description: 'Gestão jurídica e documentos legais',
+            description: 'Acompanhe status, acordos e valores dos processos',
             permission: isAdministrator || isDepartmentJuridico || can(pk('/ponto/juridico'))
           }
         ]
@@ -861,9 +861,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             const hasActiveItem = category.items.some(item => isActive(item.href));
             const isExpanded = isMenuExpanded(category.id);
             const visibleItems = category.items.filter(item => item.permission);
-            // Sempre mostrar todas as categorias como grupo expansível (título + subitens),
-            // mesmo quando só resta 1 item permitido para o usuário.
-            const forceAsGroup = true;
+            // Sempre mostrar como grupo expansível, exceto módulos com preferDirectLink (1 link direto).
+            const forceAsGroup = !(category as { preferDirectLink?: boolean }).preferDirectLink;
             const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
             const singleItem = isSingleItem ? visibleItems[0] : null;
             

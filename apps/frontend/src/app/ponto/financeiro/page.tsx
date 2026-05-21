@@ -146,7 +146,7 @@ export default function FinanceiroPage() {
 
   return (
     <ProtectedRoute route="/ponto/financeiro">
-      <MainLayout userRole="EMPLOYEE" userName="" onLogout={() => {}}>
+      <MainLayout userRole="EMPLOYEE" userName="">
         <div className="space-y-6">
           {/* Header */}
           <div className="text-center">

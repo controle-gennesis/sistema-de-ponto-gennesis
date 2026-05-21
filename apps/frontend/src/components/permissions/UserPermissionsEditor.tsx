@@ -212,6 +212,7 @@ function inferCategoryFromHref(href: string): string {
   if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes' || h === '/ponto/contratos/medicao') {
     return 'Contratos e Licitações';
   }
+  if (h === '/ponto/juridico') return 'Jurídico';
   if (
     [
       '/ponto/solicitar-materiais',

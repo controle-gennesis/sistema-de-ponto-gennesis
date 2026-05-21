@@ -23,6 +23,7 @@ import { Modal } from '@/components/ui/Modal';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { extratoMatchesAnyNatureCodes, normalizeBudgetNatureCode } from '@/lib/budgetNatureMatch';
@@ -615,9 +616,12 @@ export default function AnaliseExtratoPage() {
   const pageTitle = 'Extrato de Caixa';
   const pageSubtitle = 'Movimentações do extrato de caixa integradas ao TOTVS RM';
 
-  const { isDepartmentFinanceiro, userPosition } = usePermissions();
+  const { isDepartmentFinanceiro, userPosition, can, user } = usePermissions();
   const isAdministrator = userPosition === 'Administrador';
-  const canAccess = isAdministrator || isDepartmentFinanceiro;
+  const canAccess =
+    isAdministrator ||
+    isDepartmentFinanceiro ||
+    can(pathToModuleKey('/ponto/financeiro/analise-extrato'));
 
   const [ccFilterCodes, setCcFilterCodes] = useState<string[]>([]);
   const [natureFilterCodes, setNatureFilterCodes] = useState<string[]>([]);
@@ -925,34 +929,9 @@ export default function AnaliseExtratoPage() {
   const showDashboards =
     !isLoading && !isError && configured && !loadFailed;
 
-  if (!canAccess) {
-    return (
-      <ProtectedRoute route="/ponto/financeiro/analise-extrato">
-        <MainLayout userRole="EMPLOYEE" userName="" onLogout={() => {}}>
-          <Card className="border-red-200 dark:border-red-800">
-            <CardContent className="p-6">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="mt-1 h-6 w-6 flex-shrink-0 text-red-600 dark:text-red-400" />
-                <div>
-                  <h3 className="mb-2 text-lg font-semibold text-red-800 dark:text-red-200">
-                    Acesso Negado
-                  </h3>
-                  <p className="text-sm text-red-700 dark:text-red-300">
-                    Você não tem permissão para acessar esta página. Apenas administradores e
-                    membros do departamento financeiro podem acessar.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </MainLayout>
-      </ProtectedRoute>
-    );
-  }
-
   return (
     <ProtectedRoute route="/ponto/financeiro/analise-extrato">
-      <MainLayout userRole="EMPLOYEE" userName="" onLogout={() => {}}>
+      <MainLayout userRole="EMPLOYEE" userName={user?.name ?? ''}>
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">

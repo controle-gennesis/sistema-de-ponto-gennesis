@@ -9,6 +9,7 @@ import { Sidebar } from './Sidebar';
 import { ChatWidget } from '../chat/ChatWidget';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useLogout } from '@/hooks/useLogout';
 import { useNativeWebRTCCall } from '@/hooks/useNativeWebRTCCall';
 import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
 import { NativeCallProvider } from '@/contexts/NativeCallContext';
@@ -17,10 +18,13 @@ interface MainLayoutProps {
   children: React.ReactNode;
   userRole: 'EMPLOYEE';
   userName: string;
-  onLogout: () => void;
+  /** Opcional: se omitido, usa logout padrão (limpa sessão e vai para /auth/login). */
+  onLogout?: () => void;
 }
 
 export function MainLayout({ children, userRole, userName, onLogout }: MainLayoutProps) {
+  const defaultLogout = useLogout();
+  const handleLogout = onLogout ?? defaultLogout;
   const [isCollapsed, setIsCollapsed] = useState(false);
   /** Esconder o FAB de Conversas enquanto o modal de recorte de foto está aberto (mesmo ícone pode confundir). */
   const [hideConversasFabOverlay, setHideConversasFabOverlay] = useState(false);
@@ -66,7 +70,7 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
       <Sidebar 
         userRole={userRole} 
         userName={userName} 
-        onLogout={onLogout}
+        onLogout={handleLogout}
         onMenuToggle={handleMenuToggle}
       />
       

@@ -527,7 +527,7 @@ export default function ControleFinanceiroPage() {
 
   return (
     <ProtectedRoute route="/ponto/financeiro/controle-financeiro">
-      <MainLayout userRole="EMPLOYEE" userName="" onLogout={() => {}}>
+      <MainLayout userRole="EMPLOYEE" userName="">
         <div className="space-y-6">
           {/* Header */}
           <div className="text-center">
