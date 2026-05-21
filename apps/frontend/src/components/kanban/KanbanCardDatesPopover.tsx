@@ -1,0 +1,343 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { clsx } from 'clsx';
+import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { kanbanInput } from './kanbanFormStyles';
+import { combineDateTime, splitDateTime, toYmd } from './kanbanDateTime';
+
+function parseYmd(s: string): Date | null {
+  if (!s) return null;
+  const d = new Date(s + 'T12:00:00');
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function compareYmd(a: string, b: string): number {
+  return a.localeCompare(b);
+}
+
+export interface KanbanCardDatesPanelProps {
+  startDate: string;
+  endDate: string;
+  onClose: () => void;
+  onSave: (start: string | null, end: string | null) => void | Promise<void>;
+  saving?: boolean;
+}
+
+/** Conteúdo do painel de datas (usar dentro de Modal). */
+export function KanbanCardDatesPanel({
+  startDate: initialStart,
+  endDate: initialEnd,
+  onClose,
+  onSave,
+  saving,
+}: KanbanCardDatesPanelProps) {
+  const initialStartParts = splitDateTime(initialStart);
+  const initialEndParts = splitDateTime(initialEnd);
+
+  const [useStart, setUseStart] = useState(!!initialStart);
+  const [useEnd, setUseEnd] = useState(!!initialEnd);
+  const [startDate, setStartDate] = useState(initialStartParts.date);
+  const [startTime, setStartTime] = useState(initialStartParts.time);
+  const [endDate, setEndDate] = useState(initialEndParts.date);
+  const [endTime, setEndTime] = useState(initialEndParts.time);
+  const [viewDate, setViewDate] = useState(
+    () => parseYmd(initialEndParts.date || initialStartParts.date) ?? new Date(),
+  );
+  const [pickPhase, setPickPhase] = useState<'start' | 'end'>('start');
+
+  useEffect(() => {
+    const s = splitDateTime(initialStart);
+    const e = splitDateTime(initialEnd);
+    setUseStart(!!initialStart);
+    setUseEnd(!!initialEnd);
+    setStartDate(s.date);
+    setStartTime(s.time);
+    setEndDate(e.date);
+    setEndTime(e.time);
+    const anchor = parseYmd(e.date || s.date);
+    if (anchor) setViewDate(anchor);
+    if (initialStart && initialEnd) setPickPhase('start');
+    else if (initialStart && !initialEnd) setPickPhase('end');
+    else setPickPhase('start');
+  }, [initialStart, initialEnd]);
+
+  useEffect(() => {
+    if (useStart && useEnd) {
+      if (!startDate) setPickPhase('start');
+      else if (!endDate) setPickPhase('end');
+    }
+  }, [useStart, useEnd, startDate, endDate]);
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const monthLabel = viewDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const rangeMode = useStart && useEnd;
+
+  const firstDay = new Date(year, month, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  function dayYmd(day: number): string {
+    return toYmd(new Date(year, month, day));
+  }
+
+  function getDayVisual(day: number) {
+    const ymd = dayYmd(day);
+    const s = useStart ? startDate : '';
+    const e = useEnd ? endDate : '';
+    const isStart = !!s && ymd === s;
+    const isEnd = !!e && ymd === e;
+    const inRange =
+      !!s && !!e && s !== e && compareYmd(ymd, s) > 0 && compareYmd(ymd, e) < 0;
+    return { isStart, isEnd, inRange };
+  }
+
+  function pickDay(day: number) {
+    const ymd = dayYmd(day);
+
+    if (rangeMode) {
+      if (pickPhase === 'start') {
+        setStartDate(ymd);
+        setEndDate('');
+        setPickPhase('end');
+      } else {
+        let s = startDate;
+        let e = ymd;
+        if (s && compareYmd(e, s) < 0) {
+          [s, e] = [e, s];
+        }
+        setStartDate(s);
+        setEndDate(e);
+        setPickPhase('start');
+      }
+      return;
+    }
+
+    if (useStart) setStartDate(ymd);
+    else if (useEnd) setEndDate(ymd);
+  }
+
+  async function handleSave() {
+    await onSave(
+      useStart ? combineDateTime(startDate, startTime) || null : null,
+      useEnd ? combineDateTime(endDate, endTime) || null : null,
+    );
+    onClose();
+  }
+
+  async function handleRemove() {
+    setUseStart(false);
+    setUseEnd(false);
+    setStartDate('');
+    setStartTime('09:00');
+    setEndDate('');
+    setEndTime('09:00');
+    setPickPhase('start');
+    await Promise.resolve(onSave(null, null));
+    onClose();
+  }
+
+  return (
+    <div className="w-full max-w-full overflow-x-hidden">
+      <div className="select-none">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex gap-0.5">
+            <button
+              type="button"
+              className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              onClick={() => setViewDate(new Date(year - 1, month, 1))}
+            >
+              <ChevronsLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              onClick={() => setViewDate(new Date(year, month - 1, 1))}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          </div>
+          <span className="text-sm font-medium text-gray-800 dark:text-gray-200 capitalize">
+            {monthLabel}
+          </span>
+          <div className="flex gap-0.5">
+            <button
+              type="button"
+              className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              onClick={() => setViewDate(new Date(year, month + 1, 1))}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              onClick={() => setViewDate(new Date(year + 1, month, 1))}
+            >
+              <ChevronsRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {rangeMode && (
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 text-center mb-2">
+            {pickPhase === 'start'
+              ? 'Selecione a data de início no calendário'
+              : 'Agora selecione a data de término'}
+          </p>
+        )}
+
+        <div className="grid grid-cols-7 gap-0.5 text-center text-[10px] text-gray-500 dark:text-gray-400 mb-1">
+          {['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'].map((d) => (
+            <span key={d}>{d}</span>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-0.5">
+          {cells.map((day, i) => {
+            if (day === null) return <span key={`e-${i}`} />;
+
+            const { isStart, isEnd, inRange } = getDayVisual(day);
+            const isEndpoint = isStart || isEnd;
+
+            return (
+              <button
+                key={day}
+                type="button"
+                onClick={() => pickDay(day)}
+                className={clsx(
+                  'h-8 text-sm rounded-md transition-colors flex items-center justify-center',
+                  isEndpoint &&
+                    'bg-red-600 dark:bg-red-500 text-white font-semibold',
+                  inRange &&
+                    !isEndpoint &&
+                    'bg-red-100/90 dark:bg-red-950/45 text-red-800 dark:text-red-200',
+                  !isEndpoint &&
+                    !inRange &&
+                    'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/80',
+                )}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-5 pt-5 border-t border-gray-200 dark:border-gray-700 space-y-5">
+        <div className="space-y-3">
+          <Checkbox
+            checked={useStart}
+            onChange={(checked) => {
+              setUseStart(checked);
+              if (!checked) {
+                setStartDate('');
+                setPickPhase(endDate && useEnd ? 'end' : 'start');
+              }
+            }}
+            label="Data de início"
+          />
+          {useStart && (
+            <div className="kanban-datetime-field grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex min-w-0 flex-col">
+                <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                  Data
+                </span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    if (useEnd && !endDate) setPickPhase('end');
+                  }}
+                  className={clsx(kanbanInput, 'w-full')}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col">
+                <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                  Hora
+                </span>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className={clsx(kanbanInput, 'w-full')}
+                  title="Hora de início"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <Checkbox
+            checked={useEnd}
+            onChange={(checked) => {
+              setUseEnd(checked);
+              if (!checked) {
+                setEndDate('');
+                setPickPhase('start');
+              }
+            }}
+            label="Data de término"
+          />
+          {useEnd && (
+            <div className="kanban-datetime-field grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex min-w-0 flex-col">
+                <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                  Data
+                </span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    if (useStart && startDate) setPickPhase('start');
+                  }}
+                  className={clsx(kanbanInput, 'w-full')}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col">
+                <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                  Hora
+                </span>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className={clsx(kanbanInput, 'w-full')}
+                  title="Hora de término"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-2 border-t border-gray-200 dark:border-gray-700 pt-4">
+        <Button
+          type="button"
+          className="w-full !bg-red-600 hover:!bg-red-700 !text-white border-transparent focus:outline-none focus:ring-0 focus-visible:ring-0"
+          onClick={handleSave}
+          loading={saving}
+        >
+          Salvar
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full border-gray-300 dark:border-gray-600"
+          onClick={handleRemove}
+          disabled={saving}
+        >
+          Remover
+        </Button>
+      </div>
+    </div>
+  );
+}

@@ -53,6 +53,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Processos do Fluig', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
   { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações Gerais', href: '/ponto/solicitacoes-dp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/drive'), name: 'Meu Drive', href: '/ponto/drive', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/kanban'), name: 'Tasks', href: '/ponto/kanban', category: 'Principal' },
   // Departamento Pessoal
   { key: pathToModuleKey('/ponto/funcionarios'), name: 'Funcionários', href: '/ponto/funcionarios', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/folha-pagamento'), name: 'Folha de Pagamento', href: '/ponto/folha-pagamento', category: 'Departamento Pessoal' },
@@ -85,6 +86,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Contratos e Licitações',
   },
   { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contratos e Licitações' },
+  {
+    key: pathToModuleKey('/ponto/contratos/medicao'),
+    name: 'Medições',
+    href: '/ponto/contratos/medicao',
+    category: 'Contratos e Licitações',
+  },
   { key: pathToModuleKey('/ponto/pleitos-gerados'), name: 'Pleitos Gerados', href: '/ponto/pleitos-gerados', category: 'Engenharia' },
   // Suprimentos
   { key: pathToModuleKey('/ponto/solicitar-materiais'), name: 'Solicitar Materiais', href: '/ponto/solicitar-materiais', category: 'Suprimentos' },
@@ -153,6 +160,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
     name: 'Aprovar Espelho da Nota Fiscal',
     href: '/ponto/controle/aprovar-espelho-nf',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/visualizar-todos-kanbans'),
+    name: 'Visualizar Kanbans de todos os setores',
+    href: '/ponto/controle/visualizar-todos-kanbans',
     category: 'Controle',
   },
 ] as const;

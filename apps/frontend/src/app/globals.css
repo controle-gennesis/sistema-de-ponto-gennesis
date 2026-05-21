@@ -158,6 +158,26 @@
   .input-error {
     @apply input border-error-500 focus:ring-error-500;
   }
+
+  /* Campos de data/hora do Kanban — evita indicador absoluto que estoura a modal */
+  .kanban-datetime-field input[type="date"],
+  .kanban-datetime-field input[type="time"] {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    padding-right: 0.75rem;
+    cursor: pointer;
+  }
+
+  .kanban-datetime-field input[type="date"]::-webkit-calendar-picker-indicator,
+  .kanban-datetime-field input[type="time"]::-webkit-calendar-picker-indicator {
+    position: static;
+    right: auto;
+    top: auto;
+    transform: none;
+    margin-inline-start: 0.25rem;
+    cursor: pointer;
+  }
   
   /* Estilos para selects */
   select {
@@ -249,12 +269,15 @@
   }
   
   .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+    scrollbar-color: transparent transparent !important;
   }
   
   .scrollbar-hide::-webkit-scrollbar {
-    display: none;
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
   }
   
 /* Scrollbar ultra-fina, sem fundo, sem setas e totalmente quadrada */

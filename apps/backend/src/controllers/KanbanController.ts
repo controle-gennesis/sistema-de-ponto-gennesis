@@ -1,0 +1,396 @@
+import { Response, NextFunction } from 'express';
+import multer from 'multer';
+import { createError } from '../middleware/errorHandler';
+import { AuthRequest } from '../middleware/auth';
+import { KanbanService, KANBAN_FORBIDDEN } from '../services/KanbanService';
+
+const kanbanService = new KanbanService();
+
+const kanbanUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+function requireUserId(req: AuthRequest, next: NextFunction): string | null {
+  const id = req.user?.id;
+  if (!id) {
+    next(createError('Usuário não autenticado', 401));
+    return null;
+  }
+  return id;
+}
+
+function handleKanbanError(error: unknown, next: NextFunction) {
+  const msg = error instanceof Error ? error.message : '';
+  if (msg === KANBAN_FORBIDDEN) {
+    return next(createError('Sem permissão para acessar este quadro', 403));
+  }
+  next(error);
+}
+
+export class KanbanController {
+  async listPickerUsers(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const users = await kanbanService.listPickerUsers(userId);
+      res.json({ success: true, data: users });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async listBoards(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const boards = await kanbanService.listBoardsForUser(userId);
+      res.json({ success: true, data: boards });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async getBoard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const departmentKey =
+        typeof req.query.departmentKey === 'string' ? req.query.departmentKey : undefined;
+      const board = await kanbanService.getBoardForUser(userId, departmentKey);
+      res.json({ success: true, data: board });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado para este setor') {
+        return next(createError(msg, 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async createColumn(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { title, color, cardLimit, boardId } = req.body;
+      if (!title?.trim()) return next(createError('Título da coluna é obrigatório', 400));
+      if (!color?.trim()) return next(createError('Cor da coluna é obrigatória', 400));
+
+      const column = await kanbanService.createColumn(userId, {
+        boardId,
+        title: title.trim(),
+        color: color.trim(),
+        cardLimit: cardLimit != null ? Number(cardLimit) : undefined,
+      });
+
+      res.status(201).json({ success: true, data: column });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async updateColumn(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { id } = req.params;
+      const { title, color, cardLimit } = req.body;
+
+      const column = await kanbanService.updateColumn(userId, id, {
+        title: title?.trim(),
+        color: color?.trim(),
+        cardLimit: cardLimit === undefined ? undefined : cardLimit == null ? null : Number(cardLimit),
+      });
+
+      res.json({ success: true, data: column });
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === 'P2025') {
+        return next(createError('Coluna não encontrada', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async deleteColumn(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { id } = req.params;
+      await kanbanService.deleteColumn(userId, id);
+      res.json({ success: true, message: 'Coluna removida' });
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === 'P2025') {
+        return next(createError('Coluna não encontrada', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async createCard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const {
+        columnId,
+        title,
+        description,
+        priority,
+        startDate,
+        endDate,
+        labels,
+        assigneeUserId,
+        assigneeName,
+        memberUserIds,
+        totalTasks,
+        completedTasks,
+      } = req.body;
+
+      if (!columnId) return next(createError('columnId é obrigatório', 400));
+      if (!title?.trim()) return next(createError('Título do card é obrigatório', 400));
+
+      const card = await kanbanService.createCard(userId, {
+        columnId,
+        title,
+        description,
+        priority,
+        startDate,
+        endDate,
+        labels,
+        assigneeUserId,
+        assigneeName,
+        memberUserIds: Array.isArray(memberUserIds) ? memberUserIds : undefined,
+        totalTasks: totalTasks != null ? Number(totalTasks) : 0,
+        completedTasks: completedTasks != null ? Number(completedTasks) : 0,
+      });
+
+      res.status(201).json({ success: true, data: card });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async updateCard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { id } = req.params;
+      const {
+        columnId,
+        title,
+        description,
+        priority,
+        startDate,
+        endDate,
+        labels,
+        assigneeUserId,
+        assigneeName,
+        totalTasks,
+        completedTasks,
+        checklistEnabled,
+        attachmentsEnabled,
+        position,
+      } = req.body;
+
+      const card = await kanbanService.updateCard(userId, id, {
+        columnId,
+        title: title?.trim(),
+        description,
+        priority,
+        startDate,
+        endDate,
+        labels,
+        assigneeUserId,
+        assigneeName,
+        totalTasks: totalTasks != null ? Number(totalTasks) : undefined,
+        completedTasks: completedTasks != null ? Number(completedTasks) : undefined,
+        checklistEnabled:
+          checklistEnabled !== undefined ? Boolean(checklistEnabled) : undefined,
+        attachmentsEnabled:
+          attachmentsEnabled !== undefined ? Boolean(attachmentsEnabled) : undefined,
+        position: position != null ? Number(position) : undefined,
+      });
+
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado' || (error as { code?: string })?.code === 'P2025') {
+        return next(createError('Card não encontrado', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async deleteCard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { id } = req.params;
+      await kanbanService.deleteCard(userId, id);
+      res.json({ success: true, message: 'Card removido' });
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === 'P2025') {
+        return next(createError('Card não encontrado', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async addCardMember(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const requesterId = requireUserId(req, next);
+      if (!requesterId) return;
+      const { cardId } = req.params;
+      const { userId } = req.body;
+      if (!userId) return next(createError('userId é obrigatório', 400));
+      const card = await kanbanService.addCardMember(requesterId, cardId, userId);
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado' || msg === 'Usuário não encontrado') {
+        return next(createError(msg, 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async removeCardMember(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const requesterId = requireUserId(req, next);
+      if (!requesterId) return;
+      const { cardId, userId } = req.params;
+      const card = await kanbanService.removeCardMember(requesterId, cardId, userId);
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async getCardById(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const card = await kanbanService.getCardById(userId, req.params.id);
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async createChecklistItem(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { title } = req.body;
+      if (!title?.trim()) return next(createError('Título da tarefa é obrigatório', 400));
+      const item = await kanbanService.createChecklistItem(userId, req.params.cardId, title);
+      const card = await kanbanService.getCardById(userId, req.params.cardId);
+      res.status(201).json({ success: true, data: { item, card } });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async updateChecklistItem(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { title, isDone, assigneeUserId, dueDate } = req.body;
+      const item = await kanbanService.updateChecklistItem(userId, req.params.id, {
+        title,
+        isDone,
+        assigneeUserId: assigneeUserId !== undefined ? assigneeUserId : undefined,
+        dueDate: dueDate !== undefined ? dueDate : undefined,
+      });
+      const card = await kanbanService.getCardById(userId, item.cardId);
+      res.json({ success: true, data: { item, card } });
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === 'P2025') {
+        return next(createError('Tarefa não encontrada', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async deleteChecklistItem(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      await kanbanService.deleteChecklistItem(userId, req.params.id);
+      res.json({ success: true, message: 'Tarefa removida' });
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === 'P2025') {
+        return next(createError('Tarefa não encontrada', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async createComment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { content } = req.body;
+      if (!content?.trim()) return next(createError('Comentário não pode ser vazio', 400));
+      const comment = await kanbanService.createComment(
+        userId,
+        req.params.cardId,
+        content,
+      );
+      res.status(201).json({ success: true, data: comment });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async deleteComment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      await kanbanService.deleteComment(userId, req.params.id);
+      res.json({ success: true, message: 'Comentário removido' });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Comentário não encontrado' || (error as { code?: string })?.code === 'P2025') {
+        return next(createError('Comentário não encontrado', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  static uploadAttachments() {
+    return kanbanUpload.array('attachments', 10);
+  }
+
+  async addAttachments(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const files = (req as AuthRequest & { files?: Express.Multer.File[] }).files ?? [];
+      const card = await kanbanService.addAttachments(userId, req.params.cardId, files);
+      res.status(201).json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      if (msg === 'Nenhum arquivo enviado') return next(createError(msg, 400));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async deleteAttachment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const card = await kanbanService.deleteAttachment(userId, req.params.id);
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Anexo não encontrado') return next(createError(msg, 404));
+      if (msg === 'Sem permissão para remover este anexo') return next(createError(msg, 403));
+      handleKanbanError(error, next);
+    }
+  }
+}

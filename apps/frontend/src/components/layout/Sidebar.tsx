@@ -58,7 +58,8 @@ import {
   Camera,
   PencilLine,
   Trash2,
-  Loader2
+  Loader2,
+  ListTodo
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -255,6 +256,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
             permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+          },
+          {
+            name: 'Tasks',
+            href: '/ponto/kanban',
+            icon: ListTodo,
+            description: 'Gerencie tarefas em colunas',
+            permission: true
           }
         ]
       },
@@ -444,7 +452,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             href: '/ponto/contratos/medicao',
             icon: FileSpreadsheet,
             description: 'Importar e visualizar planilhas de medição',
-            permission: isAdministrator || can(pk('/ponto/contratos'))
+            permission: isAdministrator || can(pk('/ponto/contratos/medicao'))
           }
         ]
       },

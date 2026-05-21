@@ -1,0 +1,49 @@
+import { Router } from 'express';
+import { KanbanController } from '../controllers/KanbanController';
+import { authenticate } from '../middleware/auth';
+
+const router = Router();
+const controller = new KanbanController();
+
+router.use(authenticate);
+
+router.get('/boards', (req, res, next) => controller.listBoards(req, res, next));
+router.get('/picker-users', (req, res, next) => controller.listPickerUsers(req, res, next));
+router.get('/board', (req, res, next) => controller.getBoard(req, res, next));
+
+router.post('/columns', (req, res, next) => controller.createColumn(req, res, next));
+router.patch('/columns/:id', (req, res, next) => controller.updateColumn(req, res, next));
+router.delete('/columns/:id', (req, res, next) => controller.deleteColumn(req, res, next));
+
+router.post('/cards', (req, res, next) => controller.createCard(req, res, next));
+router.post('/cards/:cardId/members', (req, res, next) => controller.addCardMember(req, res, next));
+router.delete('/cards/:cardId/members/:userId', (req, res, next) =>
+  controller.removeCardMember(req, res, next),
+);
+router.get('/cards/:id', (req, res, next) => controller.getCardById(req, res, next));
+router.patch('/cards/:id', (req, res, next) => controller.updateCard(req, res, next));
+router.delete('/cards/:id', (req, res, next) => controller.deleteCard(req, res, next));
+
+router.post('/cards/:cardId/checklist-items', (req, res, next) =>
+  controller.createChecklistItem(req, res, next),
+);
+router.patch('/checklist-items/:id', (req, res, next) =>
+  controller.updateChecklistItem(req, res, next),
+);
+router.delete('/checklist-items/:id', (req, res, next) =>
+  controller.deleteChecklistItem(req, res, next),
+);
+
+router.post('/cards/:cardId/comments', (req, res, next) =>
+  controller.createComment(req, res, next),
+);
+router.delete('/comments/:id', (req, res, next) => controller.deleteComment(req, res, next));
+
+router.post(
+  '/cards/:cardId/attachments',
+  KanbanController.uploadAttachments(),
+  (req, res, next) => controller.addAttachments(req, res, next),
+);
+router.delete('/attachments/:id', (req, res, next) => controller.deleteAttachment(req, res, next));
+
+export default router;

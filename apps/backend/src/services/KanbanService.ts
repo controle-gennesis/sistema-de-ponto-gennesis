@@ -1,0 +1,1002 @@
+import { TaskPriority } from '@prisma/client';
+import {
+  isKanbanHiddenPickerUser,
+  KANBAN_LEGACY_DEPARTMENT_KEY,
+  userCanViewAllKanbanBoards,
+} from '../lib/kanbanAccess';
+import { prisma } from '../lib/prisma';
+import { ChatService } from './ChatService';
+
+const chatUploadService = new ChatService();
+
+export const KANBAN_FORBIDDEN = 'KANBAN_FORBIDDEN';
+
+export function normalizeDepartmentKey(dept: string | null | undefined): string {
+  if (!dept?.trim()) return 'SEM_SETOR';
+  return dept.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+function slugFromDepartmentKey(key: string): string {
+  const slug = key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return slug || 'sem-setor';
+}
+
+const AVATAR_COLORS = [
+  'bg-gradient-to-br from-amber-400 to-orange-500',
+  'bg-gradient-to-br from-sky-400 to-blue-600',
+  'bg-gradient-to-br from-violet-400 to-purple-600',
+  'bg-gradient-to-br from-emerald-400 to-teal-600',
+  'bg-gradient-to-br from-rose-400 to-pink-600',
+  'bg-gradient-to-br from-indigo-400 to-blue-600',
+];
+
+function avatarColorForKey(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = key.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function calcProgress(completed: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.round((completed / total) * 100);
+}
+
+function priorityToClient(p: TaskPriority): string {
+  return p.toLowerCase();
+}
+
+function priorityFromClient(p: string): TaskPriority {
+  const map: Record<string, TaskPriority> = {
+    low: TaskPriority.LOW,
+    medium: TaskPriority.MEDIUM,
+    high: TaskPriority.HIGH,
+    critical: TaskPriority.CRITICAL,
+  };
+  return map[p?.toLowerCase()] ?? TaskPriority.MEDIUM;
+}
+
+function parseDateInput(value?: string | null): Date | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value + 'T12:00:00');
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function formatDateTimeForClient(d: Date | null): string | null {
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+export type KanbanCardLabelDto = { color: string; text: string };
+
+function parseLabels(raw: unknown): KanbanCardLabelDto[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (x): x is KanbanCardLabelDto =>
+        !!x &&
+        typeof x === 'object' &&
+        typeof (x as KanbanCardLabelDto).color === 'string',
+    )
+    .map((x) => ({
+      color: x.color,
+      text: String(x.text ?? '').trim(),
+    }));
+}
+
+function labelsToJson(labels?: KanbanCardLabelDto[]) {
+  if (labels === undefined) return undefined;
+  return labels.map((l) => ({ color: l.color, text: l.text.trim() }));
+}
+
+export type KanbanCardMemberDto = {
+  userId: string;
+  name: string;
+  profilePhotoUrl: string | null;
+  avatarColor: string;
+};
+
+function formatMembersList(card: {
+  members?: Array<{ user: { id: string; name: string; profilePhotoUrl: string | null } }>;
+  assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
+  assigneeUserId: string | null;
+  assigneeName: string | null;
+}): KanbanCardMemberDto[] {
+  if (card.members?.length) {
+    return card.members.map((m) => ({
+      userId: m.user.id,
+      name: m.user.name,
+      profilePhotoUrl: m.user.profilePhotoUrl,
+      avatarColor: avatarColorForKey(m.user.id),
+    }));
+  }
+  if (card.assignee) {
+    return [
+      {
+        userId: card.assignee.id,
+        name: card.assignee.name,
+        profilePhotoUrl: card.assignee.profilePhotoUrl,
+        avatarColor: avatarColorForKey(card.assignee.id),
+      },
+    ];
+  }
+  return [];
+}
+
+function formatCard(card: {
+  id: string;
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  startDate: Date | null;
+  endDate: Date | null;
+  assigneeUserId: string | null;
+  assigneeName: string | null;
+  totalTasks: number;
+  completedTasks: number;
+  checklistEnabled: boolean;
+  attachmentsEnabled: boolean;
+  position: number;
+  labels?: unknown;
+  createdAt: Date;
+  updatedAt?: Date;
+  assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
+  members?: Array<{ user: { id: string; name: string; profilePhotoUrl: string | null } }>;
+  _count?: { comments: number; attachments: number };
+}) {
+  const members = formatMembersList(card);
+  const assignee =
+    members.length > 0
+      ? members.map((m) => m.name).join(', ')
+      : (card.assignee?.name ?? card.assigneeName ?? 'Sem responsável');
+  const primary = members[0];
+  const colorKey = primary?.userId ?? card.assigneeUserId ?? card.assigneeName ?? assignee;
+  return {
+    id: card.id,
+    title: card.title,
+    description: card.description,
+    priority: priorityToClient(card.priority),
+    startDate: formatDateTimeForClient(card.startDate),
+    endDate: formatDateTimeForClient(card.endDate),
+    assignee,
+    assigneeUserId: primary?.userId ?? card.assigneeUserId,
+    assigneeProfilePhotoUrl: primary?.profilePhotoUrl ?? card.assignee?.profilePhotoUrl ?? null,
+    assigneeColor: avatarColorForKey(colorKey),
+    members,
+    progress: calcProgress(card.completedTasks, card.totalTasks),
+    totalTasks: card.totalTasks,
+    completedTasks: card.completedTasks,
+    checklistEnabled: card.checklistEnabled,
+    attachmentsEnabled: card.attachmentsEnabled,
+    position: card.position,
+    labels: parseLabels(card.labels),
+    attachments: card._count?.attachments ?? 0,
+    comments: card._count?.comments ?? 0,
+    createdAt: card.createdAt.toISOString(),
+    updatedAt: card.updatedAt?.toISOString() ?? card.createdAt.toISOString(),
+  };
+}
+
+export type KanbanChecklistItemDto = {
+  id: string;
+  cardId: string;
+  title: string;
+  isDone: boolean;
+  position: number;
+  dueDate: string | null;
+  assigneeUserId: string | null;
+  assignee: {
+    id: string;
+    name: string;
+    profilePhotoUrl: string | null;
+    avatarColor: string;
+  } | null;
+};
+
+function formatChecklistItem(item: {
+  id: string;
+  cardId: string;
+  title: string;
+  isDone: boolean;
+  position: number;
+  dueDate: Date | null;
+  assigneeUserId: string | null;
+  assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
+}): KanbanChecklistItemDto {
+  const due =
+    item.dueDate && !Number.isNaN(item.dueDate.getTime())
+      ? item.dueDate.toISOString().slice(0, 10)
+      : null;
+  return {
+    id: item.id,
+    cardId: item.cardId,
+    title: item.title,
+    isDone: item.isDone,
+    position: item.position,
+    dueDate: due,
+    assigneeUserId: item.assigneeUserId,
+    assignee: item.assignee
+      ? {
+          id: item.assignee.id,
+          name: item.assignee.name,
+          profilePhotoUrl: item.assignee.profilePhotoUrl,
+          avatarColor: avatarColorForKey(item.assignee.id),
+        }
+      : null,
+  };
+}
+
+const memberUserSelect = { id: true, name: true, profilePhotoUrl: true } as const;
+
+const cardInclude = {
+  assignee: { select: memberUserSelect },
+  members: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { user: { select: memberUserSelect } },
+  },
+  _count: { select: { comments: true, attachments: true } },
+} as const;
+
+const boardListInclude = {
+  columns: {
+    orderBy: { position: 'asc' as const },
+    include: {
+      cards: { orderBy: { position: 'asc' as const }, include: cardInclude },
+    },
+  },
+} as const;
+
+async function migrateLegacyCardMembers() {
+  const cards = await prisma.kanbanCard.findMany({
+    where: {
+      assigneeUserId: { not: null },
+      members: { none: {} },
+    },
+    select: { id: true, assigneeUserId: true },
+  });
+  if (cards.length === 0) return;
+  await prisma.kanbanCardMember.createMany({
+    data: cards.map((c) => ({ cardId: c.id, userId: c.assigneeUserId! })),
+    skipDuplicates: true,
+  });
+}
+
+async function syncLegacyAssignee(cardId: string) {
+  const first = await prisma.kanbanCardMember.findFirst({
+    where: { cardId },
+    orderBy: { createdAt: 'asc' },
+    include: { user: { select: { id: true, name: true } } },
+  });
+  await prisma.kanbanCard.update({
+    where: { id: cardId },
+    data: {
+      assigneeUserId: first?.user.id ?? null,
+      assigneeName: first?.user.name ?? null,
+    },
+  });
+}
+
+async function syncCardTaskCounts(cardId: string) {
+  const items = await prisma.kanbanChecklistItem.findMany({ where: { cardId } });
+  const totalTasks = items.length;
+  const completedTasks = items.filter((i) => i.isDone).length;
+  await prisma.kanbanCard.update({
+    where: { id: cardId },
+    data: {
+      totalTasks,
+      completedTasks,
+      ...(totalTasks === 0 ? { checklistEnabled: false } : {}),
+    },
+  });
+  return { totalTasks, completedTasks };
+}
+
+function formatBoardResponse(
+  board: {
+    id: string;
+    name: string;
+    slug: string;
+    departmentKey: string;
+    departmentLabel: string;
+    columns: Array<{
+      id: string;
+      title: string;
+      color: string;
+      position: number;
+      cardLimit: number | null;
+      cards: Parameters<typeof formatCard>[0][];
+    }>;
+  },
+  meta?: { canWrite?: boolean },
+) {
+  return {
+    id: board.id,
+    name: board.name,
+    slug: board.slug,
+    department: board.departmentLabel,
+    departmentKey: board.departmentKey,
+    canWrite: meta?.canWrite ?? true,
+    columns: board.columns.map((col) => ({
+      id: col.id,
+      title: col.title,
+      color: col.color,
+      position: col.position,
+      limit: col.cardLimit ?? undefined,
+      cards: col.cards.map(formatCard),
+    })),
+  };
+}
+
+async function seedBoardForDepartment(
+  departmentKey: string,
+  departmentLabel: string,
+  createdById?: string,
+) {
+  return prisma.kanbanBoard.create({
+    data: {
+      name: 'Tasks',
+      slug: slugFromDepartmentKey(departmentKey),
+      departmentKey,
+      departmentLabel,
+      createdById: createdById ?? null,
+      columns: {
+        create: [
+          { title: 'Planned', color: '#111827', position: 0 },
+          { title: 'Active', color: '#14B8A6', position: 1 },
+          { title: 'Completed', color: '#3B82F6', position: 2 },
+        ],
+      },
+    },
+    include: boardListInclude,
+  });
+}
+
+export class KanbanService {
+  private async getUserDepartment(userId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { employee: { select: { department: true } } },
+    });
+    if (!user) throw new Error('Usuário não encontrado');
+    const label = user.employee?.department?.trim() || 'Sem setor';
+    const key = normalizeDepartmentKey(label);
+    return { key, label };
+  }
+
+  private async getOrCreateBoardForDepartment(userId: string) {
+    const { key, label } = await this.getUserDepartment(userId);
+
+    let board = await prisma.kanbanBoard.findUnique({
+      where: { departmentKey: key },
+      include: boardListInclude,
+    });
+
+    if (!board) {
+      board = await seedBoardForDepartment(key, label, userId);
+    }
+
+    return board;
+  }
+
+  private async assertBoardAccess(
+    userId: string,
+    departmentKey: string,
+    mode: 'read' | 'write',
+  ) {
+    const { key } = await this.getUserDepartment(userId);
+    if (departmentKey === key) return;
+    if (mode === 'read' && (await userCanViewAllKanbanBoards(userId))) return;
+    throw new Error(KANBAN_FORBIDDEN);
+  }
+
+  private async assertColumnAccess(
+    userId: string,
+    columnId: string,
+    mode: 'read' | 'write' = 'write',
+  ) {
+    const column = await prisma.kanbanColumn.findUnique({
+      where: { id: columnId },
+      include: { board: { select: { departmentKey: true } } },
+    });
+    if (!column) throw new Error(KANBAN_FORBIDDEN);
+    await this.assertBoardAccess(userId, column.board.departmentKey, mode);
+  }
+
+  private async assertCardAccess(
+    userId: string,
+    cardId: string,
+    mode: 'read' | 'write' = 'write',
+  ) {
+    const card = await prisma.kanbanCard.findUnique({
+      where: { id: cardId },
+      include: { column: { include: { board: { select: { departmentKey: true } } } } },
+    });
+    if (!card) throw new Error(KANBAN_FORBIDDEN);
+    await this.assertBoardAccess(userId, card.column.board.departmentKey, mode);
+  }
+
+  async listBoardsForUser(userId: string) {
+    const { key: ownKey } = await this.getUserDepartment(userId);
+    const canViewAll = await userCanViewAllKanbanBoards(userId);
+
+    const boards = await prisma.kanbanBoard.findMany({
+      where: canViewAll
+        ? { departmentKey: { not: KANBAN_LEGACY_DEPARTMENT_KEY } }
+        : { departmentKey: ownKey },
+      orderBy: { departmentLabel: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        departmentKey: true,
+        departmentLabel: true,
+        updatedAt: true,
+        _count: {
+          select: {
+            columns: true,
+          },
+        },
+      },
+    });
+
+    return boards.map((b) => ({
+      id: b.id,
+      name: b.name,
+      slug: b.slug,
+      departmentKey: b.departmentKey,
+      department: b.departmentLabel,
+      columnCount: b._count.columns,
+      updatedAt: b.updatedAt.toISOString(),
+      isOwnDepartment: b.departmentKey === ownKey,
+    }));
+  }
+
+  async getBoardForUser(userId: string, departmentKeyParam?: string) {
+    await migrateLegacyCardMembers();
+    const { key: ownKey } = await this.getUserDepartment(userId);
+    const targetKey = departmentKeyParam
+      ? normalizeDepartmentKey(departmentKeyParam)
+      : ownKey;
+
+    if (targetKey === KANBAN_LEGACY_DEPARTMENT_KEY) {
+      throw new Error('Quadro não encontrado para este setor');
+    }
+
+    await this.assertBoardAccess(userId, targetKey, 'read');
+
+    let board =
+      targetKey === ownKey
+        ? await this.getOrCreateBoardForDepartment(userId)
+        : await prisma.kanbanBoard.findUnique({
+            where: { departmentKey: targetKey },
+            include: boardListInclude,
+          });
+
+    if (!board) {
+      throw new Error('Quadro não encontrado para este setor');
+    }
+
+    const canWrite = targetKey === ownKey;
+    return formatBoardResponse(board, { canWrite });
+  }
+
+  async createColumn(
+    userId: string,
+    data: {
+      boardId?: string;
+      title: string;
+      color: string;
+      cardLimit?: number;
+    },
+  ) {
+    const board = data.boardId
+      ? await prisma.kanbanBoard.findUnique({ where: { id: data.boardId } })
+      : await this.getOrCreateBoardForDepartment(userId);
+
+    if (!board) throw new Error('Quadro não encontrado');
+
+    const { key } = await this.getUserDepartment(userId);
+    if (board.departmentKey !== key) throw new Error(KANBAN_FORBIDDEN);
+
+    const maxPos = await prisma.kanbanColumn.aggregate({
+      where: { boardId: board.id },
+      _max: { position: true },
+    });
+
+    const column = await prisma.kanbanColumn.create({
+      data: {
+        boardId: board.id,
+        title: data.title,
+        color: data.color,
+        cardLimit: data.cardLimit ?? null,
+        position: (maxPos._max.position ?? -1) + 1,
+      },
+      include: { cards: { include: cardInclude } },
+    });
+
+    return {
+      id: column.id,
+      title: column.title,
+      color: column.color,
+      position: column.position,
+      limit: column.cardLimit ?? undefined,
+      cards: column.cards.map(formatCard),
+    };
+  }
+
+  async updateColumn(
+    userId: string,
+    id: string,
+    data: { title?: string; color?: string; cardLimit?: number | null },
+  ) {
+    await this.assertColumnAccess(userId, id);
+    const column = await prisma.kanbanColumn.update({
+      where: { id },
+      data: {
+        title: data.title,
+        color: data.color,
+        cardLimit: data.cardLimit,
+      },
+      include: {
+        cards: { orderBy: { position: 'asc' }, include: cardInclude },
+      },
+    });
+
+    return {
+      id: column.id,
+      title: column.title,
+      color: column.color,
+      position: column.position,
+      limit: column.cardLimit ?? undefined,
+      cards: column.cards.map(formatCard),
+    };
+  }
+
+  async deleteColumn(userId: string, id: string) {
+    await this.assertColumnAccess(userId, id);
+    await prisma.kanbanColumn.delete({ where: { id } });
+  }
+
+  async createCard(
+    userId: string,
+    data: {
+    columnId: string;
+    title: string;
+    description?: string;
+    priority?: string;
+    startDate?: string | null;
+    endDate?: string | null;
+    labels?: KanbanCardLabelDto[];
+    assigneeUserId?: string | null;
+    assigneeName?: string;
+    memberUserIds?: string[];
+    totalTasks?: number;
+    completedTasks?: number;
+  },
+  ) {
+    await this.assertColumnAccess(userId, data.columnId);
+    const maxPos = await prisma.kanbanCard.aggregate({
+      where: { columnId: data.columnId },
+      _max: { position: true },
+    });
+
+    let assigneeName = data.assigneeName?.trim() || null;
+    if (data.assigneeUserId) {
+      const user = await prisma.user.findUnique({
+        where: { id: data.assigneeUserId },
+        select: { name: true },
+      });
+      if (user) assigneeName = user.name;
+    }
+
+    const memberIds = [
+      ...new Set(
+        (data.memberUserIds ?? []).filter(Boolean).concat(
+          data.assigneeUserId ? [data.assigneeUserId] : [],
+        ),
+      ),
+    ];
+
+    const card = await prisma.kanbanCard.create({
+      data: {
+        columnId: data.columnId,
+        title: data.title.trim(),
+        description: data.description?.trim() ?? '',
+        priority: priorityFromClient(data.priority ?? 'medium'),
+        startDate: parseDateInput(data.startDate) ?? null,
+        endDate: parseDateInput(data.endDate) ?? null,
+        labels: labelsToJson(data.labels ?? []) ?? [],
+        assigneeUserId: memberIds[0] ?? data.assigneeUserId ?? null,
+        assigneeName,
+        totalTasks: data.totalTasks ?? 0,
+        completedTasks: Math.min(data.completedTasks ?? 0, data.totalTasks ?? 0),
+        position: (maxPos._max.position ?? -1) + 1,
+        ...(memberIds.length > 0
+          ? {
+              members: {
+                create: memberIds.map((userId) => ({ userId })),
+              },
+            }
+          : {}),
+      },
+      include: cardInclude,
+    });
+
+    if (memberIds.length > 0) {
+      const firstUser = await prisma.user.findUnique({
+        where: { id: memberIds[0] },
+        select: { name: true },
+      });
+      if (firstUser) {
+        await prisma.kanbanCard.update({
+          where: { id: card.id },
+          data: { assigneeUserId: memberIds[0], assigneeName: firstUser.name },
+        });
+      }
+    }
+
+    const full = await prisma.kanbanCard.findUnique({
+      where: { id: card.id },
+      include: cardInclude,
+    });
+    return formatCard(full!);
+  }
+
+  async updateCard(
+    userId: string,
+    id: string,
+    data: {
+      columnId?: string;
+      title?: string;
+      description?: string;
+      priority?: string;
+      startDate?: string | null;
+      endDate?: string | null;
+      labels?: KanbanCardLabelDto[];
+      assigneeUserId?: string | null;
+      assigneeName?: string;
+      totalTasks?: number;
+      completedTasks?: number;
+      checklistEnabled?: boolean;
+      attachmentsEnabled?: boolean;
+      position?: number;
+    },
+  ) {
+    await this.assertCardAccess(userId, id);
+    const existing = await prisma.kanbanCard.findUnique({ where: { id } });
+    if (!existing) throw new Error('Card não encontrado');
+
+    if (data.columnId && data.columnId !== existing.columnId) {
+      await this.assertColumnAccess(userId, data.columnId);
+    }
+
+    let assigneeName: string | null | undefined = data.assigneeName?.trim();
+    if (data.assigneeUserId !== undefined) {
+      if (data.assigneeUserId) {
+        const user = await prisma.user.findUnique({
+          where: { id: data.assigneeUserId },
+          select: { name: true },
+        });
+        assigneeName = user?.name ?? assigneeName ?? null;
+      } else {
+        assigneeName =
+          data.assigneeName !== undefined
+            ? data.assigneeName?.trim() || null
+            : null;
+      }
+    }
+
+    const totalTasks = data.totalTasks ?? existing.totalTasks;
+    const completedTasks = Math.min(
+      data.completedTasks ?? existing.completedTasks,
+      totalTasks,
+    );
+
+    if (data.columnId && data.columnId !== existing.columnId) {
+      const maxPos = await prisma.kanbanCard.aggregate({
+        where: { columnId: data.columnId },
+        _max: { position: true },
+      });
+      data.position = (maxPos._max.position ?? -1) + 1;
+    }
+
+    const card = await prisma.kanbanCard.update({
+      where: { id },
+      data: {
+        columnId: data.columnId,
+        title: data.title?.trim(),
+        description: data.description?.trim(),
+        priority: data.priority ? priorityFromClient(data.priority) : undefined,
+        startDate: parseDateInput(data.startDate),
+        endDate: parseDateInput(data.endDate),
+        labels: labelsToJson(data.labels),
+        assigneeUserId: data.assigneeUserId,
+        assigneeName: assigneeName !== undefined ? assigneeName : undefined,
+        totalTasks,
+        completedTasks,
+        checklistEnabled: data.checklistEnabled,
+        attachmentsEnabled: data.attachmentsEnabled,
+        position: data.position,
+      },
+      include: cardInclude,
+    });
+
+    return formatCard(card);
+  }
+
+  async deleteCard(userId: string, id: string) {
+    await this.assertCardAccess(userId, id);
+    await prisma.kanbanCard.delete({ where: { id } });
+  }
+
+  async listPickerUsers(requesterId: string) {
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        id: { not: requesterId },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        profilePhotoUrl: true,
+        employee: { select: { position: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+    return users
+      .filter((u) => !isKanbanHiddenPickerUser(u))
+      .map(({ employee: _e, ...u }) => u);
+  }
+
+  async addCardMember(requesterId: string, cardId: string, userId: string) {
+    await this.assertCardAccess(requesterId, cardId);
+    const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
+    if (!card) throw new Error('Card não encontrado');
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, isActive: true, employee: { select: { position: true } } },
+    });
+    if (!user?.isActive || isKanbanHiddenPickerUser(user)) {
+      throw new Error('Usuário não encontrado');
+    }
+
+    await prisma.kanbanCardMember.upsert({
+      where: { cardId_userId: { cardId, userId } },
+      create: { cardId, userId },
+      update: {},
+    });
+    await syncLegacyAssignee(cardId);
+    return this.getCardById(requesterId, cardId);
+  }
+
+  async removeCardMember(requesterId: string, cardId: string, userId: string) {
+    await this.assertCardAccess(requesterId, cardId);
+    const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
+    if (!card) throw new Error('Card não encontrado');
+
+    await prisma.kanbanCardMember.deleteMany({ where: { cardId, userId } });
+    await syncLegacyAssignee(cardId);
+    return this.getCardById(requesterId, cardId);
+  }
+
+  async getCardById(userId: string, id: string) {
+    await this.assertCardAccess(userId, id, 'read');
+    const card = await prisma.kanbanCard.findUnique({
+      where: { id },
+      include: {
+        assignee: { select: memberUserSelect },
+        members: {
+          orderBy: { createdAt: 'asc' },
+          include: { user: { select: memberUserSelect } },
+        },
+        column: { select: { id: true, title: true, color: true } },
+        checklistItems: {
+          orderBy: { position: 'asc' },
+          include: { assignee: { select: memberUserSelect } },
+        },
+        comments: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            author: { select: { id: true, name: true, profilePhotoUrl: true } },
+          },
+        },
+        attachments: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            uploader: { select: { id: true, name: true } },
+          },
+        },
+        _count: { select: { comments: true, attachments: true } },
+      },
+    });
+    if (!card) throw new Error('Card não encontrado');
+
+    const base = formatCard(card);
+    return {
+      ...base,
+      columnId: card.columnId,
+      columnTitle: card.column.title,
+      columnColor: card.column.color,
+      attachmentsList: card.attachments.map((a) => ({
+        id: a.id,
+        fileName: a.fileName,
+        fileUrl: a.fileUrl,
+        fileSize: a.fileSize,
+        mimeType: a.mimeType,
+        createdAt: a.createdAt.toISOString(),
+        uploader: {
+          id: a.uploader.id,
+          name: a.uploader.name,
+        },
+      })),
+      checklistItems: card.checklistItems.map((item) => formatChecklistItem(item)),
+      commentsList: card.comments.map((c) => ({
+        id: c.id,
+        content: c.content,
+        createdAt: c.createdAt.toISOString(),
+        author: {
+          id: c.author.id,
+          name: c.author.name,
+          profilePhotoUrl: c.author.profilePhotoUrl,
+          avatarColor: avatarColorForKey(c.author.id),
+        },
+      })),
+    };
+  }
+
+  async createChecklistItem(userId: string, cardId: string, title: string) {
+    await this.assertCardAccess(userId, cardId);
+    const maxPos = await prisma.kanbanChecklistItem.aggregate({
+      where: { cardId },
+      _max: { position: true },
+    });
+    const item = await prisma.kanbanChecklistItem.create({
+      data: {
+        cardId,
+        title: title.trim(),
+        position: (maxPos._max.position ?? -1) + 1,
+      },
+      include: { assignee: { select: memberUserSelect } },
+    });
+    await syncCardTaskCounts(cardId);
+    await prisma.kanbanCard.update({
+      where: { id: cardId },
+      data: { checklistEnabled: true },
+    });
+    return formatChecklistItem(item);
+  }
+
+  async updateChecklistItem(
+    userId: string,
+    id: string,
+    data: {
+      title?: string;
+      isDone?: boolean;
+      assigneeUserId?: string | null;
+      dueDate?: string | null;
+    },
+  ) {
+    const existing = await prisma.kanbanChecklistItem.findUnique({
+      where: { id },
+      select: { cardId: true },
+    });
+    if (!existing) throw new Error('Tarefa não encontrada');
+    await this.assertCardAccess(userId, existing.cardId);
+
+    const item = await prisma.kanbanChecklistItem.update({
+      where: { id },
+      data: {
+        title: data.title?.trim(),
+        isDone: data.isDone,
+        ...(data.assigneeUserId !== undefined && { assigneeUserId: data.assigneeUserId }),
+        ...(data.dueDate !== undefined && { dueDate: parseDateInput(data.dueDate) }),
+      },
+      include: { assignee: { select: memberUserSelect } },
+    });
+    await syncCardTaskCounts(item.cardId);
+    return formatChecklistItem(item);
+  }
+
+  async deleteChecklistItem(userId: string, id: string) {
+    const item = await prisma.kanbanChecklistItem.findUnique({
+      where: { id },
+      select: { cardId: true },
+    });
+    if (!item) return;
+    await this.assertCardAccess(userId, item.cardId);
+    await prisma.kanbanChecklistItem.delete({ where: { id } });
+    await syncCardTaskCounts(item.cardId);
+  }
+
+  async createComment(requesterId: string, cardId: string, content: string) {
+    await this.assertCardAccess(requesterId, cardId);
+    const comment = await prisma.kanbanCardComment.create({
+      data: {
+        cardId,
+        userId: requesterId,
+        content: content.trim(),
+      },
+      include: {
+        author: { select: { id: true, name: true, profilePhotoUrl: true } },
+      },
+    });
+    return {
+      id: comment.id,
+      content: comment.content,
+      createdAt: comment.createdAt.toISOString(),
+      author: {
+        id: comment.author.id,
+        name: comment.author.name,
+        profilePhotoUrl: comment.author.profilePhotoUrl,
+        avatarColor: avatarColorForKey(comment.author.id),
+      },
+    };
+  }
+
+  async deleteComment(requesterId: string, id: string) {
+    const comment = await prisma.kanbanCardComment.findUnique({
+      where: { id },
+      select: { cardId: true },
+    });
+    if (!comment) throw new Error('Comentário não encontrado');
+    await this.assertCardAccess(requesterId, comment.cardId);
+    await prisma.kanbanCardComment.delete({ where: { id } });
+  }
+
+  async addAttachments(
+    requesterId: string,
+    cardId: string,
+    files: Array<{ originalname: string; buffer: Buffer; size: number; mimetype?: string }>,
+  ) {
+    await this.assertCardAccess(requesterId, cardId);
+    const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
+    if (!card) throw new Error('Card não encontrado');
+    if (!files.length) throw new Error('Nenhum arquivo enviado');
+
+    for (const file of files) {
+      const upload = await chatUploadService.uploadFile(file, requesterId);
+      await prisma.kanbanCardAttachment.create({
+        data: {
+          cardId,
+          userId: requesterId,
+          fileName: file.originalname || 'arquivo',
+          fileUrl: upload.url,
+          fileKey: upload.key,
+          fileSize: upload.size,
+          mimeType: upload.mimeType,
+        },
+      });
+    }
+
+    await prisma.kanbanCard.update({
+      where: { id: cardId },
+      data: { attachmentsEnabled: true },
+    });
+
+    return this.getCardById(requesterId, cardId);
+  }
+
+  async deleteAttachment(requesterId: string, attachmentId: string) {
+    const att = await prisma.kanbanCardAttachment.findUnique({ where: { id: attachmentId } });
+    if (!att) throw new Error('Anexo não encontrado');
+    await this.assertCardAccess(requesterId, att.cardId);
+    if (att.userId !== requesterId) throw new Error('Sem permissão para remover este anexo');
+
+    await prisma.kanbanCardAttachment.delete({ where: { id: attachmentId } });
+
+    const remaining = await prisma.kanbanCardAttachment.count({
+      where: { cardId: att.cardId },
+    });
+    if (remaining === 0) {
+      await prisma.kanbanCard.update({
+        where: { id: att.cardId },
+        data: { attachmentsEnabled: false },
+      });
+    }
+
+    return this.getCardById(requesterId, att.cardId);
+  }
+}

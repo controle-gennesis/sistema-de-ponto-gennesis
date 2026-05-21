@@ -146,6 +146,12 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-espelho-nf'));
 
+  /** Lista e visualização dos quadros Tasks de todos os setores (somente leitura fora do próprio setor). */
+  const canViewAllKanbanBoards =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/visualizar-todos-kanbans'));
+
   /** Lista de orçamentos: módulo Contratos + permissão checklist «Orçamento» em pelo menos um contrato. */
   const canAccessOrcamentoRoutePage =
     isElevatedUser ||
@@ -225,6 +231,7 @@ export function usePermissions() {
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
     canApproveEspelhoNf,
+    canViewAllKanbanBoards,
     canAccessContract,
     contractModuleFlags,
     canAccessOrcamentoRoutePage,
@@ -339,6 +346,7 @@ export function useRoutePermission(route: string) {
       can(pk('/ponto/espelho-nf/codigos-tributarios')) ||
       can(pk('/ponto/espelho-nf')),
     '/ponto/licitacoes': isAdministrator || can(pk('/ponto/licitacoes')),
+    '/ponto/contratos/medicao': isAdministrator || can(pk('/ponto/contratos/medicao')),
     '/ponto/solicitar-materiais': isAdministrator || can(pk('/ponto/solicitar-materiais')),
     '/ponto/gerenciar-materiais': isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais')),
     '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),

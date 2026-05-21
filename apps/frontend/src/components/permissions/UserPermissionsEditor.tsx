@@ -208,7 +208,7 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Engenharia';
   }
-  if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes') {
+  if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes' || h === '/ponto/contratos/medicao') {
     return 'Contratos e Licitações';
   }
   if (

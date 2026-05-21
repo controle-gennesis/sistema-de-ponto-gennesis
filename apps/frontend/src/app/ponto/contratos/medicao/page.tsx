@@ -822,7 +822,7 @@ export default function MedicaoPage() {
   );
 
   return (
-    <ProtectedRoute route="/ponto/contratos">
+    <ProtectedRoute route="/ponto/contratos/medicao">
       <MainLayout
         userRole={user.role}
         userName={user.name}
