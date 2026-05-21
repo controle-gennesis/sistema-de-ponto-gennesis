@@ -660,6 +660,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
   const selectedModule = menuItems.find((c) => c.id === selectedModuleId) ?? menuItems[0];
 
+  const activeModuleId = menuItems.find((category) =>
+    category.items.some((item) => item.permission && isActive(item.href))
+  )?.id;
+
+  /** Um único módulo destacado no rail: painel aberto → módulo selecionado; recolhido → rota atual */
+  const railModuleActiveId = tier2Visible
+    ? selectedModuleId
+    : activeModuleId ?? selectedModuleId;
+
+  const handleCollapseSidebar = () => {
+    if (activeModuleId) setSelectedModuleId(activeModuleId);
+    setIsCollapsed(true);
+  };
+
   // Selecionar módulo conforme rota ativa
   React.useEffect(() => {
     const activeCategory = menuItems.find((category) =>
@@ -731,10 +745,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           <nav className="flex-1 overflow-y-auto overflow-x-hidden pb-4 px-2 space-y-3">
             {menuItems.map((category) => {
               const CategoryIcon = category.icon;
-              const hasActiveItem = category.items.some(
-                (item) => item.permission && isActive(item.href)
-              );
-              const isSelected = selectedModuleId === category.id;
+              const isRailActive = category.id === railModuleActiveId;
               const visibleItems = category.items.filter((item) => item.permission);
               const forceAsGroup = !(category as { preferDirectLink?: boolean }).preferDirectLink;
               const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
@@ -767,13 +778,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     type="button"
                     onClick={() => handleSelectModule(category.id)}
                     className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                      isSelected || hasActiveItem
+                      isRailActive
                         ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                     }`}
                     title={category.name}
                     aria-label={category.name}
-                    aria-current={isSelected ? 'true' : undefined}
+                    aria-current={isRailActive ? 'true' : undefined}
                   >
                     <CategoryIcon className="w-5 h-5" />
                   </button>
@@ -998,7 +1009,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               </h2>
               <div className="flex items-center gap-1 shrink-0">
                 <button
-                  onClick={() => setIsCollapsed(true)}
+                  onClick={handleCollapseSidebar}
                   className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
                   title="Recolher menu"
                 >
