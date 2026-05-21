@@ -347,6 +347,86 @@ const EXTRATO_TD_CENTER = 'px-3 py-3 text-center sm:px-4';
 const EXTRATO_TD_HISTORICO =
   'max-w-[16rem] truncate px-3 py-3 text-left text-gray-700 dark:text-gray-300 sm:px-4';
 
+const skeletonPulse = 'animate-pulse rounded-md bg-gray-200/90 dark:bg-gray-700/80';
+
+function ExtratoCaixaLoadingSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Carregando extrato de caixa">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <Card key={i}>
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className={`h-11 w-11 shrink-0 rounded-lg sm:h-12 sm:w-12 ${skeletonPulse}`} />
+                <div className="min-w-0 flex-1 space-y-2.5">
+                  <div className={`h-3.5 w-24 ${skeletonPulse}`} />
+                  <div className={`h-7 w-36 max-w-full ${skeletonPulse}`} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b border-gray-100 dark:border-gray-700/80">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`h-10 w-10 shrink-0 rounded-lg ${skeletonPulse}`} />
+              <div className="space-y-2">
+                <div className={`h-5 w-36 ${skeletonPulse}`} />
+                <div className={`h-4 w-28 ${skeletonPulse}`} />
+              </div>
+            </div>
+            <div className="flex gap-2 sm:justify-end">
+              <div className={`h-10 min-w-[240px] flex-1 sm:w-72 ${skeletonPulse}`} />
+              <div className={`h-10 w-10 shrink-0 ${skeletonPulse}`} />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="px-0 pb-0 pt-0">
+          <div className={`mx-3 mb-3 mt-4 h-4 w-48 sm:mx-6 ${skeletonPulse}`} />
+          <div className="space-y-0 border-t border-gray-100 dark:border-gray-700/80">
+            <div className={`mx-3 my-3 h-9 rounded-lg sm:mx-4 ${skeletonPulse}`} />
+            {Array.from({ length: 8 }).map((_, row) => (
+              <div
+                key={row}
+                className="flex gap-3 border-b border-gray-100 px-3 py-3 last:border-0 dark:border-gray-700/60 sm:px-4"
+              >
+                <div className={`h-4 w-12 shrink-0 ${skeletonPulse}`} />
+                <div className={`h-4 min-w-[8rem] flex-1 ${skeletonPulse}`} />
+                <div className={`hidden h-4 w-20 sm:block ${skeletonPulse}`} />
+                <div className={`hidden h-4 w-24 md:block ${skeletonPulse}`} />
+                <div className={`hidden h-4 w-16 lg:block ${skeletonPulse}`} />
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between gap-4 border-t border-gray-100 px-4 py-4 dark:border-gray-700/80 sm:px-6">
+            <div className={`h-4 w-40 ${skeletonPulse}`} />
+            <div className="flex gap-2">
+              <div className={`h-9 w-20 ${skeletonPulse}`} />
+              <div className={`h-9 w-20 ${skeletonPulse}`} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ExtratoCaixaRefetchBar() {
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg border border-red-200/80 bg-red-50/90 px-4 py-2.5 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+      role="status"
+      aria-live="polite"
+    >
+      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+      <span>Atualizando movimentações do extrato…</span>
+    </div>
+  );
+}
+
 interface ExtratoItemsListProps {
   items: ExtratoCaixaItem[];
   searchQuery: string;
@@ -1039,13 +1119,8 @@ export default function AnaliseExtratoPage() {
             </div>
           ) : null}
 
-          {isLoading || isFetching ? (
-            <Card>
-              <CardContent className="flex items-center justify-center gap-2 py-12 text-gray-500 dark:text-gray-400">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Carregando extrato de caixa...
-              </CardContent>
-            </Card>
+          {isLoading ? (
+            <ExtratoCaixaLoadingSkeleton />
           ) : isError ? (
             <Card>
               <CardContent className="py-8 text-center">
@@ -1088,19 +1163,22 @@ export default function AnaliseExtratoPage() {
               </CardContent>
             </Card>
           ) : (
-            <ExtratoItemsList
-              items={filteredItems}
-              searchQuery={searchQuery}
-              onSearchQueryChange={setSearchQuery}
-              searchInputRef={searchInputRef}
-              onOpenFilters={openFiltersModal}
-              hasActiveFilters={hasActiveFilters}
-              emptyMessage={
-                hasListRefinement
-                  ? 'Nenhuma movimentação encontrada com os filtros ou termo de busca aplicados.'
-                  : 'Nenhuma movimentação encontrada no extrato.'
-              }
-            />
+            <div className="space-y-4">
+              {isFetching ? <ExtratoCaixaRefetchBar /> : null}
+              <ExtratoItemsList
+                items={filteredItems}
+                searchQuery={searchQuery}
+                onSearchQueryChange={setSearchQuery}
+                searchInputRef={searchInputRef}
+                onOpenFilters={openFiltersModal}
+                hasActiveFilters={hasActiveFilters}
+                emptyMessage={
+                  hasListRefinement
+                    ? 'Nenhuma movimentação encontrada com os filtros ou termo de busca aplicados.'
+                    : 'Nenhuma movimentação encontrada no extrato.'
+                }
+              />
+            </div>
           )}
         </div>
 
