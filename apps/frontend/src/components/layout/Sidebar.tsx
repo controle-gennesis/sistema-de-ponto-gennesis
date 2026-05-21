@@ -18,10 +18,8 @@ import {
   X,
   User,
   PanelRightOpen,
-  PanelLeftOpen,
-  ChevronDown,
-  ChevronUp,
   Lock,
+  Settings,
   FolderClock,
   ImagePlus,
   CalendarDays,
@@ -43,24 +41,27 @@ import {
   DollarSign,
   Package,
   PackageX,
+  Warehouse,
   ShoppingCart,
   Building2,
   Cake,
-  Calculator,
+  DraftingCompass,
+  Database,
   ClipboardList,
   CreditCard,
   HardDrive,
+  SquareKanban,
   Truck,
   Landmark,
   Percent,
   Contact,
   Scale,
+  ScrollText,
   Image as ImageIcon,
   Camera,
   PencilLine,
   Trash2,
-  Loader2,
-  ListTodo
+  Loader2
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -85,10 +86,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     }
     return false;
   });
-  const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
+  const [selectedModuleId, setSelectedModuleId] = useState<string>('main');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showButtonText, setShowButtonText] = useState(!isCollapsed);
-  const [showUserMenu, setShowUserMenu] = useState(false);
+  const tier2Visible = !isCollapsed || isOpen;
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -106,7 +107,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     canAccessOsRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
-  const menuRef = useRef<HTMLDivElement>(null);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
@@ -132,7 +133,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     userDepartment?.toLowerCase().includes('juridico');
 
   const handleLogout = () => {
-    setShowUserMenu(false);
+    setShowSettingsMenu(false);
     setShowLogoutConfirm(true);
   };
 
@@ -184,19 +185,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     const handleClickOutside = (event: MouseEvent) => {
       const t = event.target as Node;
       if (profileAvatarSectionRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;
-      setShowUserMenu(false);
+      if (settingsMenuRef.current?.contains(t)) return;
       setProfileAvatarMenu(false);
+      setShowSettingsMenu(false);
     };
 
-    if (showUserMenu || profileAvatarMenu) {
+    if (profileAvatarMenu || showSettingsMenu) {
       document.addEventListener('mousedown', handleClickOutside);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showUserMenu, profileAvatarMenu]);
+  }, [profileAvatarMenu, showSettingsMenu]);
 
   const isEmployee = userRole === 'EMPLOYEE';
 
@@ -233,13 +234,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes'))
           },
           {
-            name: 'Meu Drive',
-            href: '/ponto/drive',
-            icon: HardDrive,
-            description: 'Armazenamento de arquivos na nuvem',
-            permission: true
-          },
-          {
             name: 'Central de Atendimentos',
             href: '/ponto/conversas-whatsapp',
             icon: MessageSquare,
@@ -262,13 +256,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Minhas solicitações ao DP',
             permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
           },
-          {
-            name: 'Tasks',
-            href: '/ponto/kanban',
-            icon: ListTodo,
-            description: 'Gerencie tarefas em colunas',
-            permission: true
-          }
         ]
       },
       {
@@ -373,7 +360,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         id: 'financeiro',
         name: 'Financeiro',
-        icon: DollarSign,
+        icon: Landmark,
         items: [
           {
             name: 'Controle Financeiro',
@@ -401,7 +388,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         id: 'engenharia',
         name: 'Engenharia',
-        icon: Calculator,
+        icon: DraftingCompass,
         items: [
           {
             name: 'Contratos',
@@ -436,7 +423,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         id: 'contratos-licitacoes',
         name: 'Contratos e Licitações',
-        icon: FileText,
+        icon: ScrollText,
         items: [
           {
             name: 'Espelho da Nota Fiscal',
@@ -478,7 +465,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         id: 'suprimentos',
         name: 'Suprimentos',
-        icon: Package,
+        icon: Warehouse,
         items: [
           {
             name: 'Solicitar Materiais',
@@ -534,7 +521,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       {
         id: 'cadastros',
         name: 'Cadastros',
-        icon: BarChart3,
+        icon: Database,
         items: [
           {
             name: 'Centros de Custo',
@@ -671,44 +658,24 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     return pathname === href;
   };
 
-  const toggleMenu = (menuId: string) => {
-    setExpandedMenus(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(menuId)) {
-        newSet.delete(menuId);
-      } else {
-        newSet.add(menuId);
-      }
-      return newSet;
-    });
-  };
+  const selectedModule = menuItems.find((c) => c.id === selectedModuleId) ?? menuItems[0];
 
-  const isMenuExpanded = (menuId: string) => {
-    return expandedMenus.has(menuId);
-  };
-
-  // Expandir automaticamente grupos com páginas ativas na inicialização
+  // Selecionar módulo conforme rota ativa
   React.useEffect(() => {
-    const activeCategories = menuItems.filter(category => 
-      category.items.some(item => isActive(item.href))
+    const activeCategory = menuItems.find((category) =>
+      category.items.some((item) => item.permission && isActive(item.href))
     );
-    
-    if (activeCategories.length > 0) {
-      const newExpandedMenus = new Set(expandedMenus);
-      activeCategories.forEach(category => {
-        newExpandedMenus.add(category.id);
-      });
-      setExpandedMenus(newExpandedMenus);
+    if (activeCategory) {
+      setSelectedModuleId(activeCategory.id);
+    } else if (menuItems.length > 0 && !menuItems.some((c) => c.id === selectedModuleId)) {
+      setSelectedModuleId(menuItems[0].id);
     }
-  }, [pathname]); // Executa quando a rota muda
+  }, [pathname, menuItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Expandir automaticamente todos os grupos quando houver pesquisa
-  React.useEffect(() => {
-    if (searchTerm.trim()) {
-      const allCategoryIds = menuItems.map(category => category.id);
-      setExpandedMenus(new Set(allCategoryIds));
-    }
-  }, [searchTerm]); // Executa quando o termo de pesquisa muda
+  const handleSelectModule = (categoryId: string) => {
+    setSelectedModuleId(categoryId);
+    if (isCollapsed) setIsCollapsed(false);
+  };
 
   // Salvar estado no localStorage sempre que mudar
   React.useEffect(() => {
@@ -723,11 +690,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
       onMenuToggle(isCollapsed);
     }
   }, [isCollapsed, onMenuToggle]);
-
-  // Controlar quando mostrar o texto dos botões
-  React.useEffect(() => {
-    setShowButtonText(!isCollapsed);
-  }, [isCollapsed]);
 
   return (
     <>
@@ -747,305 +709,187 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         />
       )}
 
-      {/* Sidebar */}
+      {/* Dual-tier Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transform transition-all duration-500 ease-in-out z-[100] ${
+        className={`fixed top-0 left-0 h-full flex transform transition-all duration-500 ease-in-out z-[100] ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0 lg:fixed ${
-          isCollapsed ? 'w-20' : 'w-72'
-        } flex flex-col ${isCollapsed ? 'overflow-visible' : 'overflow-x-hidden overflow-y-visible'}`}
+        } lg:translate-x-0`}
       >
-        {/* Header */}
-        <div className={`${isCollapsed ? 'p-4' : 'p-4'} overflow-hidden`}>
-          <div className={`flex items-center overflow-hidden ${
-            isCollapsed ? 'flex-col justify-center space-y-3' : 'justify-between'
-          }`}>
-            {isCollapsed ? (
-              /* Quando colapsada: logo acima do botão */
-              <>
-                <Link
-                  href="/ponto/home"
-                  className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-transform hover:scale-105"
-                  title="Ir para a página inicial"
-                  aria-label="Página inicial"
-                >
-                  <img src="/loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
-                </Link>
-                <button
-                  onClick={() => setIsCollapsed(!isCollapsed)}
-                  className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
-                  title="Expandir menu"
-                >
-                  <PanelLeftOpen className="w-5 h-5 flex-shrink-0" />
-                </button>
-              </>
-            ) : (
-              /* Quando expandida: logo e texto à esquerda, botão à direita */
-              <>
-                <Link
-                  href="/ponto/home"
-                  className="flex items-center space-x-3 transition-opacity duration-500 ease-in-out rounded-lg -ml-1 pl-1 hover:opacity-90"
-                  title="Ir para a página inicial"
-                  aria-label="Página inicial"
-                >
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-transform group-hover:scale-105">
-                    <img src="/loogo.png" alt="Logo Gennesis" className="w-12 h-12 object-contain" />
-                  </div>
-                  <div className="transition-all duration-500 ease-in-out">
-                    <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 transition-all duration-500">Gennesis</h1>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 transition-all duration-500">Attendance</p>
-                  </div>
-                </Link>
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => setIsCollapsed(!isCollapsed)}
-                    className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
-                    title="Colapsar menu"
-                  >
-                    <PanelRightOpen className="w-5 h-5 flex-shrink-0" />
-                  </button>
-                  <button
-                    onClick={() => setIsOpen(false)}
-                    className="lg:hidden w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-300"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </>
-            )}
+        {/* Tier 1 — Rail de módulos */}
+        <div className="w-20 flex-shrink-0 h-full flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800">
+          <div className="p-5 flex flex-col items-center">
+            <Link
+              href="/ponto/home"
+              className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-transform hover:scale-105"
+              title="Ir para a página inicial"
+              aria-label="Página inicial"
+            >
+              <img src="/loogo.png" alt="Logo Gennesis" className="w-10 h-10 object-contain" />
+            </Link>
           </div>
-        </div>
 
-        {/* Search Bar */}
-        {!isCollapsed ? (
-          <div className="px-4">
-            <div className="relative flex items-center">
-              <div className="relative flex-1 min-w-0">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  placeholder="Search"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="mt-2 mb-2 text-sm w-full pl-10 pr-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
-                />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="px-4">
-            <div className="flex justify-center">
-              <button
-                onClick={() => {
-                  setIsCollapsed(false);
-                  // Focar no input após a sidebar abrir (aguardar a transição)
-                  setTimeout(() => {
-                    searchInputRef.current?.focus();
-                  }, 300);
-                }}
-                className="w-10 h-10 rounded-xl bg-white hover:bg-gray-200 hover:text-gray-400 dark:bg-gray-900 dark:hover:bg-gray-800 dark:hover:text-gray-300 border border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-500 transition-all duration-200 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-transparent"
-                title="Buscar"
-              >
-                <Search className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        )}
+          <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-3">
+            {menuItems.map((category) => {
+              const CategoryIcon = category.icon;
+              const hasActiveItem = category.items.some(
+                (item) => item.permission && isActive(item.href)
+              );
+              const isSelected = selectedModuleId === category.id;
+              const visibleItems = category.items.filter((item) => item.permission);
+              const forceAsGroup = !(category as { preferDirectLink?: boolean }).preferDirectLink;
+              const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
+              const singleItem = isSingleItem ? visibleItems[0] : null;
 
-        {/* Navigation */}
-        <nav className={`flex-1 space-y-2 p-4 ${isCollapsed ? 'overflow-visible' : 'overflow-y-auto overflow-x-hidden'}`}>
-          {(() => {
-            return menuItems.map((category, index) => {
-            const CategoryIcon = category.icon;
-            const hasActiveItem = category.items.some(item => isActive(item.href));
-            const isExpanded = isMenuExpanded(category.id);
-            const visibleItems = category.items.filter(item => item.permission);
-            // Sempre mostrar como grupo expansível, exceto módulos com preferDirectLink (1 link direto).
-            const forceAsGroup = !(category as { preferDirectLink?: boolean }).preferDirectLink;
-            const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
-            const singleItem = isSingleItem ? visibleItems[0] : null;
-            
-            // Mostrar o título "Menu" sempre no topo da navegação visível.
-            const shouldShowMenuTitle = index === 0 && !isCollapsed;
-            
-            // Se tiver apenas um item, renderizar como link direto
-            if (isSingleItem && singleItem) {
-              
-              const active = isActive(singleItem.href);
-              const SingleItemIcon = singleItem.icon || CategoryIcon;
-              
+              if (isSingleItem && singleItem) {
+                const active = isActive(singleItem.href);
+                const SingleItemIcon = singleItem.icon || CategoryIcon;
+                return (
+                  <div key={category.id} className="flex justify-center">
+                    <Link
+                      href={singleItem.href}
+                      onClick={() => setIsOpen(false)}
+                      className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                        active
+                          ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                      title={singleItem.name}
+                    >
+                      <SingleItemIcon className="w-5 h-5" />
+                    </Link>
+                  </div>
+                );
+              }
+
               return (
-                <div key={category.id}>
-                  {shouldShowMenuTitle && (
-                    <div className="px-3 pt-2 pb-2">
-                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
-                    </div>
-                  )}
-                  <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'}`}>
-                    {isCollapsed ? (
-                      <div className="flex justify-center">
-                        <Link
-                          href={singleItem.href}
-                          onClick={() => setIsOpen(false)}
-                          className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                            active 
-                              ? 'text-red-600 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
-                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                          }`}
-                          title={singleItem.name}
-                        >
-                          <SingleItemIcon className="w-5 h-5" />
-                        </Link>
-                      </div>
-                    ) : (
-                      <Link
-                        href={singleItem.href}
-                        onClick={() => setIsOpen(false)}
-                        className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 overflow-hidden ${
-                          active 
-                            ? 'text-red-700 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
-                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                        }`}
-                      >
-                        <div className="rounded-xl transition-all duration-200 p-3">
-                          <SingleItemIcon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
-                        </div>
-                        <div className="flex-1 min-w-0 text-left">
-                          <p className={`text-sm font-medium whitespace-nowrap ${active ? 'text-red-700 dark:text-red-500' : 'text-gray-700 dark:text-gray-300'}`}>{singleItem.name}</p>
-                        </div>
-                      </Link>
-                    )}
-                  </div>
+                <div key={category.id} className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectModule(category.id)}
+                    className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                      isSelected || hasActiveItem
+                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                    }`}
+                    title={category.name}
+                    aria-label={category.name}
+                    aria-current={isSelected ? 'true' : undefined}
+                  >
+                    <CategoryIcon className="w-5 h-5" />
+                  </button>
                 </div>
               );
-            }
-            
-            return (
-              <div key={category.id} className="overflow-hidden">
-                {/* Título "Menu" no topo da navegação */}
-                {shouldShowMenuTitle && (
-                  <div className="px-3 pt-2 pb-2">
-                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</p>
-                  </div>
-                )}
-                {/* Separador entre grupos */}
-                
-                <div className={`${isCollapsed ? 'space-y-2' : 'space-y-1'} overflow-hidden`}>
-                {/* Categoria Header */}
-                {isCollapsed ? (
-                  <div className="flex justify-center">
+            })}
+          </nav>
+
+          {/* Rodapé: atalhos, divisor e perfil */}
+          <div className="flex-shrink-0 relative z-20 overflow-visible px-2 pb-4 flex flex-col items-center">
+            <div className="flex flex-col items-center gap-2">
+              <Link
+                href="/ponto/drive"
+                onClick={() => setIsOpen(false)}
+                title="Drive"
+                aria-label="Drive"
+                className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                  isActive('/ponto/drive')
+                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                <HardDrive className="w-5 h-5" />
+              </Link>
+              <Link
+                href="/ponto/kanban"
+                onClick={() => setIsOpen(false)}
+                title="Kanban"
+                aria-label="Kanban"
+                className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                  isActive('/ponto/kanban')
+                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                <SquareKanban className="w-5 h-5" />
+              </Link>
+            </div>
+            <div className="mt-2 flex flex-col items-center gap-2">
+            <div className="relative size-10 shrink-0" ref={settingsMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowSettingsMenu((v) => !v)}
+                title="Configurações"
+                aria-label="Configurações"
+                aria-expanded={showSettingsMenu}
+                className={`size-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                  showSettingsMenu
+                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+              {showSettingsMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-[100]"
+                    aria-hidden="true"
+                    onClick={() => setShowSettingsMenu(false)}
+                  />
+                  <div
+                    role="menu"
+                    className="absolute z-[120] left-full ml-2 bottom-0 min-w-[200px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1"
+                  >
                     <button
-                      onClick={() => {
-                        // Abrir a sidebar e expandir o grupo
-                        setIsCollapsed(false);
-                        setExpandedMenus(prev => {
-                          const newSet = new Set(prev);
-                          newSet.add(category.id);
-                          return newSet;
-                        });
-                      }}
-                        className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                          hasActiveItem 
-                            ? 'text-red-600 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
-                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                        }`}
-                      title={category.name}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => toggleTheme()}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                     >
-                      <CategoryIcon className="w-5 h-5" />
+                      {isDark ? (
+                        <Sun size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                      ) : (
+                        <Moon size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                      )}
+                      <span className="font-medium">{isDark ? 'Modo Claro' : 'Modo Escuro'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
+                        setShowSettingsMenu(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <Lock size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                      <span className="font-medium">Alterar Senha</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-red-900/20 transition-colors group"
+                    >
+                      <LogOut size={15} className="text-gray-500 dark:text-gray-400 shrink-0 group-hover:text-red-600 dark:group-hover:text-red-400" />
+                      <span className="font-medium group-hover:text-red-600 dark:group-hover:text-red-400">Sair</span>
                     </button>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => toggleMenu(category.id)}
-                    className={`w-full flex items-center space-x-2 rounded-xl transition-all duration-200 overflow-hidden ${
-                      hasActiveItem 
-                        ? 'text-red-700 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' 
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    <div className="rounded-xl transition-all duration-200 p-3">
-                      <CategoryIcon className={`w-5 h-5 flex-shrink-0 ${hasActiveItem ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
-                    </div>
-                    <div className="flex-1 min-w-0 text-left overflow-hidden">
-                        <p className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${hasActiveItem ? 'text-red-700 dark:text-red-500' : 'text-gray-700 dark:text-gray-300'}`}>{category.name}</p>
-                    </div>
-                    {category.items.filter(item => item.permission).length > 0 && (
-                      <div className="flex-shrink-0 pr-3">
-                        {isExpanded ? (
-                          <ChevronUp className={`w-4 h-4 ${hasActiveItem ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
-                        ) : (
-                          <ChevronDown className={`w-4 h-4 ${hasActiveItem ? 'text-red-600 dark:text-red-500' : 'text-gray-600 dark:text-gray-400'}`} />
-                        )}
-                      </div>
-                    )}
-                  </button>
-                )}
-
-                {/* Submenu Items */}
-                {isExpanded && !isCollapsed && (
-                  <div className="relative ml-6 pl-4 border-l border-gray-300 dark:border-gray-700 space-y-2">
-                    {category.items
-                      .filter(item => item.permission)
-                      .map((item) => {
-                        const active = isActive(item.href);
-            
-                        return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setIsOpen(false)}
-                            className={`flex items-center px-3 py-2 rounded-xl transition-all duration-200 overflow-hidden ${
-                              active
-                                ? 'text-red-700 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
-                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                            }`}
-                          >
-                            <p className={`text-sm font-medium ${active ? '' : 'text-gray-700 dark:text-gray-300'}`}>{item.name}</p>
-              </Link>
-                        );
-                      })}
-                  </div>
-                )}
-                </div>
-              </div>
-            );
-            });
-          })()}
-        </nav>
-
-        {/* Perfil do usuário */}
-        <div className="flex-shrink-0 relative z-20 overflow-visible">
-          {/* Linha separadora acima do perfil */}
-          <div className="mx-4">
-            <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
-          </div>
-          
-          <div className="relative" ref={menuRef}>
-            {/* Seção de perfil - sempre visível quando expandida */}
-            <div className="bg-white dark:bg-gray-900">
-              <div className={`${isCollapsed ? 'p-2' : 'p-4'}`}>
-                <div
-                  className={
-                    isCollapsed ? 'flex flex-col items-center gap-2' : 'flex items-center space-x-3'
-                  }
-                >
-                  {/* Foto — menu como no grupo (Conversas) */}
-                  <div className={`flex-shrink-0 relative ${!isCollapsed ? '' : ''}`}>
-                    <div ref={profileAvatarSectionRef}>
+                </>
+              )}
+            </div>
+            <div className="h-px w-12 shrink-0 bg-gray-200 dark:bg-gray-700" />
+            </div>
+            <div className="pt-4 flex justify-center w-full">
+            <div ref={profileAvatarSectionRef} className="relative size-12 shrink-0">
                       <button
                         type="button"
                         aria-haspopup="true"
                         aria-expanded={profileAvatarMenu}
                         aria-label="Opções da foto de perfil"
                         onClick={() => setProfileAvatarMenu((v) => !v)}
-                        className="group relative block rounded-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                        className="group relative block size-12 rounded-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-red-500/50"
                       >
-                        <div
-                          className={`${
-                            isCollapsed ? 'w-11 h-11' : 'w-11 h-11'
-                          } rounded-full overflow-hidden bg-red-600 flex items-center justify-center relative`}
-                        >
+                        <div className="size-12 rounded-full overflow-hidden bg-red-600 flex items-center justify-center relative">
                           {profilePhotoHref ? (
                             <img
                               src={profilePhotoHref}
@@ -1054,16 +898,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                               referrerPolicy="no-referrer"
                             />
                           ) : (
-                            <span
-                              className={`font-semibold text-white ${
-                                isCollapsed ? 'text-sm' : 'text-sm'
-                              }`}
-                            >
+                            <span className="font-semibold text-white text-sm">
                               {getInitials(user?.name || userName || 'U')}
                             </span>
                           )}
                           <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-0.5 pointer-events-none">
-                            <PencilLine size={isCollapsed ? 12 : 14} className="text-white shrink-0" strokeWidth={2} />
+                            <PencilLine size={14} className="text-white shrink-0" strokeWidth={2} />
                           </div>
                           {(uploadProfilePhotoMutation.isPending ||
                             removeProfilePhotoMutation.isPending) && (
@@ -1096,7 +936,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                             onClick={() => setProfileAvatarMenu(false)}
                           />
                           <div
-                            className="absolute z-[120] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 left-0 bottom-full mb-2"
+                            className="absolute z-[120] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 left-full ml-2 bottom-0"
                           >
                             {profilePhotoHref && (
                               <button
@@ -1139,129 +979,130 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                           </div>
                         </>
                       )}
-                    </div>
-                  </div>
+            </div>
+            </div>
+          </div>
+        </div>
 
-                  {!isCollapsed && (
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {isAdministrator ? 'Administrador' : user?.name || userName || 'Usuário'}
-                      </p>
-                      {!isAdministrator && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {(user as { employee?: { position?: string } } | undefined)?.employee
-                            ?.position || userPosition}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="relative shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowUserMenu(!showUserMenu)}
-                      className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                      title={showUserMenu ? 'Fechar menu (descer)' : 'Abrir menu (subir)'}
-                      aria-expanded={showUserMenu}
-                      aria-label={showUserMenu ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
-                    >
-                      {showUserMenu ? (
-                        <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                      ) : (
-                        <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                      )}
-                    </button>
-                  </div>
-                </div>
+        {/* Tier 2 — Painel de páginas do módulo */}
+        <div
+          className={`h-full flex-shrink-0 flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-500 ease-in-out overflow-hidden ${
+            tier2Visible ? 'w-72 opacity-100' : 'w-0 opacity-0 pointer-events-none'
+          }`}
+        >
+          {/* Header do módulo */}
+          <div className="p-4 flex-shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+                {searchTerm.trim() ? 'Busca' : selectedModule?.name ?? 'Menu'}
+              </h2>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setIsCollapsed(true)}
+                  className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
+                  title="Recolher menu"
+                >
+                  <PanelRightOpen className="w-5 h-5 flex-shrink-0" />
+                </button>
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="lg:hidden w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-300"
+                  aria-label="Fechar menu"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
             </div>
-            
-            {/* Menu de botões que desliza de baixo para cima com animação */}
-            <div 
-              className={`bg-white dark:bg-gray-900 transition-all duration-300 ease-in-out overflow-hidden ${
-                showUserMenu 
-                  ? 'max-h-[300px] opacity-100 translate-y-0' 
-                  : 'max-h-0 opacity-0 -translate-y-2 pointer-events-none'
-              }`}
-            >
-                {/* Linha separadora superior */}
-                <div className="mx-4">
-                  <div className="h-px bg-gray-200 dark:bg-gray-700"></div>
-                </div>
-                
-                {isCollapsed ? (
-                  /* Quando colapsada: apenas ícones */
-                  <div className="p-2 flex flex-col items-center space-y-2">
-                    <button
-                      onClick={() => {
-                        toggleTheme();
-                      }}
-                      className="w-10 h-10 flex items-center justify-center group transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                      title={isDark ? 'Modo Claro' : 'Modo Escuro'}
-                    >
-                      {isDark ? (
-                        <Sun className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-500" />
-                      ) : (
-                        <Moon className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
-                      )}
-                    </button>
-                    <button
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
-                        setShowUserMenu(false);
-                      }}
-                      className="w-10 h-10 flex items-center justify-center group transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                      title="Alterar Senha"
-                    >
-                      <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
-                    </button>
-                    <button
-                      onClick={handleLogout}
-                      className="w-10 h-10 flex items-center justify-center group transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                      title="Sair"
-                    >
-                      <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
-                    </button>
-                  </div>
-                ) : (
-                  /* Quando expandida: ícones com texto */
-                  <div className="p-2">
-                    <button
-                      onClick={() => {
-                        toggleTheme();
-                      }}
-                      className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      {isDark ? (
-                        <Sun className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-500" />
-                      ) : (
-                        <Moon className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
-                      )}
-                      <span className="text-sm font-medium whitespace-nowrap text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">
-                        {isDark ? 'Modo Claro' : 'Modo Escuro'}
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
-                        setShowUserMenu(false);
-                      }}
-                      className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      <Lock className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-blue-700 dark:group-hover:text-blue-500" />
-                      <span className="text-sm font-medium whitespace-nowrap text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Alterar Senha</span>
-                    </button>
-                    <button
-                      onClick={handleLogout}
-                      className="w-full flex items-center space-x-3 px-4 py-3 group transition-colors rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      <LogOut className="w-5 h-5 flex-shrink-0 text-gray-600 dark:text-gray-400 group-hover:text-red-700 dark:group-hover:text-red-500" />
-                      <span className="text-sm font-medium whitespace-nowrap text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">Sair</span>
-                    </button>
-                  </div>
-                )}
-              </div>
           </div>
+
+          {/* Busca */}
+          <div className="px-4 flex-shrink-0">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Buscar"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="text-sm w-full pl-10 pr-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Lista de páginas */}
+          <nav className="flex-1 overflow-y-auto overflow-x-hidden p-4 pt-4 space-y-3">
+            {searchTerm.trim() ? (
+              menuItems.map((category) => {
+                const filteredItems = category.items.filter(
+                  (item) =>
+                    item.permission &&
+                    (item.name.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
+                      item.description?.toLowerCase().includes(searchTerm.toLowerCase().trim()))
+                );
+                if (filteredItems.length === 0) return null;
+                return (
+                  <div key={category.id} className="mb-4">
+                    <p className="px-3 pb-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      {category.name}
+                    </p>
+                    <div className="space-y-3">
+                      {filteredItems.map((item) => {
+                        const ItemIcon = item.icon;
+                        const active = isActive(item.href);
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setIsOpen(false)}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
+                              active
+                                ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'
+                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                            }`}
+                          >
+                            <ItemIcon
+                              className={`w-4 h-4 flex-shrink-0 ${
+                                active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
+                              }`}
+                            />
+                            <span className="text-sm font-medium truncate">{item.name}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              selectedModule?.items
+                .filter((item) => item.permission)
+                .map((item) => {
+                  const ItemIcon = item.icon;
+                  const active = isActive(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setIsOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
+                        active
+                          ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <ItemIcon
+                        className={`w-4 h-4 flex-shrink-0 ${
+                          active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
+                        }`}
+                      />
+                      <span className="text-sm font-medium truncate">{item.name}</span>
+                    </Link>
+                  );
+                })
+            )}
+          </nav>
+
         </div>
       </div>
 

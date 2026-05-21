@@ -76,7 +76,7 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
       
       {/* Main Content */}
       <div className={`transition-all duration-300 ease-in-out ${
-        isCollapsed ? 'lg:ml-20' : 'lg:ml-72'
+        isCollapsed ? 'lg:ml-20' : 'lg:ml-[23rem]'
       }`}>
         <main className="p-4 lg:p-8">
           {children}
