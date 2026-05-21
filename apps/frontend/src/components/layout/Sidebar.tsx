@@ -17,7 +17,7 @@ import {
   Menu, 
   X,
   User,
-  PanelRightOpen,
+  ArrowLeftToLine,
   Lock,
   Settings,
   FolderClock,
@@ -728,7 +728,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             </Link>
           </div>
 
-          <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-3">
+          <nav className="flex-1 overflow-y-auto overflow-x-hidden pb-4 px-2 space-y-3">
             {menuItems.map((category) => {
               const CategoryIcon = category.icon;
               const hasActiveItem = category.items.some(
@@ -1002,7 +1002,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   className="hidden lg:flex items-center justify-center rounded-lg transition-colors duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-8 h-8"
                   title="Recolher menu"
                 >
-                  <PanelRightOpen className="w-5 h-5 flex-shrink-0" />
+                  <ArrowLeftToLine className="w-5 h-5 flex-shrink-0" />
                 </button>
                 <button
                   onClick={() => setIsOpen(false)}
