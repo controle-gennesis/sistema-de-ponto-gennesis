@@ -3,8 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { createPortal } from 'react-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
@@ -37,6 +36,7 @@ import {
   Sun,
   AlertCircle,
   MessageSquare,
+  MessagesSquare,
   FileCheck,
   DollarSign,
   Package,
@@ -57,10 +57,7 @@ import {
   Contact,
   Scale,
   ScrollText,
-  Image as ImageIcon,
   Camera,
-  PencilLine,
-  Trash2,
   Loader2
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -89,7 +86,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [selectedModuleId, setSelectedModuleId] = useState<string>('main');
   const [searchTerm, setSearchTerm] = useState('');
   const tier2Visible = !isCollapsed || isOpen;
-  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -107,14 +103,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     canAccessOsRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
-  const settingsMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const [profileAvatarMenu, setProfileAvatarMenu] = useState(false);
-  const [profilePhotoViewer, setProfilePhotoViewer] = useState(false);
   const [profileCropSrc, setProfileCropSrc] = useState<string | null>(null);
+
+  const { data: chatUnreadCount = 0 } = useQuery({
+    queryKey: ['chat-unread-count', user?.id],
+    queryFn: async () => {
+      const res = await api.get('/chats/direct');
+      const chats = (res.data?.data ?? []) as Array<{ messages?: Array<{ isRead: boolean; senderId: string }> }>;
+      return chats.reduce((acc, chat) => {
+        const unread = (chat.messages ?? []).filter(
+          (m) => !m.isRead && m.senderId !== user?.id
+        ).length;
+        return acc + unread;
+      }, 0);
+    },
+    enabled: !!user?.id,
+    refetchInterval: 5000,
+  });
   
   // Verificar se é administrador
   const isAdministrator = userPosition === 'Administrador';
@@ -133,7 +143,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     userDepartment?.toLowerCase().includes('juridico');
 
   const handleLogout = () => {
-    setShowSettingsMenu(false);
+    setProfileAvatarMenu(false);
     setShowLogoutConfirm(true);
   };
 
@@ -172,7 +182,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user'] });
       toast.success('Foto removida');
-      setProfilePhotoViewer(false);
       setProfileAvatarMenu(false);
     },
     onError: () => toast.error('Não foi possível remover a foto'),
@@ -185,19 +194,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     const handleClickOutside = (event: MouseEvent) => {
       const t = event.target as Node;
       if (profileAvatarSectionRef.current?.contains(t)) return;
-      if (settingsMenuRef.current?.contains(t)) return;
       setProfileAvatarMenu(false);
-      setShowSettingsMenu(false);
     };
 
-    if (profileAvatarMenu || showSettingsMenu) {
+    if (profileAvatarMenu) {
       document.addEventListener('mousedown', handleClickOutside);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [profileAvatarMenu, showSettingsMenu]);
+  }, [profileAvatarMenu]);
 
   const isEmployee = userRole === 'EMPLOYEE';
 
@@ -797,6 +804,37 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           <div className="flex-shrink-0 relative z-20 overflow-visible px-2 pb-4 flex flex-col items-center">
             <div className="flex flex-col items-center gap-2">
               <Link
+                href="/ponto/conversas"
+                onClick={() => setIsOpen(false)}
+                title="Chat"
+                aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
+                className={`relative w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                  isActive('/ponto/conversas')
+                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                <MessagesSquare className="w-5 h-5" strokeWidth={2} />
+                {chatUnreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-0.5 rounded-md bg-red-600 text-white text-[10px] font-bold inline-flex items-center justify-center leading-none shadow-sm ring-2 ring-white dark:ring-gray-900 animate-chat-unread-badge">
+                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                  </span>
+                )}
+              </Link>
+              <Link
+                href="/ponto/kanban"
+                onClick={() => setIsOpen(false)}
+                title="Tasks"
+                aria-label="Tasks"
+                className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                  isActive('/ponto/kanban')
+                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                <SquareKanban className="w-5 h-5" />
+              </Link>
+              <Link
                 href="/ponto/drive"
                 onClick={() => setIsOpen(false)}
                 title="Drive"
@@ -809,86 +847,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               >
                 <HardDrive className="w-5 h-5" />
               </Link>
-              <Link
-                href="/ponto/kanban"
-                onClick={() => setIsOpen(false)}
-                title="Kanban"
-                aria-label="Kanban"
-                className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  isActive('/ponto/kanban')
-                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                }`}
-              >
-                <SquareKanban className="w-5 h-5" />
-              </Link>
             </div>
             <div className="mt-2 flex flex-col items-center gap-2">
-            <div className="relative size-10 shrink-0" ref={settingsMenuRef}>
-              <button
-                type="button"
-                onClick={() => setShowSettingsMenu((v) => !v)}
-                title="Configurações"
-                aria-label="Configurações"
-                aria-expanded={showSettingsMenu}
-                className={`size-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  showSettingsMenu
-                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                }`}
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-              {showSettingsMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-[100]"
-                    aria-hidden="true"
-                    onClick={() => setShowSettingsMenu(false)}
-                  />
-                  <div
-                    role="menu"
-                    className="absolute z-[120] left-full ml-2 bottom-0 min-w-[200px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => toggleTheme()}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      {isDark ? (
-                        <Sun size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
-                      ) : (
-                        <Moon size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
-                      )}
-                      <span className="font-medium">{isDark ? 'Modo Claro' : 'Modo Escuro'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
-                        setShowSettingsMenu(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      <Lock size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
-                      <span className="font-medium">Alterar Senha</span>
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={handleLogout}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-red-900/20 transition-colors group"
-                    >
-                      <LogOut size={15} className="text-gray-500 dark:text-gray-400 shrink-0 group-hover:text-red-600 dark:group-hover:text-red-400" />
-                      <span className="font-medium group-hover:text-red-600 dark:group-hover:text-red-400">Sair</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="h-px w-12 shrink-0 bg-gray-200 dark:bg-gray-700" />
+              <div className="h-px w-12 shrink-0 bg-gray-200 dark:bg-gray-700" />
             </div>
             <div className="pt-4 flex justify-center w-full">
             <div ref={profileAvatarSectionRef} className="relative size-12 shrink-0">
@@ -896,7 +857,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                         type="button"
                         aria-haspopup="true"
                         aria-expanded={profileAvatarMenu}
-                        aria-label="Opções da foto de perfil"
+                        aria-label="Configurações e foto de perfil"
                         onClick={() => setProfileAvatarMenu((v) => !v)}
                         className="group relative block size-12 rounded-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-red-500/50"
                       >
@@ -914,7 +875,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                             </span>
                           )}
                           <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-0.5 pointer-events-none">
-                            <PencilLine size={14} className="text-white shrink-0" strokeWidth={2} />
+                            <Settings size={14} className="text-white shrink-0" strokeWidth={2} />
                           </div>
                           {(uploadProfilePhotoMutation.isPending ||
                             removeProfilePhotoMutation.isPending) && (
@@ -947,23 +908,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                             onClick={() => setProfileAvatarMenu(false)}
                           />
                           <div
-                            className="absolute z-[120] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 left-full ml-2 bottom-0"
+                            role="menu"
+                            className="absolute z-[120] min-w-[200px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1 left-full ml-2 bottom-0"
                           >
-                            {profilePhotoHref && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setProfileAvatarMenu(false);
-                                  setProfilePhotoViewer(true);
-                                }}
-                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                              >
-                                <ImageIcon size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
-                                Mostrar foto
-                              </button>
-                            )}
                             <button
                               type="button"
+                              role="menuitem"
                               onClick={() => {
                                 setProfileAvatarMenu(false);
                                 profileAvatarInputRef.current?.click();
@@ -971,22 +921,45 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                             >
                               <Camera size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
-                              Carregar foto
+                              <span className="font-medium">Carregar foto</span>
                             </button>
-                            {profilePhotoHref && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setProfileAvatarMenu(false);
-                                  removeProfilePhotoMutation.mutate();
-                                }}
-                                disabled={removeProfilePhotoMutation.isPending}
-                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
-                              >
-                                <Trash2 size={15} className="shrink-0" />
-                                Remover foto
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                toggleTheme();
+                                setProfileAvatarMenu(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              {isDark ? (
+                                <Sun size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                              ) : (
+                                <Moon size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                              )}
+                              <span className="font-medium">{isDark ? 'Modo Claro' : 'Modo Escuro'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
+                                setProfileAvatarMenu(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              <Lock size={15} className="text-gray-500 dark:text-gray-400 shrink-0" />
+                              <span className="font-medium">Alterar Senha</span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={handleLogout}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-red-900/20 transition-colors group"
+                            >
+                              <LogOut size={15} className="text-gray-500 dark:text-gray-400 shrink-0 group-hover:text-red-600 dark:group-hover:text-red-400" />
+                              <span className="font-medium group-hover:text-red-600 dark:group-hover:text-red-400">Sair</span>
+                            </button>
                           </div>
                         </>
                       )}
@@ -1167,35 +1140,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         }}
       />
 
-      {typeof document !== 'undefined' &&
-        profilePhotoViewer &&
-        profilePhotoHref &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[10060] flex cursor-zoom-out flex-col bg-black/90 p-6"
-            onClick={() => setProfilePhotoViewer(false)}
-            role="presentation"
-          >
-            <button
-              type="button"
-              className="absolute top-4 right-4 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20"
-              onClick={() => setProfilePhotoViewer(false)}
-              aria-label="Fechar"
-            >
-              <X className="h-7 w-7" strokeWidth={2} />
-            </button>
-            <div className="flex flex-1 items-center justify-center min-h-0">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={profilePhotoHref}
-                alt=""
-                className="max-h-full max-w-full rounded-lg object-contain shadow-xl"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          </div>,
-          document.body
-        )}
     </>
   );
 }
