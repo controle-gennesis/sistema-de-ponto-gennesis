@@ -66,6 +66,16 @@ import { usePermissions } from '@/hooks/usePermissions';
 const pk = pathToModuleKey;
 import { useTheme } from '@/context/ThemeContext';
 
+/** Atalhos do rodapé do rail — fora das categorias do menu lateral */
+const RAIL_FOOTER_ROUTES = ['/ponto/conversas', '/ponto/kanban', '/ponto/drive'] as const;
+
+function isRailFooterRoute(pathname: string | null): boolean {
+  if (pathname == null) return false;
+  return RAIL_FOOTER_ROUTES.some(
+    (base) => pathname === base || pathname.startsWith(`${base}/`)
+  );
+}
+
 interface SidebarProps {
   userRole: 'EMPLOYEE';
   userName: string;
@@ -652,6 +662,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
   const menuItems = getMenuItems();
 
+  const isFooterShortcutActive = (href: string) => {
+    if (pathname == null) return false;
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
   const isActive = (href: string) => {
     if (pathname == null) return false;
     if (href === '/ponto/contratos') {
@@ -671,13 +686,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     category.items.some((item) => item.permission && isActive(item.href))
   )?.id;
 
-  /** Um único módulo destacado no rail: painel aberto → módulo selecionado; recolhido → rota atual */
-  const railModuleActiveId = tier2Visible
-    ? selectedModuleId
-    : activeModuleId ?? selectedModuleId;
+  const onRailFooterRoute = isRailFooterRoute(pathname);
+
+  /** Um único módulo destacado no rail: painel aberto → módulo selecionado; recolhido → rota do menu (não atalhos do rodapé) */
+  const railModuleActiveId: string | null = onRailFooterRoute && !tier2Visible
+    ? null
+    : tier2Visible
+      ? selectedModuleId
+      : activeModuleId ?? selectedModuleId;
 
   const handleCollapseSidebar = () => {
-    if (activeModuleId) setSelectedModuleId(activeModuleId);
+    if (activeModuleId) {
+      setSelectedModuleId(activeModuleId);
+    } else if (onRailFooterRoute && menuItems[0]) {
+      setSelectedModuleId(menuItems[0].id);
+    }
     setIsCollapsed(true);
   };
 
@@ -809,7 +832,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 title="Chat"
                 aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
                 className={`relative w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  isActive('/ponto/conversas')
+                  isFooterShortcutActive('/ponto/conversas')
                     ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
@@ -827,7 +850,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 title="Tasks"
                 aria-label="Tasks"
                 className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  isActive('/ponto/kanban')
+                  isFooterShortcutActive('/ponto/kanban')
                     ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
@@ -840,7 +863,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 title="Drive"
                 aria-label="Drive"
                 className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  isActive('/ponto/drive')
+                  isFooterShortcutActive('/ponto/drive')
                     ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
