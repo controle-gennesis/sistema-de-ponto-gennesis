@@ -810,34 +810,29 @@ function KanbanPage() {
   const queryClient = useQueryClient();
   const departmentKeyParam = searchParams?.get('departmentKey') ?? null;
 
-  const { canViewAllKanbanBoards, isLoading: loadingPerms } = usePermissions();
+  const {
+    canViewAllKanbanBoards,
+    isLoading: loadingPerms,
+    user: meUser,
+  } = usePermissions();
   const showBoardList = canViewAllKanbanBoards && !departmentKeyParam;
+  const loadingUser = loadingPerms;
 
-  const { data: userData, isLoading: loadingUser } = useQuery({
-    queryKey: ['user'],
-    queryFn: async () => {
-      const res = await api.get('/auth/me');
-      return res.data;
-    },
-    staleTime: 5 * 60 * 1000,
-    retry: 1,
-  });
-
-  const userDepartment = userData?.data?.employee?.department ?? '';
+  const userDepartment = meUser?.employee?.department ?? '';
   const boardScopeKey = departmentKeyParam ?? userDepartment;
   const kanbanBoardQueryKey = ['kanban-board', boardScopeKey] as const;
 
   const { data: boardsList, isLoading: loadingBoardsList } = useQuery({
     queryKey: ['kanban-boards'],
     queryFn: fetchKanbanBoards,
-    enabled: !!userData && canViewAllKanbanBoards,
+    enabled: !!meUser && canViewAllKanbanBoards,
     staleTime: 30 * 1000,
   });
 
   const { data: board, isLoading: loadingBoard, isError: boardError } = useQuery({
     queryKey: kanbanBoardQueryKey,
     queryFn: () => fetchKanbanBoard(departmentKeyParam ?? undefined),
-    enabled: !!userData && !showBoardList,
+    enabled: !!meUser && !showBoardList,
     staleTime: 30 * 1000,
   });
 
@@ -856,7 +851,7 @@ function KanbanPage() {
     router.push('/auth/login');
   };
 
-  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+  const user = meUser || { name: 'Usuário', role: 'EMPLOYEE' };
   const columns = board?.columns ?? [];
 
   const [search, setSearch] = useState('');
@@ -1173,7 +1168,7 @@ function KanbanPage() {
           mode={cardModal.mode}
           cardId={cardModal.mode === 'detail' ? cardModal.cardId : undefined}
           columnId={cardModal.columnId}
-          currentUserId={userData?.data?.id}
+          currentUserId={meUser?.id}
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
         />

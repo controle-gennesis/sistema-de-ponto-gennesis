@@ -643,6 +643,50 @@ export class KanbanService {
     return formatCard(full!);
   }
 
+  /** Card no quadro do setor do usuário (coluna Planned), usado pela Gennecy no chat. */
+  async createTaskFromChatAssistant(
+    userId: string,
+    payload: {
+      title: string;
+      description: string;
+      priority?: string;
+      endDate?: string | null;
+      checklistItems?: string[];
+      sourceChatId?: string;
+    },
+  ) {
+    const board = await this.getOrCreateBoardForDepartment(userId);
+    const column =
+      board.columns.find((c) => c.title === 'Planned') ?? board.columns[0];
+    if (!column) throw new Error('Quadro de Tasks sem colunas');
+
+    const descParts = [payload.description.trim()];
+    if (payload.sourceChatId) {
+      descParts.push('', `Conversa de origem (chat): ${payload.sourceChatId}`);
+    }
+
+    const card = await this.createCard(userId, {
+      columnId: column.id,
+      title: payload.title,
+      description: descParts.filter(Boolean).join('\n'),
+      priority: payload.priority ?? 'medium',
+      endDate: payload.endDate ?? null,
+      memberUserIds: [userId],
+      assigneeUserId: userId,
+    });
+
+    for (const item of payload.checklistItems ?? []) {
+      const t = item.trim();
+      if (t) await this.createChecklistItem(userId, card.id, t);
+    }
+
+    return {
+      card,
+      departmentKey: board.departmentKey,
+      departmentLabel: board.departmentLabel,
+    };
+  }
+
   async updateCard(
     userId: string,
     id: string,

@@ -456,7 +456,6 @@ export default function EstoquePage() {
   const movements: StockMovement[] = movementsData?.data || [];
   const movementsForOc: StockMovement[] = movementOcData?.data || [];
   const purchaseOrders: PurchaseOrderOption[] = purchaseOrdersData?.data || [];
-  const constructionMaterials: Material[] = materialsData?.data || [];
   const balanceByMaterialAndCostCenter = useMemo(() => {
     const map = new Map<string, number>();
     balances.forEach((balance) => {
@@ -501,11 +500,13 @@ export default function EstoquePage() {
   const selectedOrderDetail: PurchaseOrderDetail | null = selectedPurchaseOrderData?.data || null;
   const constructionMaterialIdByName = useMemo(() => {
     const map = new Map<string, string>();
-    constructionMaterials.forEach((material) => {
+    const list = materialsData?.data;
+    if (!Array.isArray(list)) return map;
+    list.forEach((material) => {
       map.set(normalizeMaterialName(material.name), material.id);
     });
     return map;
-  }, [constructionMaterials]);
+  }, [materialsData?.data]);
   const availableOcOptions = useMemo(() => {
     const ocWithTotalOut = new Set<string>();
 
@@ -541,16 +542,28 @@ export default function EstoquePage() {
     });
   }, [availableOcOptions, formData.ocNumber]);
 
+  const selectedOrderDetailId = selectedOrderDetail?.id ?? null;
+  const movementSplit = formData.movementSplit;
+  const ocCostCenterIdFromOrder =
+    selectedOrderDetail?.materialRequest?.costCenter?.id ?? null;
+
   useEffect(() => {
-    if (!selectedOrderDetail || !formData.movementSplit) {
-      setOcMovementItems([]);
+    if (!selectedOrderDetailId || !movementSplit) {
+      setOcMovementItems((prev) => (prev.length === 0 ? prev : []));
       return;
     }
 
-    const nextItems = selectedOrderDetail.items.map((item, index) => {
+    const detail = selectedPurchaseOrderData?.data as PurchaseOrderDetail | null | undefined;
+    if (!detail?.items?.length) {
+      setOcMovementItems((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    const nextItems = detail.items.map((item, index) => {
       const originalQuantity = Number(item.quantity || 0);
       const materialName = item.material?.name || `Material ${index + 1}`;
-      const resolvedMaterialId = constructionMaterialIdByName.get(normalizeMaterialName(materialName)) || '';
+      const resolvedMaterialId =
+        constructionMaterialIdByName.get(normalizeMaterialName(materialName)) || '';
       return {
         key: `${item.materialId}-${index}`,
         materialId: resolvedMaterialId,
@@ -559,19 +572,26 @@ export default function EstoquePage() {
         unit: item.unit || '-',
         originalQuantity,
         quantity: String(originalQuantity),
-        checked: formData.movementSplit === 'TOTAL'
+        checked: movementSplit === 'TOTAL',
       };
     });
 
     setOcMovementItems(nextItems);
-  }, [selectedOrderDetail, formData.movementSplit, constructionMaterialIdByName]);
+  }, [
+    selectedOrderDetailId,
+    movementSplit,
+    materialsData?.data,
+    selectedPurchaseOrderData?.data,
+    constructionMaterialIdByName,
+  ]);
 
   useEffect(() => {
-    const ocCostCenterId = selectedOrderDetail?.materialRequest?.costCenter?.id;
-    if (ocCostCenterId && !formData.costCenterId) {
-      setFormData((prev) => ({ ...prev, costCenterId: ocCostCenterId }));
-    }
-  }, [selectedOrderDetail, formData.costCenterId]);
+    if (!ocCostCenterIdFromOrder) return;
+    setFormData((prev) => {
+      if (prev.costCenterId) return prev;
+      return { ...prev, costCenterId: ocCostCenterIdFromOrder };
+    });
+  }, [ocCostCenterIdFromOrder]);
   const exportRows = balances.map((b) => ({
     material: b.material.name,
     categoria: b.material.category || '-',

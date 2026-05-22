@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -62,6 +62,7 @@ import {
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
+import { readSidebarCollapsed, writeSidebarCollapsed } from '@/lib/sidebarStorage';
 
 const pk = pathToModuleKey;
 import { useTheme } from '@/context/ThemeContext';
@@ -85,14 +86,8 @@ interface SidebarProps {
 
 export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    // Carregar estado do localStorage no carregamento inicial
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('sidebar-collapsed');
-      return saved ? JSON.parse(saved) : false;
-    }
-    return false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [sidebarHydrated, setSidebarHydrated] = useState(false);
   const [selectedModuleId, setSelectedModuleId] = useState<string>('main');
   const [searchTerm, setSearchTerm] = useState('');
   const tier2Visible = !isCollapsed || isOpen;
@@ -717,23 +712,34 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   }, [pathname, menuItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectModule = (categoryId: string) => {
+    const panelOpen = !isCollapsed || isOpen;
+    if (panelOpen && selectedModuleId === categoryId) {
+      setIsCollapsed(true);
+      setIsOpen(false);
+      return;
+    }
     setSelectedModuleId(categoryId);
     if (isCollapsed) setIsCollapsed(false);
   };
 
-  // Salvar estado no localStorage sempre que mudar
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('sidebar-collapsed', JSON.stringify(isCollapsed));
-    }
-  }, [isCollapsed]);
+  useLayoutEffect(() => {
+    const collapsed = readSidebarCollapsed();
+    setIsCollapsed(collapsed);
+    onMenuToggle?.(collapsed);
+    setSidebarHydrated(true);
+  }, [onMenuToggle]);
 
-  // Notificar o MainLayout sobre mudanças no estado do menu
+  // Salvar estado no localStorage sempre que mudar (após hidratação)
   React.useEffect(() => {
-    if (onMenuToggle) {
-      onMenuToggle(isCollapsed);
-    }
-  }, [isCollapsed, onMenuToggle]);
+    if (!sidebarHydrated) return;
+    writeSidebarCollapsed(isCollapsed);
+  }, [isCollapsed, sidebarHydrated]);
+
+  // Notificar o MainLayout sobre mudanças no estado do menu (onMenuToggle deve ser estável — useCallback no pai)
+  React.useEffect(() => {
+    if (!sidebarHydrated) return;
+    onMenuToggle?.(isCollapsed);
+  }, [isCollapsed, onMenuToggle, sidebarHydrated]);
 
   return (
     <>

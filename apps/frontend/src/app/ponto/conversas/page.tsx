@@ -41,6 +41,7 @@ import {
   MinusCircle,
   XCircle,
   CornerUpLeft,
+  Bot,
   Video,
   Phone,
   Square,
@@ -50,6 +51,24 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
 import { CircularPhotoCropModal } from '@/components/conversas/CircularPhotoCropModal';
+import { ChatMentionPicker } from '@/components/conversas/ChatMentionPicker';
+import { ChatComposerField } from '@/components/conversas/ChatComposerField';
+import { ChatComposerAttachments } from '@/components/conversas/ChatComposerAttachments';
+import { ChatImageComposePanel } from '@/components/conversas/ChatImageComposePanel';
+import { MentionHighlightedText } from '@/components/conversas/MentionHighlightedText';
+import {
+  formatGennecyMessageContent,
+  GENNECY_BOT_AVATAR_PATH,
+  isGennecyBotUser,
+  isGennecyDirectChat,
+} from '@/lib/gennecyBot';
+import {
+  applyMentionInsert,
+  buildChatMentionOptions,
+  detectMentionQuery,
+  type ChatMentionOption,
+} from '@/lib/chatMentions';
+import { dedupeFiles, getFilesFromClipboard } from '@/lib/chatComposerFiles';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { useNativeCallContext } from '@/contexts/NativeCallContext';
 
@@ -165,6 +184,11 @@ const openDirectChat = async (recipientId: string): Promise<DirectChat> => {
   return res.data.data;
 };
 
+const openGennecyDirectChat = async (): Promise<DirectChat> => {
+  const res = await api.post('/chats/direct/gennecy');
+  return res.data.data;
+};
+
 const createGroupChat = async ({
   groupName,
   groupDescription,
@@ -232,14 +256,18 @@ const sendDirectMessage = async ({
   content: string;
   files?: File[];
   replyToId?: string;
-}): Promise<Message> => {
+}): Promise<{ message: Message; gennecyProcessing?: boolean; gennecyMode?: 'task' | 'chat' | null }> => {
   const form = new FormData();
   form.append('chatId', chatId);
   form.append('content', content);
   if (replyToId) form.append('replyToId', replyToId);
   if (files) files.forEach(f => form.append('attachments', f));
   const res = await api.post('/chats/direct/messages', form);
-  return res.data.data;
+  return {
+    message: res.data.data,
+    gennecyProcessing: Boolean(res.data.gennecyProcessing),
+    gennecyMode: res.data.gennecyMode ?? null,
+  };
 };
 
 const markAsRead = async (chatId: string) => {
@@ -761,7 +789,14 @@ function Avatar({ user, size = 'md' }: { user: UserBasic; size?: 'sm' | 'md' | '
     list: 'w-12 h-12 text-base',
     xl: 'w-24 h-24 text-3xl',
   }[size];
-  const resolved = resolveApiMediaUrl(user.profilePhotoUrl ?? null);
+  let photoUrl = user.profilePhotoUrl ?? null;
+  if (
+    isGennecyBotUser(user) &&
+    (!photoUrl || photoUrl.includes('logoredonda'))
+  ) {
+    photoUrl = GENNECY_BOT_AVATAR_PATH;
+  }
+  const resolved = resolveApiMediaUrl(photoUrl);
   return (
     <div
       className={clsx(
@@ -886,7 +921,24 @@ function ConversasContent() {
   const [newGroupMemberSearch, setNewGroupMemberSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
   const [messageInput, setMessageInput] = useState('');
+  const [mentionMenu, setMentionMenu] = useState<{
+    start: number;
+    query: string;
+    activeIndex: number;
+  } | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [composeImageIndex, setComposeImageIndex] = useState(0);
+  const imageAttachInputRef = useRef<HTMLInputElement>(null);
+
+  const imageAttachmentIndices = useMemo(
+    () =>
+      attachedFiles
+        .map((f, index) => (f.type.startsWith('image/') ? index : -1))
+        .filter((index) => index >= 0),
+    [attachedFiles],
+  );
+
+  const hasImageCompose = imageAttachmentIndices.length > 0;
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isMobileView, setIsMobileView] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -1001,12 +1053,25 @@ function ConversasContent() {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  useEffect(() => {
+  const syncLeftPanelWidth = useCallback(() => {
     if (!layoutRef.current || isMobileView) return;
     const rect = layoutRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const max = Math.max(MIN_LEFT_PANEL_WIDTH, rect.width - MIN_RIGHT_PANEL_WIDTH);
     setLeftPanelWidth((prev) => Math.min(Math.max(prev, MIN_LEFT_PANEL_WIDTH), max));
-  }, [isMobileView]);
+  }, [isMobileView, MIN_LEFT_PANEL_WIDTH, MIN_RIGHT_PANEL_WIDTH]);
+
+  useLayoutEffect(() => {
+    syncLeftPanelWidth();
+  }, [syncLeftPanelWidth]);
+
+  useEffect(() => {
+    if (!layoutRef.current || isMobileView) return;
+    const el = layoutRef.current;
+    const ro = new ResizeObserver(() => syncLeftPanelWidth());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isMobileView, syncLeftPanelWidth]);
 
   useEffect(() => {
     if (!isResizing || isMobileView) return;
@@ -1212,6 +1277,35 @@ function ConversasContent() {
     onError: () => toast.error('Erro ao abrir conversa'),
   });
 
+  const openGennecyChatMutation = useMutation({
+    mutationFn: openGennecyDirectChat,
+    onSuccess: (chat) => {
+      queryClient.invalidateQueries({ queryKey: ['directChats'] });
+      setSelectedChatId(chat.id);
+      setShowUsers(false);
+      setUserSearch('');
+      setSearchTerm('');
+    },
+    onError: () => toast.error('Erro ao abrir conversa com a Gennecy'),
+  });
+
+  const handleOpenGennecyChat = useCallback(() => {
+    const existing = chats.find((c) => {
+      if (c.chatType === 'GROUP' || c.chatType === 'GROUP_CALL') return false;
+      const other =
+        currentUser && c.initiatorId === currentUser.id ? c.recipient : c.initiator;
+      return isGennecyBotUser(other);
+    });
+    if (existing) {
+      setSelectedChatId(existing.id);
+      setShowUsers(false);
+      setUserSearch('');
+      setSearchTerm('');
+      return;
+    }
+    openGennecyChatMutation.mutate();
+  }, [chats, currentUser, openGennecyChatMutation]);
+
   const closeNewGroupModal = useCallback(() => {
     setShowNewGroupModal(false);
     setNewGroupModalStep(1);
@@ -1359,7 +1453,7 @@ function ConversasContent() {
 
   const sendMutation = useMutation({
     mutationFn: sendDirectMessage,
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['directChat', selectedChatId] });
       queryClient.invalidateQueries({ queryKey: ['directChats'] });
       setMessageInput('');
@@ -1367,6 +1461,16 @@ function ConversasContent() {
       setReplyingTo(null);
       if (textareaRef.current) {
         textareaRef.current.style.height = '44px';
+      }
+      if (result?.gennecyProcessing) {
+        const gennecyToast =
+          result.gennecyMode === 'task'
+            ? 'Gennecy está criando o card no Tasks…'
+            : 'Gennecy está respondendo…';
+        toast(gennecyToast, { icon: '🤖', duration: 5000 });
+        window.setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ['directChat', selectedChatId] });
+        }, 3500);
       }
     },
     onError: () => toast.error('Erro ao enviar mensagem'),
@@ -1632,6 +1736,51 @@ function ConversasContent() {
   }, [selectedChatId]);
 
   useEffect(() => {
+    setMentionMenu(null);
+  }, [selectedChatId]);
+
+  useEffect(() => {
+    setAttachedFiles([]);
+    setComposeImageIndex(0);
+  }, [selectedChatId]);
+
+  useEffect(() => {
+    if (composeImageIndex >= imageAttachmentIndices.length) {
+      setComposeImageIndex(Math.max(0, imageAttachmentIndices.length - 1));
+    }
+  }, [composeImageIndex, imageAttachmentIndices.length]);
+
+  const clearImageAttachments = useCallback(() => {
+    setAttachedFiles((prev) => prev.filter((f) => !f.type.startsWith('image/')));
+    setComposeImageIndex(0);
+    setShowEmojiPicker(false);
+  }, []);
+
+  const mentionableUsers = useMemo((): UserBasic[] => {
+    if (!activeChat || !currentUser) return [];
+    if (activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') {
+      return (activeChat.participants ?? [])
+        .map((p) => p.user)
+        .filter(
+          (u): u is UserBasic =>
+            Boolean(u?.id) && u.id !== currentUser.id && !isGennecyBotUser(u),
+        );
+    }
+    const other =
+      activeChat.initiatorId === currentUser.id ? activeChat.recipient : activeChat.initiator;
+    if (!other || other.id === currentUser.id || isGennecyBotUser(other)) return [];
+    return [other];
+  }, [activeChat, currentUser]);
+
+  const mentionOptions = useMemo(() => {
+    if (!mentionMenu) return [];
+    const inGennecyDm = isGennecyDirectChat(activeChat, currentUser?.id);
+    return buildChatMentionOptions(mentionableUsers, mentionMenu.query, {
+      includeGennecyAssistant: !inGennecyDm,
+    });
+  }, [mentionMenu, mentionableUsers, activeChat, currentUser?.id]);
+
+  useEffect(() => {
     setReactionsByChat(loadChatReactionsFromStorage());
   }, []);
 
@@ -1815,7 +1964,69 @@ function ConversasContent() {
     abortVoiceRecording();
   }, [selectedChatId, abortVoiceRecording]);
 
+  const resizeComposerTextarea = useCallback((ta: HTMLTextAreaElement) => {
+    ta.style.height = 'auto';
+    const h = Math.round(Math.min(Math.max(ta.scrollHeight, 44), 120));
+    ta.style.height = `${h}px`;
+  }, []);
+
+  const insertMention = useCallback(
+    (opt: ChatMentionOption) => {
+      const ta = textareaRef.current;
+      if (!ta || !mentionMenu) return;
+      const { value, cursor } = applyMentionInsert(
+        messageInput,
+        ta.selectionStart,
+        ta.selectionEnd,
+        mentionMenu.start,
+        opt.insertText,
+      );
+      setMessageInput(value);
+      setMentionMenu(null);
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(cursor, cursor);
+        resizeComposerTextarea(ta);
+      });
+    },
+    [mentionMenu, messageInput, resizeComposerTextarea],
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionMenu) {
+      if (e.key === 'ArrowDown' && mentionOptions.length > 0) {
+        e.preventDefault();
+        setMentionMenu((m) =>
+          m
+            ? { ...m, activeIndex: (m.activeIndex + 1) % mentionOptions.length }
+            : null,
+        );
+        return;
+      }
+      if (e.key === 'ArrowUp' && mentionOptions.length > 0) {
+        e.preventDefault();
+        setMentionMenu((m) =>
+          m
+            ? {
+                ...m,
+                activeIndex: (m.activeIndex - 1 + mentionOptions.length) % mentionOptions.length,
+              }
+            : null,
+        );
+        return;
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && mentionOptions.length > 0) {
+        e.preventDefault();
+        const opt = mentionOptions[mentionMenu.activeIndex];
+        if (opt) insertMention(opt);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionMenu(null);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -1823,12 +2034,20 @@ function ConversasContent() {
   };
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setMessageInput(e.target.value);
-    const ta = e.target;
-    ta.style.height = 'auto';
-    /** Mínimo 44px (= size-11 dos botões): evita pílula “puxando” só para baixo quando scrollHeight é ímpar / fracionário */
-    const h = Math.round(Math.min(Math.max(ta.scrollHeight, 44), 120));
-    ta.style.height = `${h}px`;
+    const value = e.target.value;
+    const cursor = e.target.selectionStart ?? value.length;
+    setMessageInput(value);
+    const detected = detectMentionQuery(value, cursor);
+    if (!detected) {
+      setMentionMenu(null);
+    } else {
+      setMentionMenu((prev) =>
+        prev && prev.start === detected.start && prev.query === detected.query
+          ? prev
+          : { ...detected, activeIndex: 0 },
+      );
+    }
+    resizeComposerTextarea(e.target);
   };
 
   const insertEmoji = (emoji: string) => {
@@ -1883,7 +2102,7 @@ function ConversasContent() {
 
   const appendFilesToComposer = useCallback((files: File[]) => {
     if (!files.length) return;
-    setAttachedFiles((prev) => [...prev, ...files].slice(0, 5));
+    setAttachedFiles((prev) => dedupeFiles([...prev, ...files]).slice(0, 5));
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1915,6 +2134,17 @@ function ConversasContent() {
     const files = Array.from(e.dataTransfer.files || []);
     appendFilesToComposer(files);
   }, [appendFilesToComposer]);
+
+  const handleComposerPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = getFilesFromClipboard(e.clipboardData);
+      if (files.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      appendFilesToComposer(files);
+    },
+    [appendFilesToComposer],
+  );
 
   // Helpers
   const getOtherUser = (chat: DirectChat): UserBasic | null => {
@@ -2161,13 +2391,26 @@ function ConversasContent() {
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             <div className="flex items-center justify-between mb-3">
               <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Conversas</h1>
-              <button
-                onClick={() => setShowUsers(v => !v)}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-200"
-                title="Nova conversa"
-              >
-                {showUsers ? <X size={18} /> : <Plus size={18} />}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleOpenGennecyChat}
+                  disabled={openGennecyChatMutation.isPending}
+                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-200 disabled:opacity-50"
+                  title="Conversar com a Gennecy"
+                  aria-label="Conversar com a Gennecy"
+                >
+                  <Bot size={18} strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowUsers(v => !v)}
+                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-200"
+                  title="Nova conversa"
+                >
+                  {showUsers ? <X size={18} /> : <Plus size={18} />}
+                </button>
+              </div>
             </div>
 
             {/* Search bar */}
@@ -2346,7 +2589,15 @@ function ConversasContent() {
 
       {/* ── Right Panel ────────────────────────────────────────── */}
       {showRightPanel && (
-        <div className="relative flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-gray-950 overflow-hidden">
+        <div
+          className={clsx(
+            'relative flex min-w-0 flex-1 flex-col overflow-hidden',
+            'bg-gray-50 dark:bg-gray-950',
+          )}
+          onDragOver={hasImageCompose ? handleComposerDragOver : undefined}
+          onDragLeave={hasImageCompose ? handleComposerDragLeave : undefined}
+          onDrop={hasImageCompose ? handleComposerDrop : undefined}
+        >
           {!selectedChatId ? (
             /* Empty state */
             <div className="flex-1 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400 select-none">
@@ -2359,10 +2610,11 @@ function ConversasContent() {
               </p>
             </div>
           ) : (
-            <>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Chat Header */}
               {(() => {
                 const other = activeChat ? getOtherUser(activeChat) : null;
+                const isGennecyChatOpen = isGennecyDirectChat(activeChat, currentUser?.id);
                 return (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-shrink-0">
                     {isMobileView && (
@@ -2474,54 +2726,58 @@ function ConversasContent() {
                             </div>
                           )}
                         <div ref={chatHeaderMenuRef} className="relative ml-auto flex shrink-0 items-center gap-0.5">
-                          <button
-                            type="button"
-                            title={
-                              activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL'
-                                ? 'Videochamada com todo o grupo'
-                                : 'Videochamada no sistema'
-                            }
-                            aria-label="Iniciar videochamada"
-                            onClick={() => {
-                              if (!activeChat?.id) return;
-                              if (activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') {
-                                inviteGroupConference('video');
-                                return;
-                              }
-                              if (!other) {
-                                toast.error('Abra uma conversa direta para ligar.');
-                                return;
-                              }
-                              void nativeCall.startOutgoing(activeChat.id, other.id, other.name || 'Contato', true);
-                            }}
-                            className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
-                          >
-                            <Video size={18} />
-                          </button>
-                          <button
-                            type="button"
-                            title={
-                              activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL'
-                                ? 'Ligação de voz com todo o grupo'
-                                : 'Ligação de voz no sistema'
-                            }
-                            aria-label="Iniciar ligação de voz"
-                            onClick={() => {
-                              if (!activeChat?.id) return;
-                              if (activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') {
-                                inviteGroupConference('audio');
-                                return;
-                              }
-                              if (!other) {
-                                toast.error('Abra uma conversa direta para ligar.');
-                                return;
-                              }
-                              void nativeCall.startOutgoing(activeChat.id, other.id, other.name || 'Contato', false);
-                            }}
-                            className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
-                          >
-                            <Phone size={18} />
-                          </button>
+                          {!isGennecyChatOpen && (
+                            <>
+                              <button
+                                type="button"
+                                title={
+                                  activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL'
+                                    ? 'Videochamada com todo o grupo'
+                                    : 'Videochamada no sistema'
+                                }
+                                aria-label="Iniciar videochamada"
+                                onClick={() => {
+                                  if (!activeChat?.id) return;
+                                  if (activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') {
+                                    inviteGroupConference('video');
+                                    return;
+                                  }
+                                  if (!other) {
+                                    toast.error('Abra uma conversa direta para ligar.');
+                                    return;
+                                  }
+                                  void nativeCall.startOutgoing(activeChat.id, other.id, other.name || 'Contato', true);
+                                }}
+                                className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                              >
+                                <Video size={18} />
+                              </button>
+                              <button
+                                type="button"
+                                title={
+                                  activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL'
+                                    ? 'Ligação de voz com todo o grupo'
+                                    : 'Ligação de voz no sistema'
+                                }
+                                aria-label="Iniciar ligação de voz"
+                                onClick={() => {
+                                  if (!activeChat?.id) return;
+                                  if (activeChat.chatType === 'GROUP' || activeChat.chatType === 'GROUP_CALL') {
+                                    inviteGroupConference('audio');
+                                    return;
+                                  }
+                                  if (!other) {
+                                    toast.error('Abra uma conversa direta para ligar.');
+                                    return;
+                                  }
+                                  void nativeCall.startOutgoing(activeChat.id, other.id, other.name || 'Contato', false);
+                                }}
+                                className="h-9 w-9 inline-flex flex-shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                              >
+                                <Phone size={18} />
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
                             title="Pesquisar mensagens"
@@ -2790,7 +3046,34 @@ function ConversasContent() {
                 </div>
               )}
 
-              {/* Messages */}
+              {/* Mensagens ou pré-visualização de imagem (abaixo do header) */}
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {hasImageCompose ? (
+                <ChatImageComposePanel
+                  files={attachedFiles}
+                  fileIndices={imageAttachmentIndices}
+                  activeIndex={composeImageIndex}
+                  caption={messageInput}
+                  sending={sendMutation.isPending}
+                  showEmojiPicker={showEmojiPicker}
+                  onCaptionChange={setMessageInput}
+                  onCaptionKeyDown={handleKeyDown}
+                  onActiveIndexChange={setComposeImageIndex}
+                  onRemoveAt={(fileIndex) => {
+                    removeFile(fileIndex);
+                    setComposeImageIndex((i) => Math.max(0, i - 1));
+                  }}
+                  onDiscard={clearImageAttachments}
+                  onSend={handleSend}
+                  onAddImages={() => imageAttachInputRef.current?.click()}
+                  onPaste={handleComposerPaste}
+                  onToggleEmojiPicker={() => setShowEmojiPicker((s) => !s)}
+                  onPickEmoji={(e) => {
+                    setMessageInput((v) => v + e);
+                    setShowEmojiPicker(false);
+                  }}
+                />
+              ) : (
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1 bg-gray-50 dark:bg-gray-950">
                 {chatLoading && !activeChat ? (
                   <div className="flex items-center justify-center h-full">
@@ -2799,6 +3082,11 @@ function ConversasContent() {
                 ) : (
                   activeChat?.messages.map((msg, idx) => {
                     const isOwn = msg.senderId === currentUser?.id;
+                    const isGennecyMsg = !isOwn && isGennecyBotUser(msg.sender);
+                    const isGroupChat =
+                      activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL';
+                    const showSenderColumn =
+                      !msg.deletedAt && !isOwn && (isGroupChat || isGennecyMsg);
                     const prevMsg = activeChat.messages[idx - 1];
                     const showDate = !prevMsg || new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
                     const isClusterStart =
@@ -2859,9 +3147,7 @@ function ConversasContent() {
                             textareaRef.current?.focus();
                           }}
                         >
-                          {(activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL') &&
-                            !isOwn &&
-                            !msg.deletedAt && (
+                          {showSenderColumn && (
                             <div className="mr-2 mt-1.5 flex w-8 flex-shrink-0 justify-center self-start">
                               {isClusterStart ? (
                                 <Avatar user={msg.sender} size="sm" />
@@ -2894,21 +3180,26 @@ function ConversasContent() {
                                       )
                                 )}
                               >
-                            {(activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL') &&
-                              !isOwn &&
-                              !msg.deletedAt &&
-                              isClusterStart && (
-                              <button
-                                type="button"
-                                onClick={() => setContactDetailsUser(msg.sender)}
-                                className={clsx(
-                                  'mb-1 block text-[11px] font-semibold underline-offset-2 hover:underline',
-                                  getNameColorClass(String(msg.senderId || msg.sender?.id || msg.sender?.name || 'sender'))
-                                )}
-                                title="Ver dados do contato"
-                              >
-                                {msg.sender?.name || 'Usuário'}
-                              </button>
+                            {showSenderColumn && isClusterStart && (
+                              isGennecyMsg ? (
+                                <p className="mb-1 block text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                  Gennecy
+                                </p>
+                              ) : isGroupChat ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setContactDetailsUser(msg.sender)}
+                                  className={clsx(
+                                    'mb-1 block text-[11px] font-semibold underline-offset-2 hover:underline',
+                                    getNameColorClass(
+                                      String(msg.senderId || msg.sender?.id || msg.sender?.name || 'sender'),
+                                    ),
+                                  )}
+                                  title="Ver dados do contato"
+                                >
+                                  {msg.sender?.name || 'Usuário'}
+                                </button>
+                              ) : null
                             )}
                             {msg.deletedAt ? (
                               <p className="text-sm italic opacity-80">Mensagem apagada</p>
@@ -3056,7 +3347,20 @@ function ConversasContent() {
                                 })}
                                 {/* Conteúdo */}
                                 {hasVisibleText && (
-                                    <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>
+                                    <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                                      <MentionHighlightedText
+                                        text={
+                                          isGennecyMsg
+                                            ? formatGennecyMessageContent(msg.content)
+                                            : msg.content
+                                        }
+                                        mentionClassName={
+                                          isOwn
+                                            ? 'font-semibold text-red-200'
+                                            : 'font-medium text-red-600 dark:text-red-400'
+                                        }
+                                      />
+                                    </p>
                                   )}
                               </>
                             )}
@@ -3216,6 +3520,8 @@ function ConversasContent() {
                   })
                 )}
                 <div ref={messagesEndRef} />
+              </div>
+              )}
               </div>
 
               {typeof document !== 'undefined' && messageContextMenu
@@ -3525,7 +3831,7 @@ function ConversasContent() {
                                 commitEditMessage();
                               }
                             }}
-                            placeholder="Digite uma mensagem"
+                            placeholder="Digite uma mensagem · @ para mencionar"
                             className="min-h-[44px] min-w-0 flex-1 bg-transparent px-2 py-2 text-base leading-6 text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-400/90"
                           />
                           <div className="flex h-11 shrink-0 items-center gap-0.5">
@@ -3564,7 +3870,7 @@ function ConversasContent() {
                             type="button"
                             disabled={editMessageMutation.isPending}
                             onClick={commitEditMessage}
-                            className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent bg-[#25D366] text-white shadow-sm transition-colors hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                             title="Salvar"
                             aria-label="Salvar edição"
                           >
@@ -3582,7 +3888,17 @@ function ConversasContent() {
                   document.body
                 )}
 
-              {/* Input area — pílula fina, fundo contínuo com a área de mensagens */}
+              <input
+                ref={imageAttachInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {/* Input area — oculto enquanto compõe imagem (legenda fica no painel) */}
+              {!hasImageCompose && (
               <div
                 className="flex-shrink-0 bg-transparent border-0 px-3 pt-2 pb-3 sm:px-4"
                 onDragOver={handleComposerDragOver}
@@ -3625,25 +3941,7 @@ function ConversasContent() {
                     </span>
                   </div>
                 )}
-                {attachedFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-1.5 px-0.5">
-                    {attachedFiles.map((f, i) => (
-                      <div key={i} className="flex items-center gap-1 text-xs bg-white dark:bg-gray-900 rounded-lg px-2 py-1 max-w-[160px] border border-gray-200 dark:border-gray-800">
-                        {f.type.startsWith('image/') ? (
-                          <ImageIcon size={12} />
-                        ) : f.type.startsWith('audio/') ? (
-                          <Mic size={12} />
-                        ) : (
-                          <FileText size={12} />
-                        )}
-                        <span className="truncate flex-1">{f.name}</span>
-                        <button type="button" onClick={() => removeFile(i)} className="flex-shrink-0 hover:text-red-500">
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <ChatComposerAttachments files={attachedFiles} onRemove={removeFile} />
 
                 <div
                   className={clsx(
@@ -3699,16 +3997,30 @@ function ConversasContent() {
                     </div>
                   </div>
 
-                  <textarea
-                    ref={textareaRef}
+                  <ChatComposerField
+                    textareaRef={textareaRef}
                     value={messageInput}
                     onChange={handleTextareaChange}
                     onKeyDown={handleKeyDown}
+                    onPaste={handleComposerPaste}
+                    onResize={resizeComposerTextarea}
                     placeholder="Digite uma mensagem"
-                    rows={1}
                     disabled={voiceRecordingActive}
-                    className="chat-composer-input min-h-[44px] max-h-[120px] flex-1 resize-none border-0 bg-transparent px-1.5 py-2 leading-6 disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{ height: '44px', minHeight: '44px' }}
+                    mentionPicker={
+                      mentionMenu ? (
+                        <ChatMentionPicker
+                          options={mentionOptions}
+                          activeIndex={Math.min(
+                            mentionMenu.activeIndex,
+                            Math.max(0, mentionOptions.length - 1),
+                          )}
+                          onSelect={insertMention}
+                          onHoverIndex={(index) =>
+                            setMentionMenu((m) => (m ? { ...m, activeIndex: index } : null))
+                          }
+                        />
+                      ) : null
+                    }
                   />
 
                   {/* Bloco fixo à direita: sempre h-11 alinhado ao esquerdo */}
@@ -3729,7 +4041,7 @@ function ConversasContent() {
                         type="button"
                         onClick={handleSend}
                         disabled={sendMutation.isPending}
-                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent bg-[#25D366] text-white transition-colors hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent bg-red-600 text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                         title="Enviar"
                         aria-label="Enviar mensagem"
                       >
@@ -3754,6 +4066,7 @@ function ConversasContent() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* ── Sidebar de pesquisa de mensagens ── */}
               {showMsgSearch && (
@@ -4004,7 +4317,7 @@ function ConversasContent() {
                                     groupName: t,
                                   });
                                 }}
-                                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[#25D366] text-white hover:bg-[#20bd5a] disabled:opacity-50"
+                                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
                               >
                                 Salvar
                               </button>
@@ -4056,7 +4369,7 @@ function ConversasContent() {
                             }}
                             className="mt-5 flex w-full max-w-[160px] flex-col items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50/80 px-4 py-3 text-center transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800/50 dark:hover:bg-gray-800"
                           >
-                            <UserPlus size={26} strokeWidth={1.75} className="text-[#25D366]" />
+                            <UserPlus size={26} strokeWidth={1.75} className="text-red-600 dark:text-red-400" />
                             <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
                               Adicionar
                             </span>
@@ -4108,7 +4421,7 @@ function ConversasContent() {
                                         : groupDescriptionDraft.trim(),
                                   });
                                 }}
-                                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[#25D366] text-white hover:bg-[#20bd5a] disabled:opacity-50"
+                                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
                               >
                                 Salvar
                               </button>
@@ -4453,7 +4766,7 @@ function ConversasContent() {
                                   participantIds: addMemberPickSelection,
                                 });
                               }}
-                              className="rounded-lg bg-[#25D366] px-4 py-2 text-sm font-semibold text-white hover:bg-[#20bd5a] disabled:opacity-50"
+                              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                             >
                               {addGroupMembersMutation.isPending
                                 ? 'Adicionando...'
@@ -4653,7 +4966,7 @@ function ConversasContent() {
                               <MessageSquare
                                 size={26}
                                 strokeWidth={1.75}
-                                className="text-[#25D366]"
+                                className="text-red-600 dark:text-red-400"
                               />
                               <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
                                 Conversar
@@ -4712,7 +5025,7 @@ function ConversasContent() {
                   </aside>
                 </>
               )}
-            </>
+            </div>
           )}
         </div>
       )}

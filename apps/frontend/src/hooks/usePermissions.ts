@@ -15,7 +15,13 @@ export function usePermissions() {
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
-    }
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: (failureCount, error) => {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 429 || status === 401 || status === 403) return false;
+      return failureCount < 1;
+    },
   });
 
   const user = userData?.data;

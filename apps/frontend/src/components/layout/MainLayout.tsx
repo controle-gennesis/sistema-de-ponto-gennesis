@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useLayoutEffect, useState } from 'react';
+import { readSidebarCollapsed } from '@/lib/sidebarStorage';
 import { Sidebar } from './Sidebar';
 import { ChatWidget } from '../chat/ChatWidget';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -21,13 +22,18 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
   const defaultLogout = useLogout();
   const handleLogout = onLogout ?? defaultLogout;
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [layoutSynced, setLayoutSynced] = useState(false);
   const { user } = usePermissions();
   const nativeCall = useNativeWebRTCCall({ userId: user?.id });
 
-  // Função para detectar mudanças no estado do menu
-  const handleMenuToggle = (collapsed: boolean) => {
-    setIsCollapsed(collapsed);
-  };
+  useLayoutEffect(() => {
+    setIsCollapsed(readSidebarCollapsed());
+    setLayoutSynced(true);
+  }, []);
+
+  const handleMenuToggle = useCallback((collapsed: boolean) => {
+    setIsCollapsed((prev) => (prev === collapsed ? prev : collapsed));
+  }, []);
 
   return (
     <NativeCallProvider value={nativeCall}>
@@ -41,9 +47,11 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
       />
       
       {/* Main Content */}
-      <div className={`transition-all duration-300 ease-in-out ${
-        isCollapsed ? 'lg:ml-20' : 'lg:ml-[23rem]'
-      }`}>
+      <div
+        className={`${
+          layoutSynced ? 'transition-all duration-300 ease-in-out' : ''
+        } ${isCollapsed ? 'lg:ml-20' : 'lg:ml-[23rem]'}`}
+      >
         <main className="p-4 lg:p-8">
           {children}
         </main>

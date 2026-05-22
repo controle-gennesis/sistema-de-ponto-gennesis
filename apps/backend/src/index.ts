@@ -160,62 +160,62 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 app.use(compression());
-// Rate limiter que ignora requisições OPTIONS (preflight CORS)
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
-  message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
-  skip: (req) => req.method === 'OPTIONS', // Ignorar requisições OPTIONS
-}));
 
-// Rate limiting geral - ignorar requisições OPTIONS (preflight CORS)
+/** Rate limit só em deploy real (local/HMR não deve bloquear /auth/me). */
+const enableRateLimit =
+  process.env.NODE_ENV === 'production' ||
+  process.env.RAILWAY_ENVIRONMENT === 'production';
+
+const rateLimit429Handler = (
+  req: import('express').Request,
+  res: import('express').Response,
+  message: string,
+) => {
+  const origin = req.headers.origin;
+  if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.status(429).json({ success: false, message });
+};
+
+/** Em desenvolvimento local não aplicamos rate limit (evita 429 com HMR + polling do chat). */
+const skipRateLimit = (req: import('express').Request) =>
+  req.method === 'OPTIONS' || !enableRateLimit;
+
+// Rate limiting geral (uma única instância — antes havia duas contando em dobro)
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 1000, // máximo 1000 requests por IP (mais permissivo para desenvolvimento)
-  message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
+  windowMs: 15 * 60 * 1000,
+  max: enableRateLimit ? 2000 : 50_000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS', // Ignorar requisições OPTIONS (preflight)
-  handler: (req, res) => {
-    // Garantir que headers CORS sejam enviados mesmo quando rate limit é atingido
-    const origin = req.headers.origin;
-    if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    res.status(429).json({
-      success: false,
-      message: 'Muitas tentativas de acesso. Tente novamente em 15 minutos.'
-    });
-  }
+  skip: skipRateLimit,
+  handler: (req, res) =>
+    rateLimit429Handler(
+      req,
+      res,
+      'Muitas tentativas de acesso. Tente novamente em 15 minutos.',
+    ),
 });
 
-// Rate limiting mais permissivo para /auth/me (endpoint usado frequentemente)
-const authLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 100, // máximo 100 requests por minuto por IP
-  message: 'Muitas tentativas de acesso. Tente novamente em 1 minuto.',
+// /auth/me é consultado por vários componentes React — limite dedicado mais alto
+const authMeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: enableRateLimit ? 300 : 10_000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS', // Ignorar requisições OPTIONS (preflight)
-  handler: (req, res) => {
-    // Garantir que headers CORS sejam enviados mesmo quando rate limit é atingido
-    const origin = req.headers.origin;
-    if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    res.status(429).json({
-      success: false,
-      message: 'Muitas tentativas de acesso. Tente novamente em 1 minuto.'
-    });
-  }
+  skipSuccessfulRequests: true,
+  skip: skipRateLimit,
+  handler: (req, res) =>
+    rateLimit429Handler(
+      req,
+      res,
+      'Muitas consultas ao perfil. Aguarde um momento e recarregue a página.',
+    ),
 });
 
 app.use(limiter);
-
-// Aplicar rate limiter mais permissivo para /auth/me antes das rotas
-app.use('/api/auth/me', authLimiter);
+app.use('/api/auth/me', authMeLimiter);
 
 // Logging
 app.use(morgan('combined'));

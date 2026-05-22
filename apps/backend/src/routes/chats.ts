@@ -34,6 +34,11 @@ router.post('/direct', (req, res, next) =>
   chatController.openDirectChat(req, res, next)
 );
 
+// Abrir (ou criar) conversa com a Gennecy
+router.post('/direct/gennecy', (req, res, next) =>
+  chatController.openGennecyDirectChat(req, res, next)
+);
+
 // Criar grupo (suporta upload de foto via multipart)
 router.post('/direct/groups',
   ChatController.uploadGroupAvatar(),
