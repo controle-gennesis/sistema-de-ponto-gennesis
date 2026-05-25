@@ -116,6 +116,23 @@ function formatDateTimeBR(dateString: string) {
   });
 }
 
+const mapFieldCls =
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm tabular-nums text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+
+const mapThCls =
+  'px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4';
+
+const mapTdCls = 'px-3 py-3 text-sm sm:px-4 align-middle';
+
+const mapPaymentSegmentCls = (active: boolean) =>
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+    active
+      ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-blue-500 dark:bg-blue-500'
+      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700/80'
+  }`;
+
+const mapLabelCls = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
+
 function MapStyledCheckbox({
   checked,
   onChange,
@@ -163,6 +180,16 @@ const OC_TYPE_BOLETO = 'BOLETO';
 function paymentConditionDefault(paymentType: string): string {
   if (paymentType === OC_TYPE_AVISTA) return 'AVISTA';
   return 'BOLETO_30';
+}
+
+function emptyPaymentDraft() {
+  return {
+    paymentType: OC_TYPE_AVISTA,
+    paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
+    paymentDetails: '',
+    observations: '',
+    amountToPayStr: ''
+  };
 }
 
 function scoreItem(params: {
@@ -272,12 +299,6 @@ export default function MapaCotacaoPage() {
         (s.code && s.code.toLowerCase().includes(q))
     );
   }, [suppliers, supplierSearch]);
-
-  const selectedSuppliersOrdered = useMemo(() => {
-    return suppliers
-      .filter((s) => selectedSupplierIds.has(s.id))
-      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [suppliers, selectedSupplierIds]);
 
   const selectedRequest = approvedRequests.find((r) => r.id === selectedRequestId) || null;
 
@@ -498,8 +519,17 @@ export default function MapaCotacaoPage() {
         const selectedSupplierIdsArr = Array.from(selectedSupplierIds);
         const freightBySupplierPayload: Record<string, number> = {};
         for (const supplierId of selectedSupplierIdsArr) {
-          const f = parseCurrencyBR(freightBySupplier[supplierId] ?? '');
-          if (f == null || f < 0) throw new Error(`Frete inválido para o fornecedor ${supplierId}`);
+          const rawFrete = freightBySupplier[supplierId] ?? '';
+          const parsed = parseCurrencyBR(rawFrete);
+          // Campo vazio = sem frete (0), igual ao resumo exibido na tela
+          const f = rawFrete.trim() === '' ? 0 : parsed;
+          if (f == null || f < 0) {
+            const nome =
+              suppliers.find((s) => s.id === supplierId)?.name ?? 'fornecedor selecionado';
+            throw new Error(
+              `Frete inválido para "${nome}". Use um valor numérico válido (ex.: 0,00 ou 8,00).`
+            );
+          }
           freightBySupplierPayload[supplierId] = f;
         }
 
@@ -625,63 +655,43 @@ export default function MapaCotacaoPage() {
 
           <Card>
             <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
-                    <Truck className="h-5 w-5 text-blue-600 sm:h-6 sm:w-6 dark:text-blue-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Requisições de Materiais Aprovadas</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Escolha a requisição e os fornecedores para montar o mapa
-                    </p>
-                  </div>
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
+                  <Truck className="h-5 w-5 text-blue-600 sm:h-6 sm:w-6 dark:text-blue-400" />
                 </div>
-                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="text"
-                      inputMode="search"
-                      autoComplete="off"
-                      value={supplierSearch}
-                      onChange={(e) => setSupplierSearch(e.target.value)}
-                      placeholder="Buscar fornecedor..."
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                    />
-                    {supplierSearch ? (
-                      <button
-                        type="button"
-                        onClick={() => setSupplierSearch('')}
-                        aria-label="Limpar busca"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    ) : null}
-                  </div>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    RM's Aprovadas
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Escolha a requisição e os fornecedores para montar o mapa
+                  </p>
                 </div>
               </div>
             </CardHeader>
 
-            <CardContent>
+            <CardContent className="pt-4">
               {approvedRequests.length === 0 ? (
-                <div className="py-8 text-center">
-                  <Truck className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
-                  <p className="text-gray-500 dark:text-gray-400">
+                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-12 text-center dark:border-gray-600 dark:bg-gray-900/30">
+                  <Truck className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500" />
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     Nenhuma requisição em RMs Aprovadas aguardando cotação
                   </p>
                 </div>
               ) : (
                 <>
-                  <div className="mb-4">
-                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <div>
+                    <label
+                      htmlFor="mapa-cotacao-rm-select"
+                      className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
                       Requisição de material *
                     </label>
                     <select
+                      id="mapa-cotacao-rm-select"
                       value={selectedRequestId}
                       onChange={(e) => setSelectedRequestId(e.target.value)}
-                      className="h-10 w-full max-w-xl rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     >
                       <option value="">Selecione uma requisição (RMs Aprovadas)</option>
                       {approvedRequests.map((r) => (
@@ -693,106 +703,99 @@ export default function MapaCotacaoPage() {
                   </div>
 
                   {!selectedRequest ? (
-                    <div className="py-8 text-center">
-                      <FileText className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
-                      <p className="text-gray-500 dark:text-gray-400">
-                        Selecione uma requisição para liberar a comparação de fornecedores
+                    <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-12 text-center dark:border-gray-600 dark:bg-gray-900/30">
+                      <FileText className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500" />
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Selecione uma requisição acima
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Depois você poderá escolher os fornecedores para comparar preços
                       </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                      <div className="min-w-0">
-                        <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                          Fornecedores (comparação)
-                        </p>
-                        <div className="max-h-[280px] overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-gray-600">
+                    <div className="mt-4 min-w-0">
+                        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Fornecedores (comparação)
+                            {selectedSupplierIds.size > 0 ? (
+                              <span className="font-normal text-gray-500 dark:text-gray-400">
+                                {' '}
+                                · {selectedSupplierIds.size} selecionado
+                                {selectedSupplierIds.size === 1 ? '' : 's'}
+                              </span>
+                            ) : null}
+                          </p>
+                          <div className="relative w-full sm:max-w-[16rem]">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                            <input
+                              type="text"
+                              inputMode="search"
+                              autoComplete="off"
+                              value={supplierSearch}
+                              onChange={(e) => setSupplierSearch(e.target.value)}
+                              placeholder="Buscar fornecedor..."
+                              className="h-9 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                            />
+                            {supplierSearch ? (
+                              <button
+                                type="button"
+                                onClick={() => setSupplierSearch('')}
+                                aria-label="Limpar busca"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="max-h-[280px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600">
                           {suppliers.length === 0 ? (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                            <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
                               Nenhum fornecedor cadastrado.
                             </p>
                           ) : filteredSuppliers.length === 0 ? (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                            <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
                               Nenhum fornecedor corresponde à busca.
                             </p>
                           ) : (
-                            <ul className="space-y-1">
-                              {filteredSuppliers.map((s) => (
-                                <li key={s.id}>
-                                  <label className="flex cursor-pointer items-start gap-2 rounded-md py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/40">
-                                    <MapStyledCheckbox
-                                      checked={selectedSupplierIds.has(s.id)}
-                                      onChange={(checked) => {
-                                        setSelectedSupplierIds((prev) => {
-                                          const next = new Set(prev);
-                                          if (checked) next.add(s.id);
-                                          else next.delete(s.id);
-                                          return next;
-                                        });
-                                      }}
-                                      ariaLabel={`Selecionar ${s.name}`}
-                                    />
-                                    <span className="min-w-0 pt-0.5">
-                                      <span className="block truncate font-medium">{s.name}</span>
-                                      {s.code ? (
-                                        <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
-                                          Cód. {s.code}
-                                        </span>
-                                      ) : null}
-                                    </span>
-                                  </label>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                          Selecionados ({selectedSuppliersOrdered.length})
-                        </p>
-                        <div className="max-h-[280px] overflow-y-auto rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-600 dark:bg-gray-900/30">
-                          {selectedSuppliersOrdered.length === 0 ? (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                              Nenhum fornecedor selecionado.
-                            </p>
-                          ) : (
-                            <ul className="space-y-2">
-                              {selectedSuppliersOrdered.map((s) => (
-                                <li
-                                  key={s.id}
-                                  className="flex items-start justify-between gap-2 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800"
-                                >
-                                  <span className="min-w-0">
-                                    <span className="block truncate text-gray-900 dark:text-gray-100">
-                                      {s.name}
-                                    </span>
-                                    {s.code ? (
-                                      <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
-                                        {s.code}
-                                      </span>
-                                    ) : null}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    title="Remover da comparação"
-                                    className="shrink-0 rounded p-1 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                                    onClick={() => {
-                                      setSelectedSupplierIds((prev) => {
-                                        const next = new Set(prev);
-                                        next.delete(s.id);
-                                        return next;
-                                      });
-                                    }}
+                            <ul className="divide-y divide-gray-200 dark:divide-gray-600">
+                              {filteredSuppliers.map((s) => {
+                                const isChecked = selectedSupplierIds.has(s.id);
+                                return (
+                                  <li
+                                    key={s.id}
+                                    className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
                                   >
-                                    <X className="h-4 w-4" />
-                                  </button>
-                                </li>
-                              ))}
+                                    <label className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300">
+                                      <MapStyledCheckbox
+                                        checked={isChecked}
+                                        onChange={(checked) => {
+                                          setSelectedSupplierIds((prev) => {
+                                            const next = new Set(prev);
+                                            if (checked) next.add(s.id);
+                                            else next.delete(s.id);
+                                            return next;
+                                          });
+                                        }}
+                                        ariaLabel={`Selecionar ${s.name}`}
+                                      />
+                                      <span className="min-w-0 flex-1 leading-tight">
+                                        <span className="block truncate font-medium text-gray-900 dark:text-gray-100">
+                                          {s.name}
+                                        </span>
+                                        {s.code ? (
+                                          <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                                            Cód. {s.code}
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                    </label>
+                                  </li>
+                                );
+                              })}
                             </ul>
                           )}
                         </div>
-                      </div>
                     </div>
                   )}
                 </>
@@ -811,7 +814,7 @@ export default function MapaCotacaoPage() {
                       </div>
                       <div className="min-w-0">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          Cotações por item
+                          Cotações
                         </h3>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                           Preços, quantidades e vencedor por item da SC
@@ -849,489 +852,522 @@ export default function MapaCotacaoPage() {
                 </CardHeader>
                 <CardContent>
                   {selectedSupplierIds.size === 0 ? (
-                    <div className="py-8 text-center">
-                      <FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
-                      <p className="text-gray-500 dark:text-gray-400">
-                        Selecione pelo menos um fornecedor para comparar preços
+                    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-12 text-center dark:border-gray-600 dark:bg-gray-900/30">
+                      <FileSpreadsheet className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500" />
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Selecione pelo menos um fornecedor acima
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        A tabela de cotações será exibida aqui
                       </p>
                     </div>
                   ) : (
                     <>
-                      <div className="overflow-x-auto [scrollbar-gutter:stable]">
-                        <table className="w-full text-sm">
-                          <thead className="border-b border-gray-200 dark:border-gray-700">
-                            <tr>
-                              <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                Item (SC)
-                              </th>
-                              {Array.from(selectedSupplierIds).map((supplierId) => {
-                                const sup = suppliers.find((x) => x.id === supplierId);
-                                return (
-                                  <th
-                                    key={supplierId}
-                                    className="whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6"
-                                  >
-                                    <div className="font-medium text-gray-900 dark:text-gray-100">
-                                      {sup ? sup.name : supplierId}
-                                    </div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                      Frete:
-                                    </div>
-                                    <input
-                                      type="text"
-                                      value={freightBySupplier[supplierId] ?? ''}
-                                      onChange={(e) => {
-                                        setFreightBySupplier((prev) => ({ ...prev, [supplierId]: e.target.value }));
-                                      }}
-                                      onBlur={() => {
-                                        const raw = freightBySupplier[supplierId] ?? '';
-                                        const formatted = formatCurrencyInputValue(raw);
-                                        setFreightBySupplier((prev) => ({ ...prev, [supplierId]: formatted }));
-                                      }}
-                                      placeholder="0,00"
-                                      className="mt-1 w-24 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                  </th>
-                                );
-                              })}
-                              <th className="whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                Vencedor
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                            {ocItems.map((item) => {
-                              const winner = winnersByItem.find((w) => w.itemId === item.id) || null;
-                              const winnerSupplier = suppliers.find((s) => s.id === winner?.winnerSupplierId);
-
-                              const unitLabel = item.unit || '-';
-                              const maxQty = Number(item.quantity);
-                              const qty = ocItemQtyByItemId[item.id] ?? maxQty;
-                              const matSub = materialItemSubtitle(item);
-
-                              return (
-                                <tr
-                                  key={item.id}
-                                  className="align-top transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-600 dark:bg-gray-900/40">
+                        <p className="mb-3 text-sm font-medium text-gray-800 dark:text-gray-200">
+                          Frete por fornecedor (R$)
+                        </p>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {Array.from(selectedSupplierIds).map((supplierId) => {
+                            const sup = suppliers.find((x) => x.id === supplierId);
+                            return (
+                              <div key={supplierId} className="min-w-0">
+                                <label
+                                  htmlFor={`frete-${supplierId}`}
+                                  className="mb-1 block truncate text-xs font-medium text-gray-600 dark:text-gray-400"
+                                  title={sup?.name ?? supplierId}
                                 >
-                                  <td className="min-w-[260px] px-3 py-3 sm:px-6">
-                                    <div className="font-medium text-gray-900 dark:text-gray-100">
-                                      {materialItemLabel(item)}
-                                    </div>
-                                    {matSub ? (
-                                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
-                                        {matSub}
-                                      </div>
-                                    ) : null}
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                                      <span>
-                                        Solicitado na SC: {maxQty} {unitLabel}
-                                      </span>
-                                      <span className="text-gray-500">|</span>
-                                      <label className="inline-flex items-center gap-1">
-                                        <span className="whitespace-nowrap">Qtd. na OC:</span>
-                                        <input
-                                          type="number"
-                                          min={0.0001}
-                                          step="any"
-                                          max={maxQty}
-                                          value={qty}
-                                          onChange={(e) => {
-                                            const n = parseFloat(e.target.value);
-                                            if (Number.isNaN(n)) return;
-                                            const q = Math.min(Math.max(n, 0.0001), maxQty);
-                                            setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }));
-                                          }}
-                                          className="w-20 px-1.5 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                                        />
-                                        <span>{unitLabel}</span>
-                                      </label>
-                                    </div>
-                                  </td>
-
-                                  {Array.from(selectedSupplierIds).map((supplierId) => {
-                                    const key = `${supplierId}:${item.id}`;
-                                    const unitPriceStr = unitPriceBySupplierItem[key] ?? '';
-                                    const unitPrice = parseCurrencyBR(unitPriceStr);
-                                    const freightRaw = freightBySupplier[supplierId] ?? '';
-                                    const freightParsed = parseCurrencyBR(freightRaw);
-                                    const freight = freightParsed ?? 0;
-                                    const itemTotal = unitPrice == null ? null : unitPrice * qty;
-                                    const score = unitPrice == null ? null : itemTotal! + freight;
-                                    const isWinner = winner?.winnerSupplierId === supplierId;
-
-                                    return (
-                                      <td key={supplierId} className="whitespace-nowrap px-3 py-3 sm:px-6">
-                                        <input
-                                          type="text"
-                                          value={unitPriceStr}
-                                          onChange={(e) => {
-                                            setUnitPriceBySupplierItem((prev) => ({
-                                              ...prev,
-                                              [key]: e.target.value
-                                            }));
-                                          }}
-                                          onBlur={() => {
-                                            const raw = unitPriceBySupplierItem[key] ?? '';
-                                            const formatted = formatCurrencyInputValue(raw);
-                                            setUnitPriceBySupplierItem((prev) => ({ ...prev, [key]: formatted }));
-                                          }}
-                                          placeholder="0,00"
-                                          className={`w-28 px-2 py-1 border rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                            isWinner
-                                              ? 'border-green-500 ring-1 ring-green-200 dark:ring-green-400'
-                                              : 'border-gray-300 dark:border-gray-600'
-                                          }`}
-                                        />
-                                        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                                          Total do item: {itemTotal == null ? '-' : formatCurrencyBR(itemTotal)}
-                                        </div>
-                                        <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                                          Frete (fornecedor): {freightParsed == null ? '-' : formatCurrencyBR(freight)}
-                                        </div>
-                                        <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                                          Custo p/ vencer: {score == null ? '-' : formatCurrencyBR(score)}
-                                        </div>
-                                      </td>
-                                    );
-                                  })}
-
-                                  <td className="whitespace-nowrap px-3 py-3 align-top sm:px-6">
-                                    {winnerSupplier && winner ? (
-                                      <div className="flex flex-col gap-1 items-start">
-                                        <span className="inline-flex items-center gap-2 px-2 py-1 rounded bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs font-medium">
-                                          {winnerSupplier.name} (ganhou)
-                                        </span>
-                                        {winner.technicalTie ? (
-                                          <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                                            Empate Técnico
-                                          </span>
-                                        ) : null}
-                                      </div>
-                                    ) : (
-                                      <span className="text-xs text-gray-500 dark:text-gray-400">—</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                  {sup ? sup.name : supplierId}
+                                </label>
+                                <input
+                                  id={`frete-${supplierId}`}
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={freightBySupplier[supplierId] ?? ''}
+                                  onChange={(e) => {
+                                    setFreightBySupplier((prev) => ({
+                                      ...prev,
+                                      [supplierId]: e.target.value
+                                    }));
+                                  }}
+                                  onBlur={() => {
+                                    const raw = freightBySupplier[supplierId] ?? '';
+                                    const formatted =
+                                      raw.trim() === '' ? '0,00' : formatCurrencyInputValue(raw);
+                                    setFreightBySupplier((prev) => ({
+                                      ...prev,
+                                      [supplierId]: formatted
+                                    }));
+                                  }}
+                                  placeholder="0,00"
+                                  className={mapFieldCls}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
 
-                      <div className="mt-4">
-                        <h3 className="font-medium text-gray-900 dark:text-gray-100 mb-2">
-                          Fornecedores vencedores (para gerar OC)
-                        </h3>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                          {Array.from(selectedSupplierIds)
-                            .filter((sid) => (wonItemsBySupplier[sid] ?? []).length > 0)
-                            .map((sid) => {
-                              const sup = suppliers.find((s) => s.id === sid);
-                              const itemsWon = wonItemsBySupplier[sid] ?? [];
-                              const totals = computedSupplierTotals[sid];
+                      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600">
+                        <div className="overflow-x-auto [scrollbar-gutter:stable]">
+                          <table className="w-full min-w-[40rem] text-sm">
+                            <thead className="border-b border-gray-200 dark:border-gray-700">
+                              <tr>
+                                <th className={`${mapThCls} min-w-[11rem]`}>Material</th>
+                                <th className={`${mapThCls} whitespace-nowrap text-center`}>Qtd. SC</th>
+                                <th className={`${mapThCls} whitespace-nowrap`}>Qtd. na OC</th>
+                                {Array.from(selectedSupplierIds).map((supplierId) => {
+                                  const sup = suppliers.find((x) => x.id === supplierId);
+                                  return (
+                                    <th
+                                      key={supplierId}
+                                      className={`${mapThCls} min-w-[8.5rem] whitespace-nowrap`}
+                                      title={sup?.name ?? supplierId}
+                                    >
+                                      <span className="block truncate normal-case tracking-normal text-gray-800 dark:text-gray-200">
+                                        {sup ? sup.name : supplierId}
+                                      </span>
+                                      <span className="mt-0.5 block text-[10px] font-normal normal-case tracking-normal text-gray-500 dark:text-gray-400">
+                                        Valor unit. (R$)
+                                      </span>
+                                    </th>
+                                  );
+                                })}
+                                <th className={`${mapThCls} whitespace-nowrap`}>Vencedor</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                              {ocItems.map((item) => {
+                                const winner = winnersByItem.find((w) => w.itemId === item.id) || null;
+                                const winnerSupplier = suppliers.find((s) => s.id === winner?.winnerSupplierId);
+                                const unitLabel = item.unit || '-';
+                                const maxQty = Number(item.quantity);
+                                const qty = ocItemQtyByItemId[item.id] ?? maxQty;
+                                const matSub = materialItemSubtitle(item);
 
-                              return (
-                                <div key={sid} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <p className="font-medium text-gray-900 dark:text-gray-100 truncate">
-                                        {sup ? sup.name : sid}
+                                return (
+                                  <tr
+                                    key={item.id}
+                                    className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                                  >
+                                    <td className={mapTdCls}>
+                                      <p className="font-medium text-gray-900 dark:text-gray-100">
+                                        {materialItemLabel(item)}
                                       </p>
-                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                        Frete: {totals ? formatCurrencyBR(totals.freight) : '—'} | Total itens: {totals ? formatCurrencyBR(totals.itemsTotal) : '—'}
-                                      </p>
-                                    </div>
-                                    <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                                      <MapStyledCheckbox
-                                        checked={generateSupplierIds.has(sid)}
-                                        onChange={(checked) => {
-                                          setGenerateSupplierIds((prev) => {
-                                            const next = new Set(prev);
-                                            if (checked) next.add(sid);
-                                            else next.delete(sid);
-                                            return next;
-                                          });
+                                      {matSub ? (
+                                        <p className="mt-0.5 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
+                                          {matSub}
+                                        </p>
+                                      ) : null}
+                                    </td>
+                                    <td className={`${mapTdCls} text-center tabular-nums font-medium text-gray-900 dark:text-gray-100`}>
+                                      {maxQty} {unitLabel}
+                                    </td>
+                                    <td className={mapTdCls}>
+                                      <label htmlFor={`oc-qty-map-${item.id}`} className="sr-only">
+                                        Quantidade na OC
+                                      </label>
+                                      <input
+                                        id={`oc-qty-map-${item.id}`}
+                                        type="number"
+                                        min={0.0001}
+                                        step="any"
+                                        max={maxQty}
+                                        value={qty}
+                                        onChange={(e) => {
+                                          const n = parseFloat(e.target.value);
+                                          if (Number.isNaN(n)) return;
+                                          const q = Math.min(Math.max(n, 0.0001), maxQty);
+                                          setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }));
                                         }}
-                                        ariaLabel={`Gerar OC para ${sup?.name ?? sid}`}
+                                        className={`${mapFieldCls} max-w-[6.5rem]`}
                                       />
-                                      Gerar OC
-                                    </label>
-                                  </div>
+                                    </td>
 
-                                  <div className="mt-3">
-                                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                      Itens da SC (nesta OC):
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                                      Mesmo formato da criação manual de OC: quantidade e valor unitário valem também na
-                                      tabela acima.
-                                    </p>
-                                    <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                                      <ul className="divide-y divide-gray-200 dark:divide-gray-600">
-                                        {itemsWon.map((item) => {
-                                          const unitLabel = item.unit || '-';
-                                          const maxQty = Number(item.quantity);
-                                          const qty = ocItemQtyByItemId[item.id] ?? maxQty;
-                                          const priceKey = `${sid}:${item.id}`;
-                                          const unitPriceStr = unitPriceBySupplierItem[priceKey] ?? '';
-                                          const sub = materialItemSubtitle(item);
-                                          return (
-                                            <li key={item.id} className="px-3 py-2 flex items-start gap-3">
-                                              <div className="min-w-0 flex-1">
-                                                <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
-                                                  {materialItemLabel(item)}
-                                                </p>
-                                                {sub ? (
-                                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
-                                                    {sub}
-                                                  </p>
-                                                ) : null}
-                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-                                                  <span>
-                                                    Solicitado na SC: {maxQty} {unitLabel}
-                                                  </span>
-                                                  <span className="text-gray-400">|</span>
-                                                  <label className="inline-flex items-center gap-1.5">
-                                                    <span className="whitespace-nowrap">Qtd. na OC:</span>
-                                                    <input
-                                                      type="number"
-                                                      min={0.0001}
-                                                      step="any"
-                                                      max={maxQty}
-                                                      value={qty}
-                                                      onChange={(e) => {
-                                                        const n = parseFloat(e.target.value);
-                                                        if (Number.isNaN(n)) return;
-                                                        const q = Math.min(Math.max(n, 0.0001), maxQty);
-                                                        setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }));
-                                                      }}
-                                                      className="w-24 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                                                    />
-                                                    <span>{unitLabel}</span>
-                                                  </label>
-                                                  <span className="text-gray-400">|</span>
-                                                  <label className="inline-flex items-center gap-1.5">
-                                                    <span className="whitespace-nowrap">Valor unit. (R$):</span>
-                                                    <input
-                                                      type="text"
-                                                      inputMode="decimal"
-                                                      placeholder="0,00"
-                                                      value={unitPriceStr}
-                                                      onChange={(e) => {
-                                                        setUnitPriceBySupplierItem((prev) => ({
-                                                          ...prev,
-                                                          [priceKey]: e.target.value
-                                                        }));
-                                                      }}
-                                                      onBlur={() => {
-                                                        const raw = unitPriceBySupplierItem[priceKey] ?? '';
-                                                        const formatted = formatCurrencyInputValue(raw);
-                                                        setUnitPriceBySupplierItem((prev) => ({
-                                                          ...prev,
-                                                          [priceKey]: formatted
-                                                        }));
-                                                      }}
-                                                      className="w-28 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                                                    />
-                                                  </label>
-                                                </div>
-                                              </div>
-                                            </li>
-                                          );
-                                        })}
-                                      </ul>
+                                    {Array.from(selectedSupplierIds).map((supplierId) => {
+                                      const key = `${supplierId}:${item.id}`;
+                                      const unitPriceStr = unitPriceBySupplierItem[key] ?? '';
+                                      const unitPrice = parseCurrencyBR(unitPriceStr);
+                                      const freightParsed = parseCurrencyBR(freightBySupplier[supplierId] ?? '');
+                                      const freight = freightParsed ?? 0;
+                                      const itemTotal = unitPrice == null ? null : unitPrice * qty;
+                                      const score = unitPrice == null ? null : itemTotal! + freight;
+                                      const isWinner = winner?.winnerSupplierId === supplierId;
+
+                                      return (
+                                        <td
+                                          key={supplierId}
+                                          className={`${mapTdCls} ${
+                                            isWinner
+                                              ? 'border-l-2 border-l-green-500 bg-green-50/30 dark:bg-green-950/10'
+                                              : ''
+                                          }`}
+                                        >
+                                          <input
+                                            id={`unit-${key}`}
+                                            type="text"
+                                            inputMode="decimal"
+                                            aria-label={`Valor unitário ${suppliers.find((x) => x.id === supplierId)?.name ?? supplierId}`}
+                                            value={unitPriceStr}
+                                            onChange={(e) => {
+                                              setUnitPriceBySupplierItem((prev) => ({
+                                                ...prev,
+                                                [key]: e.target.value
+                                              }));
+                                            }}
+                                            onBlur={() => {
+                                              const raw = unitPriceBySupplierItem[key] ?? '';
+                                              const formatted = formatCurrencyInputValue(raw);
+                                              setUnitPriceBySupplierItem((prev) => ({
+                                                ...prev,
+                                                [key]: formatted
+                                              }));
+                                            }}
+                                            placeholder="0,00"
+                                            className={`${mapFieldCls} max-w-[8rem] ${
+                                              isWinner
+                                                ? 'border-green-500 dark:border-green-500'
+                                                : ''
+                                            }`}
+                                          />
+                                          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                            Custo p/ vencer:{' '}
+                                            <span className="font-medium tabular-nums text-gray-800 dark:text-gray-200">
+                                              {score == null ? '—' : formatCurrencyBR(score)}
+                                            </span>
+                                          </p>
+                                        </td>
+                                      );
+                                    })}
+
+                                    <td className={mapTdCls}>
+                                      {winnerSupplier && winner ? (
+                                        <div className="flex flex-col items-start gap-1">
+                                          <span className="inline-flex max-w-full rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/35 dark:text-green-300">
+                                            <span className="truncate">{winnerSupplier.name}</span>
+                                          </span>
+                                          {winner.technicalTie ? (
+                                            <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                                              Empate técnico
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      ) : (
+                                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          Fornecedores vencedores
+                        </h3>
+                        <p className="mt-1 mb-4 text-sm text-gray-500 dark:text-gray-400">
+                          Marque os fornecedores para gerar a OC. Quantidades e preços seguem a tabela de cotações acima.
+                        </p>
+
+                        {Array.from(selectedSupplierIds).filter(
+                          (sid) => (wonItemsBySupplier[sid] ?? []).length > 0
+                        ).length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-10 text-center dark:border-gray-600 dark:bg-gray-900/30">
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Informe os preços na tabela para definir o vencedor de cada item.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {Array.from(selectedSupplierIds)
+                              .filter((sid) => (wonItemsBySupplier[sid] ?? []).length > 0)
+                              .map((sid) => {
+                                const sup = suppliers.find((s) => s.id === sid);
+                                const itemsWon = wonItemsBySupplier[sid] ?? [];
+                                const totals = computedSupplierTotals[sid];
+                                const generateOc = generateSupplierIds.has(sid);
+                                const payType =
+                                  paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA;
+
+                                return (
+                                  <div
+                                    key={sid}
+                                    className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600"
+                                  >
+                                    <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/60 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40">
+                                      <div className="min-w-0">
+                                        <p
+                                          className="truncate font-semibold text-gray-900 dark:text-gray-100"
+                                          title={sup?.name ?? sid}
+                                        >
+                                          {sup ? sup.name : sid}
+                                        </p>
+                                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+                                          <span>
+                                            Frete:{' '}
+                                            <span className="font-medium text-gray-700 dark:text-gray-300">
+                                              {totals ? formatCurrencyBR(totals.freight) : '—'}
+                                            </span>
+                                          </span>
+                                          <span>
+                                            Itens:{' '}
+                                            <span className="font-medium text-gray-700 dark:text-gray-300">
+                                              {totals ? formatCurrencyBR(totals.itemsTotal) : '—'}
+                                            </span>
+                                          </span>
+                                          {totals ? (
+                                            <span>
+                                              Total OC:{' '}
+                                              <span className="font-medium text-gray-800 dark:text-gray-200">
+                                                {formatCurrencyBR(totals.amountToPay)}
+                                              </span>
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                      <label className="flex shrink-0 cursor-pointer items-center gap-2.5 text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        <MapStyledCheckbox
+                                          checked={generateOc}
+                                          onChange={(checked) => {
+                                            setGenerateSupplierIds((prev) => {
+                                              const next = new Set(prev);
+                                              if (checked) next.add(sid);
+                                              else next.delete(sid);
+                                              return next;
+                                            });
+                                          }}
+                                          ariaLabel={`Gerar OC para ${sup?.name ?? sid}`}
+                                        />
+                                        Gerar OC
+                                      </label>
                                     </div>
-                                  </div>
 
-                                  {generateSupplierIds.has(sid) && (
-                                    <div className="mt-4 border-t border-gray-200 dark:border-gray-600 pt-4 space-y-3">
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-sm">
+                                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                                          <tr>
+                                            <th className={`${mapThCls} min-w-[9rem]`}>Material</th>
+                                            <th className={`${mapThCls} text-center`}>Qtd. SC</th>
+                                            <th className={`${mapThCls} text-center`}>Qtd. OC</th>
+                                            <th className={`${mapThCls} text-right`}>Valor unit.</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                          {itemsWon.map((item) => {
+                                            const unitLabel = item.unit || '-';
+                                            const maxQty = Number(item.quantity);
+                                            const qty = ocItemQtyByItemId[item.id] ?? maxQty;
+                                            const priceKey = `${sid}:${item.id}`;
+                                            const unitParsed = parseCurrencyBR(
+                                              unitPriceBySupplierItem[priceKey] ?? ''
+                                            );
+                                            const sub = materialItemSubtitle(item);
+                                            return (
+                                              <tr key={item.id}>
+                                                <td className={mapTdCls}>
+                                                  <p className="font-medium text-gray-900 dark:text-gray-100">
+                                                    {materialItemLabel(item)}
+                                                  </p>
+                                                  {sub ? (
+                                                    <p className="mt-0.5 line-clamp-1 text-xs text-gray-500 dark:text-gray-400">
+                                                      {sub}
+                                                    </p>
+                                                  ) : null}
+                                                </td>
+                                                <td
+                                                  className={`${mapTdCls} text-center tabular-nums text-gray-700 dark:text-gray-300`}
+                                                >
+                                                  {maxQty} {unitLabel}
+                                                </td>
+                                                <td
+                                                  className={`${mapTdCls} text-center tabular-nums font-medium text-gray-900 dark:text-gray-100`}
+                                                >
+                                                  {qty} {unitLabel}
+                                                </td>
+                                                <td
+                                                  className={`${mapTdCls} text-right tabular-nums font-medium text-gray-900 dark:text-gray-100`}
+                                                >
+                                                  {unitParsed == null
+                                                    ? '—'
+                                                    : formatCurrencyBR(unitParsed)}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+
+                                    {generateOc && (
+                                      <div className="space-y-4 border-t border-gray-200 p-4 dark:border-gray-700">
                                         <div>
-                                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tipo de pagamento</p>
-                                          <div className="flex flex-wrap gap-4">
-                                            <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                              <input
-                                                type="radio"
-                                                name={`payType-${sid}`}
-                                                checked={(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_AVISTA}
-                                                onChange={() => {
-                                                  setPaymentDraftBySupplier((prev) => ({
-                                                    ...prev,
-                                                    [sid]: {
-                                                      ...(prev[sid] ?? {}),
-                                                      paymentType: OC_TYPE_AVISTA,
-                                                      paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA)
-                                                    }
-                                                  }));
-                                                }}
-                                              />
+                                          <span className={mapLabelCls}>Tipo de pagamento *</span>
+                                          <div
+                                            role="radiogroup"
+                                            aria-label="Tipo de pagamento"
+                                            className="grid max-w-md grid-cols-2 gap-2"
+                                          >
+                                            <button
+                                              type="button"
+                                              role="radio"
+                                              aria-checked={payType === OC_TYPE_AVISTA}
+                                              onClick={() => {
+                                                setPaymentDraftBySupplier((prev) => ({
+                                                  ...prev,
+                                                  [sid]: {
+                                                    ...(prev[sid] ?? emptyPaymentDraft()),
+                                                    paymentType: OC_TYPE_AVISTA,
+                                                    paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA)
+                                                  }
+                                                }));
+                                              }}
+                                              className={mapPaymentSegmentCls(payType === OC_TYPE_AVISTA)}
+                                            >
                                               À vista
-                                            </label>
-                                            <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                              <input
-                                                type="radio"
-                                                name={`payType-${sid}`}
-                                                checked={(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_BOLETO}
-                                                onChange={() => {
-                                                  setPaymentDraftBySupplier((prev) => ({
-                                                    ...prev,
-                                                    [sid]: {
-                                                      ...(prev[sid] ?? {}),
-                                                      paymentType: OC_TYPE_BOLETO,
-                                                      paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO)
-                                                    }
-                                                  }));
-                                                }}
-                                              />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              role="radio"
+                                              aria-checked={payType === OC_TYPE_BOLETO}
+                                              onClick={() => {
+                                                setPaymentDraftBySupplier((prev) => ({
+                                                  ...prev,
+                                                  [sid]: {
+                                                    ...(prev[sid] ?? emptyPaymentDraft()),
+                                                    paymentType: OC_TYPE_BOLETO,
+                                                    paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO)
+                                                  }
+                                                }));
+                                              }}
+                                              className={mapPaymentSegmentCls(payType === OC_TYPE_BOLETO)}
+                                            >
                                               Boleto
-                                            </label>
+                                            </button>
                                           </div>
                                         </div>
 
                                         <div>
-                                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Condição</p>
+                                          <label
+                                            htmlFor={`pc-${sid}`}
+                                            className={mapLabelCls}
+                                          >
+                                            Condição de pagamento *
+                                          </label>
                                           <PaymentConditionSelect
-                                            key={`pc-${sid}-${paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA}`}
-                                            paymentType={
-                                              (paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_AVISTA
-                                                ? 'AVISTA'
-                                                : 'BOLETO'
-                                            }
+                                            id={`pc-${sid}`}
+                                            key={`pc-${sid}-${payType}`}
+                                            paymentType={payType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
                                             value={
                                               paymentDraftBySupplier[sid]?.paymentCondition ??
-                                              paymentConditionDefault(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA)
+                                              paymentConditionDefault(payType)
                                             }
                                             onChange={(v) => {
                                               setPaymentDraftBySupplier((prev) => ({
                                                 ...prev,
                                                 [sid]: {
-                                                  ...(prev[sid] ?? {
-                                                    paymentType: OC_TYPE_AVISTA,
-                                                    paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                    paymentDetails: '',
-                                                    observations: '',
-                                                    amountToPayStr: ''
-                                                  }),
+                                                  ...(prev[sid] ?? emptyPaymentDraft()),
                                                   paymentCondition: v
                                                 }
                                               }));
                                             }}
-                                            disabled={(paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA) === OC_TYPE_AVISTA}
+                                            disabled={payType === OC_TYPE_AVISTA}
+                                            className={mapFieldCls}
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <label htmlFor={`amount-${sid}`} className={mapLabelCls}>
+                                            Valor total (R$) *
+                                          </label>
+                                          <input
+                                            id={`amount-${sid}`}
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={(() => {
+                                              const s = paymentDraftBySupplier[sid]?.amountToPayStr;
+                                              if (s !== undefined && s !== '') return s;
+                                              return totals ? formatCurrencyBR(totals.amountToPay) : '';
+                                            })()}
+                                            onChange={(e) => {
+                                              setPaymentDraftBySupplier((prev) => ({
+                                                ...prev,
+                                                [sid]: {
+                                                  ...(prev[sid] ?? emptyPaymentDraft()),
+                                                  amountToPayStr: e.target.value
+                                                }
+                                              }));
+                                            }}
+                                            onBlur={() => {
+                                              const raw =
+                                                paymentDraftBySupplier[sid]?.amountToPayStr ??
+                                                (totals ? String(totals.amountToPay) : '');
+                                              const formatted = formatCurrencyInputValue(raw);
+                                              setPaymentDraftBySupplier((prev) => ({
+                                                ...prev,
+                                                [sid]: {
+                                                  ...(prev[sid] ?? emptyPaymentDraft()),
+                                                  amountToPayStr: formatted
+                                                }
+                                              }));
+                                            }}
+                                            placeholder="0,00"
+                                            className={mapFieldCls}
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <label htmlFor={`pay-details-${sid}`} className={mapLabelCls}>
+                                            Dados do pagamento
+                                          </label>
+                                          <textarea
+                                            id={`pay-details-${sid}`}
+                                            value={paymentDraftBySupplier[sid]?.paymentDetails ?? ''}
+                                            onChange={(e) => {
+                                              setPaymentDraftBySupplier((prev) => ({
+                                                ...prev,
+                                                [sid]: {
+                                                  ...(prev[sid] ?? emptyPaymentDraft()),
+                                                  paymentDetails: e.target.value
+                                                }
+                                              }));
+                                            }}
+                                            rows={3}
+                                            placeholder="Conta, PIX, agência, favorecido, etc."
+                                            className={`${mapFieldCls} min-h-[5rem] resize-y`}
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <label htmlFor={`obs-${sid}`} className={mapLabelCls}>
+                                            Observações
+                                          </label>
+                                          <textarea
+                                            id={`obs-${sid}`}
+                                            value={paymentDraftBySupplier[sid]?.observations ?? ''}
+                                            onChange={(e) => {
+                                              setPaymentDraftBySupplier((prev) => ({
+                                                ...prev,
+                                                [sid]: {
+                                                  ...(prev[sid] ?? emptyPaymentDraft()),
+                                                  observations: e.target.value
+                                                }
+                                              }));
+                                            }}
+                                            rows={2}
+                                            placeholder="Observações gerais da OC"
+                                            className={`${mapFieldCls} min-h-[4rem] resize-y`}
                                           />
                                         </div>
                                       </div>
-
-                                      <div>
-                                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                          Valor total (R$)
-                                        </p>
-                                        <input
-                                          type="text"
-                                          value={(() => {
-                                            const s = paymentDraftBySupplier[sid]?.amountToPayStr;
-                                            if (s !== undefined && s !== '') return s;
-                                            return totals ? formatCurrencyBR(totals.amountToPay) : '';
-                                          })()}
-                                          onChange={(e) => {
-                                            const v = e.target.value;
-                                            setPaymentDraftBySupplier((prev) => ({
-                                              ...prev,
-                                              [sid]: {
-                                                ...(prev[sid] ?? {
-                                                  paymentType: OC_TYPE_AVISTA,
-                                                  paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                  paymentDetails: '',
-                                                  observations: '',
-                                                  amountToPayStr: ''
-                                                }),
-                                                amountToPayStr: v
-                                              }
-                                            }));
-                                          }}
-                                          onBlur={() => {
-                                            const raw = paymentDraftBySupplier[sid]?.amountToPayStr ?? (totals ? String(totals.amountToPay) : '');
-                                            const formatted = formatCurrencyInputValue(raw);
-                                            setPaymentDraftBySupplier((prev) => ({
-                                              ...prev,
-                                              [sid]: {
-                                                ...(prev[sid] ?? {
-                                                  paymentType: OC_TYPE_AVISTA,
-                                                  paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                  paymentDetails: '',
-                                                  observations: '',
-                                                  amountToPayStr: ''
-                                                }),
-                                                amountToPayStr: formatted
-                                              }
-                                            }));
-                                          }}
-                                          placeholder="0,00"
-                                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        />
-                                      </div>
-
-                                      <div>
-                                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                          Dados do pagamento
-                                        </p>
-                                        <textarea
-                                          value={paymentDraftBySupplier[sid]?.paymentDetails ?? ''}
-                                          onChange={(e) => {
-                                            const v = e.target.value;
-                                            setPaymentDraftBySupplier((prev) => ({
-                                              ...prev,
-                                              [sid]: {
-                                                ...(prev[sid] ?? {
-                                                  paymentType: OC_TYPE_AVISTA,
-                                                  paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                  paymentDetails: '',
-                                                  observations: '',
-                                                  amountToPayStr: ''
-                                                }),
-                                                paymentDetails: v
-                                              }
-                                            }));
-                                          }}
-                                          rows={3}
-                                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                          placeholder="Conta, PIX, agência, favorecido, etc."
-                                        />
-                                      </div>
-
-                                      <div>
-                                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                          Observações
-                                        </p>
-                                        <textarea
-                                          value={paymentDraftBySupplier[sid]?.observations ?? ''}
-                                          onChange={(e) => {
-                                            const v = e.target.value;
-                                            setPaymentDraftBySupplier((prev) => ({
-                                              ...prev,
-                                              [sid]: {
-                                                ...(prev[sid] ?? {
-                                                  paymentType: OC_TYPE_AVISTA,
-                                                  paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                  paymentDetails: '',
-                                                  observations: '',
-                                                  amountToPayStr: ''
-                                                }),
-                                                observations: v
-                                              }
-                                            }));
-                                          }}
-                                          rows={2}
-                                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                          placeholder="Observações gerais da OC"
-                                        />
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                        </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
                       </div>
 
                     </>

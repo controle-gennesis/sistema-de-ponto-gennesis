@@ -206,6 +206,7 @@ export default function MateriaisConstrucaoPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
       setShowForm(false);
       resetForm();
       toast.success('Material criado com sucesso!');
@@ -225,6 +226,7 @@ export default function MateriaisConstrucaoPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
       setShowForm(false);
       setEditingMaterial(null);
       resetForm();
@@ -245,6 +247,7 @@ export default function MateriaisConstrucaoPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
       setShowDeleteModal(null);
     }
   });
@@ -257,6 +260,7 @@ export default function MateriaisConstrucaoPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
       setShowImportModal(false);
       setImportData('');
       alert(`Importação concluída: ${data.data.created} materiais criados`);

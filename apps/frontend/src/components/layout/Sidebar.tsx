@@ -109,6 +109,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     can,
     canAccessDpApproverPages,
     canApproveEspelhoNf,
+    canApproveOc,
     canAccessOsRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
@@ -263,7 +264,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Caixa de entrada de aprovações',
             // Aparece automaticamente para quem é gestor (decide Solicitações Gerais)
             // ou tem a permissão «Aprovar Espelho da Nota Fiscal» (Controle).
-            permission: canAccessDpApproverPages || canApproveEspelhoNf,
+            permission: canAccessDpApproverPages || canApproveEspelhoNf || canApproveOc,
           },
           {
             name: 'Solicitações Gerais',

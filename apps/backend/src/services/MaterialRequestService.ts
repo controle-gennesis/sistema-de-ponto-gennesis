@@ -98,7 +98,7 @@ export class MaterialRequestService {
         id: eng.id,
         code: cm.name,
         sinapiCode: eng.sinapiCode,
-        name: cm.description || cm.name || eng.description || eng.name || '',
+        name: cm.name,
         description: cm.description || eng.description || '',
         unit: eng.unit,
         medianPrice: eng.medianPrice ? Number(eng.medianPrice) : null

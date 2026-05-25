@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -257,6 +258,139 @@ const emptyNewFormData = () => ({
   items: [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
 });
 
+type RmMaterialOption = {
+  id: string;
+  code?: string;
+  description?: string;
+  name?: string;
+  unit?: string;
+};
+
+function RmMaterialAutocomplete({
+  searchValue,
+  isOpen,
+  onOpen,
+  onClose,
+  onSearchChange,
+  onSelect,
+  materials,
+  loading,
+  loadError,
+  getMaterialLabel,
+  inputClassName,
+  placeholder = 'Digite para buscar material...'
+}: {
+  searchValue: string;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onSearchChange: (value: string) => void;
+  onSelect: (material: RmMaterialOption) => void;
+  materials: RmMaterialOption[];
+  loading: boolean;
+  loadError: boolean;
+  getMaterialLabel: (material?: RmMaterialOption | null) => string;
+  inputClassName: string;
+  placeholder?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const syncMenuPosition = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setMenuStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setMenuStyle(null);
+      return;
+    }
+    syncMenuPosition();
+    const onReposition = () => syncMenuPosition();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [isOpen, syncMenuPosition, searchValue]);
+
+  const filteredMaterials = useMemo(() => {
+    const q = searchValue.trim().toLowerCase();
+    return materials
+      .filter((material) => {
+        if (!q) return true;
+        return getMaterialLabel(material).toLowerCase().includes(q);
+      })
+      .slice(0, 50);
+  }, [materials, searchValue, getMaterialLabel]);
+
+  const dropdown =
+    isOpen &&
+    menuStyle &&
+    typeof document !== 'undefined' &&
+    createPortal(
+      <div
+        role="listbox"
+        className="max-h-56 overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
+        style={{
+          position: 'fixed',
+          top: menuStyle.top,
+          left: menuStyle.left,
+          width: menuStyle.width,
+          zIndex: 1200
+        }}
+      >
+        {loading ? (
+          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Carregando materiais…</p>
+        ) : loadError ? (
+          <p className="px-3 py-2 text-sm text-red-600 dark:text-red-400">Erro ao carregar materiais.</p>
+        ) : filteredMaterials.length === 0 ? (
+          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+            {materials.length === 0
+              ? 'Nenhum material ativo em Materiais de Construção.'
+              : 'Nenhum material encontrado para esta busca.'}
+          </p>
+        ) : (
+          filteredMaterials.map((material) => (
+            <button
+              key={material.id}
+              type="button"
+              role="option"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSelect(material)}
+              className="w-full px-3 py-2 text-left text-sm text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700"
+            >
+              {getMaterialLabel(material)}
+            </button>
+          ))
+        )}
+      </div>,
+      document.body
+    );
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        value={searchValue}
+        onFocus={onOpen}
+        onClick={onOpen}
+        onBlur={() => setTimeout(onClose, 120)}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder={placeholder}
+        className={inputClassName}
+        autoComplete="off"
+      />
+      {dropdown}
+    </>
+  );
+}
+
 function SolicitarMateriaisPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -315,14 +449,25 @@ function SolicitarMateriaisPage() {
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
 
 
-  // Buscar materiais
-  const { data: materialsData } = useQuery({
-    queryKey: ['materials'],
+  // Materiais de Construção ativos (espelhados para a RM)
+  const {
+    data: materialsData,
+    isLoading: loadingMaterials,
+    isError: materialsLoadError,
+    refetch: refetchMaterials
+  } = useQuery({
+    queryKey: ['materials-rm-dropdown'],
     queryFn: async () => {
       const res = await api.get('/material-requests/materials');
       return res.data;
     }
   });
+
+  useEffect(() => {
+    if (isNewRequestModalOpen || correctionEditId) {
+      void refetchMaterials();
+    }
+  }, [isNewRequestModalOpen, correctionEditId, refetchMaterials]);
 
   // Buscar requisições do usuário
   const { data: requestsData, isLoading: loadingRequests, isError: hasRequestsError, error: requestsError } = useQuery({
@@ -440,15 +585,10 @@ function SolicitarMateriaisPage() {
   });
 
   const requests = requestsData?.data?.requests || requestsData?.data || [];
-  const materials = (materialsData?.data || []) as Array<{
-    id: string;
-    description?: string;
-    name?: string;
-    unit?: string;
-  }>;
+  const materials = (materialsData?.data || []) as RmMaterialOption[];
 
-  const getMaterialLabel = (material?: { description?: string; name?: string } | null) =>
-    material?.description || material?.name || 'Material sem nome';
+  const getMaterialLabel = (material?: RmMaterialOption | null) =>
+    material?.name?.trim() || material?.code?.trim() || material?.description?.trim() || 'Material sem nome';
 
   const obraOptionsFromRequests = useMemo(() => {
     const set = new Set<string>();
@@ -1086,8 +1226,8 @@ function SolicitarMateriaisPage() {
                                   {request.description ? String(request.description) : '—'}
                                 </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-top">
-                                <div className="flex flex-col gap-0.5 text-xs sm:text-sm">
+                              <td className="px-3 sm:px-6 py-3 align-middle">
+                                <div className="flex flex-col justify-center gap-0.5 text-xs sm:text-sm">
                                   {materialRequestFaseAtualLines(request).map((line) => (
                                     <span
                                       key={line.key}
@@ -1504,48 +1644,27 @@ function SolicitarMateriaisPage() {
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Material *
                               </label>
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  required
-                                  value={newItemMaterialSearch[index] || ''}
-                                  onFocus={() => setActiveNewMaterialDropdownIndex(index)}
-                                  onBlur={() => {
-                                    setTimeout(() => {
-                                      setActiveNewMaterialDropdownIndex((prev) => (prev === index ? null : prev));
-                                    }, 120);
+                              <div>
+                                <RmMaterialAutocomplete
+                                  searchValue={newItemMaterialSearch[index] || ''}
+                                  isOpen={activeNewMaterialDropdownIndex === index}
+                                  onOpen={() => setActiveNewMaterialDropdownIndex(index)}
+                                  onClose={() =>
+                                    setActiveNewMaterialDropdownIndex((prev) => (prev === index ? null : prev))
+                                  }
+                                  onSearchChange={(value) => handleNewItemMaterialSearchChange(index, value)}
+                                  onSelect={(material) => {
+                                    handleItemChange(index, 'materialId', material.id);
+                                    handleNewItemMaterialSearchChange(index, getMaterialLabel(material));
+                                    setActiveNewMaterialDropdownIndex(null);
                                   }}
-                                  onChange={(e) => handleNewItemMaterialSearchChange(index, e.target.value)}
-                                  placeholder="Digite para buscar material..."
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                  materials={materials}
+                                  loading={loadingMaterials}
+                                  loadError={materialsLoadError}
+                                  getMaterialLabel={getMaterialLabel}
+                                  inputClassName="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
                                 />
                                 <input type="hidden" required value={item.materialId} readOnly />
-                                {activeNewMaterialDropdownIndex === index && (
-                                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg">
-                                    {materials
-                                      .filter((material) => {
-                                        const q = (newItemMaterialSearch[index] || '').trim().toLowerCase();
-                                        if (!q) return true;
-                                        const label = getMaterialLabel(material).toLowerCase();
-                                        return label.includes(q);
-                                      })
-                                      .slice(0, 50)
-                                      .map((material) => (
-                                        <button
-                                          key={material.id}
-                                          type="button"
-                                          onClick={() => {
-                                            handleItemChange(index, 'materialId', material.id);
-                                            handleNewItemMaterialSearchChange(index, getMaterialLabel(material));
-                                            setActiveNewMaterialDropdownIndex(null);
-                                          }}
-                                          className="w-full px-3 py-2 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                        >
-                                          {getMaterialLabel(material)}
-                                        </button>
-                                      ))}
-                                  </div>
-                                )}
                               </div>
                             </div>
                             <div>
@@ -2087,47 +2206,25 @@ function SolicitarMateriaisPage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Material *</label>
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={editItemMaterialSearch[index] || ''}
-                                onFocus={() => setActiveEditMaterialDropdownIndex(index)}
-                                onBlur={() => {
-                                  setTimeout(() => {
-                                    setActiveEditMaterialDropdownIndex((prev) => (prev === index ? null : prev));
-                                  }, 120);
-                                }}
-                                onChange={(e) => handleEditItemMaterialSearchChange(index, e.target.value)}
-                                placeholder="Digite para buscar material..."
-                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
-                              />
-                              {activeEditMaterialDropdownIndex === index && (
-                                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg">
-                                  {materials
-                                    .filter((material) => {
-                                      const q = (editItemMaterialSearch[index] || '').trim().toLowerCase();
-                                      if (!q) return true;
-                                      const label = getMaterialLabel(material).toLowerCase();
-                                      return label.includes(q);
-                                    })
-                                    .slice(0, 50)
-                                    .map((material) => (
-                                      <button
-                                        key={material.id}
-                                        type="button"
-                                        onClick={() => {
-                                          handleEditItemChange(index, 'materialId', material.id);
-                                          handleEditItemMaterialSearchChange(index, getMaterialLabel(material));
-                                          setActiveEditMaterialDropdownIndex(null);
-                                        }}
-                                        className="w-full px-2 py-1.5 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                      >
-                                        {getMaterialLabel(material)}
-                                      </button>
-                                    ))}
-                                </div>
-                              )}
-                            </div>
+                            <RmMaterialAutocomplete
+                              searchValue={editItemMaterialSearch[index] || ''}
+                              isOpen={activeEditMaterialDropdownIndex === index}
+                              onOpen={() => setActiveEditMaterialDropdownIndex(index)}
+                              onClose={() =>
+                                setActiveEditMaterialDropdownIndex((prev) => (prev === index ? null : prev))
+                              }
+                              onSearchChange={(value) => handleEditItemMaterialSearchChange(index, value)}
+                              onSelect={(material) => {
+                                handleEditItemChange(index, 'materialId', material.id);
+                                handleEditItemMaterialSearchChange(index, getMaterialLabel(material));
+                                setActiveEditMaterialDropdownIndex(null);
+                              }}
+                              materials={materials}
+                              loading={loadingMaterials}
+                              loadError={materialsLoadError}
+                              getMaterialLabel={getMaterialLabel}
+                              inputClassName="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
+                            />
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Quantidade *</label>

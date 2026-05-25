@@ -165,6 +165,24 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Controle',
   },
   {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-compras'),
+    name: 'Aprovar OCs — Compras',
+    href: '/ponto/controle/aprovar-oc-compras',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-gestor'),
+    name: 'Aprovar OCs — Gestor',
+    href: '/ponto/controle/aprovar-oc-gestor',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-diretoria'),
+    name: 'Aprovar OCs — Diretoria',
+    href: '/ponto/controle/aprovar-oc-diretoria',
+    category: 'Controle',
+  },
+  {
     key: pathToModuleKey('/ponto/controle/visualizar-todos-kanbans'),
     name: 'Visualizar Kanbans de todos os setores',
     href: '/ponto/controle/visualizar-todos-kanbans',

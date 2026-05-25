@@ -9,6 +9,14 @@ export function parseCurrencyBR(input: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Texto do campo quantidade → número (vazio ou inválido = null). Aceita vírgula ou ponto. */
+export function numericQuantityFromInput(s: string): number | null {
+  const t = s.trim().replace(',', '.');
+  if (!t) return null;
+  const n = parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Texto do campo valor unitário → número (vazio ou inválido = 0). Aceita vírgula ou ponto. */
 export function numericUnitPriceFromInput(s: string): number {
   const t = s.trim();

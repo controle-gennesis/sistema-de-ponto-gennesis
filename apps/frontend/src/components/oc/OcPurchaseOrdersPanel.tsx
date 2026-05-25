@@ -464,6 +464,11 @@ export type OcPurchaseOrdersPanelProps = {
   onSearchChange?: (value: string) => void;
   /** Card colado às abas do fluxo (sem borda/sombra superior). */
   flushInCard?: boolean;
+  /**
+   * Fase gestor na tela de Aprovações: limita OCs ao centro de custo dos contratos do gestor.
+   * `undefined` = sem filtro (admin). `[]` = nenhum contrato vinculado.
+   */
+  gestorCostCenterIds?: string[];
 };
 
 const normalizeOcSearch = (value?: string | null) =>
@@ -522,7 +527,12 @@ const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> =
 
 const OC_ACTION_MENU_WIDTH_PX = 224;
 
-function OcStyledCheckbox({
+const OC_MENU_ITEM_CLASS =
+  'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700';
+
+const OC_APPROVAL_FLOW_STATUSES = ['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'] as const;
+
+export function OcStyledCheckbox({
   checked,
   onChange,
   ariaLabel,
@@ -585,7 +595,8 @@ export function OcPurchaseOrdersPanel({
   activeTab: activeTabProp,
   searchTerm = '',
   onSearchChange,
-  flushInCard = false
+  flushInCard = false,
+  gestorCostCenterIds
 }: OcPurchaseOrdersPanelProps) {
   const queryClient = useQueryClient();
   const [internalActiveTab, setInternalActiveTab] = useState<OcTab>('compras');
@@ -1080,7 +1091,15 @@ export function OcPurchaseOrdersPanel({
       return allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT');
     }
     if (activeTab === 'gestor') {
-      return allOrders.filter((o) => o.status === 'PENDING');
+      let list = allOrders.filter((o) => o.status === 'PENDING');
+      if (gestorCostCenterIds !== undefined) {
+        const allowed = new Set(gestorCostCenterIds);
+        list = list.filter((o) => {
+          const ccId = o.materialRequest?.costCenter?.id;
+          return ccId ? allowed.has(ccId) : false;
+        });
+      }
+      return list;
     }
     if (activeTab === 'diretoria') {
       return allOrders.filter((o) => o.status === 'PENDING_DIRETORIA');
@@ -1122,7 +1141,7 @@ export function OcPurchaseOrdersPanel({
       );
     }
     return allOrders;
-  }, [allOrders, activeTab]);
+  }, [allOrders, activeTab, gestorCostCenterIds]);
 
   const filteredOrdersBySearch = useMemo(() => {
     const normalizedSearchTerm = normalizeOcSearch(searchTerm);
@@ -1947,101 +1966,84 @@ export function OcPurchaseOrdersPanel({
                         )}
                         <td className="px-3 sm:px-6 py-4 text-right whitespace-nowrap">
                           <div className="inline-flex items-center justify-end gap-1 flex-wrap">
-                            {o.status === 'PENDING_PROOF_VALIDATION' && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (
-                                    !window.confirm(
-                                      'Confirmar validação do comprovante e liberar a fase Anexar NF para o comprador?'
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  validateProofMutation.mutate(o.id);
-                                }}
-                                disabled={validateProofMutation.isPending}
-                                className="p-2 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
-                                title="Validar comprovante — liberar anexo de NF"
-                              >
-                                {validateProofMutation.isPending ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Check className="w-4 h-4" />
-                                )}
-                              </button>
-                            )}
-                            {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(o.status) && (
-                              <button
-                                type="button"
-                                onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
-                                className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors inline-flex"
-                                title={approvalLabel(o.status)}
-                              >
-                                <Check className="w-4 h-4" />
-                              </button>
-                            )}
-                            {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(o.status) && (
-                              <button
-                                type="button"
-                                onClick={() => setCorrectionTarget(o)}
-                                className="p-2 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors inline-flex"
-                                title="Enviar para CORREÇÃO OC"
-                              >
-                                <Wrench className="w-4 h-4" />
-                              </button>
-                            )}
-                            {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(o.status) && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRejectTarget(o);
-                                  setRejectReason('');
-                                }}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors inline-flex"
-                                title="Reprovar"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            )}
-                            {o.status === 'IN_REVIEW' &&
-                              o.creator?.id &&
-                              currentUserId === o.creator.id && (
-                                <button
-                                  type="button"
-                                  onClick={() => resubmitOcMutation.mutate(o.id)}
-                                  disabled={resubmitOcMutation.isPending}
-                                  className="p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
-                                  title="Reenviar para aprovação"
-                                >
-                                  <Send className="w-4 h-4" />
-                                </button>
-                              )}
-                            {isIntegratedFlux ? (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                  setOcActionMenu((prev) => {
-                                    if (prev?.orderId === o.id) return null;
-                                    let left = r.right - OC_ACTION_MENU_WIDTH_PX;
-                                    left = Math.max(
-                                      8,
-                                      Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - 8)
-                                    );
-                                    return { orderId: o.id, top: r.bottom + 4, left };
-                                  });
-                                }}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                                aria-label="Menu de ações"
-                                aria-expanded={ocActionMenu?.orderId === o.id}
-                                aria-haspopup="menu"
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </button>
-                            ) : (
+                            {!isIntegratedFlux && (
                               <>
+                                {o.status === 'PENDING_PROOF_VALIDATION' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (
+                                        !window.confirm(
+                                          'Confirmar validação do comprovante e liberar a fase Anexar NF para o comprador?'
+                                        )
+                                      ) {
+                                        return;
+                                      }
+                                      validateProofMutation.mutate(o.id);
+                                    }}
+                                    disabled={validateProofMutation.isPending}
+                                    className="p-2 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
+                                    title="Validar comprovante — liberar anexo de NF"
+                                  >
+                                    {validateProofMutation.isPending ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Check className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                )}
+                                {OC_APPROVAL_FLOW_STATUSES.includes(
+                                  o.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
+                                ) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
+                                    className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors inline-flex"
+                                    title={approvalLabel(o.status)}
+                                  >
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {OC_APPROVAL_FLOW_STATUSES.includes(
+                                  o.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
+                                ) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCorrectionTarget(o)}
+                                    className="p-2 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors inline-flex"
+                                    title="Enviar para CORREÇÃO OC"
+                                  >
+                                    <Wrench className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {OC_APPROVAL_FLOW_STATUSES.includes(
+                                  o.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
+                                ) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRejectTarget(o);
+                                      setRejectReason('');
+                                    }}
+                                    className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors inline-flex"
+                                    title="Reprovar"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {o.status === 'IN_REVIEW' &&
+                                  o.creator?.id &&
+                                  currentUserId === o.creator.id && (
+                                    <button
+                                      type="button"
+                                      onClick={() => resubmitOcMutation.mutate(o.id)}
+                                      disabled={resubmitOcMutation.isPending}
+                                      className="p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
+                                      title="Reenviar para aprovação"
+                                    >
+                                      <Send className="w-4 h-4" />
+                                    </button>
+                                  )}
                                 <button
                                   type="button"
                                   onClick={() => handleExportPdf(o.id)}
@@ -2065,6 +2067,30 @@ export function OcPurchaseOrdersPanel({
                                   )}
                                 </button>
                               </>
+                            )}
+                            {isIntegratedFlux && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                  setOcActionMenu((prev) => {
+                                    if (prev?.orderId === o.id) return null;
+                                    let left = r.right - OC_ACTION_MENU_WIDTH_PX;
+                                    left = Math.max(
+                                      8,
+                                      Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - 8)
+                                    );
+                                    return { orderId: o.id, top: r.bottom + 4, left };
+                                  });
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                aria-label="Menu de ações"
+                                aria-expanded={ocActionMenu?.orderId === o.id}
+                                aria-haspopup="menu"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -3624,7 +3650,7 @@ export function OcPurchaseOrdersPanel({
                   openOrderDetail(orderForActionMenu);
                 }}
                 disabled={orderDetailLoadingId === orderForActionMenu.id}
-                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                className={OC_MENU_ITEM_CLASS}
               >
                 {orderDetailLoadingId === orderForActionMenu.id ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
@@ -3642,7 +3668,7 @@ export function OcPurchaseOrdersPanel({
                   handleExportPdf(orderForActionMenu.id);
                 }}
                 disabled={pdfExportingId === orderForActionMenu.id}
-                className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
               >
                 {pdfExportingId === orderForActionMenu.id ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-600 dark:text-slate-300" />
@@ -3651,6 +3677,109 @@ export function OcPurchaseOrdersPanel({
                 )}
                 <span>Baixar OC (PDF)</span>
               </button>
+              {orderForActionMenu.status === 'PENDING_PROOF_VALIDATION' && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOcActionMenu(null);
+                    if (
+                      !window.confirm(
+                        'Confirmar validação do comprovante e liberar a fase Anexar NF para o comprador?'
+                      )
+                    ) {
+                      return;
+                    }
+                    validateProofMutation.mutate(orderForActionMenu.id);
+                  }}
+                  disabled={validateProofMutation.isPending}
+                  className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                >
+                  {validateProofMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-teal-600 dark:text-teal-400" />
+                  ) : (
+                    <Check className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
+                  )}
+                  <span>Validar comprovante</span>
+                </button>
+              )}
+              {OC_APPROVAL_FLOW_STATUSES.includes(
+                orderForActionMenu.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
+              ) && (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      approveMutation.mutate({
+                        id: orderForActionMenu.id,
+                        currentStatus: orderForActionMenu.status
+                      });
+                    }}
+                    disabled={approveMutation.isPending}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    {approveMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-green-600 dark:text-green-400" />
+                    ) : (
+                      <Check className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                    )}
+                    <span>{approvalLabel(orderForActionMenu.status)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      setCorrectionTarget(orderForActionMenu);
+                    }}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    <Wrench className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>Enviar para correção</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      setRejectTarget(orderForActionMenu);
+                      setRejectReason('');
+                    }}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                    <span>Reprovar</span>
+                  </button>
+                </>
+              )}
+              {orderForActionMenu.status === 'IN_REVIEW' &&
+                orderForActionMenu.creator?.id &&
+                currentUserId === orderForActionMenu.creator.id && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      resubmitOcMutation.mutate(orderForActionMenu.id);
+                    }}
+                    disabled={resubmitOcMutation.isPending}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    {resubmitOcMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+                    ) : (
+                      <Send className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                    )}
+                    <span>Reenviar para aprovação</span>
+                  </button>
+                )}
             </div>
           </>,
           document.body

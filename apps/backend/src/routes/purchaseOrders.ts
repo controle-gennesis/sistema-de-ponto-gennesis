@@ -8,6 +8,7 @@ import { AuthRequest } from '../middleware/auth';
 import { PurchaseOrderService } from '../services/PurchaseOrderService';
 import { createError } from '../middleware/errorHandler';
 import { backendUploadsRoot } from '../lib/uploads';
+import { assertOcApprovalStatusChange } from '../lib/ocApprovalAccess';
 
 const router = Router();
 const service = new PurchaseOrderService();
@@ -257,11 +258,24 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
   try {
     const { status, rejectionReason } = req.body;
     if (!status) throw createError('Status é obrigatório', 400);
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const existing = await service.getById(req.params.id);
+    if (!existing) throw createError('Ordem de compra não encontrada', 404);
+    await assertOcApprovalStatusChange(
+      req.user.id,
+      !!req.user.isAdmin,
+      String(existing?.status ?? ''),
+      String(status)
+    );
     const order = await service.updateStatus(req.params.id, status, req.user?.id, {
       rejectionReason: typeof rejectionReason === 'string' ? rejectionReason : undefined
     });
     res.json({ success: true, data: order, message: 'Status atualizado com sucesso' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
       /Apenas |Status atual não permite|Anexe o comprovante|Envie a OC para a fase Pagamento|Aguarde o pagamento de todas as parcelas|Registre o comprovante|validação de comprovante|validação do comprovante|Pagamento ou em correção|ao menos uma nota|marcada como enviada|marcar como enviada|Usuário não autenticado|financeiro pode reenviar|financeiro pode anexar/.test(

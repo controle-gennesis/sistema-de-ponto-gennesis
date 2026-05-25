@@ -4,20 +4,21 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pencil } from 'lucide-react';
+import { Pencil, X } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
-import { OcPurchaseOrdersPanel, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
+import { OcPurchaseOrdersPanel, OcStyledCheckbox, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
 import type { FluxTab, MaterialRequest } from './_lib/types';
 import { fluxTabToOcTab, orderNeedsFinanceBoleto } from './_lib/flux';
 import { getStatusInfo, materialItemLabel, materialItemSubtitle, rmSolicitante } from './_lib/display';
 import {
   formatCurrencyBR,
+  numericQuantityFromInput,
   numericUnitPriceFromInput,
   OC_TYPE_AVISTA,
   OC_TYPE_BOLETO,
@@ -32,6 +33,19 @@ const normalizeSearch = (value?: string | null) =>
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+
+const ocFieldCls =
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
+
+const ocPaymentSegmentCls = (active: boolean) =>
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+    active
+      ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-blue-500 dark:bg-blue-500'
+      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700/80'
+  }`;
+
+const ocFieldCompactCls =
+  'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 export default function GerenciarMateriaisPage() {
   const router = useRouter();
@@ -50,8 +64,8 @@ export default function GerenciarMateriaisPage() {
   const [ocObservations, setOcObservations] = useState('');
   const [ocFreteStr, setOcFreteStr] = useState('');
   const [ocSelectedItemIds, setOcSelectedItemIds] = useState<Set<string>>(new Set());
-  /** Quantidade a comprar na OC por item da SC (≤ quantidade solicitada). */
-  const [ocQuantityByItemId, setOcQuantityByItemId] = useState<Record<string, number>>({});
+  /** Quantidade na OC por item (texto livre: pode ficar vazio enquanto digita). */
+  const [ocQuantityStrByItemId, setOcQuantityStrByItemId] = useState<Record<string, string>>({});
   /** Valor unitário na OC por item (texto livre: pode ficar vazio enquanto digita). */
   const [ocUnitPriceStrByItemId, setOcUnitPriceStrByItemId] = useState<Record<string, string>>({});
 
@@ -71,7 +85,7 @@ export default function GerenciarMateriaisPage() {
     setOcObservations('');
     setOcFreteStr('');
     setOcSelectedItemIds(new Set());
-    setOcQuantityByItemId({});
+    setOcQuantityStrByItemId({});
     setOcUnitPriceStrByItemId({});
   };
 
@@ -79,8 +93,8 @@ export default function GerenciarMateriaisPage() {
   useEffect(() => {
     if (showCreateOCModal && selectedRequest) {
       setOcSelectedItemIds(new Set(selectedRequest.items.map((i) => i.id)));
-      setOcQuantityByItemId(
-        Object.fromEntries(selectedRequest.items.map((i) => [i.id, Number(i.quantity)]))
+      setOcQuantityStrByItemId(
+        Object.fromEntries(selectedRequest.items.map((i) => [i.id, String(i.quantity)]))
       );
       setOcUnitPriceStrByItemId(
         Object.fromEntries(selectedRequest.items.map((i) => [i.id, '0']))
@@ -91,17 +105,24 @@ export default function GerenciarMateriaisPage() {
   const ocSelectedItems =
     selectedRequest?.items.filter((i) => ocSelectedItemIds.has(i.id)) ?? [];
 
+  const ocAllItemsSelected = Boolean(
+    selectedRequest?.items.length &&
+      selectedRequest.items.every((i) => ocSelectedItemIds.has(i.id))
+  );
+
   const ocSubtotalItens = useMemo(() => {
     if (!selectedRequest) return 0;
     let s = 0;
     for (const item of selectedRequest.items) {
       if (!ocSelectedItemIds.has(item.id)) continue;
-      const q = ocQuantityByItemId[item.id] ?? Number(item.quantity);
+      const q =
+        numericQuantityFromInput(ocQuantityStrByItemId[item.id] ?? '') ??
+        Number(item.quantity);
       const unit = numericUnitPriceFromInput(ocUnitPriceStrByItemId[item.id] ?? '');
       s += q * unit;
     }
     return Math.round(s * 100) / 100;
-  }, [selectedRequest, ocSelectedItemIds, ocQuantityByItemId, ocUnitPriceStrByItemId]);
+  }, [selectedRequest, ocSelectedItemIds, ocQuantityStrByItemId, ocUnitPriceStrByItemId]);
 
   const ocFreteParsed =
     ocFreteStr.trim() === '' ? 0 : parseCurrencyBR(ocFreteStr);
@@ -123,10 +144,10 @@ export default function GerenciarMateriaisPage() {
   const selectAllOcItems = () => {
     if (!selectedRequest) return;
     setOcSelectedItemIds(new Set(selectedRequest.items.map((i) => i.id)));
-    setOcQuantityByItemId((prev) => {
+    setOcQuantityStrByItemId((prev) => {
       const next = { ...prev };
       for (const it of selectedRequest.items) {
-        if (next[it.id] === undefined) next[it.id] = Number(it.quantity);
+        if (next[it.id] === undefined) next[it.id] = String(it.quantity);
       }
       return next;
     });
@@ -243,7 +264,7 @@ export default function GerenciarMateriaisPage() {
         const q = quantityByItemId[item.id] ?? maxQ;
         if (!(q > 0) || q > maxQ) {
           throw new Error(
-            `Quantidade inválida para "${item.material?.description || item.material?.name || 'item'}". Use entre 0 e ${maxQ}.`
+            `Quantidade inválida para "${materialItemLabel(item)}". Use entre 0 e ${maxQ}.`
           );
         }
         return {
@@ -630,12 +651,41 @@ export default function GerenciarMateriaisPage() {
 
         {/* Modal Detalhes */}
         {showDetailsModal && selectedRequest && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => { setShowDetailsModal(false); setSelectedRequest(null); }} />
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                Detalhes da Requisição
-              </h3>
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => {
+                setShowDetailsModal(false);
+                setSelectedRequest(null);
+              }}
+              aria-hidden
+            />
+            <div
+              className="relative flex max-h-[min(90vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="rm-details-modal-title"
+            >
+              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                <h3
+                  id="rm-details-modal-title"
+                  className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                >
+                  Detalhes da Requisição
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    setSelectedRequest(null);
+                  }}
+                  className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Fechar"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <div className="space-y-4">
                 <div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Número</p>
@@ -680,7 +730,14 @@ export default function GerenciarMateriaisPage() {
                       <tbody>
                         {selectedRequest.items?.map((item: any) => (
                           <tr key={item.id} className="border-t border-gray-200 dark:border-gray-600">
-                            <td className="p-2 text-gray-900 dark:text-gray-100">{item.material?.description || item.material?.name || '-'}</td>
+                            <td className="p-2 text-gray-900 dark:text-gray-100">
+                              <span className="block">{materialItemLabel(item)}</span>
+                              {materialItemSubtitle(item) ? (
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {materialItemSubtitle(item)}
+                                </span>
+                              ) : null}
+                            </td>
                             <td className="p-2 text-right">{item.quantity}</td>
                             <td className="p-2 text-right">{item.unit || '-'}</td>
                             <td className="p-2 text-left">
@@ -703,29 +760,33 @@ export default function GerenciarMateriaisPage() {
                     </table>
                   </div>
                 </div>
-                <div className="flex justify-end gap-2 pt-2 flex-wrap">
-                  {selectedRequest.status === 'IN_REVIEW' &&
-                    userData?.data?.id === rmSolicitante(selectedRequest)?.id && (
-                      <Link
-                        href={`/ponto/solicitar-materiais?editRm=${selectedRequest.id}`}
-                        onClick={() => {
-                          setShowDetailsModal(false);
-                          setSelectedRequest(null);
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors text-sm font-medium"
-                      >
-                        <Pencil className="w-4 h-4" />
-                        Editar RM
-                      </Link>
-                    )}
-                  <button
-                    type="button"
-                    onClick={() => { setShowDetailsModal(false); setSelectedRequest(null); }}
-                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                  >
-                    Fechar
-                  </button>
-                </div>
+              </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                {selectedRequest.status === 'IN_REVIEW' &&
+                  userData?.data?.id === rmSolicitante(selectedRequest)?.id && (
+                    <Link
+                      href={`/ponto/solicitar-materiais?editRm=${selectedRequest.id}`}
+                      onClick={() => {
+                        setShowDetailsModal(false);
+                        setSelectedRequest(null);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Editar RM
+                    </Link>
+                  )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    setSelectedRequest(null);
+                  }}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Fechar
+                </button>
               </div>
             </div>
           </div>
@@ -770,123 +831,167 @@ export default function GerenciarMateriaisPage() {
                 setShowCreateOCModal(false);
                 resetOcForm();
               }}
+              aria-hidden
             />
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                Criar Ordem de Compra (OC)
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                SC: {selectedRequest.requestNumber || selectedRequest.id.slice(0, 8)}
-              </p>
+            <div
+              className="relative flex max-h-[min(92vh,800px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="create-oc-modal-title"
+            >
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                <div className="min-w-0">
+                  <h3
+                    id="create-oc-modal-title"
+                    className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                  >
+                    Criar Ordem de Compra (OC)
+                  </h3>
+                  <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                    SC: {selectedRequest.requestNumber || selectedRequest.id.slice(0, 8)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateOCModal(false);
+                    resetOcForm();
+                  }}
+                  className="shrink-0 rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Fechar"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
 
-              {/* Lista de itens (primeiro na tela) */}
-              <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div>
-                    <p className="font-medium text-gray-700 dark:text-gray-300 mb-1">Itens da SC:</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Selecione quais itens serão inseridos nesta OC.
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={selectAllOcItems}
-                      className="px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      Selecionar todos
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearOcItems}
-                      className="px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                      disabled={ocSelectedItems.length === 0}
-                    >
-                      Limpar
-                    </button>
-                  </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <div className="space-y-4 text-sm text-gray-600 dark:text-gray-400">
+              {/* Lista de itens */}
+              <div>
+                <div className="mb-3">
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Itens da SC</p>
+                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    Selecione quais itens serão inseridos nesta OC.
+                  </p>
                 </div>
 
-                <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                  <ul className="divide-y divide-gray-200 dark:divide-gray-600">
-                    {selectedRequest.items.map((item) => {
-                      const materialSubtitle = materialItemSubtitle(item);
-                      return (
-                      <li key={item.id} className="px-3 py-2 flex items-start gap-3">
-                        <input
-                          type="checkbox"
-                          checked={ocSelectedItemIds.has(item.id)}
-                          onChange={() => toggleOcItem(item.id)}
-                          className="mt-1"
-                        />
-                        <div className="min-w-0">
-                          <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
-                            {materialItemLabel(item)}
-                          </p>
-                          {materialSubtitle ? (
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
-                              {materialSubtitle}
-                            </p>
-                          ) : null}
-                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-                            <span>
-                              Solicitado na SC: {item.quantity} {item.unit}
-                            </span>
-                            <span className="text-gray-400">|</span>
-                            <label className="inline-flex items-center gap-1.5">
-                              <span className="whitespace-nowrap">Qtd. na OC:</span>
-                              <input
-                                type="number"
-                                min={0.0001}
-                                step="any"
-                                max={Number(item.quantity)}
-                                disabled={!ocSelectedItemIds.has(item.id)}
-                                value={ocQuantityByItemId[item.id] ?? Number(item.quantity)}
-                                onChange={(e) => {
-                                  const n = parseFloat(e.target.value);
-                                  if (Number.isNaN(n)) return;
-                                  const max = Number(item.quantity);
-                                  const q = Math.min(Math.max(n, 0.0001), max);
-                                  setOcQuantityByItemId((prev) => ({ ...prev, [item.id]: q }));
+                <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600">
+                  <div className="max-h-[min(280px,40vh)] overflow-auto">
+                    <table className="w-full min-w-[26rem] table-fixed border-collapse text-sm">
+                      <colgroup>
+                        <col className="w-10" />
+                        <col />
+                        <col className="w-[5.5rem]" />
+                        <col className="w-[6rem]" />
+                        <col className="w-[7.5rem]" />
+                      </colgroup>
+                      <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-900/80">
+                        <tr className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          <th scope="col" className="px-2 py-2">
+                            <div className="flex justify-center">
+                              <OcStyledCheckbox
+                                checked={ocAllItemsSelected}
+                                onChange={(checked) => {
+                                  if (checked) selectAllOcItems();
+                                  else clearOcItems();
                                 }}
-                                className="w-24 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                                ariaLabel="Selecionar todos os itens"
+                                title="Selecionar todos"
                               />
-                              <span>{item.unit}</span>
-                            </label>
-                            <span className="text-gray-400">|</span>
-                            <label className="inline-flex items-center gap-1.5">
-                              <span className="whitespace-nowrap">Valor unit. (R$):</span>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="0,00"
-                                disabled={!ocSelectedItemIds.has(item.id)}
-                                value={ocUnitPriceStrByItemId[item.id] ?? ''}
-                                onChange={(e) => {
-                                  setOcUnitPriceStrByItemId((prev) => ({
-                                    ...prev,
-                                    [item.id]: e.target.value
-                                  }));
-                                }}
-                                className="w-28 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                              />
-                            </label>
-                          </div>
-                          {item.attachmentUrl && (
-                            <a
-                              href={absoluteUploadUrl(item.attachmentUrl)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-0.5 inline-block"
-                            >
-                              Anexo: {item.attachmentName || 'abrir'}
-                            </a>
-                          )}
-                        </div>
-                      </li>
-                    );
-                    })}
-                  </ul>
+                            </div>
+                          </th>
+                          <th scope="col" className="px-2 py-2 text-left font-medium">
+                            Material
+                          </th>
+                          <th scope="col" className="px-2 py-2 text-center font-medium">
+                            Qtd. SC
+                          </th>
+                          <th scope="col" className="px-2 py-2 text-left font-medium">
+                            Qtd. na OC
+                          </th>
+                          <th scope="col" className="px-2 py-2 text-left font-medium">
+                            Valor unit. (R$)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                        {selectedRequest.items.map((item) => {
+                          const isSelected = ocSelectedItemIds.has(item.id);
+                          return (
+                            <tr key={item.id} className="bg-white dark:bg-gray-800">
+                              <td className="px-2 py-2 align-middle">
+                                <div className="flex justify-center">
+                                  <OcStyledCheckbox
+                                    checked={isSelected}
+                                    onChange={() => toggleOcItem(item.id)}
+                                    ariaLabel={`Incluir ${materialItemLabel(item)} na OC`}
+                                  />
+                                </div>
+                              </td>
+                              <td className="px-2 py-2 align-middle">
+                                <p className="truncate font-medium text-gray-900 dark:text-gray-100">
+                                  {materialItemLabel(item)}
+                                </p>
+                                {item.attachmentUrl ? (
+                                  <a
+                                    href={absoluteUploadUrl(item.attachmentUrl)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    Anexo
+                                  </a>
+                                ) : null}
+                              </td>
+                              <td className="px-2 py-2 text-center align-middle tabular-nums font-medium text-gray-900 dark:text-gray-100">
+                                {item.quantity} {item.unit}
+                              </td>
+                              <td className="px-2 py-2 align-middle">
+                                <label htmlFor={`oc-qty-${item.id}`} className="sr-only">
+                                  Quantidade na OC
+                                </label>
+                                <input
+                                  id={`oc-qty-${item.id}`}
+                                  type="text"
+                                  inputMode="decimal"
+                                  disabled={!isSelected}
+                                  value={ocQuantityStrByItemId[item.id] ?? String(item.quantity)}
+                                  onChange={(e) => {
+                                    setOcQuantityStrByItemId((prev) => ({
+                                      ...prev,
+                                      [item.id]: e.target.value
+                                    }));
+                                  }}
+                                  className={`${ocFieldCompactCls} w-full`}
+                                />
+                              </td>
+                              <td className="px-2 py-2 align-middle">
+                                <label htmlFor={`oc-price-${item.id}`} className="sr-only">
+                                  Valor unitário em reais
+                                </label>
+                                <input
+                                  id={`oc-price-${item.id}`}
+                                  type="text"
+                                  inputMode="decimal"
+                                  placeholder="0,00"
+                                  disabled={!isSelected}
+                                  value={ocUnitPriceStrByItemId[item.id] ?? ''}
+                                  onChange={(e) => {
+                                    setOcUnitPriceStrByItemId((prev) => ({
+                                      ...prev,
+                                      [item.id]: e.target.value
+                                    }));
+                                  }}
+                                  className={`${ocFieldCompactCls} w-full`}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -894,14 +999,14 @@ export default function GerenciarMateriaisPage() {
                 </p>
               </div>
 
-              <div className="mb-4">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Fornecedor *
                 </label>
                 <select
                   value={ocSupplierId}
                   onChange={(e) => setOcSupplierId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={ocFieldCls}
                 >
                   <option value="">Selecione o fornecedor</option>
                   {(suppliersData?.data || []).filter((s: { isActive?: boolean }) => s.isActive).map((s: { id: string; code: string; name: string }) => (
@@ -915,49 +1020,51 @@ export default function GerenciarMateriaisPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Tipo de pagamento *
-                  </span>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="ocPaymentType"
-                        checked={ocPaymentType === OC_TYPE_AVISTA}
-                        onChange={() => setOcPaymentType(OC_TYPE_AVISTA)}
-                        className="rounded-full border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      À vista
-                    </label>
-                    <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="ocPaymentType"
-                        checked={ocPaymentType === OC_TYPE_BOLETO}
-                        onChange={() => setOcPaymentType(OC_TYPE_BOLETO)}
-                        className="rounded-full border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      Boleto
-                    </label>
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="ocPaymentCondition" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Condição de pagamento *
-                  </label>
-                  <PaymentConditionSelect
-                    id="ocPaymentCondition"
-                    paymentType={ocPaymentType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
-                    value={ocPaymentCondition}
-                    onChange={setOcPaymentCondition}
-                    disabled={ocPaymentType === OC_TYPE_AVISTA}
-                  />
+              <div>
+                <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Tipo de pagamento *
+                </span>
+                <div
+                  role="radiogroup"
+                  aria-label="Tipo de pagamento"
+                  className="grid w-full grid-cols-2 gap-2"
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={ocPaymentType === OC_TYPE_AVISTA}
+                    onClick={() => setOcPaymentType(OC_TYPE_AVISTA)}
+                    className={ocPaymentSegmentCls(ocPaymentType === OC_TYPE_AVISTA)}
+                  >
+                    À vista
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={ocPaymentType === OC_TYPE_BOLETO}
+                    onClick={() => setOcPaymentType(OC_TYPE_BOLETO)}
+                    className={ocPaymentSegmentCls(ocPaymentType === OC_TYPE_BOLETO)}
+                  >
+                    Boleto
+                  </button>
                 </div>
               </div>
 
-              <div className="mb-4">
+              <div>
+                <label htmlFor="ocPaymentCondition" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Condição de pagamento *
+                </label>
+                <PaymentConditionSelect
+                  id="ocPaymentCondition"
+                  paymentType={ocPaymentType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
+                  value={ocPaymentCondition}
+                  onChange={setOcPaymentCondition}
+                  disabled={ocPaymentType === OC_TYPE_AVISTA}
+                  className={ocFieldCls}
+                />
+              </div>
+
+              <div>
                 <label htmlFor="ocFrete" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Frete (R$)
                 </label>
@@ -968,19 +1075,19 @@ export default function GerenciarMateriaisPage() {
                   placeholder="0,00"
                   value={ocFreteStr}
                   onChange={(e) => setOcFreteStr(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={ocFieldCls}
                 />
                 {ocFreteInvalid && (
                   <p className="text-xs text-red-600 dark:text-red-400 mt-1">Informe um valor de frete válido ou deixe em branco.</p>
                 )}
               </div>
 
-              <div className="mb-4">
+              <div>
                 <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Valor a ser pago (R$) *
                 </span>
                 <div
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-gray-100"
+                  className={`${ocFieldCls} bg-gray-50 font-semibold dark:bg-gray-900/50`}
                   aria-live="polite"
                 >
                   {ocAmountToPayComputed !== null
@@ -992,7 +1099,7 @@ export default function GerenciarMateriaisPage() {
                 </p>
               </div>
 
-              <div className="mb-4">
+              <div>
                 <label htmlFor="ocPaymentDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Dados do pagamento
                 </label>
@@ -1001,12 +1108,12 @@ export default function GerenciarMateriaisPage() {
                   value={ocPaymentDetails}
                   onChange={(e) => setOcPaymentDetails(e.target.value)}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={`${ocFieldCls} resize-y`}
                   placeholder="Conta, PIX, agência, favorecido, etc."
                 />
               </div>
 
-              <div className="mb-4">
+              <div>
                 <label htmlFor="ocObservations" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Observações
                 </label>
@@ -1015,19 +1122,21 @@ export default function GerenciarMateriaisPage() {
                   value={ocObservations}
                   onChange={(e) => setOcObservations(e.target.value)}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={`${ocFieldCls} resize-y`}
                   placeholder="Observações gerais da OC"
                 />
               </div>
+              </div>
+              </div>
 
-              <div className="flex justify-end gap-3">
+              <div className="flex shrink-0 justify-end gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
                 <button
                   type="button"
                   onClick={() => {
                     setShowCreateOCModal(false);
                     resetOcForm();
                   }}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
                 >
                   Cancelar
                 </button>
@@ -1048,6 +1157,20 @@ export default function GerenciarMateriaisPage() {
                         numericUnitPriceFromInput(ocUnitPriceStrByItemId[id] ?? '')
                       ])
                     );
+                    const quantityByItemId: Record<string, number> = {};
+                    for (const id of Array.from(ocSelectedItemIds)) {
+                      const item = selectedRequest.items.find((i) => i.id === id);
+                      if (!item) continue;
+                      const maxQ = Number(item.quantity);
+                      const q = numericQuantityFromInput(ocQuantityStrByItemId[id] ?? '');
+                      if (q === null || !(q > 0) || q > maxQ) {
+                        toast.error(
+                          `Quantidade inválida para "${materialItemLabel(item)}". Informe um valor entre 0 e ${maxQ}.`
+                        );
+                        return;
+                      }
+                      quantityByItemId[id] = q;
+                    }
                     createOCMutation.mutate({
                       request: selectedRequest,
                       supplierId: ocSupplierId,
@@ -1057,7 +1180,7 @@ export default function GerenciarMateriaisPage() {
                       observations: ocObservations,
                       freightAmount: ocFreteParsed ?? 0,
                       selectedItemIds: Array.from(ocSelectedItemIds),
-                      quantityByItemId: ocQuantityByItemId,
+                      quantityByItemId,
                       unitPriceByItemId
                     });
                   }}
@@ -1068,7 +1191,7 @@ export default function GerenciarMateriaisPage() {
                     ocAmountToPayComputed === null ||
                     ocAmountToPayComputed < 0
                   }
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                 >
                   {createOCMutation.isPending ? 'Criando...' : 'Criar OC'}
                 </button>

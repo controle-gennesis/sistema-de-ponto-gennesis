@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
   Ban,
@@ -8,6 +9,7 @@ import {
   ClipboardList,
   Eye,
   FileText,
+  MoreVertical,
   Pencil,
   Search,
   Wrench,
@@ -26,12 +28,17 @@ import {
 } from '../_lib/display';
 
 const LIST_ITEMS_PER_PAGE = 12;
+const RM_ACTION_MENU_WIDTH_PX = 224;
+
+const MENU_ITEM_CLASS =
+  'w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700';
+const MENU_ITEM_BORDER_CLASS = `${MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
 
 const FLUX_TAB_META: Partial<
   Record<FluxTab, { title: string; subtitle: string }>
 > = {
   rm_PENDING: {
-    title: 'Requisições pendentes',
+    title: 'Requisições Pendentes',
     subtitle: 'Aprove, envie para correção ou cancele a solicitação'
   },
   rm_IN_REVIEW: {
@@ -78,6 +85,11 @@ export function MaterialRequestsRmList({
   onDetails: (r: MaterialRequest) => void;
 }) {
   const [listCurrentPage, setListCurrentPage] = useState(1);
+  const [actionMenu, setActionMenu] = useState<{
+    requestId: string;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const meta = FLUX_TAB_META[fluxTab] ?? {
     title: 'Requisições de materiais',
@@ -94,6 +106,15 @@ export function MaterialRequestsRmList({
   const listStartItem = listTotal === 0 ? 0 : listStartIndex + 1;
   const listEndItem = Math.min(listStartIndex + LIST_ITEMS_PER_PAGE, listTotal);
 
+  const requestForMenu = useMemo(() => {
+    if (!actionMenu) return null;
+    return (
+      paginatedRequests.find((r) => r.id === actionMenu.requestId) ??
+      filteredRequests.find((r) => r.id === actionMenu.requestId) ??
+      null
+    );
+  }, [actionMenu, paginatedRequests, filteredRequests]);
+
   useEffect(() => {
     setListCurrentPage(1);
   }, [fluxTab, searchTerm, listTotal]);
@@ -103,6 +124,12 @@ export function MaterialRequestsRmList({
       setListCurrentPage(listTotalPages);
     }
   }, [listCurrentPage, listTotalPages]);
+
+  useEffect(() => {
+    if (actionMenu && !requestForMenu) {
+      setActionMenu(null);
+    }
+  }, [actionMenu, requestForMenu]);
 
   return (
     <Card
@@ -257,74 +284,28 @@ export function MaterialRequestsRmList({
                           {formatDate(request.createdAt)}
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap">
-                          <div className="inline-flex items-center justify-end gap-0.5">
-                            {request.status === 'APPROVED' && (
-                              <button
-                                type="button"
-                                onClick={() => onCreateOc(request)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
-                                title="Criar Ordem de Compra"
-                              >
-                                <FileText className="h-4 w-4" />
-                              </button>
-                            )}
-                            {request.status === 'PENDING' && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => onApprove(request)}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950/40"
-                                  title="Aprovar"
-                                >
-                                  <CheckCircle className="h-4 w-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onCorrection(request)}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
-                                  title="Enviar para Correção RM"
-                                >
-                                  <Wrench className="h-4 w-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onCancel(request)}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                                  title="Cancelar requisição"
-                                >
-                                  <Ban className="h-4 w-4" />
-                                </button>
-                              </>
-                            )}
-                            {request.status === 'IN_REVIEW' &&
-                              currentUserId === rmSolicitante(request)?.id && (
-                                <Link
-                                  href={`/ponto/solicitar-materiais?editRm=${request.id}`}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
-                                  title="Editar RM"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Link>
-                              )}
-                            {request.status === 'IN_REVIEW' && (
-                              <button
-                                type="button"
-                                onClick={() => onCancel(request)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                                title="Cancelar requisição"
-                              >
-                                <Ban className="h-4 w-4" />
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => onDetails(request)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                              title="Ver detalhes"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setActionMenu((prev) => {
+                                if (prev?.requestId === request.id) return null;
+                                let left = rect.right - RM_ACTION_MENU_WIDTH_PX;
+                                left = Math.max(
+                                  8,
+                                  Math.min(left, window.innerWidth - RM_ACTION_MENU_WIDTH_PX - 8)
+                                );
+                                return { requestId: request.id, top: rect.bottom + 4, left };
+                              });
+                            }}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                            aria-label="Menu de ações"
+                            aria-expanded={actionMenu?.requestId === request.id}
+                            aria-haspopup="menu"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -355,6 +336,120 @@ export function MaterialRequestsRmList({
           </>
         )}
       </CardContent>
+
+      {actionMenu &&
+        requestForMenu &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[200]" aria-hidden onClick={() => setActionMenu(null)} />
+            <div
+              role="menu"
+              className="fixed z-[201] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
+              style={{ top: actionMenu.top, left: actionMenu.left }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActionMenu(null);
+                  onDetails(requestForMenu);
+                }}
+                className={MENU_ITEM_CLASS}
+              >
+                <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                <span>Ver detalhes</span>
+              </button>
+              {requestForMenu.status === 'APPROVED' && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActionMenu(null);
+                    onCreateOc(requestForMenu);
+                  }}
+                  className={MENU_ITEM_BORDER_CLASS}
+                >
+                  <FileText className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                  <span>Criar Ordem de Compra</span>
+                </button>
+              )}
+              {requestForMenu.status === 'PENDING' && (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActionMenu(null);
+                      onApprove(requestForMenu);
+                    }}
+                    className={MENU_ITEM_BORDER_CLASS}
+                  >
+                    <CheckCircle className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                    <span>Aprovar requisição</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActionMenu(null);
+                      onCorrection(requestForMenu);
+                    }}
+                    className={MENU_ITEM_BORDER_CLASS}
+                  >
+                    <Wrench className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
+                    <span>Enviar para correção RM</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActionMenu(null);
+                      onCancel(requestForMenu);
+                    }}
+                    className={MENU_ITEM_BORDER_CLASS}
+                  >
+                    <Ban className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                    <span>Cancelar requisição</span>
+                  </button>
+                </>
+              )}
+              {requestForMenu.status === 'IN_REVIEW' &&
+                currentUserId === rmSolicitante(requestForMenu)?.id && (
+                  <Link
+                    href={`/ponto/solicitar-materiais?editRm=${requestForMenu.id}`}
+                    role="menuitem"
+                    onClick={() => setActionMenu(null)}
+                    className={MENU_ITEM_BORDER_CLASS}
+                  >
+                    <Pencil className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
+                    <span>Editar RM</span>
+                  </Link>
+                )}
+              {requestForMenu.status === 'IN_REVIEW' && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActionMenu(null);
+                    onCancel(requestForMenu);
+                  }}
+                  className={MENU_ITEM_BORDER_CLASS}
+                >
+                  <Ban className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                  <span>Cancelar requisição</span>
+                </button>
+              )}
+            </div>
+          </>,
+          document.body
+        )}
     </Card>
   );
 }

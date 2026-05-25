@@ -156,6 +156,14 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-espelho-nf'));
 
+  const canApproveOcCompras =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
+  const canApproveOcDiretoria =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-diretoria'));
+  const canApproveOcGestor =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-gestor'));
+  const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
+
   /** Lista e visualização dos quadros Tasks de todos os setores (somente leitura fora do próprio setor). */
   const canViewAllKanbanBoards =
     isAdministrator ||
@@ -242,6 +250,10 @@ export function usePermissions() {
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
     canApproveEspelhoNf,
+    canApproveOc,
+    canApproveOcCompras,
+    canApproveOcDiretoria,
+    canApproveOcGestor,
     canViewAllKanbanBoards,
     canAccessContract,
     contractModuleFlags,
@@ -302,13 +314,17 @@ export function useRoutePermission(route: string) {
      * sobre algum bloco. Não há mais entrada na matriz de acessos.
      *  - Gestor de algum contrato (decide Solicitações Gerais) → vê o bloco de Solicitações.
      *  - Permissão «Aprovar Espelho da Nota Fiscal» (Controle) → vê o bloco de Espelhos da Nota Fiscal.
+     *  - Compras / Gerenciar materiais → vê o bloco de aprovação de OC.
      * Cada bloco é renderizado independentemente dentro da própria página.
      */
     '/ponto/aprovacoes':
       isAdministrator ||
       dpApprovalContractIds.length > 0 ||
       can(pk('/ponto/controle/aprovar-solicitacoes-dp')) ||
-      canApproveEspelhoNf,
+      canApproveEspelhoNf ||
+      can(pk('/ponto/controle/aprovar-oc-compras')) ||
+      can(pk('/ponto/controle/aprovar-oc-gestor')) ||
+      can(pk('/ponto/controle/aprovar-oc-diretoria')),
     '/ponto/funcionarios':
       isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal || can(pk('/ponto/aniversariantes')),
