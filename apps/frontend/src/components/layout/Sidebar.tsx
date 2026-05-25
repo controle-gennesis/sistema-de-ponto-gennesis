@@ -77,6 +77,10 @@ function isRailFooterRoute(pathname: string | null): boolean {
   );
 }
 
+function isHomeRoute(pathname: string | null): boolean {
+  return pathname === '/ponto/home';
+}
+
 interface SidebarProps {
   userRole: 'EMPLOYEE';
   userName: string;
@@ -682,25 +686,29 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   )?.id;
 
   const onRailFooterRoute = isRailFooterRoute(pathname);
+  const onHomeRoute = isHomeRoute(pathname);
 
-  /** Um único módulo destacado no rail: painel aberto → módulo selecionado; recolhido → rota do menu (não atalhos do rodapé) */
-  const railModuleActiveId: string | null = onRailFooterRoute && !tier2Visible
-    ? null
-    : tier2Visible
-      ? selectedModuleId
-      : activeModuleId ?? selectedModuleId;
+  /** Rail: painel aberto → módulo clicado; recolhido → rota ativa; na home recolhida → nenhum (só logo) */
+  const railModuleActiveId: string | null = tier2Visible
+    ? selectedModuleId
+    : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : selectedModuleId);
 
   const handleCollapseSidebar = () => {
     if (activeModuleId) {
       setSelectedModuleId(activeModuleId);
-    } else if (onRailFooterRoute && menuItems[0]) {
+    } else if (!onHomeRoute && onRailFooterRoute && menuItems[0]) {
       setSelectedModuleId(menuItems[0].id);
     }
     setIsCollapsed(true);
   };
 
-  // Selecionar módulo conforme rota ativa
+  // Selecionar módulo conforme rota ativa; na home recolhe o painel e não marca módulo
   React.useEffect(() => {
+    if (onHomeRoute) {
+      setIsCollapsed(true);
+      setIsOpen(false);
+      return;
+    }
     const activeCategory = menuItems.find((category) =>
       category.items.some((item) => item.permission && isActive(item.href))
     );
@@ -770,9 +778,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           <div className="p-5 flex flex-col items-center">
             <Link
               href="/ponto/home"
-              className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-transform hover:scale-105"
+              className={`w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-all hover:scale-105 ${
+                onHomeRoute
+                  ? 'bg-red-50 dark:bg-red-900/20 ring-2 ring-red-500/30'
+                  : ''
+              }`}
               title="Ir para a página inicial"
               aria-label="Página inicial"
+              aria-current={onHomeRoute ? 'page' : undefined}
             >
               <img src="/loogo.png" alt="Logo Gennesis" className="w-10 h-10 object-contain" />
             </Link>
