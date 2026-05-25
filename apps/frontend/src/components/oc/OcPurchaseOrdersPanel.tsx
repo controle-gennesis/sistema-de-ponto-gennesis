@@ -528,6 +528,23 @@ const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> =
 };
 
 const OC_ACTION_MENU_WIDTH_PX = 224;
+/** Altura estimada do menu (itens variam); usada para abrir acima quando perto do fim da página. */
+const OC_ACTION_MENU_MAX_HEIGHT_PX = 360;
+
+function computeOcActionMenuPosition(rect: DOMRect): { top: number; left: number } {
+  let left = rect.right - OC_ACTION_MENU_WIDTH_PX;
+  left = Math.max(8, Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - 8));
+
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  const openBelow =
+    spaceBelow >= OC_ACTION_MENU_MAX_HEIGHT_PX || spaceBelow >= spaceAbove;
+  const top = openBelow
+    ? rect.bottom + 4
+    : Math.max(8, rect.top - OC_ACTION_MENU_MAX_HEIGHT_PX - 4);
+
+  return { top, left };
+}
 
 const OC_MENU_ITEM_CLASS =
   'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700';
@@ -1608,14 +1625,25 @@ export function OcPurchaseOrdersPanel({
                   <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                     <span>
                       {activeTab === 'FINALIZADAS' && finalizedPagination
-                        ? `Mostrando ${integratedListCount} de ${finalizedPagination.total} ordem(ns) nesta página`
-                        : `Mostrando ${integratedListCount} ${integratedListCount === 1 ? 'ordem' : 'ordens'}`}
+                        ? (() => {
+                            const total = finalizedPagination.total;
+                            const page = finalizedPagination.page;
+                            const limit = finalizedPagination.limit ?? integratedListCount;
+                            const start = total === 0 ? 0 : (page - 1) * limit + 1;
+                            const end = Math.min((page - 1) * limit + integratedListCount, total);
+                            return `Mostrando ${start} a ${end} de ${total} ordens de compra`;
+                          })()
+                        : `Mostrando 1 a ${integratedListCount} de ${integratedListCount} ${
+                            integratedListCount === 1 ? 'ordem de compra' : 'ordens de compra'
+                          }`}
                     </span>
-                    {activeTab === 'FINALIZADAS' && finalizedPagination && finalizedPagination.totalPages > 1 ? (
-                      <span>
-                        Página {finalizedPagination.page} de {finalizedPagination.totalPages}
-                      </span>
-                    ) : null}
+                    <span>
+                      {activeTab === 'FINALIZADAS' &&
+                      finalizedPagination &&
+                      finalizedPagination.totalPages > 1
+                        ? `Página ${finalizedPagination.page} de ${finalizedPagination.totalPages}`
+                        : 'Página 1 de 1'}
+                    </span>
                   </div>
                 )}
                 {isIntegratedFlux && integratedListCount === 0 ? (
@@ -2088,12 +2116,8 @@ export function OcPurchaseOrdersPanel({
                                   const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                                   setOcActionMenu((prev) => {
                                     if (prev?.orderId === o.id) return null;
-                                    let left = r.right - OC_ACTION_MENU_WIDTH_PX;
-                                    left = Math.max(
-                                      8,
-                                      Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - 8)
-                                    );
-                                    return { orderId: o.id, top: r.bottom + 4, left };
+                                    const { top, left } = computeOcActionMenuPosition(r);
+                                    return { orderId: o.id, top, left };
                                   });
                                 }}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -3647,10 +3671,10 @@ export function OcPurchaseOrdersPanel({
         typeof document !== 'undefined' &&
         createPortal(
           <>
-            <div className="fixed inset-0 z-[200]" aria-hidden onClick={() => setOcActionMenu(null)} />
+            <div className="fixed inset-0 z-[1100]" aria-hidden onClick={() => setOcActionMenu(null)} />
             <div
               role="menu"
-              className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              className="fixed z-[1101] w-56 max-h-[min(70vh,360px)] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
               style={{ top: ocActionMenu.top, left: ocActionMenu.left }}
             >
               <button
