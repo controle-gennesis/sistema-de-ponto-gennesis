@@ -1,0 +1,12 @@
+import { Router } from 'express';
+import { ServiceOrderController } from '../controllers/ServiceOrderController';
+import { authenticate } from '../middleware/auth';
+
+const router = Router();
+const controller = new ServiceOrderController();
+
+router.use(authenticate);
+
+router.get('/', (req, res, next) => controller.listByCostCenter(req, res, next));
+
+export default router;

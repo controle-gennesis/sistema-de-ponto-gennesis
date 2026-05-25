@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { AlertCircle, CheckCircle, Wrench, XCircle } from 'lucide-react';
+import { ensureOsSePrefix } from '@/lib/formatOsSePasta';
 import type { MaterialRequest } from './types';
 
 export function getStatusInfo(status: string): {
@@ -66,7 +67,7 @@ export function rmSolicitante(r: MaterialRequest): { id: string; name: string; e
 
 export function rmTitulo(r: MaterialRequest): string {
   const os = (r.serviceOrder || '').trim();
-  if (os) return `OS ${os}`;
+  if (os) return ensureOsSePrefix(os);
   if (r.requestNumber) return `OS ${r.requestNumber}`;
   return `OS #${r.id.slice(0, 8)}`;
 }

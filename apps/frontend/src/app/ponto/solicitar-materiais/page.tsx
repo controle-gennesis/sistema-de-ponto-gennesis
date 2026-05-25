@@ -25,6 +25,8 @@ import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
 import { useCostCenters } from '@/hooks/useCostCenters';
+import { useServiceOrdersByCostCenter } from '@/hooks/useServiceOrdersByCostCenter';
+import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
 import {
   purchaseOrderPhaseLabel,
   ocStatusTextClass,
@@ -197,6 +199,7 @@ function SolicitarMateriaisPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'new'>('list');
   const [formData, setFormData] = useState({
     costCenterId: '',
+    serviceOrderId: '',
     serviceOrder: '',
     obra: '',
     description: '',
@@ -211,6 +214,7 @@ function SolicitarMateriaisPage() {
   const [detailViewId, setDetailViewId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState({
     costCenterId: '',
+    serviceOrderId: '',
     serviceOrder: '',
     obra: '',
     description: '',
@@ -254,7 +258,44 @@ function SolicitarMateriaisPage() {
   });
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
+  const { serviceOrders: newFormServiceOrders, isLoading: loadingNewFormServiceOrders } =
+    useServiceOrdersByCostCenter(formData.costCenterId);
+  const { serviceOrders: editFormServiceOrders, isLoading: loadingEditFormServiceOrders } =
+    useServiceOrdersByCostCenter(editFormData.costCenterId);
 
+  const handleNewCostCenterChange = (costCenterId: string) => {
+    setFormData({
+      ...formData,
+      costCenterId,
+      serviceOrderId: '',
+      serviceOrder: ''
+    });
+  };
+
+  const handleEditCostCenterChange = (costCenterId: string) => {
+    setEditFormData({
+      ...editFormData,
+      costCenterId,
+      serviceOrderId: '',
+      serviceOrder: ''
+    });
+  };
+
+  const handleNewServiceOrderSelect = (serviceOrderId: string, serviceOrder: string) => {
+    setFormData((prev) => ({ ...prev, serviceOrderId, serviceOrder }));
+  };
+
+  const handleNewServiceOrderClear = () => {
+    setFormData((prev) => ({ ...prev, serviceOrderId: '', serviceOrder: '' }));
+  };
+
+  const handleEditServiceOrderSelect = (serviceOrderId: string, serviceOrder: string) => {
+    setEditFormData((prev) => ({ ...prev, serviceOrderId, serviceOrder }));
+  };
+
+  const handleEditServiceOrderClear = () => {
+    setEditFormData((prev) => ({ ...prev, serviceOrderId: '', serviceOrder: '' }));
+  };
 
   // Buscar materiais
   const { data: materialsData } = useQuery({
@@ -324,7 +365,7 @@ function SolicitarMateriaisPage() {
     }) => {
       const res = await api.patch(`/material-requests/${id}`, {
         costCenterId: form.costCenterId,
-        projectId: form.serviceOrder || undefined,
+        serviceOrderId: form.serviceOrderId || undefined,
         serviceOrder: form.serviceOrder || undefined,
         obra: form.obra || undefined,
         description: form.description,
@@ -369,6 +410,7 @@ function SolicitarMateriaisPage() {
       setActiveTab('list');
       setFormData({
         costCenterId: '',
+        serviceOrderId: '',
         serviceOrder: '',
         obra: '',
         description: '',
@@ -469,18 +511,21 @@ function SolicitarMateriaisPage() {
     const r = (correctionRmDetail as typeof fromList | undefined) || fromList;
     if (!r) return;
     const itemsFromApi = Array.isArray(r.items) ? r.items : [];
+    const rmServiceOrderId = String((r as { serviceOrderId?: string }).serviceOrderId || '').trim();
+    const rmServiceOrderText =
+      (r as { serviceOrder?: string }).serviceOrder?.trim()
+        ? String((r as { serviceOrder?: string }).serviceOrder)
+        : (r as { projectId?: string }).projectId && (r as { project?: { code?: string; name?: string } }).project
+          ? String(
+              (r as { project?: { code?: string; name?: string } }).project?.code ||
+                (r as { project?: { code?: string; name?: string } }).project?.name ||
+                ''
+            )
+          : '';
     setEditFormData({
       costCenterId: (r as { costCenterId?: string }).costCenterId || (r as { costCenter?: { id?: string } }).costCenter?.id || '',
-      serviceOrder:
-        (r as { serviceOrder?: string }).serviceOrder?.trim()
-          ? String((r as { serviceOrder?: string }).serviceOrder)
-          : (r as { projectId?: string }).projectId && (r as { project?: { code?: string; name?: string } }).project
-            ? String(
-                (r as { project?: { code?: string; name?: string } }).project?.code ||
-                  (r as { project?: { code?: string; name?: string } }).project?.name ||
-                  ''
-              )
-            : '',
+      serviceOrderId: rmServiceOrderId,
+      serviceOrder: rmServiceOrderText,
       obra: String((r as { obra?: string }).obra || ''),
       description: (r.description as string) || '',
       priority: (r.priority as string) || 'MEDIUM',
@@ -510,6 +555,16 @@ function SolicitarMateriaisPage() {
           : [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
     });
   }, [correctionEditId, correctionRmDetail, requests]);
+
+  useEffect(() => {
+    if (!correctionEditId || editFormData.serviceOrderId) return;
+    const text = editFormData.serviceOrder.trim();
+    if (!text || editFormServiceOrders.length === 0) return;
+    const match = editFormServiceOrders.find((o) => o.label.trim() === text);
+    if (match) {
+      setEditFormData((prev) => ({ ...prev, serviceOrderId: match.id }));
+    }
+  }, [correctionEditId, editFormData.serviceOrder, editFormData.serviceOrderId, editFormServiceOrders]);
 
   useEffect(() => {
     setNewItemMaterialSearch((prev) =>
@@ -605,6 +660,7 @@ function SolicitarMateriaisPage() {
     e.preventDefault();
     createMutation.mutate({
       costCenterId: formData.costCenterId,
+      serviceOrderId: formData.serviceOrderId || undefined,
       serviceOrder: formData.serviceOrder || undefined,
       obra: formData.obra || undefined,
       description: formData.description,
@@ -612,7 +668,6 @@ function SolicitarMateriaisPage() {
       demandSheet: formData.demandSheet || undefined,
       demandSheetAttachmentUrl: formData.demandSheetAttachmentUrl || undefined,
       demandSheetAttachmentName: formData.demandSheetAttachmentName || undefined,
-      projectId: formData.serviceOrder || undefined,
       items: formData.items.map((item) => ({
         materialId: item.materialId,
         quantity: Number(item.quantity),
@@ -1136,7 +1191,7 @@ function SolicitarMateriaisPage() {
                       <select
                         required
                         value={formData.costCenterId}
-                        onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
+                        onChange={(e) => handleNewCostCenterChange(e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
                         <option value="">Selecione um centro de custo</option>
@@ -1158,12 +1213,14 @@ function SolicitarMateriaisPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Ordem de Serviço
                     </label>
-                    <input
-                      type="text"
-                      value={formData.serviceOrder}
-                      onChange={(e) => setFormData({ ...formData, serviceOrder: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Digite o número da ordem de serviço (opcional)"
+                    <ServiceOrderSearchSelect
+                      costCenterId={formData.costCenterId}
+                      serviceOrders={newFormServiceOrders}
+                      loading={loadingNewFormServiceOrders}
+                      serviceOrderId={formData.serviceOrderId}
+                      serviceOrderLabel={formData.serviceOrder}
+                      onSelect={handleNewServiceOrderSelect}
+                      onClear={handleNewServiceOrderClear}
                     />
                   </div>
 
@@ -1646,7 +1703,7 @@ function SolicitarMateriaisPage() {
                   </label>
                   <select
                     value={editFormData.costCenterId}
-                    onChange={(e) => setEditFormData({ ...editFormData, costCenterId: e.target.value })}
+                    onChange={(e) => handleEditCostCenterChange(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
                   >
                     <option value="">Selecione</option>
@@ -1662,13 +1719,24 @@ function SolicitarMateriaisPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Ordem de Serviço
                   </label>
-                  <input
-                    type="text"
-                    value={editFormData.serviceOrder}
-                    onChange={(e) => setEditFormData({ ...editFormData, serviceOrder: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
-                    placeholder="Opcional"
+                  <ServiceOrderSearchSelect
+                    costCenterId={editFormData.costCenterId}
+                    serviceOrders={editFormServiceOrders}
+                    loading={loadingEditFormServiceOrders}
+                    serviceOrderId={editFormData.serviceOrderId}
+                    serviceOrderLabel={editFormData.serviceOrder}
+                    onSelect={handleEditServiceOrderSelect}
+                    onClear={handleEditServiceOrderClear}
+                    inputSize="sm"
+                    emptyCostCenterHint="Selecione o centro de custo"
                   />
+                  {editFormData.serviceOrder &&
+                    !editFormData.serviceOrderId &&
+                    editFormServiceOrders.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Valor anterior: {editFormData.serviceOrder}. Selecione a OS correspondente na lista, se existir.
+                      </p>
+                    )}
                 </div>
 
                 <div>

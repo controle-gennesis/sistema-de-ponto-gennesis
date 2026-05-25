@@ -40,14 +40,23 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Garante que o @prisma/client inclui o Drive (se faltar, reinicie o backend após `npx prisma generate`)
-const p = prisma as { driveFolder?: unknown; driveFile?: unknown };
+// Garante que o @prisma/client está atualizado (reinicie o backend após `npx prisma generate`)
+const p = prisma as {
+  driveFolder?: unknown;
+  driveFile?: unknown;
+  extratoCaixaFiltroSalvo?: unknown;
+};
 if (!p.driveFolder || !p.driveFile) {
   console.error(
     '❌ @prisma/client sem modelos Drive. Rode na pasta apps/backend: npx prisma generate e reinicie o servidor.',
   );
 } else if (process.env.NODE_ENV === 'development') {
   console.log('✅ Prisma: modelos Drive (drive_folders / drive_files) carregados.');
+}
+if (!p.extratoCaixaFiltroSalvo) {
+  console.error(
+    '❌ @prisma/client sem ExtratoCaixaFiltroSalvo (filtros salvos do extrato). Rode em apps/backend: npx prisma generate e reinicie o servidor.',
+  );
 }
 
 export { prisma };

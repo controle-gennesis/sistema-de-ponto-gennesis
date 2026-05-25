@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
@@ -115,12 +115,25 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   
   // Verificar se é administrador
   const isAdministrator = userPosition === 'Administrador';
-  
+  const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
+  const canSeeFuroEstoque =
+    isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque'));
+
+  const { data: pendingFuroCount = 0 } = useQuery({
+    queryKey: ['stock-shortfalls-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/stock/shortfalls/pending-count');
+      const n = Number(res.data?.count ?? res.data?.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeFuroEstoque && !isLoading,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000
+  });
+
   // Verificar se o funcionário precisa bater ponto
   const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
-  
-  // Verificar se é do departamento Compras
-  const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
   
   // Verificar se é do departamento Financeiro
   const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
@@ -370,6 +383,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro'))
           },
           {
+            name: 'Financeiro',
+            href: '/ponto/financeiro',
+            icon: DollarSign,
+            description: 'Gerar borderô e CNAB400 para pagamentos',
+            permission: isAdministrator || can(pk('/ponto/financeiro'))
+          },
+        ]
+      },
+      {
+        id: 'metricas',
+        name: 'Métricas',
+        icon: BarChart3,
+        items: [
+          {
             name: 'Extrato de Caixa',
             href: '/ponto/financeiro/analise-extrato',
             icon: BarChart3,
@@ -377,11 +404,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           },
           {
-            name: 'Financeiro',
-            href: '/ponto/financeiro',
-            icon: DollarSign,
-            description: 'Gerar borderô e CNAB400 para pagamentos',
-            permission: isAdministrator || can(pk('/ponto/financeiro'))
+            name: 'Controle Geral de Contratos',
+            href: '/ponto/contratos/controle-geral',
+            icon: LayoutDashboard,
+            description: 'Visão consolidada de todos os contratos',
+            permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
           },
         ]
       },
@@ -396,13 +423,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Cadastro de contratos da engenharia',
             permission: isAdministrator || can(pk('/ponto/contratos'))
-          },
-          {
-            name: 'Controle Geral de Contratos',
-            href: '/ponto/contratos/controle-geral',
-            icon: LayoutDashboard,
-            description: 'Visão consolidada de todos os contratos',
-            permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
           },
           {
             name: 'Ordem de Serviço',
@@ -975,7 +995,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                                 : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                             }`}
                           >
-                            <p className={`text-sm font-medium ${active ? '' : 'text-gray-700 dark:text-gray-300'}`}>{item.name}</p>
+                            <span className="flex flex-1 items-center justify-between gap-2 min-w-0">
+                              <p className={`text-sm font-medium truncate ${active ? '' : 'text-gray-700 dark:text-gray-300'}`}>
+                                {item.name}
+                              </p>
+                              {item.href === '/ponto/furo-estoque' && pendingFuroCount > 0 ? (
+                                <span
+                                  className="shrink-0 min-w-[1.25rem] h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-[11px] font-semibold leading-none"
+                                  title={`${pendingFuroCount} furo(s) de estoque pendente(s)`}
+                                >
+                                  {pendingFuroCount > 99 ? '99+' : pendingFuroCount}
+                                </span>
+                              ) : null}
+                            </span>
               </Link>
                         );
                       })}

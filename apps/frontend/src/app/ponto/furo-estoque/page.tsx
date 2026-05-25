@@ -75,7 +75,7 @@ export default function FuroEstoquePage() {
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
   const [filtersCategory, setFiltersCategory] = useState('');
   const [filtersMonth, setFiltersMonth] = useState('');
-  const [filtersYear, setFiltersYear] = useState(String(new Date().getFullYear()));
+  const [filtersYear, setFiltersYear] = useState('');
   const [filtersSearch, setFiltersSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ABERTO' | 'RESOLVIDO' | 'ALL'>('ABERTO');
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(true);
@@ -139,6 +139,7 @@ export default function FuroEstoquePage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stock-shortfalls'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-shortfalls-pending-count'] });
       setDetail(null);
       toast.success('Furo encerrado como Resolvido.');
     },
@@ -191,7 +192,7 @@ export default function FuroEstoquePage() {
                         setFiltersCostCenterId('');
                         setFiltersCategory('');
                         setFiltersMonth('');
-                        setFiltersYear(String(new Date().getFullYear()));
+                        setFiltersYear('');
                         setFiltersSearch('');
                         setStatusFilter('ABERTO');
                       }}
@@ -270,6 +271,7 @@ export default function FuroEstoquePage() {
                       onChange={(e) => setFiltersYear(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                     >
+                      <option value="">Todos</option>
                       {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
                         <option key={year} value={year}>
                           {year}

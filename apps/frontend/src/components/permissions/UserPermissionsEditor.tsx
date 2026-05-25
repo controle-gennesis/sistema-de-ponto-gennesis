@@ -150,6 +150,7 @@ const CATEGORY_ORDER = [
   'Principal',
   'Departamento Pessoal',
   'Financeiro',
+  'Métricas',
   'Engenharia',
   'Contratos e Licitações',
   'Suprimentos',
@@ -195,12 +196,14 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Departamento Pessoal';
   }
+  if (h === '/ponto/financeiro/analise-extrato' || h === '/ponto/contratos/controle-geral') {
+    return 'Métricas';
+  }
   if (h.startsWith('/ponto/financeiro')) return 'Financeiro';
   if (
     [
       '/ponto/orcamento',
       '/ponto/contratos',
-      '/ponto/contratos/controle-geral',
       '/ponto/contratos/relatorios',
       '/ponto/andamento-da-os',
       '/ponto/pleitos-gerados',
