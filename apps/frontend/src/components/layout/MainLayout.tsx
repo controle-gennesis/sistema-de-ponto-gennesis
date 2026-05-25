@@ -7,6 +7,7 @@ import { ChatWidget } from '../chat/ChatWidget';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useLogout } from '@/hooks/useLogout';
 import { useNativeWebRTCCall } from '@/hooks/useNativeWebRTCCall';
+import { useChatSounds } from '@/hooks/useChatSounds';
 import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
 import { NativeCallProvider } from '@/contexts/NativeCallContext';
 
@@ -25,6 +26,7 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
   const [layoutSynced, setLayoutSynced] = useState(false);
   const { user } = usePermissions();
   const nativeCall = useNativeWebRTCCall({ userId: user?.id });
+  useChatSounds({ userId: user?.id, callPhase: nativeCall.phase });
 
   useLayoutEffect(() => {
     setIsCollapsed(readSidebarCollapsed());

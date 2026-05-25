@@ -71,6 +71,7 @@ import {
 import { dedupeFiles, getFilesFromClipboard } from '@/lib/chatComposerFiles';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { useNativeCallContext } from '@/contexts/NativeCallContext';
+import { syncConversasActiveChatId } from '@/hooks/useChatSounds';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1166,6 +1167,11 @@ function ConversasContent() {
     if (textareaRef.current) {
       textareaRef.current.style.height = '44px';
     }
+  }, [selectedChatId]);
+
+  useEffect(() => {
+    syncConversasActiveChatId(selectedChatId);
+    return () => syncConversasActiveChatId(null);
   }, [selectedChatId]);
 
   // Auto-scroll
