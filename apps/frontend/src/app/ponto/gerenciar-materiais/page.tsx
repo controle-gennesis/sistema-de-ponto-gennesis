@@ -23,7 +23,6 @@ import {
   OC_TYPE_BOLETO,
   parseCurrencyBR
 } from './_lib/ocAmounts';
-import { MaterialsSearchFilter } from './_components/MaterialsSearchFilter';
 import { FluxTabsNav } from './_components/FluxTabsNav';
 import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
 
@@ -520,43 +519,6 @@ export default function GerenciarMateriaisPage() {
   }, [allOrders, searchTerm]);
 
   useEffect(() => {
-    const normalizedSearchTerm = normalizeSearch(searchTerm);
-    if (!normalizedSearchTerm) return;
-
-    const currentCount =
-      fluxTab.startsWith('rm_')
-        ? rmMatchCountsByFluxTab[fluxTab as keyof typeof rmMatchCountsByFluxTab] || 0
-        : ocMatchCountsByFluxTab[fluxTab as keyof typeof ocMatchCountsByFluxTab] || 0;
-    if (currentCount > 0) return;
-
-    const tabPriority: FluxTab[] = [
-      'rm_PENDING',
-      'rm_IN_REVIEW',
-      'rm_APPROVED',
-      'rm_CANCELLED',
-      'oc_compras',
-      'oc_gestor',
-      'oc_diretoria',
-      'oc_IN_REVIEW',
-      'oc_APPROVED',
-      'oc_ATTACH_BOLETO',
-      'oc_PROOF_VALIDATION',
-      'oc_PROOF_CORRECTION',
-      'oc_ATTACH_NF',
-      'oc_FINALIZADAS'
-    ];
-
-    const nextTab = tabPriority.find((tab) => {
-      if (tab.startsWith('rm_')) return (rmMatchCountsByFluxTab[tab as keyof typeof rmMatchCountsByFluxTab] || 0) > 0;
-      return (ocMatchCountsByFluxTab[tab as keyof typeof ocMatchCountsByFluxTab] || 0) > 0;
-    });
-
-    if (nextTab && nextTab !== fluxTab) {
-      setFluxTab(nextTab);
-    }
-  }, [searchTerm, fluxTab, rmMatchCountsByFluxTab, ocMatchCountsByFluxTab]);
-
-  useEffect(() => {
     const group = fluxTab.startsWith('oc_') ? 'oc' : 'rm';
     if (prevFluxGroupRef.current === null) {
       prevFluxGroupRef.current = group;
@@ -600,66 +562,75 @@ export default function GerenciarMateriaisPage() {
         userName={user.name} 
         onLogout={handleLogout}
       >
-        <div className="space-y-10">
-          <div id="secao-sc-rm" className="space-y-6 scroll-mt-4">
-          {/* Cabeçalho */}
+        <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Solicitações de materiais e ordens de compra
+              Requisições de Materiais
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Fluxo completo na mesma tela: <strong>SC / RM</strong> (aprovação e correção) → <strong>OC</strong> (compras, gestor e diretoria).
+              Acompanhe solicitações, aprovações e ordens de compra em um único fluxo.
             </p>
           </div>
 
-          <MaterialsSearchFilter searchTerm={searchTerm} onSearchChange={setSearchTerm} />
-
-          <FluxTabsNav
-            fluxTab={fluxTab}
-            onFluxTab={setFluxTab}
-            stats={stats}
-            ocTabCounts={ocTabCounts}
-          />
-
-          {fluxTab.startsWith('rm_') && (
-            <MaterialRequestsRmList
-              loadingRequests={loadingRequests}
-              filteredRequests={filteredRequests}
-              ordersByMaterialRequestId={ordersByMaterialRequestId}
-              currentUserId={userData?.data?.id}
-              onCreateOc={(request) => {
-                setSelectedRequest(request);
-                resetOcForm();
-                setShowCreateOCModal(true);
-              }}
-              onApprove={(request) => {
-                setSelectedRequest(request);
-                setShowApprovalModal(true);
-              }}
-              onCorrection={(request) => {
-                setSelectedRequest(request);
-                setShowCorrectionModal(true);
-              }}
-              onCancel={(request) => {
-                setSelectedRequest(request);
-                setShowCancelModal(true);
-              }}
-              onDetails={(request) => {
-                setSelectedRequest(request);
-                setShowDetailsModal(true);
-              }}
+          <div className="scroll-mt-4">
+            <FluxTabsNav
+              fluxTab={fluxTab}
+              onFluxTab={setFluxTab}
+              stats={stats}
+              ocTabCounts={ocTabCounts}
+              embeddedInCard
             />
-          )}
-          </div>
 
-          {fluxTab.startsWith('oc_') && (
-            <OcPurchaseOrdersPanel embedded hideTabs activeTab={fluxTabToOcTab(fluxTab)} searchTerm={searchTerm} />
-          )}
+            <div className="mt-4">
+              {fluxTab.startsWith('rm_') && (
+                <MaterialRequestsRmList
+                  fluxTab={fluxTab}
+                  searchTerm={searchTerm}
+                  onSearchChange={setSearchTerm}
+                  loadingRequests={loadingRequests}
+                  filteredRequests={filteredRequests}
+                  ordersByMaterialRequestId={ordersByMaterialRequestId}
+                  currentUserId={userData?.data?.id}
+                  onCreateOc={(request) => {
+                    setSelectedRequest(request);
+                    resetOcForm();
+                    setShowCreateOCModal(true);
+                  }}
+                  onApprove={(request) => {
+                    setSelectedRequest(request);
+                    setShowApprovalModal(true);
+                  }}
+                  onCorrection={(request) => {
+                    setSelectedRequest(request);
+                    setShowCorrectionModal(true);
+                  }}
+                  onCancel={(request) => {
+                    setSelectedRequest(request);
+                    setShowCancelModal(true);
+                  }}
+                  onDetails={(request) => {
+                    setSelectedRequest(request);
+                    setShowDetailsModal(true);
+                  }}
+                />
+              )}
+
+              {fluxTab.startsWith('oc_') && (
+                <OcPurchaseOrdersPanel
+                  embedded
+                  hideTabs
+                  activeTab={fluxTabToOcTab(fluxTab)}
+                  searchTerm={searchTerm}
+                  onSearchChange={setSearchTerm}
+                />
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Modal Detalhes */}
         {showDetailsModal && selectedRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => { setShowDetailsModal(false); setSelectedRequest(null); }} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -762,7 +733,7 @@ export default function GerenciarMateriaisPage() {
 
         {/* Modal de Aprovação */}
         {showApprovalModal && selectedRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowApprovalModal(false)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -792,7 +763,7 @@ export default function GerenciarMateriaisPage() {
 
         {/* Modal Criar OC */}
         {showCreateOCModal && selectedRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/50"
               onClick={() => {
@@ -1108,7 +1079,7 @@ export default function GerenciarMateriaisPage() {
 
         {/* Modal Cancelar (compras) */}
         {showCancelModal && selectedRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowCancelModal(false)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
@@ -1140,7 +1111,7 @@ export default function GerenciarMateriaisPage() {
 
         {/* Modal Enviar para Correção RM */}
         {showCorrectionModal && selectedRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowCorrectionModal(false)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">

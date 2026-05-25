@@ -71,7 +71,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Financeiro
   { key: pathToModuleKey('/ponto/financeiro/controle-financeiro'), name: 'Controle Financeiro', href: '/ponto/financeiro/controle-financeiro', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/analise-extrato'), name: 'Extrato de Caixa', href: '/ponto/financeiro/analise-extrato', category: 'Financeiro' },
-  { key: pathToModuleKey('/ponto/financeiro'), name: 'Financeiro', href: '/ponto/financeiro', category: 'Financeiro' },
+  { key: pathToModuleKey('/ponto/financeiro'), name: 'Pagamento da Folha', href: '/ponto/financeiro', category: 'Financeiro' },
   // Engenharia
   { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamento', href: '/ponto/orcamento', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos'), name: 'Contratos', href: '/ponto/contratos', category: 'Engenharia' },

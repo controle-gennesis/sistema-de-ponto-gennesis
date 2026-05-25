@@ -1,9 +1,20 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ArrowDownCircle, ArrowUpCircle, History } from 'lucide-react';
+import {
+  ArrowDownCircle,
+  ArrowLeftRight,
+  ArrowUpCircle,
+  Filter,
+  History,
+  MoreVertical,
+  RotateCcw,
+  Search,
+  X
+} from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -35,7 +46,7 @@ interface MovementPayload {
 interface StockMovement {
   id: string;
   material: Material;
-  costCenter?: { code: string; name: string } | null;
+  costCenter?: { id?: string; code: string; name: string } | null;
   type: 'IN' | 'OUT';
   quantity: number;
   notes?: string | null;
@@ -44,19 +55,67 @@ interface StockMovement {
 }
 
 const ADJUSTMENT_MARKER = '[AJUSTE_ESTOQUE]';
+const HISTORY_ITEMS_PER_PAGE = 12;
+
+const cleanAdjustmentNotes = (notes?: string | null) =>
+  (notes || '').replace(ADJUSTMENT_MARKER, '').trim();
+
+function MovementSegButton({
+  active,
+  onClick,
+  label,
+  icon: Icon,
+  variant
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  variant: 'in' | 'out';
+}) {
+  const activeCls =
+    variant === 'in'
+      ? 'border-green-600 bg-green-50 text-green-800 dark:border-green-500 dark:bg-green-950/40 dark:text-green-200'
+      : 'border-red-600 bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200';
+  const inactiveCls =
+    'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+        active ? activeCls : inactiveCls
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </button>
+  );
+}
+
+const emptyForm = (): MovementFormData => ({
+  materialId: '',
+  costCenterId: '',
+  type: 'IN',
+  quantity: '',
+  notes: ''
+});
 
 export default function AjusteEstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'new' | 'history'>('new');
+  const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
 
-  const [formData, setFormData] = useState<MovementFormData>({
-    materialId: '',
-    costCenterId: '',
-    type: 'IN',
-    quantity: '',
-    notes: ''
-  });
+  const [formData, setFormData] = useState<MovementFormData>(emptyForm());
+  const [historySearch, setHistorySearch] = useState('');
+  const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
+  const [filtersMonth, setFiltersMonth] = useState('');
+  const [filtersYear, setFiltersYear] = useState(String(new Date().getFullYear()));
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
+  const [isHistoryFiltersModalOpen, setIsHistoryFiltersModalOpen] = useState(false);
+  const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
+  const [historyDetail, setHistoryDetail] = useState<StockMovement | null>(null);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -96,6 +155,11 @@ export default function AjusteEstoquePage() {
     }
   });
 
+  const closeAdjustmentModal = () => {
+    setIsAdjustmentModalOpen(false);
+    setFormData(emptyForm());
+  };
+
   const createMovementMutation = useMutation({
     mutationFn: async (data: MovementPayload) => {
       const res = await api.post('/stock/movements', data);
@@ -105,16 +169,10 @@ export default function AjusteEstoquePage() {
       queryClient.invalidateQueries({ queryKey: ['stock-balance'] });
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
       queryClient.invalidateQueries({ queryKey: ['stock-adjustment-movements'] });
-      setFormData({
-        materialId: '',
-        costCenterId: '',
-        type: 'IN',
-        quantity: '',
-        notes: ''
-      });
+      closeAdjustmentModal();
       toast.success('Ajuste de estoque registrado com sucesso!');
     },
-    onError: (error: any) => {
+    onError: (error: { response?: { data?: { message?: string } }; message?: string }) => {
       const msg = error?.response?.data?.message || error?.message || 'Erro ao registrar ajuste de estoque';
       toast.error(msg);
     }
@@ -142,17 +200,81 @@ export default function AjusteEstoquePage() {
   const costCenters = Array.isArray(costCentersData?.data)
     ? costCentersData.data
     : Array.isArray(costCentersData)
-    ? costCentersData
-    : [];
+      ? costCentersData
+      : [];
   const selectedMaterial = materials.find((m: Material) => m.id === formData.materialId);
-  const selectedUnit = selectedMaterial?.unit || '-';
+  const selectedUnit = selectedMaterial?.unit || '—';
   const movements: StockMovement[] = movementsData?.data || [];
-  const adjustmentMovements = movements.filter((mov) => mov.notes?.includes(ADJUSTMENT_MARKER));
 
-  const cleanAdjustmentNotes = (notes?: string | null) =>
-    (notes || '')
-      .replace(ADJUSTMENT_MARKER, '')
-      .trim();
+  const adjustmentMovements = useMemo(() => {
+    const term = historySearch.trim().toLowerCase();
+    return movements
+      .filter((mov) => mov.notes?.includes(ADJUSTMENT_MARKER))
+      .filter((mov) => {
+        if (typeFilter !== 'ALL' && mov.type !== typeFilter) return false;
+        if (filtersCostCenterId && mov.costCenter?.id !== filtersCostCenterId) return false;
+        if (filtersMonth) {
+          const month = new Date(mov.createdAt).getMonth() + 1;
+          if (month !== Number(filtersMonth)) return false;
+        }
+        if (filtersYear) {
+          const year = new Date(mov.createdAt).getFullYear();
+          if (year !== Number(filtersYear)) return false;
+        }
+        if (!term) return true;
+        const material = mov.material.name.toLowerCase();
+        const user = mov.user.name.toLowerCase();
+        const cc = (mov.costCenter?.name || '').toLowerCase();
+        const notes = cleanAdjustmentNotes(mov.notes).toLowerCase();
+        return material.includes(term) || user.includes(term) || cc.includes(term) || notes.includes(term);
+      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [movements, historySearch, typeFilter, filtersCostCenterId, filtersMonth, filtersYear]);
+
+  const historyTotal = adjustmentMovements.length;
+  const historyTotalPages = Math.max(1, Math.ceil(historyTotal / HISTORY_ITEMS_PER_PAGE));
+  const historyStartIndex = (historyCurrentPage - 1) * HISTORY_ITEMS_PER_PAGE;
+  const historyEndIndex = historyStartIndex + HISTORY_ITEMS_PER_PAGE;
+  const paginatedAdjustments = adjustmentMovements.slice(historyStartIndex, historyEndIndex);
+  const historyStartItem = historyTotal === 0 ? 0 : historyStartIndex + 1;
+  const historyEndItem = Math.min(historyEndIndex, historyTotal);
+
+  const clearHistoryFilters = () => {
+    setFiltersCostCenterId('');
+    setFiltersMonth('');
+    setFiltersYear(String(new Date().getFullYear()));
+    setTypeFilter('ALL');
+    setHistorySearch('');
+    setHistoryCurrentPage(1);
+  };
+
+  useEffect(() => {
+    setHistoryCurrentPage(1);
+  }, [historySearch, filtersCostCenterId, filtersMonth, filtersYear, typeFilter]);
+
+  useEffect(() => {
+    if (historyCurrentPage > historyTotalPages) {
+      setHistoryCurrentPage(historyTotalPages);
+    }
+  }, [historyCurrentPage, historyTotalPages]);
+
+  useEffect(() => {
+    if (!historyDetail) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHistoryDetail(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [historyDetail]);
+
+  useEffect(() => {
+    if (!isAdjustmentModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeAdjustmentModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isAdjustmentModalOpen]);
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
@@ -171,191 +293,496 @@ export default function AjusteEstoquePage() {
             </p>
           </div>
 
-          <div className="border-b border-gray-200 dark:border-gray-700">
-            <nav className="-mb-px flex space-x-8">
-              <button
-                onClick={() => setActiveTab('new')}
-                className={`flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'new'
-                    ? 'border-red-600 text-red-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                }`}
-              >
-                Nova Movimentação
-              </button>
-              <button
-                onClick={() => setActiveTab('history')}
-                className={`flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'history'
-                    ? 'border-red-600 text-red-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <History className="w-4 h-4" />
-                Histórico
-              </button>
-            </nav>
-          </div>
-
-          {activeTab === 'new' && (
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Nova Movimentação de Ajuste</h3>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tipo *</label>
-                  <select
-                    required
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value as 'IN' | 'OUT' })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="IN">Entrada</option>
-                    <option value="OUT">Saída</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Material *</label>
-                  <select
-                    required
-                    value={formData.materialId}
-                    onChange={(e) => setFormData({ ...formData, materialId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Selecione um material</option>
-                    {materials.map((m: Material) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quantidade *</label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Card className="w-full">
+              <CardHeader className="border-b-0 pb-1">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                      <History className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        Histórico de Ajustes
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Consulte ajustes de entrada e saída registrados no estoque
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                       <input
                         type="text"
-                        required
-                        inputMode="decimal"
-                        value={formData.quantity}
-                        onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        placeholder="Ex.: 10,5"
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        placeholder="Pesquisar material, usuário..."
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                       />
-                      <input
-                        type="text"
-                        value={selectedUnit}
-                        readOnly
-                        disabled
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed"
-                        aria-label="Unidade de Medida"
+                      {historySearch && (
+                        <button
+                          type="button"
+                          onClick={() => setHistorySearch('')}
+                          aria-label="Limpar busca"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsHistoryFiltersModalOpen(true)}
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      aria-label="Abrir filtro"
+                      title="Filtro"
+                    >
+                      <Filter className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsAdjustmentModalOpen(true)}
+                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                    >
+                      <ArrowLeftRight className="h-4 w-4 shrink-0" />
+                      <span>Novo Ajuste</span>
+                    </button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingMovements ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600 dark:text-gray-400">Carregando histórico...</p>
+                  </div>
+                ) : historyTotal === 0 ? (
+                  <div className="text-center py-8">
+                    <History className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400">Nenhum ajuste encontrado</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                      Registre um novo ajuste ou altere os filtros
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                      <span>
+                        Mostrando {historyStartItem} a {historyEndItem} de {historyTotal} ajustes
+                      </span>
+                      <span>
+                        Página {historyCurrentPage} de {historyTotalPages}
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                          <tr>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Data
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Material
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Movimento
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Quantidade
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Centro de Custo
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Registrado por
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Ação
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                          {paginatedAdjustments.map((mov) => (
+                            <tr
+                              key={mov.id}
+                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                            >
+                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                {new Date(mov.createdAt).toLocaleString('pt-BR')}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {mov.material.name}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-center">
+                                <span
+                                  className={`inline-flex items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                                    mov.type === 'IN'
+                                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                      : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                  }`}
+                                >
+                                  {mov.type === 'IN' ? (
+                                    <ArrowDownCircle className="h-3.5 w-3.5 shrink-0" />
+                                  ) : (
+                                    <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" />
+                                  )}
+                                  {mov.type === 'IN' ? 'Entrada' : 'Saída'}
+                                </span>
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                {mov.quantity.toLocaleString('pt-BR')} {mov.material.unit}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
+                                {mov.costCenter?.name || '—'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
+                                {mov.user.name}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setHistoryDetail(mov)}
+                                  className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                  aria-label="Ver detalhes"
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {historyTotalPages > 1 && (
+                      <div className="mt-4 flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryCurrentPage((prev) => Math.max(prev - 1, 1))}
+                          disabled={historyCurrentPage === 1}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          Anterior
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setHistoryCurrentPage((prev) => Math.min(prev + 1, historyTotalPages))
+                          }
+                          disabled={historyCurrentPage === historyTotalPages}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          Próxima
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+
+              {isHistoryFiltersModalOpen && (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+                  <div
+                    className="absolute inset-0 bg-black/40"
+                    onClick={() => setIsHistoryFiltersModalOpen(false)}
+                  />
+                  <div className="relative mx-4 w-full max-w-2xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+                    <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsHistoryFiltersModalOpen(false)}
+                        className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                        aria-label="Fechar filtros"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="px-5 py-4">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Centro de Custo
+                          </label>
+                          <select
+                            value={filtersCostCenterId}
+                            onChange={(e) => setFiltersCostCenterId(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            <option value="">Todos</option>
+                            {costCenters.map((cc: { id: string; name: string }) => (
+                              <option key={cc.id} value={cc.id}>
+                                {cc.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Movimento
+                          </label>
+                          <select
+                            value={typeFilter}
+                            onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            <option value="ALL">Todos</option>
+                            <option value="IN">Entrada</option>
+                            <option value="OUT">Saída</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Mês
+                          </label>
+                          <select
+                            value={filtersMonth}
+                            onChange={(e) => setFiltersMonth(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            <option value="">Todos</option>
+                            {Array.from({ length: 12 }, (_, i) => (
+                              <option key={i + 1} value={i + 1}>
+                                {new Date(0, i).toLocaleString('pt-BR', { month: 'long' })}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Ano
+                          </label>
+                          <select
+                            value={filtersYear}
+                            onChange={(e) => setFiltersYear(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
+                              <option key={year} value={year}>
+                                {year}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                      <button
+                        type="button"
+                        onClick={clearHistoryFilters}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Limpar filtros
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsHistoryFiltersModalOpen(false)}
+                        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+          {isAdjustmentModalOpen && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={closeAdjustmentModal} aria-hidden />
+              <div
+                className="relative flex max-h-[min(92vh,720px)] w-full max-w-lg flex-col rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="adjustment-modal-title"
+              >
+                <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                  <h3
+                    id="adjustment-modal-title"
+                    className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                  >
+                    Nova Movimentação de Ajuste
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={closeAdjustmentModal}
+                    className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-0 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                    aria-label="Fechar"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="overflow-y-auto px-5 py-4 [&_*:focus]:outline-none [&_*:focus]:ring-0 [&_*:focus-visible]:outline-none [&_*:focus-visible]:ring-0">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Movimento *
+                    </label>
+                    <div className="flex gap-2">
+                      <MovementSegButton
+                        active={formData.type === 'IN'}
+                        variant="in"
+                        icon={ArrowDownCircle}
+                        onClick={() => setFormData((prev) => ({ ...prev, type: 'IN' }))}
+                        label="Entrada"
+                      />
+                      <MovementSegButton
+                        active={formData.type === 'OUT'}
+                        variant="out"
+                        icon={ArrowUpCircle}
+                        onClick={() => setFormData((prev) => ({ ...prev, type: 'OUT' }))}
+                        label="Saída"
                       />
                     </div>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Centro de Custo</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Material *
+                    </label>
                     <select
-                      value={formData.costCenterId}
-                      onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
-                      disabled={loadingCostCenters}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                      required
+                      value={formData.materialId}
+                      onChange={(e) => setFormData({ ...formData, materialId: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                     >
-                      <option value="">Não especificado</option>
-                      {loadingCostCenters && <option disabled>Carregando centros de custo...</option>}
-                      {!loadingCostCenters && costCenters.length === 0 && <option disabled>Nenhum centro de custo cadastrado</option>}
-                      {costCenters.map((cc: any) => (
-                        <option key={cc.id} value={cc.id}>
-                          {cc.code} - {cc.name}
+                      <option value="">Selecione um material</option>
+                      {materials.map((m: Material) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
                         </option>
                       ))}
                     </select>
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Observações</label>
-                  <textarea
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    placeholder="Observações sobre o ajuste..."
-                  />
-                </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Quantidade *
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <input
+                          type="text"
+                          required
+                          inputMode="decimal"
+                          value={formData.quantity}
+                          onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                          placeholder="Ex.: 10,5"
+                        />
+                        <input
+                          type="text"
+                          value={selectedUnit}
+                          readOnly
+                          disabled
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed"
+                          aria-label="Unidade de Medida"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Centro de Custo
+                      </label>
+                      <select
+                        value={formData.costCenterId}
+                        onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
+                        disabled={loadingCostCenters}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                      >
+                        <option value="">Não especificado</option>
+                        {loadingCostCenters && <option disabled>Carregando centros de custo...</option>}
+                        {!loadingCostCenters && costCenters.length === 0 && (
+                          <option disabled>Nenhum centro de custo cadastrado</option>
+                        )}
+                        {costCenters.map((cc: { id: string; name: string }) => (
+                          <option key={cc.id} value={cc.id}>
+                            {cc.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
 
-                <div className="flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => router.push('/ponto/estoque')}
-                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={createMovementMutation.isPending}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-                  >
-                    {createMovementMutation.isPending ? 'Registrando...' : 'Registrar Ajuste'}
-                  </button>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Observações
+                    </label>
+                    <textarea
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      placeholder="Observações sobre o ajuste..."
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={closeAdjustmentModal}
+                      className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={createMovementMutation.isPending}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {createMovementMutation.isPending ? 'Registrando...' : 'Registrar Ajuste'}
+                    </button>
+                  </div>
+                </form>
                 </div>
-              </form>
+              </div>
             </div>
           )}
 
-          {activeTab === 'history' && (
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                <History className="w-5 h-5" />
-                Histórico de Ajustes
-              </h3>
-              {loadingMovements ? (
-                <p className="text-center py-8 text-gray-500">Carregando...</p>
-              ) : adjustmentMovements.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">Nenhum ajuste encontrado</p>
-              ) : (
-                <div className="space-y-3">
-                  {adjustmentMovements.map((mov) => (
-                    <div
-                      key={mov.id}
-                      className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`p-2 rounded-lg ${
-                            mov.type === 'IN' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'
-                          }`}
-                        >
-                          {mov.type === 'IN' ? (
-                            <ArrowUpCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
-                          ) : (
-                            <ArrowDownCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-gray-900 dark:text-gray-100">{mov.material.name}</p>
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                            {mov.type === 'IN' ? 'Entrada' : 'Saída'}: {mov.quantity} {mov.material.unit}
-                          </p>
-                          {mov.costCenter && (
-                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                              CC: {mov.costCenter.code} - {mov.costCenter.name}
-                            </p>
-                          )}
-                          {cleanAdjustmentNotes(mov.notes) && (
-                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">{cleanAdjustmentNotes(mov.notes)}</p>
-                          )}
-                          <p className="text-xs text-gray-400 dark:text-gray-600 mt-1">
-                            {new Date(mov.createdAt).toLocaleString('pt-BR')} - {mov.user.name}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+          {historyDetail && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setHistoryDetail(null)} aria-hidden />
+              <div className="relative z-10 w-full max-w-lg max-h-[min(90vh,32rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
+                <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 pr-2">
+                    Detalhe do ajuste
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDetail(null)}
+                    className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-              )}
+                <div className="p-4 space-y-3 text-sm text-gray-800 dark:text-gray-200">
+                  <p>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block">Material</span>
+                    <span className="font-medium">{historyDetail.material.name}</span>
+                  </p>
+                  <p>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block">Movimento</span>
+                    <span>
+                      {historyDetail.type === 'IN' ? 'Entrada' : 'Saída'} —{' '}
+                      {historyDetail.quantity.toLocaleString('pt-BR')} {historyDetail.material.unit}
+                    </span>
+                  </p>
+                  {historyDetail.costCenter && (
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Centro de custo</span>
+                      <span>{historyDetail.costCenter.name}</span>
+                    </p>
+                  )}
+                  {cleanAdjustmentNotes(historyDetail.notes) && (
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Observações</span>
+                      <span className="whitespace-pre-line">{cleanAdjustmentNotes(historyDetail.notes)}</span>
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {new Date(historyDetail.createdAt).toLocaleString('pt-BR')} — {historyDetail.user.name}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>

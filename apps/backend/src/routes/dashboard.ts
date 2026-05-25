@@ -748,8 +748,8 @@ router.get('/modules', authorize('EMPLOYEE'), async (req: AuthRequest, res, next
       },
       {
         id: 'financial',
-        name: 'Financeiro',
-        description: 'Gerar borderô e CNAB400 para pagamentos',
+        name: 'Pagamento da Folha',
+        description: 'Borderô em PDF e remessa CNAB400 da folha',
         icon: 'DollarSign',
         href: '/ponto/financeiro',
         category: 'Financeiro',

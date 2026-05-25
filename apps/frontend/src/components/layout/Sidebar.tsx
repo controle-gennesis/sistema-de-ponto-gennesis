@@ -393,10 +393,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           },
           {
-            name: 'Financeiro',
+            name: 'Pagamento da Folha',
             href: '/ponto/financeiro',
             icon: DollarSign,
-            description: 'Gerar borderô e CNAB400 para pagamentos',
+            description: 'Borderô em PDF e remessa CNAB400 da folha',
             permission: isAdministrator || can(pk('/ponto/financeiro'))
           },
         ]
@@ -484,7 +484,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: Warehouse,
         items: [
           {
-            name: 'Solicitar Materiais',
+            name: 'Solicitação de Materiais',
             href: '/ponto/solicitar-materiais',
             icon: ShoppingCart,
             description: 'Solicitar materiais para compra (SC)',

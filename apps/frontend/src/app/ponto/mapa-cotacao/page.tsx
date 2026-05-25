@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileSpreadsheet, FileText, Plus, Search, Truck, Upload, X } from 'lucide-react';
+import { FileSpreadsheet, FileText, Plus, Search, Truck, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
@@ -116,6 +116,47 @@ function formatDateTimeBR(dateString: string) {
   });
 }
 
+function MapStyledCheckbox({
+  checked,
+  onChange,
+  ariaLabel
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <span className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center group">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-label={ariaLabel}
+        className="sr-only"
+      />
+      <span
+        className={`box-border flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors duration-200 ${
+          checked
+            ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+            : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400'
+        }`}
+      >
+        <svg
+          className={`h-3 w-3 shrink-0 text-white transition-opacity duration-200 ${
+            checked ? 'opacity-100' : 'opacity-0'
+          }`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+        </svg>
+      </span>
+    </span>
+  );
+}
+
 const OC_TYPE_AVISTA = 'AVISTA';
 const OC_TYPE_BOLETO = 'BOLETO';
 
@@ -189,7 +230,7 @@ export default function MapaCotacaoPage() {
 
   const allOrders: PurchaseOrderLite[] = ordersData?.data || [];
 
-  /** Mesma regra da aba "RMs aprovadas" em Gerenciar materiais: aprovadas e ainda sem OC */
+  /** Mesma regra da aba "RMs Aprovadas" em Gerenciar materiais: aprovadas e ainda sem OC */
   const materialRequestIdsWithOc = useMemo(() => {
     const s = new Set<string>();
     for (const o of allOrders) {
@@ -439,7 +480,7 @@ export default function MapaCotacaoPage() {
 
   const generateOrdersMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedRequest) throw new Error('Selecione uma requisição na fase RMs aprovadas.');
+      if (!selectedRequest) throw new Error('Selecione uma requisição na fase RMs Aprovadas.');
       if (generateSupplierIds.size === 0) throw new Error('Selecione ao menos um fornecedor vencedor.');
       setIsGenerating(true);
 
@@ -578,161 +619,183 @@ export default function MapaCotacaoPage() {
               Mapa de Cotação
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Compare preços por item entre fornecedores e gere OCs por vencedor.
+              Compare preços entre fornecedores e gere ordens de compra por vencedor.
             </p>
           </div>
 
           <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <Truck className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
+                    <Truck className="h-5 w-5 text-blue-600 sm:h-6 sm:w-6 dark:text-blue-400" />
                   </div>
                   <div className="min-w-0">
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">RMs aprovadas</h2>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Requisições de Materiais Aprovadas</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Selecione uma requisição na fase RMs aprovadas para montar o mapa.
+                      Escolha a requisição e os fornecedores para montar o mapa
                     </p>
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      inputMode="search"
+                      autoComplete="off"
+                      value={supplierSearch}
+                      onChange={(e) => setSupplierSearch(e.target.value)}
+                      placeholder="Buscar fornecedor..."
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {supplierSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => setSupplierSearch('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
             </CardHeader>
 
-            <CardContent className="pt-0">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Requisição de Material *
-                  </label>
-                  <select
-                    value={selectedRequestId}
-                    onChange={(e) => setSelectedRequestId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Selecione uma requisição (RMs aprovadas)</option>
-                    {approvedRequests.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.requestNumber || r.id.slice(0, 8)} ({formatDateTimeBR(r.createdAt)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="min-w-0">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Fornecedores (comparação) *
-                  </label>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div className="min-w-0 flex flex-col gap-2">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
-                        <input
-                          type="search"
-                          value={supplierSearch}
-                          onChange={(e) => setSupplierSearch(e.target.value)}
-                          placeholder="Buscar por nome ou código..."
-                          className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          autoComplete="off"
-                        />
-                      </div>
-                      <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 max-h-[260px] overflow-y-auto">
-                        {suppliers.length === 0 ? (
-                          <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum fornecedor cadastrado.</p>
-                        ) : filteredSuppliers.length === 0 ? (
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            Nenhum fornecedor encontrado para &quot;{supplierSearch.trim()}&quot;.
-                          </p>
-                        ) : (
-                          filteredSuppliers.map((s) => (
-                            <label
-                              key={s.id}
-                              className="flex items-start gap-2 py-1.5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer"
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-0.5 shrink-0 rounded border-gray-300 dark:border-gray-600"
-                                checked={selectedSupplierIds.has(s.id)}
-                                onChange={() => {
-                                  setSelectedSupplierIds((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(s.id)) next.delete(s.id);
-                                    else next.add(s.id);
-                                    return next;
-                                  });
-                                }}
-                              />
-                              <span className="min-w-0">
-                                <span className="block truncate font-medium">{s.name}</span>
-                                {s.code ? (
-                                  <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">
-                                    Cód. {s.code}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 flex flex-col gap-2">
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Selecionados{' '}
-                        <span className="font-normal text-gray-500 dark:text-gray-400">
-                          ({selectedSuppliersOrdered.length})
-                        </span>
-                      </p>
-                      <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 max-h-[304px] overflow-y-auto bg-gray-50/50 dark:bg-gray-900/30">
-                        {selectedSuppliersOrdered.length === 0 ? (
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            Nenhum fornecedor selecionado. Marque na lista ao lado.
-                          </p>
-                        ) : (
-                          <ul className="space-y-2">
-                            {selectedSuppliersOrdered.map((s) => (
-                              <li
-                                key={s.id}
-                                className="flex items-start justify-between gap-2 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm"
-                              >
-                                <span className="min-w-0">
-                                  <span className="block text-gray-900 dark:text-gray-100 truncate">{s.name}</span>
-                                  {s.code ? (
-                                    <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">
-                                      {s.code}
-                                    </span>
-                                  ) : null}
-                                </span>
-                                <button
-                                  type="button"
-                                  title="Remover da comparação"
-                                  className="shrink-0 p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
-                                  onClick={() => {
-                                    setSelectedSupplierIds((prev) => {
-                                      const next = new Set(prev);
-                                      next.delete(s.id);
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  <X className="h-4 w-4" />
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {!selectedRequest && (
-                <div className="p-4 pt-0">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Escolha uma requisição na fase RMs aprovadas para liberar a tela de cotação.
+            <CardContent>
+              {approvedRequests.length === 0 ? (
+                <div className="py-8 text-center">
+                  <Truck className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
+                  <p className="text-gray-500 dark:text-gray-400">
+                    Nenhuma requisição em RMs Aprovadas aguardando cotação
                   </p>
                 </div>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Requisição de material *
+                    </label>
+                    <select
+                      value={selectedRequestId}
+                      onChange={(e) => setSelectedRequestId(e.target.value)}
+                      className="h-10 w-full max-w-xl rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    >
+                      <option value="">Selecione uma requisição (RMs Aprovadas)</option>
+                      {approvedRequests.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.requestNumber || r.id.slice(0, 8)} ({formatDateTimeBR(r.createdAt)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {!selectedRequest ? (
+                    <div className="py-8 text-center">
+                      <FileText className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
+                      <p className="text-gray-500 dark:text-gray-400">
+                        Selecione uma requisição para liberar a comparação de fornecedores
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div className="min-w-0">
+                        <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Fornecedores (comparação)
+                        </p>
+                        <div className="max-h-[280px] overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-gray-600">
+                          {suppliers.length === 0 ? (
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Nenhum fornecedor cadastrado.
+                            </p>
+                          ) : filteredSuppliers.length === 0 ? (
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Nenhum fornecedor corresponde à busca.
+                            </p>
+                          ) : (
+                            <ul className="space-y-1">
+                              {filteredSuppliers.map((s) => (
+                                <li key={s.id}>
+                                  <label className="flex cursor-pointer items-start gap-2 rounded-md py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/40">
+                                    <MapStyledCheckbox
+                                      checked={selectedSupplierIds.has(s.id)}
+                                      onChange={(checked) => {
+                                        setSelectedSupplierIds((prev) => {
+                                          const next = new Set(prev);
+                                          if (checked) next.add(s.id);
+                                          else next.delete(s.id);
+                                          return next;
+                                        });
+                                      }}
+                                      ariaLabel={`Selecionar ${s.name}`}
+                                    />
+                                    <span className="min-w-0 pt-0.5">
+                                      <span className="block truncate font-medium">{s.name}</span>
+                                      {s.code ? (
+                                        <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                                          Cód. {s.code}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Selecionados ({selectedSuppliersOrdered.length})
+                        </p>
+                        <div className="max-h-[280px] overflow-y-auto rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-600 dark:bg-gray-900/30">
+                          {selectedSuppliersOrdered.length === 0 ? (
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Nenhum fornecedor selecionado.
+                            </p>
+                          ) : (
+                            <ul className="space-y-2">
+                              {selectedSuppliersOrdered.map((s) => (
+                                <li
+                                  key={s.id}
+                                  className="flex items-start justify-between gap-2 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800"
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-gray-900 dark:text-gray-100">
+                                      {s.name}
+                                    </span>
+                                    {s.code ? (
+                                      <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                                        {s.code}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    title="Remover da comparação"
+                                    className="shrink-0 rounded p-1 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                                    onClick={() => {
+                                      setSelectedSupplierIds((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(s.id);
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -740,33 +803,74 @@ export default function MapaCotacaoPage() {
           {selectedRequest && (
             <>
               <Card>
-                <CardHeader className="border-b-0">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
-                      <FileText className="w-6 h-6 text-green-700 dark:text-green-400" />
+                <CardHeader className="border-b-0 pb-1">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
+                        <FileSpreadsheet className="h-5 w-5 text-green-700 sm:h-6 sm:w-6 dark:text-green-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          Cotações por item
+                        </h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          Preços, quantidades e vencedor por item da SC
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Cotações por item</h2>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Informe o preço unitário por fornecedor. Ajuste a quantidade a comprar por item (não pode exceder o solicitado na SC). O total e o vencedor são recalculados automaticamente.
-                      </p>
+                    <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedRequestId('');
+                          setQuoteMapId('');
+                          setSupplierSearch('');
+                          setSelectedSupplierIds(new Set());
+                          setGenerateSupplierIds(new Set());
+                          setFreightBySupplier({});
+                          setUnitPriceBySupplierItem({});
+                          setPaymentDraftBySupplier({});
+                        }}
+                        className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                      >
+                        Limpar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={generateSupplierIds.size === 0 || isGenerating}
+                        onClick={() => generateOrdersMutation.mutate()}
+                        className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                      >
+                        <Plus className="h-4 w-4 shrink-0" />
+                        <span>{isGenerating ? 'Gerando…' : 'Gerar OCs vencedoras'}</span>
+                      </button>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent>
                   {selectedSupplierIds.size === 0 ? (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Selecione pelo menos um fornecedor.</p>
+                    <div className="py-8 text-center">
+                      <FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
+                      <p className="text-gray-500 dark:text-gray-400">
+                        Selecione pelo menos um fornecedor para comparar preços
+                      </p>
+                    </div>
                   ) : (
                     <>
-                      <div className="overflow-x-auto">
+                      <div className="overflow-x-auto [scrollbar-gutter:stable]">
                         <table className="w-full text-sm">
-                          <thead className="bg-gray-50 dark:bg-gray-700/50">
-                            <tr className="text-left">
-                              <th className="p-2 whitespace-nowrap">Item (SC)</th>
+                          <thead className="border-b border-gray-200 dark:border-gray-700">
+                            <tr>
+                              <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                Item (SC)
+                              </th>
                               {Array.from(selectedSupplierIds).map((supplierId) => {
                                 const sup = suppliers.find((x) => x.id === supplierId);
                                 return (
-                                  <th key={supplierId} className="p-2 whitespace-nowrap">
+                                  <th
+                                    key={supplierId}
+                                    className="whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6"
+                                  >
                                     <div className="font-medium text-gray-900 dark:text-gray-100">
                                       {sup ? sup.name : supplierId}
                                     </div>
@@ -790,10 +894,12 @@ export default function MapaCotacaoPage() {
                                   </th>
                                 );
                               })}
-                              <th className="p-2 whitespace-nowrap">Vencedor</th>
+                              <th className="whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                Vencedor
+                              </th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                             {ocItems.map((item) => {
                               const winner = winnersByItem.find((w) => w.itemId === item.id) || null;
                               const winnerSupplier = suppliers.find((s) => s.id === winner?.winnerSupplierId);
@@ -804,8 +910,11 @@ export default function MapaCotacaoPage() {
                               const matSub = materialItemSubtitle(item);
 
                               return (
-                                <tr key={item.id} className="align-top">
-                                  <td className="p-2 min-w-[260px]">
+                                <tr
+                                  key={item.id}
+                                  className="align-top transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                                >
+                                  <td className="min-w-[260px] px-3 py-3 sm:px-6">
                                     <div className="font-medium text-gray-900 dark:text-gray-100">
                                       {materialItemLabel(item)}
                                     </div>
@@ -852,7 +961,7 @@ export default function MapaCotacaoPage() {
                                     const isWinner = winner?.winnerSupplierId === supplierId;
 
                                     return (
-                                      <td key={supplierId} className="p-2 whitespace-nowrap">
+                                      <td key={supplierId} className="whitespace-nowrap px-3 py-3 sm:px-6">
                                         <input
                                           type="text"
                                           value={unitPriceStr}
@@ -887,7 +996,7 @@ export default function MapaCotacaoPage() {
                                     );
                                   })}
 
-                                  <td className="p-2 whitespace-nowrap align-top">
+                                  <td className="whitespace-nowrap px-3 py-3 align-top sm:px-6">
                                     {winnerSupplier && winner ? (
                                       <div className="flex flex-col gap-1 items-start">
                                         <span className="inline-flex items-center gap-2 px-2 py-1 rounded bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs font-medium">
@@ -933,18 +1042,18 @@ export default function MapaCotacaoPage() {
                                         Frete: {totals ? formatCurrencyBR(totals.freight) : '—'} | Total itens: {totals ? formatCurrencyBR(totals.itemsTotal) : '—'}
                                       </p>
                                     </div>
-                                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                                      <input
-                                        type="checkbox"
+                                    <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                                      <MapStyledCheckbox
                                         checked={generateSupplierIds.has(sid)}
-                                        onChange={() => {
+                                        onChange={(checked) => {
                                           setGenerateSupplierIds((prev) => {
                                             const next = new Set(prev);
-                                            if (next.has(sid)) next.delete(sid);
-                                            else next.add(sid);
+                                            if (checked) next.add(sid);
+                                            else next.delete(sid);
                                             return next;
                                           });
                                         }}
+                                        ariaLabel={`Gerar OC para ${sup?.name ?? sid}`}
                                       />
                                       Gerar OC
                                     </label>
@@ -1225,32 +1334,6 @@ export default function MapaCotacaoPage() {
                         </div>
                       </div>
 
-                      <div className="flex justify-end gap-3 mt-6">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedRequestId('');
-                            setQuoteMapId('');
-                            setSupplierSearch('');
-                            setSelectedSupplierIds(new Set());
-                            setGenerateSupplierIds(new Set());
-                            setFreightBySupplier({});
-                            setUnitPriceBySupplierItem({});
-                            setPaymentDraftBySupplier({});
-                          }}
-                          className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                        >
-                          Limpar
-                        </button>
-                        <button
-                          type="button"
-                          disabled={generateSupplierIds.size === 0 || isGenerating}
-                          onClick={() => generateOrdersMutation.mutate()}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                        >
-                          {isGenerating ? 'Gerando...' : 'Gerar OCs vencedoras'}
-                        </button>
-                      </div>
                     </>
                   )}
                 </CardContent>

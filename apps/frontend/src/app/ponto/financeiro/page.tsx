@@ -151,10 +151,10 @@ export default function FinanceiroPage() {
           {/* Header */}
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Módulo Financeiro
+              Pagamento da Folha
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Gere borderôs de pagamento em PDF e arquivos CNAB400 para envio ao banco
+              Gere borderô em PDF e remessa CNAB400 para o banco após a folha ser finalizada.
             </p>
           </div>
 
