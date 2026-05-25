@@ -29,6 +29,8 @@ import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { exportPurchaseOrderPdf } from '@/lib/exportPurchaseOrderPdf';
 import { PaymentConditionSelect, buildPaymentConditionLabelMap } from '@/components/oc/PaymentConditionSelect';
 import { BoletoParcelasModal } from '@/components/oc/BoletoParcelasModal';
+import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   orderNeedsPaymentBoleto,
   canSendCurrentBoletoToPayment,
@@ -599,6 +601,22 @@ export function OcPurchaseOrdersPanel({
   gestorCostCenterIds
 }: OcPurchaseOrdersPanelProps) {
   const queryClient = useQueryClient();
+  const {
+    isAdministrator,
+    canApproveOcCompras,
+    canApproveOcGestor,
+    canApproveOcDiretoria
+  } = usePermissions();
+  const canActOnOcApproval = (status: string) =>
+    canActOnOcApprovalStatus(status, {
+      isAdministrator,
+      canApproveOcCompras,
+      canApproveOcGestor,
+      canApproveOcDiretoria
+    });
+  const showOcApprovalActions = (status: string) =>
+    OC_APPROVAL_FLOW_STATUSES.includes(status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]) &&
+    canActOnOcApproval(status);
   const [internalActiveTab, setInternalActiveTab] = useState<OcTab>('compras');
   const activeTab = hideTabs ? (activeTabProp ?? 'compras') : internalActiveTab;
   const setActiveTab = (t: OcTab) => {
@@ -1992,9 +2010,7 @@ export function OcPurchaseOrdersPanel({
                                     )}
                                   </button>
                                 )}
-                                {OC_APPROVAL_FLOW_STATUSES.includes(
-                                  o.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
-                                ) && (
+                                {showOcApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
@@ -2004,9 +2020,7 @@ export function OcPurchaseOrdersPanel({
                                     <Check className="w-4 h-4" />
                                   </button>
                                 )}
-                                {OC_APPROVAL_FLOW_STATUSES.includes(
-                                  o.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
-                                ) && (
+                                {showOcApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => setCorrectionTarget(o)}
@@ -2016,9 +2030,7 @@ export function OcPurchaseOrdersPanel({
                                     <Wrench className="w-4 h-4" />
                                   </button>
                                 )}
-                                {OC_APPROVAL_FLOW_STATUSES.includes(
-                                  o.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
-                                ) && (
+                                {showOcApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -3436,7 +3448,7 @@ export function OcPurchaseOrdersPanel({
                   Ver mapa de cotação
                 </button>
               )}
-              {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(selectedOrder.status) && (
+              {showOcApprovalActions(selectedOrder.status) && (
                 <button
                   type="button"
                   onClick={() => approveMutation.mutate({ id: selectedOrder.id, currentStatus: selectedOrder.status })}
@@ -3447,7 +3459,7 @@ export function OcPurchaseOrdersPanel({
                   {approvalLabel(selectedOrder.status)}
                 </button>
               )}
-              {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(selectedOrder.status) && (
+              {showOcApprovalActions(selectedOrder.status) && (
                 <>
                   <button
                     type="button"
@@ -3704,9 +3716,7 @@ export function OcPurchaseOrdersPanel({
                   <span>Validar comprovante</span>
                 </button>
               )}
-              {OC_APPROVAL_FLOW_STATUSES.includes(
-                orderForActionMenu.status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]
-              ) && (
+              {showOcApprovalActions(orderForActionMenu.status) && (
                 <>
                   <button
                     type="button"
