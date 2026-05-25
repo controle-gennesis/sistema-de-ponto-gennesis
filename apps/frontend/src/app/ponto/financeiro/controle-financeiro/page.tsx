@@ -752,19 +752,12 @@ export default function ControleFinanceiroPage() {
             </Card>
           ) : groupedByMonth.length === 0 ? (
             <Card>
-              <CardContent className="py-16">
+              <CardContent className="p-8">
                 <div className="text-center">
                   <ClipboardList className="w-12 h-12 text-gray-400 mx-auto mb-3" />
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     Nenhum lançamento encontrado para os filtros selecionados.
                   </p>
-                  <button
-                    onClick={openCreateModal}
-                    className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Adicionar primeiro lançamento
-                  </button>
                 </div>
               </CardContent>
             </Card>
