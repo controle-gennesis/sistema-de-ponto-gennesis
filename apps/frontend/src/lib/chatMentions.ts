@@ -28,9 +28,13 @@ export function detectMentionQuery(text: string, cursor: number): MentionQuerySt
   return { start: at, query };
 }
 
+/** Letras (incl. acentuadas latinas), dígitos, _ e - — sem \p{} (target TS es5). */
+const MENTION_HANDLE_CHARS = /[a-zA-Z0-9\u00C0-\u024F_-]/g;
+
 export function mentionHandleFromName(name: string): string {
   const first = name.trim().split(/\s+/)[0] ?? name.trim();
-  return first.replace(/[^\p{L}\p{N}_-]/gu, '') || 'usuario';
+  const chars = first.match(MENTION_HANDLE_CHARS);
+  return (chars ? chars.join('') : '') || 'usuario';
 }
 
 type MentionUser = {
@@ -83,22 +87,24 @@ export function buildChatMentionOptions(
 }
 
 /** Token @nome no composer e nas mensagens (estilo WhatsApp). */
-export const CHAT_MENTION_PATTERN = /@([\p{L}\p{N}_]+)/gu;
+export const CHAT_MENTION_PATTERN = /@([a-zA-Z0-9\u00C0-\u024F_]+)/g;
 
 export type MentionTextSegment = { type: 'text' | 'mention'; value: string };
 
 export function splitTextWithMentions(text: string): MentionTextSegment[] {
   if (!text) return [];
   const segments: MentionTextSegment[] = [];
-  const re = new RegExp(CHAT_MENTION_PATTERN.source, 'gu');
+  const re = new RegExp(CHAT_MENTION_PATTERN.source, 'g');
   let lastIndex = 0;
-  for (const match of text.matchAll(re)) {
-    const idx = match.index ?? 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const idx = match.index;
     if (idx > lastIndex) {
       segments.push({ type: 'text', value: text.slice(lastIndex, idx) });
     }
     segments.push({ type: 'mention', value: match[0] });
     lastIndex = idx + match[0].length;
+    if (match[0].length === 0) break;
   }
   if (lastIndex < text.length) {
     segments.push({ type: 'text', value: text.slice(lastIndex) });
