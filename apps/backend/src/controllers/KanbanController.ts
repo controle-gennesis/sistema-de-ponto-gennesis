@@ -189,6 +189,7 @@ export class KanbanController {
         checklistEnabled,
         attachmentsEnabled,
         position,
+        workHours,
       } = req.body;
 
       const card = await kanbanService.updateCard(userId, id, {
@@ -208,6 +209,12 @@ export class KanbanController {
         attachmentsEnabled:
           attachmentsEnabled !== undefined ? Boolean(attachmentsEnabled) : undefined,
         position: position != null ? Number(position) : undefined,
+        workHours:
+          workHours !== undefined
+            ? workHours == null || workHours === ''
+              ? null
+              : Number(workHours)
+            : undefined,
       });
 
       res.json({ success: true, data: card });
@@ -276,6 +283,25 @@ export class KanbanController {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '';
       if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async getCardCost(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const cost = await kanbanService.getCardCost(userId, req.params.id);
+      res.json({ success: true, data: cost });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      if (
+        msg === 'Defina a data de entrega (início e fim) no card para calcular o custo' ||
+        msg === 'A data final deve ser posterior à data inicial'
+      ) {
+        return next(createError(msg, 400));
+      }
       handleKanbanError(error, next);
     }
   }

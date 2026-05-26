@@ -33,6 +33,7 @@ import {
   createKanbanComment,
   deleteKanbanComment,
 } from '@/lib/kanban';
+import { KanbanCardCostModal } from './KanbanCardCostModal';
 import {
   kanbanLabel,
   kanbanInput,
@@ -123,6 +124,7 @@ export interface KanbanCardModalProps {
   columnId: string;
   currentUserId?: string;
   currentUser?: KanbanCardModalCurrentUser | null;
+  canViewAllKanbanBoards?: boolean;
   onClose: () => void;
   onBoardRefresh: () => void;
 }
@@ -133,6 +135,7 @@ export function KanbanCardModal({
   columnId: initialColumnId,
   currentUserId,
   currentUser,
+  canViewAllKanbanBoards = false,
   onClose,
   onBoardRefresh,
 }: KanbanCardModalProps) {
@@ -153,6 +156,7 @@ export function KanbanCardModal({
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [checklistEnabled, setChecklistEnabled] = useState(false);
   const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
+  const [showCostModal, setShowCostModal] = useState(false);
 
   const [newTask, setNewTask] = useState('');
   const [commentText, setCommentText] = useState('');
@@ -178,6 +182,7 @@ export function KanbanCardModal({
     setOpenMenu(null);
     setChecklistEnabled(false);
     setShowAttachmentsModal(false);
+    setShowCostModal(false);
     if (initialMode === 'create' && !initialCardId) {
       setDraftTasks([]);
       setDraftFiles([]);
@@ -406,6 +411,7 @@ export function KanbanCardModal({
   const visibleDraftTasks = hideDone ? draftTasks.filter((t) => !t.isDone) : draftTasks;
   const hasLabels = labels.length > 0;
   const hasDates = !!(startDate || endDate);
+  const showCostButton = isDetail && !!cardId && canViewAllKanbanBoards;
   const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
     attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
@@ -511,6 +517,15 @@ export function KanbanCardModal({
           onUpdated={refreshAll}
         />
       )}
+
+      {showCostButton ? (
+        <KanbanCardCostModal
+          isOpen={showCostModal}
+          elevated
+          onClose={() => setShowCostModal(false)}
+          cardId={cardId!}
+        />
+      ) : null}
     </>
   );
 
@@ -636,6 +651,14 @@ export function KanbanCardModal({
               >
                 Anexos
               </KanbanCardActionButton>
+              {showCostButton ? (
+                <KanbanCardActionButton
+                  active={showCostModal}
+                  onClick={() => setShowCostModal(true)}
+                >
+                  $
+                </KanbanCardActionButton>
+              ) : null}
             </div>
 
             {labels.length > 0 && <KanbanLabelChips labels={labels} />}
@@ -774,9 +797,9 @@ export function KanbanCardModal({
               </div>
 
               {taskTotal > 0 && (
-                <div className="h-0.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div className="relative h-px w-full overflow-hidden rounded-full bg-gray-200/80 dark:bg-gray-700/80">
                   <div
-                    className="h-full bg-red-600 rounded-full transition-all duration-300"
+                    className="absolute inset-y-0 left-0 bg-red-600 transition-all duration-300"
                     style={{ width: `${progress}%` }}
                   />
                 </div>

@@ -2323,6 +2323,8 @@ model KanbanCard {
   attachmentsEnabled  Boolean      @default(false)
   labels              Json         @default("[]")
   position       Int          @default(0)
+  completedAt    DateTime?
+  workHours      Decimal?     @db.Decimal(8, 2)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

@@ -41,6 +41,80 @@ function calcProgress(completed: number, total: number): number {
   return Math.round((completed / total) * 100);
 }
 
+const MONTHLY_WORK_HOURS = 220;
+
+type KanbanWorkWindow = { startHour: number; endHour: number };
+
+/** Seg–qui: 07–12 e 13–17 (1h almoço). Sex: 07–12 e 13–16 (1h almoço). */
+function getKanbanWorkWindowsForWeekday(dayOfWeek: number): KanbanWorkWindow[] {
+  if (dayOfWeek >= 1 && dayOfWeek <= 4) {
+    return [
+      { startHour: 7, endHour: 12 },
+      { startHour: 13, endHour: 17 },
+    ];
+  }
+  if (dayOfWeek === 5) {
+    return [
+      { startHour: 7, endHour: 12 },
+      { startHour: 13, endHour: 16 },
+    ];
+  }
+  return [];
+}
+
+/** Soma horas úteis entre duas datas (fuso local do servidor). */
+export function calculateKanbanBusinessHoursBetween(start: Date, end: Date): number {
+  if (end.getTime() <= start.getTime()) return 0;
+
+  let totalMs = 0;
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const endMs = end.getTime();
+
+  while (cursor.getTime() <= endMs) {
+    const windows = getKanbanWorkWindowsForWeekday(cursor.getDay());
+
+    for (const w of windows) {
+      const workStart = new Date(cursor);
+      workStart.setHours(w.startHour, 0, 0, 0);
+      const workEnd = new Date(cursor);
+      workEnd.setHours(w.endHour, 0, 0, 0);
+
+      const intervalStart = Math.max(start.getTime(), workStart.getTime());
+      const intervalEnd = Math.min(endMs, workEnd.getTime());
+
+      if (intervalEnd > intervalStart) {
+        totalMs += intervalEnd - intervalStart;
+      }
+    }
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return totalMs / (1000 * 60 * 60);
+}
+
+export function isKanbanCompletedColumnTitle(title: string): boolean {
+  const t = title.trim().toLowerCase();
+  return t === 'completed' || t === 'concluído' || t === 'concluido';
+}
+
+export function calculateKanbanHourlyRate(
+  salary: number,
+  dangerPay: number,
+  unhealthyPay: number,
+): number {
+  return (salary + dangerPay + unhealthyPay) / MONTHLY_WORK_HOURS;
+}
+
+function roundHours(h: number): number {
+  return Math.round(h * 100) / 100;
+}
+
+function roundMoney(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
 function priorityToClient(p: TaskPriority): string {
   return p.toLowerCase();
 }
@@ -141,6 +215,8 @@ function formatCard(card: {
   labels?: unknown;
   createdAt: Date;
   updatedAt?: Date;
+  completedAt?: Date | null;
+  workHours?: { toNumber?: () => number } | number | null;
   assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
   members?: Array<{ user: { id: string; name: string; profilePhotoUrl: string | null } }>;
   _count?: { comments: number; attachments: number };
@@ -175,6 +251,8 @@ function formatCard(card: {
     comments: card._count?.comments ?? 0,
     createdAt: card.createdAt.toISOString(),
     updatedAt: card.updatedAt?.toISOString() ?? card.createdAt.toISOString(),
+    completedAt: card.completedAt?.toISOString() ?? null,
+    workHours: card.workHours != null ? Number(card.workHours) : null,
   };
 }
 
@@ -705,6 +783,7 @@ export class KanbanService {
       checklistEnabled?: boolean;
       attachmentsEnabled?: boolean;
       position?: number;
+      workHours?: number | null;
     },
   ) {
     await this.assertCardAccess(userId, id);
@@ -713,6 +792,19 @@ export class KanbanService {
 
     if (data.columnId && data.columnId !== existing.columnId) {
       await this.assertColumnAccess(userId, data.columnId);
+    }
+
+    let completedAt: Date | null | undefined;
+    if (data.columnId && data.columnId !== existing.columnId) {
+      const targetColumn = await prisma.kanbanColumn.findUnique({
+        where: { id: data.columnId },
+        select: { title: true },
+      });
+      if (targetColumn && isKanbanCompletedColumnTitle(targetColumn.title)) {
+        completedAt = new Date();
+      } else {
+        completedAt = null;
+      }
     }
 
     let assigneeName: string | null | undefined = data.assigneeName?.trim();
@@ -762,11 +854,135 @@ export class KanbanService {
         checklistEnabled: data.checklistEnabled,
         attachmentsEnabled: data.attachmentsEnabled,
         position: data.position,
+        ...(completedAt !== undefined ? { completedAt } : {}),
+        ...(data.workHours !== undefined
+          ? { workHours: data.workHours == null ? null : data.workHours }
+          : {}),
       },
       include: cardInclude,
     });
 
     return formatCard(card);
+  }
+
+  async getCardCost(userId: string, cardId: string) {
+    if (!(await userCanViewAllKanbanBoards(userId))) {
+      throw new Error(KANBAN_FORBIDDEN);
+    }
+
+    await this.assertCardAccess(userId, cardId);
+
+    const card = await prisma.kanbanCard.findUnique({
+      where: { id: cardId },
+      include: {
+        column: { select: { title: true } },
+        assignee: { select: { id: true, name: true } },
+        members: { include: { user: { select: { id: true, name: true } } } },
+      },
+    });
+
+    if (!card) throw new Error('Card não encontrado');
+
+    const peopleMeta: Array<{ userId: string; name: string }> = [];
+    if (card.members.length) {
+      for (const m of card.members) {
+        peopleMeta.push({ userId: m.user.id, name: m.user.name });
+      }
+    } else if (card.assignee) {
+      peopleMeta.push({ userId: card.assignee.id, name: card.assignee.name });
+    } else if (card.assigneeName) {
+      peopleMeta.push({ userId: '', name: card.assigneeName });
+    }
+
+    if (!card.startDate || !card.endDate) {
+      throw new Error(
+        'Defina a data de entrega (início e fim) no card para calcular o custo',
+      );
+    }
+
+    const periodStart = card.startDate;
+    const periodEnd = card.endDate;
+
+    if (periodEnd.getTime() <= periodStart.getTime()) {
+      throw new Error('A data final deve ser posterior à data inicial');
+    }
+
+    const hours = roundHours(
+      Math.max(0, calculateKanbanBusinessHoursBetween(periodStart, periodEnd)),
+    );
+
+    const people: Array<{
+      userId: string;
+      name: string;
+      hourlyRate: number | null;
+      cost: number | null;
+      hasEmployeeRecord: boolean;
+    }> = [];
+
+    let totalCost = 0;
+    let hasMissingSalary = false;
+
+    for (const person of peopleMeta) {
+      if (!person.userId) {
+        people.push({
+          userId: '',
+          name: person.name,
+          hourlyRate: null,
+          cost: null,
+          hasEmployeeRecord: false,
+        });
+        hasMissingSalary = true;
+        continue;
+      }
+
+      const employee = await prisma.employee.findUnique({
+        where: { userId: person.userId },
+        select: { salary: true, dangerPay: true, unhealthyPay: true },
+      });
+
+      if (!employee) {
+        people.push({
+          userId: person.userId,
+          name: person.name,
+          hourlyRate: null,
+          cost: null,
+          hasEmployeeRecord: false,
+        });
+        hasMissingSalary = true;
+        continue;
+      }
+
+      const salary = Number(employee.salary);
+      const dangerPay = Number(employee.dangerPay ?? 0);
+      const unhealthyPay = Number(employee.unhealthyPay ?? 0);
+      const hourlyRate = roundMoney(
+        calculateKanbanHourlyRate(salary, dangerPay, unhealthyPay),
+      );
+      const cost = roundMoney(hourlyRate * hours);
+      totalCost += cost;
+
+      people.push({
+        userId: person.userId,
+        name: person.name,
+        hourlyRate,
+        cost,
+        hasEmployeeRecord: true,
+      });
+    }
+
+    if (peopleMeta.length === 0) {
+      hasMissingSalary = true;
+    }
+
+    return {
+      hours,
+      periodStart: periodStart.toISOString(),
+      periodEnd: periodEnd.toISOString(),
+      monthlyWorkHours: MONTHLY_WORK_HOURS,
+      totalCost: roundMoney(totalCost),
+      hasMissingSalary,
+      people,
+    };
   }
 
   async deleteCard(userId: string, id: string) {

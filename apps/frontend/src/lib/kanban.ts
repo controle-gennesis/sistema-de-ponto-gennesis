@@ -35,6 +35,31 @@ export interface KanbanCard {
   attachments: number;
   comments: number;
   createdAt: string;
+  completedAt?: string | null;
+  workHours?: number | null;
+}
+
+export interface KanbanCardCostPerson {
+  userId: string;
+  name: string;
+  hourlyRate: number | null;
+  cost: number | null;
+  hasEmployeeRecord: boolean;
+}
+
+export interface KanbanCardCost {
+  hours: number;
+  periodStart: string;
+  periodEnd: string;
+  monthlyWorkHours: number;
+  totalCost: number;
+  hasMissingSalary: boolean;
+  people: KanbanCardCostPerson[];
+}
+
+export function isKanbanCompletedColumn(title: string): boolean {
+  const t = title.trim().toLowerCase();
+  return t === 'completed' || t === 'concluído' || t === 'concluido';
 }
 
 export interface KanbanColumn {
@@ -145,10 +170,16 @@ export async function updateKanbanCard(
     checklistEnabled?: boolean;
     attachmentsEnabled?: boolean;
     position?: number;
+    workHours?: number | null;
   },
 ) {
   const res = await api.patch(`/kanban/cards/${id}`, payload);
   return res.data.data as KanbanCard;
+}
+
+export async function fetchKanbanCardCost(cardId: string): Promise<KanbanCardCost> {
+  const res = await api.get(`/kanban/cards/${cardId}/cost`);
+  return res.data.data as KanbanCardCost;
 }
 
 export async function deleteKanbanCard(id: string) {

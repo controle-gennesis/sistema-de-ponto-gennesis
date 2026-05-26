@@ -1251,6 +1251,7 @@ function KanbanPage() {
                 }
               : null
           }
+          canViewAllKanbanBoards={canViewAllKanbanBoards}
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
         />

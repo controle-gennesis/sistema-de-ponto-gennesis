@@ -21,6 +21,7 @@ router.delete('/cards/:cardId/members/:userId', (req, res, next) =>
   controller.removeCardMember(req, res, next),
 );
 router.get('/cards/:id', (req, res, next) => controller.getCardById(req, res, next));
+router.get('/cards/:id/cost', (req, res, next) => controller.getCardCost(req, res, next));
 router.patch('/cards/:id', (req, res, next) => controller.updateCard(req, res, next));
 router.delete('/cards/:id', (req, res, next) => controller.deleteCard(req, res, next));
 
