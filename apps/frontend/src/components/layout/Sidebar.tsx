@@ -427,6 +427,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: LayoutDashboard,
             description: 'Visão consolidada de todos os contratos',
             permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
+          },
+          {
             name: 'Pagamento da Folha',
             href: '/ponto/financeiro',
             icon: DollarSign,
@@ -875,29 +877,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               <Link
                 href="/ponto/conversas"
                 onClick={() => setIsOpen(false)}
-                            className={`flex items-center px-3 py-2 rounded-xl transition-all duration-200 overflow-hidden ${
-                              active
-                                ? 'text-red-700 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
-                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                            }`}
-                          >
-                            <span className="flex flex-1 items-center justify-between gap-2 min-w-0">
-                              <p className={`text-sm font-medium truncate ${active ? '' : 'text-gray-700 dark:text-gray-300'}`}>
-                                {item.name}
-                              </p>
-                              {item.href === '/ponto/furo-estoque' && pendingFuroCount > 0 ? (
-                                <span
-                                  className="shrink-0 min-w-[1.25rem] h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-[11px] font-semibold leading-none"
-                                  title={`${pendingFuroCount} furo(s) de estoque pendente(s)`}
-                                >
-                                  {pendingFuroCount > 99 ? '99+' : pendingFuroCount}
-                                </span>
-                              ) : null}
-                            </span>
-              </Link>
-                        );
-                      })}
-                  </div>
                 title="Chat"
                 aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
                 className={`relative w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${

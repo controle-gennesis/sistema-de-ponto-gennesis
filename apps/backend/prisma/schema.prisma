@@ -2255,6 +2255,8 @@ model ExtratoCaixaFiltroSalvo {
   @@unique([userId, nome])
   @@index([userId])
   @@map("extrato_caixa_filtros_salvos")
+}
+
 // ─── Tasks (Kanban) ───────────────────────────────────────────────────────────
 
 enum TaskPriority {

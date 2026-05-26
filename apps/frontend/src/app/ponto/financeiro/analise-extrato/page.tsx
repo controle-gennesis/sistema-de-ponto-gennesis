@@ -1026,6 +1026,17 @@ const EXTRATO_TD_CENTER = 'px-3 py-3 text-center sm:px-4';
 const EXTRATO_TD_HISTORICO =
   'max-w-[16rem] truncate px-3 py-3 text-left text-gray-700 dark:text-gray-300 sm:px-4';
 
+const skeletonPulse = 'animate-pulse rounded-md bg-gray-200/90 dark:bg-gray-700/80';
+
+type ExtratoSearchFilterBarProps = {
+  searchQuery: string;
+  onSearchQueryChange: (value: string) => void;
+  searchInputRef: React.RefObject<HTMLInputElement>;
+  onOpenFilters: () => void;
+  hasActiveFilters: boolean;
+  disabled?: boolean;
+};
+
 function ExtratoSearchFilterBar({
   searchQuery,
   onSearchQueryChange,
@@ -1033,8 +1044,52 @@ function ExtratoSearchFilterBar({
   onOpenFilters,
   hasActiveFilters,
   disabled = false
-}: {
-const skeletonPulse = 'animate-pulse rounded-md bg-gray-200/90 dark:bg-gray-700/80';
+}: ExtratoSearchFilterBarProps) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+      <div className="relative min-w-0 w-full sm:max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+        <input
+          ref={searchInputRef}
+          type="text"
+          value={searchQuery}
+          onChange={(e) => onSearchQueryChange(e.target.value)}
+          placeholder="Pesquisar movimentação..."
+          disabled={disabled}
+          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+        />
+        {searchQuery ? (
+          <button
+            type="button"
+            onClick={() => onSearchQueryChange('')}
+            disabled={disabled}
+            aria-label="Limpar busca"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:pointer-events-none dark:hover:bg-gray-700 dark:hover:text-gray-300"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onOpenFilters}
+        disabled={disabled}
+        className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+          hasActiveFilters
+            ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+        }`}
+        aria-label="Abrir filtro"
+        title={hasActiveFilters ? 'Filtros ativos' : 'Filtro'}
+      >
+        <Filter className="h-4 w-4" />
+        {hasActiveFilters ? (
+          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+        ) : null}
+      </button>
+    </div>
+  );
+}
 
 function ExtratoCaixaLoadingSkeleton() {
   return (
@@ -1110,61 +1165,6 @@ function ExtratoCaixaRefetchBar() {
     >
       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
       <span>Atualizando movimentações do extrato…</span>
-    </div>
-  );
-}
-
-interface ExtratoItemsListProps {
-  items: ExtratoCaixaItem[];
-  searchQuery: string;
-  onSearchQueryChange: (value: string) => void;
-  searchInputRef: React.RefObject<HTMLInputElement>;
-  onOpenFilters: () => void;
-  hasActiveFilters: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-      <div className="relative min-w-0 w-full sm:max-w-md">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-        <input
-          ref={searchInputRef}
-          type="text"
-          value={searchQuery}
-          onChange={(e) => onSearchQueryChange(e.target.value)}
-          placeholder="Pesquisar movimentação..."
-          disabled={disabled}
-          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-        />
-        {searchQuery ? (
-          <button
-            type="button"
-            onClick={() => onSearchQueryChange('')}
-            disabled={disabled}
-            aria-label="Limpar busca"
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:pointer-events-none dark:hover:bg-gray-700 dark:hover:text-gray-300"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        ) : null}
-      </div>
-      <button
-        type="button"
-        onClick={onOpenFilters}
-        disabled={disabled}
-        className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-          hasActiveFilters
-            ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
-            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
-        }`}
-        aria-label="Abrir filtro"
-        title={hasActiveFilters ? 'Filtros ativos' : 'Filtro'}
-      >
-        <Filter className="h-4 w-4" />
-        {hasActiveFilters ? (
-          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
-        ) : null}
-      </button>
     </div>
   );
 }
@@ -2351,23 +2351,10 @@ export default function AnaliseExtratoPage() {
               </CardContent>
             </Card>
           ) : (
-            <ExtratoItemsList
-              items={filteredItems}
-              emptyMessage={
-                hasListRefinement
-                  ? 'Nenhuma movimentação encontrada com os filtros ou termo de busca aplicados.'
-                  : 'Nenhuma movimentação encontrada no extrato.'
-              }
-            />
             <div className="space-y-4">
               {isFetching ? <ExtratoCaixaRefetchBar /> : null}
               <ExtratoItemsList
                 items={filteredItems}
-                searchQuery={searchQuery}
-                onSearchQueryChange={setSearchQuery}
-                searchInputRef={searchInputRef}
-                onOpenFilters={openFiltersModal}
-                hasActiveFilters={hasActiveFilters}
                 emptyMessage={
                   hasListRefinement
                     ? 'Nenhuma movimentação encontrada com os filtros ou termo de busca aplicados.'

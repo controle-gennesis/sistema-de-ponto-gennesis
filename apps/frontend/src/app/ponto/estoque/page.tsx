@@ -4,17 +4,21 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Package, Plus, ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, History, Box, Filter, ChevronDown, ChevronUp, RotateCcw, Download, Eye } from 'lucide-react';
 import {
+  Package,
+  Plus,
   ArrowUpCircle,
   ArrowDownCircle,
   ArrowLeftRight,
   History,
   Box,
   Filter,
-  MoreVertical,
+  ChevronDown,
+  ChevronUp,
   RotateCcw,
   Download,
+  Eye,
+  MoreVertical,
   Search,
   X
 } from 'lucide-react';
@@ -605,6 +609,14 @@ export default function EstoquePage() {
   const paginatedMovements = filteredMovements.slice(historyStartIndex, historyEndIndex);
   const historyStartItem = historyTotal === 0 ? 0 : historyStartIndex + 1;
   const historyEndItem = Math.min(historyEndIndex, historyTotal);
+
+  const balanceTotal = balances.length;
+  const balanceTotalPages = Math.max(1, Math.ceil(balanceTotal / BALANCE_ITEMS_PER_PAGE));
+  const balanceStartIndex = (balanceCurrentPage - 1) * BALANCE_ITEMS_PER_PAGE;
+  const balanceEndIndex = balanceStartIndex + BALANCE_ITEMS_PER_PAGE;
+  const paginatedBalances = balances.slice(balanceStartIndex, balanceEndIndex);
+  const balanceStartItem = balanceTotal === 0 ? 0 : balanceStartIndex + 1;
+  const balanceEndItem = Math.min(balanceEndIndex, balanceTotal);
 
   useEffect(() => {
     setBalanceCurrentPage(1);
@@ -1198,9 +1210,6 @@ export default function EstoquePage() {
                     <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
                       <button
                         type="button"
-                        onClick={handleExportExcel}
-                        disabled={isExporting || balancesByMaterial.length === 0}
-                        className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 text-sm disabled:opacity-50"
                         onClick={clearBalanceFilters}
                         className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                       >
@@ -1209,9 +1218,6 @@ export default function EstoquePage() {
                       </button>
                       <button
                         type="button"
-                        onClick={handleExportPdf}
-                        disabled={isExporting || balancesByMaterial.length === 0}
-                        className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 text-sm disabled:opacity-50"
                         onClick={() => setIsBalanceFiltersModalOpen(false)}
                         className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
                       >
@@ -1219,11 +1225,6 @@ export default function EstoquePage() {
                       </button>
                     </div>
                   </div>
-                  {loadingBalance ? (
-                    <p className="text-center py-8 text-gray-500">Carregando...</p>
-                  ) : balancesByMaterial.length === 0 ? (
-                    <p className="text-center py-8 text-gray-500">Nenhum material em estoque</p>
-                  ) : (
                 </div>
               )}
             </Card>
@@ -1321,8 +1322,6 @@ export default function EstoquePage() {
                             <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Quantidade
                             </th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                              Quantidade total
                             <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Centro de Custo
                             </th>
@@ -1332,162 +1331,8 @@ export default function EstoquePage() {
                             <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Ação
                             </th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                              Ações
-                            </th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                          {balancesByMaterial.map((group) => (
-                            <tr
-                              key={group.material.id}
-                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
-                              onClick={() => setMaterialBalanceDetail(group)}
-                            >
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {group.material.name}
-                                {group.lines.length > 1 ? (
-                                  <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
-                                    ({group.lines.length} centros de custo)
-                                  </span>
-                                ) : null}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                                {group.material.category || '-'}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">
-                                {group.totalBalance}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">
-                                {group.material.unit}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setMaterialBalanceDetail(group);
-                                  }}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  Detalhes
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <Modal
-                    isOpen={materialBalanceDetail != null}
-                    onClose={() => setMaterialBalanceDetail(null)}
-                    title={
-                      materialBalanceDetail
-                        ? `Saldo — ${materialBalanceDetail.material.name}`
-                        : 'Saldo do material'
-                    }
-                    size="lg"
-                  >
-                    {materialBalanceDetail ? (
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                          <p>
-                            <span className="text-gray-500 dark:text-gray-400">Categoria: </span>
-                            <span className="text-gray-900 dark:text-gray-100">
-                              {materialBalanceDetail.material.category || '—'}
-                            </span>
-                          </p>
-                          <p>
-                            <span className="text-gray-500 dark:text-gray-400">Unidade: </span>
-                            <span className="text-gray-900 dark:text-gray-100">
-                              {materialBalanceDetail.material.unit}
-                            </span>
-                          </p>
-                        </div>
-                        <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                          <table className="w-full text-sm">
-                            <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
-                              <tr>
-                                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                                  Centro de Custo
-                                </th>
-                                <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                                  Quantidade
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                              {[...materialBalanceDetail.lines]
-                                .sort((a, b) => {
-                                  const labelA = a.costCenter
-                                    ? `${a.costCenter.code} ${a.costCenter.name}`
-                                    : 'zzz';
-                                  const labelB = b.costCenter
-                                    ? `${b.costCenter.code} ${b.costCenter.name}`
-                                    : 'zzz';
-                                  return labelA.localeCompare(labelB, 'pt-BR', { sensitivity: 'base' });
-                                })
-                                .map((line, idx) => (
-                                  <tr key={line.costCenter?.id || `sem-cc-${idx}`}>
-                                    <td className="px-4 py-2.5 text-gray-800 dark:text-gray-200">
-                                      {line.costCenter
-                                        ? `${line.costCenter.code} - ${line.costCenter.name}`
-                                        : 'Não informado'}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-right font-medium text-gray-900 dark:text-gray-100">
-                                      {line.balance}
-                                    </td>
-                                  </tr>
-                                ))}
-                            </tbody>
-                            <tfoot className="bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
-                              <tr>
-                                <td className="px-4 py-2.5 font-semibold text-gray-800 dark:text-gray-200">
-                                  Total
-                                </td>
-                                <td className="px-4 py-2.5 text-right font-semibold text-gray-900 dark:text-gray-100">
-                                  {materialBalanceDetail.totalBalance}
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      </div>
-                    ) : null}
-                  </Modal>
-                </div>
-              )}
-
-              {activeTab === 'movements' && (
-                <div className="p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                    Histórico de Movimentações
-                  </h3>
-                  {loadingMovements ? (
-                    <p className="text-center py-8 text-gray-500">Carregando...</p>
-                  ) : movementHistoryByOc.length === 0 ? (
-                    <p className="text-center py-8 text-gray-500">Nenhuma movimentação encontrada</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {movementHistoryByOc.map((historyGroup) => {
-                        const latestMovement = historyGroup.movements[0];
-                        const totalEntries = historyGroup.movements
-                          .filter((mov) => mov.type === 'IN')
-                          .reduce((sum, mov) => sum + mov.quantity, 0);
-                        const totalOutputs = historyGroup.movements
-                          .filter((mov) => mov.type === 'OUT')
-                          .reduce((sum, mov) => sum + mov.quantity, 0);
-                        return (
-                        <div
-                          key={historyGroup.key}
-                          className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                        >
-                          <div className="flex items-start">
-                            <div className="flex items-start gap-3 flex-1">
-                              <div
-                                className="p-2 rounded-lg bg-slate-100 dark:bg-slate-700/40"
                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                           {paginatedMovements.map((mov) => {
                             const ocNumber = extractOcNumberFromNotes(mov.notes) || '—';

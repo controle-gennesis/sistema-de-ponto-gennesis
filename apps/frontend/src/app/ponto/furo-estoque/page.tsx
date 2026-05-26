@@ -89,6 +89,10 @@ export default function FuroEstoquePage() {
   const [listCurrentPage, setListCurrentPage] = useState(1);
   const [detail, setDetail] = useState<ShortfallRow | null>(null);
 
+  const isFiltersExpanded =
+    Boolean(filtersCostCenterId || filtersCategory || filtersMonth || filtersYear || filtersSearch) ||
+    statusFilter !== 'ABERTO';
+
   useEffect(() => {
     if (!detail) return;
     const onKey = (e: KeyboardEvent) => {
@@ -278,6 +282,7 @@ export default function FuroEstoquePage() {
                     <Filter className="h-4 w-4" />
                   </button>
                 </div>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -428,13 +433,6 @@ export default function FuroEstoquePage() {
                       className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                       aria-label="Fechar filtros"
                     >
-                      <option value="">Todos</option>
-                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
-                        <option key={year} value={year}>
-                          {year}
-                        </option>
-                      ))}
-                    </select>
                       <X className="h-4 w-4" />
                     </button>
                   </div>
