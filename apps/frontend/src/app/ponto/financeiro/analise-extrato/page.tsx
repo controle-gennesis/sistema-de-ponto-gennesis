@@ -8,17 +8,17 @@ import {
   ArrowUpRight,
   CalendarDays,
   ClipboardList,
-  Eye,
   Filter,
   BookOpen,
   ListPlus,
   Loader2,
   Search,
   Building2,
-  FileDown,
+  Download,
   FileText,
   Wallet,
-  X
+  X,
+  type LucideIcon
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -40,7 +40,6 @@ import { extratoMatchesAnyNatureCodes, normalizeBudgetNatureCode } from '@/lib/b
 import {
   exportExtratoCaixaPdf,
   EXTRATO_RESUMO_TOP_SAIDA,
-  getTopSaidaKeys,
   pickResumoRowsForPdf,
   type ExtratoCaixaPdfAjusteRow
 } from '@/lib/exportExtratoCaixaPdf';
@@ -245,20 +244,18 @@ function itemSaldoLinha(item: ExtratoCaixaItem): number {
   return item.entrada + item.saida;
 }
 
-const MESES_CURTOS = [
-  'jan',
-  'fev',
-  'mar',
-  'abr',
-  'mai',
-  'jun',
-  'jul',
-  'ago',
-  'set',
-  'out',
-  'nov',
-  'dez'
-] as const;
+function formatMonthYearLabel(monthKey: string): string {
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return monthKey;
+  }
+  const text = new Date(year, month - 1, 1).toLocaleString('pt-BR', {
+    month: 'long',
+    year: 'numeric'
+  });
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 type ExtratoResumoRow = {
   key: string;
@@ -267,6 +264,16 @@ type ExtratoResumoRow = {
   totalSaida: number;
   totalValor: number;
 };
+
+const EXTRATO_RESUMO_ITEMS_PER_PAGE = 20;
+
+function sortResumoRowsByValorDesc(rows: ExtratoResumoRow[]): ExtratoResumoRow[] {
+  return [...rows].sort((a, b) => {
+    const diff = b.totalValor - a.totalValor;
+    if (diff !== 0) return diff;
+    return a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' });
+  });
+}
 
 function itemCompensacaoMonthKey(item: ExtratoCaixaItem): string | null {
   const data = item.dataCompensacao ?? item.data;
@@ -292,10 +299,7 @@ function buildExtratoResumoMensal(items: ExtratoCaixaItem[]): ExtratoResumoRow[]
   return Array.from(map.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([monthKey, totals]) => {
-      const month = Number(monthKey.slice(5, 7));
-      const year = monthKey.slice(0, 4);
-      const short = MESES_CURTOS[month - 1] ?? monthKey;
-      const label = `${short} / ${year}`;
+      const label = formatMonthYearLabel(monthKey);
       return {
         key: monthKey,
         label,
@@ -384,160 +388,15 @@ function buildExtratoResumoNatureza(items: ExtratoCaixaItem[]): ExtratoResumoRow
     map.set(key, cur);
   }
 
-  return Array.from(map.entries()).map(([key, totals]) => ({
-    key,
-    label: totals.label,
-    totalEntrada: totals.entrada,
-    totalSaida: totals.saida,
-    totalValor: totals.valor
-  }));
-}
-
-type ExtratoResumoTopExpandLabels = {
-  title: string;
-  rowLabelHeader: string;
-  entityPlural: string;
-  addDropdownLabel: string;
-  addPlaceholder: string;
-  addSearchPlaceholder: string;
-  emptyOptionsMessage: string;
-  emptySearchMessage: string;
-  allVisibleMessage: string;
-  clearAddedLabel: string;
-};
-
-function ExtratoResumoTopExpandSection({
-  allRows,
-  detailItems,
-  getItemGroupKey,
-  labels,
-  icon,
-  dropdownIcon,
-  topLimit = EXTRATO_RESUMO_TOP_SAIDA
-}: {
-  allRows: ExtratoResumoRow[];
-  detailItems: ExtratoCaixaItem[];
-  getItemGroupKey: (item: ExtratoCaixaItem) => string | null;
-  labels: ExtratoResumoTopExpandLabels;
-  icon: React.ReactNode;
-  dropdownIcon: React.ReactNode;
-  topLimit?: number;
-}) {
-  const [extraKeys, setExtraKeys] = useState<string[]>([]);
-
-  const defaultKeys = useMemo(() => getTopSaidaKeys(allRows, topLimit), [allRows, topLimit]);
-
-  useEffect(() => {
-    setExtraKeys((prev) => prev.filter((key) => allRows.some((row) => row.key === key)));
-  }, [allRows]);
-
-  const defaultKeySet = useMemo(() => new Set(defaultKeys), [defaultKeys]);
-
-  const visibleKeySet = useMemo(() => {
-    const keys = new Set(defaultKeys);
-    for (const key of extraKeys) keys.add(key);
-    return keys;
-  }, [defaultKeys, extraKeys]);
-
-  const visibleRows = useMemo(() => {
-    const byKey = new Map(allRows.map((row) => [row.key, row]));
-    const defaultRows = defaultKeys
-      .map((key) => byKey.get(key))
-      .filter((row): row is ExtratoResumoRow => row != null);
-    const extraRows = extraKeys
-      .filter((key) => !defaultKeySet.has(key))
-      .map((key) => byKey.get(key))
-      .filter((row): row is ExtratoResumoRow => row != null)
-      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-    return [...defaultRows, ...extraRows];
-  }, [allRows, defaultKeys, defaultKeySet, extraKeys]);
-
-  const extraKeySet = useMemo(() => new Set(extraKeys), [extraKeys]);
-
-  /** Inclui itens já adicionados (para desmarcar) e os que ainda podem ser incluídos. */
-  const dropdownOptions = useMemo(
-    () =>
-      allRows
-        .filter((row) => extraKeySet.has(row.key) || !visibleKeySet.has(row.key))
-        .map((row) => ({
-          value: row.key,
-          label: row.label,
-          searchText: row.label
-        }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
-    [allRows, extraKeySet, visibleKeySet]
-  );
-
-  const canAddMore = useMemo(
-    () => allRows.some((row) => !visibleKeySet.has(row.key)),
-    [allRows, visibleKeySet]
-  );
-
-  const showDropdown = extraKeys.length > 0 || canAddMore;
-
-  const handleExtraChange = useCallback(
-    (ids: string[]) => {
-      setExtraKeys(ids.filter((id) => !defaultKeySet.has(id)));
-    },
-    [defaultKeySet]
-  );
-
-  const handleClearAdded = useCallback(() => {
-    setExtraKeys([]);
-  }, []);
-
-  if (allRows.length === 0) return null;
-
-  const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
-  const topSaidaShown = defaultKeys.length;
-
-  return (
-    <ExtratoResumoTable
-      title={labels.title}
-      detailItems={detailItems}
-      getItemGroupKey={getItemGroupKey}
-      subtitle={`Exibindo as ${topSaidaShown} maiores saídas${
-        extraKeys.length > 0 ? ` e mais ${extraKeys.length} adicionado(s).` : '.'
-      }${
-        hiddenCount > 0 ? ` ${hiddenCount} ${labels.entityPlural} oculto(s).` : ' '
-      }Use o menu abaixo para incluir ou remover itens adicionados (desmarque no menu ou use Limpar adicionados).`}
-      icon={icon}
-      rowLabelHeader={labels.rowLabelHeader}
-      rows={visibleRows}
-      totalRowLabel="Total exibido"
-      headerActions={
-        showDropdown ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1">
-              <MultiSelectSearchDropdown
-                label={labels.addDropdownLabel}
-                options={dropdownOptions}
-                selected={extraKeys}
-                onChange={handleExtraChange}
-                placeholder={labels.addPlaceholder}
-                searchPlaceholder={labels.addSearchPlaceholder}
-                emptyOptionsMessage={labels.emptyOptionsMessage}
-                emptySearchMessage={labels.emptySearchMessage}
-                icon={dropdownIcon}
-                menuInline
-              />
-            </div>
-            {extraKeys.length > 0 ? (
-              <button
-                type="button"
-                onClick={handleClearAdded}
-                className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-              >
-                {labels.clearAddedLabel}
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          <p className="text-xs text-gray-500 dark:text-gray-400">{labels.allVisibleMessage}</p>
-        )
-      }
-    />
-  );
+  return Array.from(map.entries())
+    .sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
+    .map(([key, totals]) => ({
+      key,
+      label: totals.label,
+      totalEntrada: totals.entrada,
+      totalSaida: totals.saida,
+      totalValor: totals.valor
+    }));
 }
 
 function fornecedorGroupKey(item: ExtratoCaixaItem): string {
@@ -600,6 +459,90 @@ function sortItemsForResumoDetalhe(items: ExtratoCaixaItem[]): ExtratoCaixaItem[
   return [...items].sort((a, b) => itemDetailSortKey(b) - itemDetailSortKey(a));
 }
 
+function formatExtratoResumoStatValue(label: string, value: number): string {
+  if (label === 'Saída' || label === 'Saídas') return formatCurrency(Math.abs(value));
+  return formatCurrency(value);
+}
+
+type ExtratoTotaisStripItem = {
+  label: string;
+  value: number;
+  sublabel?: string;
+  valueClassName?: string;
+};
+
+function ExtratoTotaisStrip({
+  items,
+  className = ''
+}: {
+  items: ExtratoTotaisStripItem[];
+  className?: string;
+}) {
+  return (
+    <div
+      className={`overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-900/30 ${className}`}
+    >
+      <div className="grid grid-cols-1 divide-y divide-gray-200 dark:divide-gray-700 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        {items.map((item) => (
+          <div key={item.label} className="min-w-0 px-4 py-3.5 sm:px-5">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              {item.label}
+              {item.sublabel ? (
+                <span className="ml-1 font-normal text-gray-400 dark:text-gray-500">
+                  {item.sublabel}
+                </span>
+              ) : null}
+            </p>
+            <p
+              className={`mt-1 truncate text-base font-semibold tabular-nums sm:text-lg ${
+                item.valueClassName ?? valorCellClass(item.value)
+              }`}
+            >
+              {formatExtratoResumoStatValue(item.label, item.value)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExtratoResumoStatCards({
+  totalSaida,
+  totalEntrada,
+  totalValor
+}: {
+  totalSaida: number;
+  totalEntrada: number;
+  totalValor: number;
+}) {
+  return (
+    <ExtratoTotaisStrip
+      className="mb-4"
+      items={[
+        {
+          label: 'Saída',
+          value: totalSaida,
+          valueClassName: 'text-red-600 dark:text-red-400'
+        },
+        {
+          label: 'Entrada',
+          value: totalEntrada,
+          valueClassName: 'text-green-600 dark:text-green-400'
+        },
+        {
+          label: 'Valor',
+          value: totalValor,
+          valueClassName:
+            totalValor >= 0
+              ? 'text-green-600 dark:text-green-400'
+              : 'text-red-600 dark:text-red-400'
+        }
+      ]}
+    />
+  );
+}
+
 function ExtratoResumoDetalheModal({
   isOpen,
   onClose,
@@ -626,26 +569,11 @@ function ExtratoResumoDetalheModal({
       title={`${rowLabelHeader}: ${row.label}`}
       size="xl"
     >
-      <div className="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-900/50 sm:grid-cols-3">
-        <div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Saída</p>
-          <p className={`font-semibold tabular-nums ${valorCellClass(row.totalSaida)}`}>
-            {formatCurrency(row.totalSaida)}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Entrada</p>
-          <p className={`font-semibold tabular-nums ${valorCellClass(row.totalEntrada)}`}>
-            {formatCurrency(row.totalEntrada)}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Valor</p>
-          <p className={`font-semibold tabular-nums ${valorCellClass(row.totalValor)}`}>
-            {formatCurrency(row.totalValor)}
-          </p>
-        </div>
-      </div>
+      <ExtratoResumoStatCards
+        totalSaida={row.totalSaida}
+        totalEntrada={row.totalEntrada}
+        totalValor={row.totalValor}
+      />
 
       <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
         {sorted.length} movimentação(ões) com os filtros atuais
@@ -678,12 +606,6 @@ function ExtratoResumoDetalheModal({
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
                   Filial
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-medium uppercase text-gray-500">
-                  Saída
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-medium uppercase text-gray-500">
-                  Entrada
                 </th>
                 <th className="px-3 py-2 text-right text-xs font-medium uppercase text-gray-500">
                   Valor
@@ -721,12 +643,6 @@ function ExtratoResumoDetalheModal({
                   <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-gray-300">
                     {item.codFilial != null ? formatFilialLabel(item.codFilial) : '—'}
                   </td>
-                  <td className={`px-3 py-2 text-right tabular-nums ${valorCellClass(item.saida)}`}>
-                    {item.saida !== 0 ? formatCurrency(item.saida) : '—'}
-                  </td>
-                  <td className={`px-3 py-2 text-right tabular-nums ${valorCellClass(itemEntrada(item))}`}>
-                    {itemEntrada(item) > 0 ? formatCurrency(itemEntrada(item)) : '—'}
-                  </td>
                   <td className={`px-3 py-2 text-right tabular-nums ${valorCellClass(itemSaldoLinha(item))}`}>
                     {formatCurrency(itemSaldoLinha(item))}
                   </td>
@@ -746,11 +662,24 @@ function ExtratoResumoDetalheModal({
   );
 }
 
+const RESUMO_TH =
+  'px-3 sm:px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400';
+const RESUMO_TD = 'px-3 sm:px-6 py-3 text-sm';
+
+function ExtratoBlockIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <div className="flex shrink-0 items-center justify-center rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+      <Icon className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" aria-hidden />
+    </div>
+  );
+}
+
 function ExtratoResumoTable({
   title,
   subtitle,
   icon,
   rowLabelHeader,
+  countLabel,
   rows,
   detailItems,
   getItemGroupKey,
@@ -760,8 +689,9 @@ function ExtratoResumoTable({
 }: {
   title: string;
   subtitle: string;
-  icon: React.ReactNode;
+  icon: LucideIcon;
   rowLabelHeader: string;
+  countLabel: string;
   rows: ExtratoResumoRow[];
   detailItems: ExtratoCaixaItem[];
   getItemGroupKey: (item: ExtratoCaixaItem) => string | null;
@@ -770,6 +700,29 @@ function ExtratoResumoTable({
   totalRowLabel?: string;
 }) {
   const [detalheRow, setDetalheRow] = useState<ExtratoResumoRow | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const sortedRows = useMemo(() => sortResumoRowsByValorDesc(rows), [rows]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / EXTRATO_RESUMO_ITEMS_PER_PAGE));
+  const showPagination = sortedRows.length > EXTRATO_RESUMO_ITEMS_PER_PAGE;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [rows]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const paginatedRows = useMemo(() => {
+    const start = (currentPage - 1) * EXTRATO_RESUMO_ITEMS_PER_PAGE;
+    return sortedRows.slice(start, start + EXTRATO_RESUMO_ITEMS_PER_PAGE);
+  }, [sortedRows, currentPage]);
+
+  const rangeStart =
+    sortedRows.length === 0 ? 0 : (currentPage - 1) * EXTRATO_RESUMO_ITEMS_PER_PAGE + 1;
+  const rangeEnd = Math.min(currentPage * EXTRATO_RESUMO_ITEMS_PER_PAGE, sortedRows.length);
 
   const detailsByKey = useMemo(() => {
     const map = new Map<string, ExtratoCaixaItem[]>();
@@ -798,41 +751,46 @@ function ExtratoResumoTable({
   if (rows.length === 0) return null;
 
   return (
-    <Card>
-      <CardHeader className="border-b border-gray-200 px-4 py-4 dark:border-gray-700 sm:px-6">
-        <div className="flex items-center gap-2">
-          <span className="text-gray-500 dark:text-gray-400">{icon}</span>
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+    <Card className="w-full overflow-hidden">
+      <CardHeader className="border-b-0 pb-1">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center space-x-3">
+            <ExtratoBlockIcon icon={icon} />
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{subtitle}</p>
+            </div>
+          </div>
+          {headerActions ? (
+            <div className="flex min-w-0 flex-shrink-0 flex-wrap items-end gap-2 sm:justify-end">
+              {headerActions}
+            </div>
+          ) : null}
         </div>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
-        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-          Clique em uma linha ou no ícone para abrir os detalhes em um modal.
-        </p>
-        {headerActions ? <div className="mt-4 max-w-xl">{headerActions}</div> : null}
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent>
+        <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+          <span>
+            Mostrando {rangeStart} a {rangeEnd} de {sortedRows.length} {countLabel}
+          </span>
+          {showPagination ? (
+            <span>
+              Página {currentPage} de {totalPages}
+            </span>
+          ) : null}
+        </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[36rem] w-full table-fixed text-sm">
-            <colgroup>
-              <col className="w-[38%]" />
-              <col className="w-[18%]" />
-              <col className="w-[18%]" />
-              <col className="w-[18%]" />
-              <col className="w-[8%]" />
-            </colgroup>
-            <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/50">
+          <table className="w-full min-w-[36rem] text-sm">
+            <thead className="border-b border-gray-200 dark:border-gray-700">
               <tr>
-                <th className={`${EXTRATO_TH_CENTER} text-left sm:pl-6`}>{rowLabelHeader}</th>
-                <th className={EXTRATO_TH_CENTER}>Saída</th>
-                <th className={EXTRATO_TH_CENTER}>Entrada</th>
-                <th className={EXTRATO_TH_CENTER}>Valor</th>
-                <th className={`${EXTRATO_TH_CENTER} sm:pr-6`}>
-                  <span className="sr-only">Detalhes</span>
-                </th>
+                <th className={`${RESUMO_TH} text-left`}>{rowLabelHeader}</th>
+                <th className={`${RESUMO_TH} text-right`}>Saída</th>
+                <th className={`${RESUMO_TH} text-right`}>Entrada</th>
+                <th className={`${RESUMO_TH} text-right`}>Valor</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-              {rows.map((row) => {
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {paginatedRows.map((row) => {
                 const detalhes = detailsByKey.get(row.key) ?? [];
                 const qtd = detalhes.length;
                 return (
@@ -842,7 +800,7 @@ function ExtratoResumoTable({
                     onClick={() => setDetalheRow(row)}
                   >
                     <td
-                      className={`overflow-hidden px-4 py-3 font-medium text-gray-900 dark:text-gray-100 sm:pl-6 ${labelClassName}`}
+                      className={`${RESUMO_TD} font-medium text-gray-900 dark:text-gray-100 ${labelClassName}`}
                       title={row.label}
                     >
                       <div className="flex min-w-0 items-center gap-2">
@@ -852,54 +810,81 @@ function ExtratoResumoTable({
                         </span>
                       </div>
                     </td>
-                    <td
-                      className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(row.totalSaida)}`}
-                    >
+                    <td className={`${RESUMO_TD} text-right tabular-nums ${valorCellClass(row.totalSaida)}`}>
                       {formatCurrency(row.totalSaida)}
                     </td>
-                    <td
-                      className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(row.totalEntrada)}`}
-                    >
+                    <td className={`${RESUMO_TD} text-right tabular-nums ${valorCellClass(row.totalEntrada)}`}>
                       {formatCurrency(row.totalEntrada)}
                     </td>
-                    <td className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(row.totalValor)}`}>
+                    <td className={`${RESUMO_TD} text-right tabular-nums ${valorCellClass(row.totalValor)}`}>
                       {formatCurrency(row.totalValor)}
-                    </td>
-                    <td className={`${EXTRATO_TD_CENTER} sm:pr-6`}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDetalheRow(row);
-                        }}
-                        className="inline-flex rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-700 dark:hover:text-red-400"
-                        title="Ver detalhes"
-                        aria-label={`Ver detalhes de ${row.label}`}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
                     </td>
                   </tr>
                 );
               })}
-              <tr className="bg-gray-50 font-semibold dark:bg-gray-900/60">
-                <td className="px-4 py-3 text-gray-900 dark:text-gray-100 sm:pl-6">{totalRowLabel}</td>
-                <td className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(totais.totalSaida)}`}>
+              <tr className="bg-gray-50 font-semibold dark:bg-gray-900/40">
+                <td className={`${RESUMO_TD} text-gray-900 dark:text-gray-100`}>{totalRowLabel}</td>
+                <td className={`${RESUMO_TD} text-right tabular-nums ${valorCellClass(totais.totalSaida)}`}>
                   {formatCurrency(totais.totalSaida)}
                 </td>
-                <td
-                  className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(totais.totalEntrada)}`}
-                >
+                <td className={`${RESUMO_TD} text-right tabular-nums ${valorCellClass(totais.totalEntrada)}`}>
                   {formatCurrency(totais.totalEntrada)}
                 </td>
-                <td className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(totais.totalValor)}`}>
+                <td className={`${RESUMO_TD} text-right tabular-nums ${valorCellClass(totais.totalValor)}`}>
                   {formatCurrency(totais.totalValor)}
                 </td>
-                <td className="sm:pr-6" />
               </tr>
             </tbody>
           </table>
         </div>
+
+        {showPagination ? (
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+            >
+              Anterior
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNumber: number;
+              if (totalPages <= 5) {
+                pageNumber = i + 1;
+              } else if (currentPage <= 3) {
+                pageNumber = i + 1;
+              } else if (currentPage >= totalPages - 2) {
+                pageNumber = totalPages - 4 + i;
+              } else {
+                pageNumber = currentPage - 2 + i;
+              }
+              const isActive = pageNumber === currentPage;
+              return (
+                <button
+                  key={pageNumber}
+                  type="button"
+                  onClick={() => setCurrentPage(pageNumber)}
+                  className={`min-w-[2.25rem] rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'bg-red-600 text-white'
+                      : 'border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {pageNumber}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+            >
+              Próxima
+            </button>
+          </div>
+        ) : null}
       </CardContent>
 
       <ExtratoResumoDetalheModal
@@ -1035,6 +1020,7 @@ type ExtratoSearchFilterBarProps = {
   onOpenFilters: () => void;
   hasActiveFilters: boolean;
   disabled?: boolean;
+  exportAction?: React.ReactNode;
 };
 
 function ExtratoSearchFilterBar({
@@ -1043,11 +1029,12 @@ function ExtratoSearchFilterBar({
   searchInputRef,
   onOpenFilters,
   hasActiveFilters,
-  disabled = false
+  disabled = false,
+  exportAction
 }: ExtratoSearchFilterBarProps) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-      <div className="relative min-w-0 w-full sm:max-w-md">
+    <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2">
+      <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
         <input
           ref={searchInputRef}
@@ -1056,7 +1043,7 @@ function ExtratoSearchFilterBar({
           onChange={(e) => onSearchQueryChange(e.target.value)}
           placeholder="Pesquisar movimentação..."
           disabled={disabled}
-          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
         />
         {searchQuery ? (
           <button
@@ -1087,6 +1074,7 @@ function ExtratoSearchFilterBar({
           <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
         ) : null}
       </button>
+      {exportAction}
     </div>
   );
 }
@@ -1199,21 +1187,21 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
     : items.length;
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="border-b-0 !pb-4">
-        <div className="flex items-center space-x-3">
-          <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-            <CalendarDays className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Movimentações</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {items.length} {items.length === 1 ? 'movimentação' : 'movimentações'}
-            </p>
+    <Card className="w-full overflow-hidden">
+      <CardHeader className="border-b-0 pb-1">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center space-x-3">
+            <ExtratoBlockIcon icon={CalendarDays} />
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Movimentações</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Consulte as movimentações do extrato de caixa
+              </p>
+            </div>
           </div>
         </div>
       </CardHeader>
-      <CardContent className="!pt-0 px-0 pb-0">
+      <CardContent>
           {items.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <Wallet className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
@@ -1221,7 +1209,7 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
             </div>
           ) : (
             <>
-            <div className="mb-2 flex flex-col gap-1 px-3 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-6">
+            <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
               <span>
                 Mostrando {rangeStart} a {rangeEnd} de {items.length} movimentações
               </span>
@@ -1231,7 +1219,7 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
             </div>
           <div className="overflow-x-auto">
             <table className="min-w-[64rem] w-full text-sm">
-              <thead className="border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+              <thead className="border-b border-gray-200 dark:border-gray-700">
                 <tr>
                   <th className={EXTRATO_TH_CENTER}>ID</th>
                   <th className={EXTRATO_TH_HISTORICO}>Histórico</th>
@@ -1335,8 +1323,7 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
           </div>
 
           {showPagination ? (
-            <div className="border-t border-gray-200 px-3 py-4 dark:border-gray-700 sm:px-6">
-              <div className="flex flex-wrap items-center justify-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                   <button
                     type="button"
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -1380,7 +1367,6 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
                   >
                     Próxima
                   </button>
-              </div>
             </div>
           ) : null}
             </>
@@ -1779,8 +1765,6 @@ export default function AnaliseExtratoPage() {
     hasTipoOperacaoFilter ||
     hasMovimentoTipoFilter;
 
-  const showFiltrosResumo = hasMultiselectFilters || hasPeriodFilter;
-
   const configured = data?.data?.configured ?? false;
   const pathFailures = data?.data?.pathFailures ?? [];
   const apiMessage = data?.message || data?.data?.message || null;
@@ -1985,11 +1969,9 @@ export default function AnaliseExtratoPage() {
       setExportingPdf(true);
       try {
         const includeAllNature = mode === 'all';
-        const natureRows = pickResumoRowsForPdf(
-          extratoResumoNatureza,
-          includeAllNature,
-          EXTRATO_RESUMO_TOP_SAIDA
-        );
+        const natureRows = includeAllNature
+          ? extratoResumoNatureza
+          : pickResumoRowsForPdf(extratoResumoNatureza, false, EXTRATO_RESUMO_TOP_SAIDA);
 
         await exportExtratoCaixaPdf({
           title: 'Extrato de Caixa',
@@ -2088,25 +2070,13 @@ export default function AnaliseExtratoPage() {
     <ProtectedRoute route="/ponto/financeiro/analise-extrato">
       <MainLayout userRole="EMPLOYEE" userName={user?.name ?? ''}>
         <div className="space-y-6">
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="text-center sm:text-left">
-              <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">
-                {pageTitle}
-              </h1>
-              <p className="mt-2 text-sm text-gray-600 sm:text-base dark:text-gray-400">
-                {pageSubtitle}
-              </p>
-            </div>
-            {showDashboards ? (
-              <button
-                type="button"
-                onClick={() => setExportPdfModalOpen(true)}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-              >
-                <FileDown className="h-4 w-4 text-red-600 dark:text-red-400" aria-hidden />
-                Exportar PDF
-              </button>
-            ) : null}
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">
+              {pageTitle}
+            </h1>
+            <p className="mt-2 text-sm text-gray-600 sm:text-base dark:text-gray-400">
+              {pageSubtitle}
+            </p>
           </div>
 
           {canAccess ? (
@@ -2114,17 +2084,7 @@ export default function AnaliseExtratoPage() {
           ) : null}
 
           {configured && !loadFailed ? (
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-              {showFiltrosResumo ? (
-                <ExtratoFiltrosDesmarcadosResumo
-                  presetNome={activeFiltroSalvo?.nome ?? null}
-                  camposDesmarcados={filtrosDesmarcados}
-                  periodFrom={periodFrom}
-                  periodTo={periodTo}
-                  hasActiveFilters={hasMultiselectFilters}
-                  temAjustesManuais={ajustes.length > 0}
-                />
-              ) : null}
+            <div className="space-y-3">
               <ExtratoSearchFilterBar
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
@@ -2132,7 +2092,25 @@ export default function AnaliseExtratoPage() {
                 onOpenFilters={openFiltersModal}
                 hasActiveFilters={hasActiveFilters}
                 disabled={isLoading || isFetching}
+                exportAction={
+                  showDashboards ? (
+                    <button
+                      type="button"
+                      onClick={() => setExportPdfModalOpen(true)}
+                      className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                    >
+                      <Download className="h-4 w-4 shrink-0" aria-hidden />
+                      <span>Exportar PDF</span>
+                    </button>
+                  ) : null
+                }
               />
+              {filtrosDesmarcados.length > 0 ? (
+                <ExtratoFiltrosDesmarcadosResumo
+                  camposDesmarcados={filtrosDesmarcados}
+                  temAjustesManuais={ajustes.length > 0}
+                />
+              ) : null}
             </div>
           ) : null}
 
@@ -2216,7 +2194,7 @@ export default function AnaliseExtratoPage() {
                       </div>
                       <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                         <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                          Saldo líquido
+                          Valor
                         </p>
                         <p
                           className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
@@ -2235,9 +2213,10 @@ export default function AnaliseExtratoPage() {
 
               <ExtratoResumoTable
                 title="Resumo por mês"
-                subtitle="Totais de entrada, saída e valor agrupados pela data de compensação (mesmos filtros da listagem)."
-                icon={<CalendarDays className="h-5 w-5" aria-hidden />}
+                subtitle="Totais de entrada, saída e valor agrupados pela data de compensação."
+                icon={CalendarDays}
                 rowLabelHeader="Mês"
+                countLabel="meses"
                 rows={extratoResumoMensal}
                 detailItems={filteredItems}
                 getItemGroupKey={itemCompensacaoMonthKey}
@@ -2245,9 +2224,10 @@ export default function AnaliseExtratoPage() {
 
               <ExtratoResumoTable
                 title="Resumo por polo"
-                subtitle="Totais de entrada, saída e valor agrupados por polo, conforme o centro de custo da movimentação (mesmos filtros da listagem)."
-                icon={<Building2 className="h-5 w-5" aria-hidden />}
+                subtitle="Totais de entrada, saída e valor agrupados por polo, conforme o centro de custo da movimentação."
+                icon={Building2}
                 rowLabelHeader="Polo"
+                countLabel="polos"
                 rows={extratoResumoPolo}
                 detailItems={filteredItems}
                 getItemGroupKey={poloGroupKey}
@@ -2255,54 +2235,35 @@ export default function AnaliseExtratoPage() {
 
               <ExtratoResumoTable
                 title="Resumo por centro de custo"
-                subtitle="Totais de entrada, saída e valor agrupados por centro de custo (mesmos filtros da listagem)."
-                icon={<ListPlus className="h-5 w-5" aria-hidden />}
+                subtitle="Totais de entrada, saída e valor agrupados por centro de custo."
+                icon={ListPlus}
                 rowLabelHeader="Centro de custo"
+                countLabel="centros de custo"
                 rows={extratoResumoCentroCusto}
                 detailItems={filteredItems}
                 getItemGroupKey={ccGroupKey}
               />
 
-              <ExtratoResumoTopExpandSection
-                allRows={extratoResumoNatureza}
+              <ExtratoResumoTable
+                title="Resumo por natureza financeira"
+                subtitle="Totais de entrada, saída e valor agrupados por natureza financeira."
+                icon={BookOpen}
+                rowLabelHeader="Natureza financeira"
+                countLabel="naturezas"
+                rows={extratoResumoNatureza}
                 detailItems={filteredItems}
                 getItemGroupKey={natureGroupKey}
-                icon={<BookOpen className="h-5 w-5" aria-hidden />}
-                dropdownIcon={<BookOpen className="h-4 w-4" aria-hidden />}
-                labels={{
-                  title: 'Resumo por natureza financeira',
-                  rowLabelHeader: 'Natureza financeira',
-                  entityPlural: 'naturezas',
-                  addDropdownLabel: 'Gerenciar naturezas exibidas',
-                  addPlaceholder: 'Selecione naturezas para exibir...',
-                  addSearchPlaceholder: 'Pesquisar natureza ou código...',
-                  emptyOptionsMessage: 'Nenhuma natureza disponível para adicionar.',
-                  emptySearchMessage: 'Nenhuma natureza encontrada.',
-                  allVisibleMessage:
-                    `As ${EXTRATO_RESUMO_TOP_SAIDA} maiores saídas estão exibidas. Nenhuma adicional selecionada.`,
-                  clearAddedLabel: 'Limpar adicionados'
-                }}
               />
 
-              <ExtratoResumoTopExpandSection
-                allRows={extratoResumoFornecedor}
+              <ExtratoResumoTable
+                title="Resumo por fornecedor"
+                subtitle="Totais de entrada, saída e valor agrupados por fornecedor."
+                icon={Building2}
+                rowLabelHeader="Fornecedor"
+                countLabel="fornecedores"
+                rows={extratoResumoFornecedor}
                 detailItems={filteredItems}
                 getItemGroupKey={fornecedorGroupKey}
-                icon={<Building2 className="h-5 w-5" aria-hidden />}
-                dropdownIcon={<Building2 className="h-4 w-4" aria-hidden />}
-                labels={{
-                  title: 'Resumo por fornecedor',
-                  rowLabelHeader: 'Fornecedor',
-                  entityPlural: 'fornecedores',
-                  addDropdownLabel: 'Gerenciar fornecedores exibidos',
-                  addPlaceholder: 'Selecione fornecedores para exibir...',
-                  addSearchPlaceholder: 'Pesquisar fornecedor...',
-                  emptyOptionsMessage: 'Nenhum fornecedor disponível para adicionar.',
-                  emptySearchMessage: 'Nenhum fornecedor encontrado.',
-                  allVisibleMessage:
-                    `As ${EXTRATO_RESUMO_TOP_SAIDA} maiores saídas estão exibidas. Nenhum adicional selecionado.`,
-                  clearAddedLabel: 'Limpar adicionados'
-                }}
               />
             </div>
           ) : null}

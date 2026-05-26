@@ -51,8 +51,10 @@ model User {
   materialRequestsRejected   MaterialRequest[]      @relation("MaterialRequestRejecter")
   chatGPTConversations      ChatGPTConversation[]
   passwordResetTokens PasswordResetToken[]
-  purchaseOrdersCreated     PurchaseOrder[]        @relation("PurchaseOrderCreator")
-  purchaseOrdersApproved    PurchaseOrder[]        @relation("PurchaseOrderApprover")
+  purchaseOrdersCreated          PurchaseOrder[] @relation("PurchaseOrderCreator")
+  purchaseOrdersApproved         PurchaseOrder[] @relation("PurchaseOrderApprover")
+  purchaseOrdersComprasApproved  PurchaseOrder[] @relation("PurchaseOrderComprasApprover")
+  purchaseOrdersGestorApproved   PurchaseOrder[] @relation("PurchaseOrderGestorApprover")
   quoteMapsCreated          QuoteMap[]             @relation("QuoteMapCreator")
   userPermissions           UserPermission[]       @relation("UserPermissionUser")
   updatedPermissions        UserPermission[]       @relation("UserPermissionUpdatedBy")
@@ -1555,8 +1557,12 @@ model PurchaseOrder {
   amountToPay                Decimal?            @db.Decimal(15, 2) // Itens + frete (recalculado ao salvar itens/frete)
   notes                      String?
   createdBy                  String // Usuário que criou
-  approvedBy                 String? // Usuário que aprovou
+  approvedBy                 String? // Usuário que aprovou (diretoria — status APPROVED)
   approvedAt                 DateTime?
+  comprasApprovedBy          String?
+  comprasApprovedAt          DateTime?
+  gestorApprovedBy           String?
+  gestorApprovedAt           DateTime?
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
 
@@ -1565,6 +1571,8 @@ model PurchaseOrder {
   supplier        Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   creator         User                @relation("PurchaseOrderCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   approver        User?               @relation("PurchaseOrderApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  comprasApprover User?               @relation("PurchaseOrderComprasApprover", fields: [comprasApprovedBy], references: [id], onDelete: SetNull)
+  gestorApprover  User?               @relation("PurchaseOrderGestorApprover", fields: [gestorApprovedBy], references: [id], onDelete: SetNull)
   items           PurchaseOrderItem[]
   stockShortfalls StockShortfall[]
 

@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bookmark, Loader2, Save, Trash2 } from 'lucide-react';
+import { Loader2, Save, Trash2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
 import {
@@ -56,11 +56,13 @@ export function ExtratoFiltrosSalvosPanel({
       const res = await api.post('/extrato-caixa/filtros-salvos', body);
       return res.data?.data as ExtratoCaixaFiltroSalvo;
     },
-    onSuccess: (row) => {
+    onSuccess: (row, variables) => {
       queryClient.invalidateQueries({ queryKey: ['extrato-caixa-filtros-salvos'] });
       setSelectedId(row.id);
       setSaveName(row.nome);
-      toast.success('Filtro salvo com sucesso.');
+      toast.success(
+        variables.id ? 'Filtro atualizado com sucesso.' : 'Filtro salvo com sucesso.'
+      );
     },
     onError: (err: unknown) => {
       const msg =
@@ -102,6 +104,14 @@ export function ExtratoFiltrosSalvosPanel({
     const existing = filtrosSalvos.find(
       (f) => f.nome.localeCompare(nome, 'pt-BR', { sensitivity: 'accent' }) === 0
     );
+    if (existing?.id) {
+      const ok = window.confirm(
+        `O filtro salvo "${existing.nome}" já existe.\n\n` +
+          'Os critérios atuais do formulário vão substituir a configuração salva anteriormente. ' +
+          'Deseja continuar?'
+      );
+      if (!ok) return;
+    }
     saveMutation.mutate({ id: existing?.id, nome, payload });
   };
 
@@ -118,14 +128,7 @@ export function ExtratoFiltrosSalvosPanel({
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40">
-      <div className="mb-3 flex items-center gap-2">
-        <Bookmark className="h-4 w-4 text-red-600 dark:text-red-400" aria-hidden />
-        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Filtros salvos</p>
-      </div>
-      <p className="mb-3 text-xs text-gray-600 dark:text-gray-400">
-        Salve combinações de filtros com um nome e carregue quando precisar. Cada usuário tem seus
-        próprios presets.
-      </p>
+      <p className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">Filtros salvos</p>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">

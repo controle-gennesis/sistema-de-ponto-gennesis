@@ -1,8 +1,17 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Loader2, Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Pencil,
+  Plus,
+  SlidersHorizontal,
+  Trash2
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
@@ -16,7 +25,9 @@ import {
   buildNatureSelectOptions,
   resolveCcFromSelect,
   resolveFornecedorFromSelect,
-  resolveNatureFromSelect
+  resolveNatureFromSelect,
+  parseAjusteValorInput,
+  maskAjusteValorInput
 } from '@/lib/extratoCaixaAjuste';
 import type { ExtratoCaixaItem } from './extratoCaixaTypes';
 
@@ -50,6 +61,23 @@ const INPUT_CLASS =
 
 const LABEL_CLASS = 'mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400';
 
+const AJUSTES_ITEMS_PER_PAGE = 20;
+
+const AJUSTE_TH =
+  'px-3 sm:px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400';
+const AJUSTE_TD = 'px-3 sm:px-6 py-3 text-sm';
+
+function AjustesBlockIcon() {
+  return (
+    <div className="flex shrink-0 items-center justify-center rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 sm:p-3">
+      <SlidersHorizontal
+        className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6"
+        aria-hidden
+      />
+    </div>
+  );
+}
+
 type ApiListResponse = { success: boolean; data: ExtratoCaixaAjuste[]; message?: string };
 type ApiOneResponse = { success: boolean; data: ExtratoCaixaAjuste; message?: string };
 
@@ -64,7 +92,7 @@ function formToPayload(form: ExtratoCaixaAjusteForm, sourceItems: ExtratoCaixaIt
     natureza: nature.natureza,
     codFilial: form.codFilial === '' ? null : Number(form.codFilial),
     fornecedor: resolveFornecedorFromSelect(form.fornecedor),
-    valor: Number(String(form.valor).replace(/\./g, '').replace(',', '.')),
+    valor: parseAjusteValorInput(form.valor),
     observacao: form.observacao.trim() || null
   };
 }
@@ -92,6 +120,8 @@ export function ExtratoCaixaAjustesPanel({
   const [form, setForm] = useState<ExtratoCaixaAjusteForm>(EMPTY_AJUSTE_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExtratoCaixaAjuste | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [expanded, setExpanded] = useState(false);
 
   const ccOptionsBase = useMemo(() => buildCcSelectOptions(sourceItems), [sourceItems]);
   const natureOptionsBase = useMemo(() => buildNatureSelectOptions(sourceItems), [sourceItems]);
@@ -123,6 +153,26 @@ export function ExtratoCaixaAjustesPanel({
   });
 
   const ajustes = data?.data ?? [];
+
+  const totalPages = Math.max(1, Math.ceil(ajustes.length / AJUSTES_ITEMS_PER_PAGE));
+  const showPagination = ajustes.length > AJUSTES_ITEMS_PER_PAGE;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [ajustes.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const paginatedAjustes = useMemo(() => {
+    const start = (currentPage - 1) * AJUSTES_ITEMS_PER_PAGE;
+    return ajustes.slice(start, start + AJUSTES_ITEMS_PER_PAGE);
+  }, [ajustes, currentPage]);
+
+  const rangeStart =
+    ajustes.length === 0 ? 0 : (currentPage - 1) * AJUSTES_ITEMS_PER_PAGE + 1;
+  const rangeEnd = Math.min(currentPage * AJUSTES_ITEMS_PER_PAGE, ajustes.length);
 
   const refetchAjustes = useCallback(async () => {
     await queryClient.refetchQueries({ queryKey: ['extrato-caixa-ajustes'] });
@@ -192,139 +242,226 @@ export function ExtratoCaixaAjustesPanel({
 
   return (
     <>
-      <Card>
-        <CardHeader className="border-b border-gray-200 px-4 py-4 dark:border-gray-700 sm:px-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <SlidersHorizontal className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden />
-              <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                  Ajustes manuais
-                </h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Correções permanentes somadas ao extrato do TOTVS (resumos e listagem).
-                </p>
+      <Card className="w-full overflow-hidden">
+        <CardHeader className={expanded ? 'border-b-0 pb-1' : 'border-b-0 pb-4'}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <AjustesBlockIcon />
+              <div className="min-w-0 flex-1">
+                <h3 className="text-lg font-semibold leading-tight text-gray-900 dark:text-gray-100">
+                  Ajustes Manuais
+                </h3>
+                {expanded ? (
+                  <p className="text-sm leading-snug text-gray-600 dark:text-gray-400">
+                    Correções permanentes somadas ao extrato do TOTVS (resumos e listagem)
+                  </p>
+                ) : (
+                  <p className="text-sm leading-snug text-gray-500 dark:text-gray-400">
+                    {isLoading
+                      ? 'Carregando...'
+                      : ajustes.length === 0
+                        ? 'Nenhum cadastrado'
+                        : `${ajustes.length} ${ajustes.length === 1 ? 'ajuste cadastrado' : 'ajustes cadastrados'}`}
+                  </p>
+                )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600"
-            >
-              <Plus className="h-4 w-4" />
-              Novo ajuste
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {expanded ? (
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Novo ajuste</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                aria-expanded={expanded}
+                aria-controls="extrato-ajustes-panel-content"
+                title={expanded ? 'Minimizar' : 'Maximizar'}
+              >
+                {expanded ? (
+                  <ChevronUp className="h-5 w-5" aria-hidden />
+                ) : (
+                  <ChevronDown className="h-5 w-5" aria-hidden />
+                )}
+                <span className="sr-only">{expanded ? 'Minimizar seção' : 'Maximizar seção'}</span>
+              </button>
+            </div>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
+        {expanded ? (
+        <CardContent id="extrato-ajustes-panel-content">
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-gray-500 dark:text-gray-400">
+            <div className="flex items-center justify-center gap-2 py-12 text-gray-500 dark:text-gray-400">
               <Loader2 className="h-5 w-5 animate-spin" />
               Carregando ajustes...
             </div>
           ) : isError ? (
-            <div className="flex items-start gap-2 px-6 py-8 text-sm text-red-600 dark:text-red-400">
+            <div className="flex items-start gap-2 py-8 text-sm text-red-600 dark:text-red-400">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
               {(error as Error)?.message || 'Erro ao carregar ajustes.'}
             </div>
           ) : ajustes.length === 0 ? (
-            <p className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-              Nenhum ajuste manual cadastrado. Clique em &quot;Novo ajuste&quot; para incluir uma
-              correção.
-            </p>
+            <div className="px-6 py-12 text-center">
+              <p className="text-gray-600 dark:text-gray-400">
+                Nenhum ajuste manual cadastrado
+              </p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-500">
+                Clique em &quot;Novo ajuste&quot; para incluir uma correção
+              </p>
+            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-[56rem] w-full text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Data
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Centro de custo
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Natureza
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Filial
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Observação
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Valor
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Ações
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {ajustes.map((ajuste) => (
-                    <tr key={ajuste.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                      <td className="whitespace-nowrap px-4 py-3 text-gray-900 dark:text-gray-100">
-                        {formatDateBr(ajuste.dataCompensacao)}
-                      </td>
-                      <td
-                        className="max-w-[12rem] truncate px-4 py-3 text-gray-700 dark:text-gray-300"
-                        title={ajuste.ccusto || undefined}
+            <>
+              <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                <span>
+                  Mostrando {rangeStart} a {rangeEnd} de {ajustes.length} ajustes
+                </span>
+                {showPagination ? (
+                  <span>
+                    Página {currentPage} de {totalPages}
+                  </span>
+                ) : null}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[56rem] text-sm">
+                  <thead className="border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                      <th className={`${AJUSTE_TH} text-left`}>Data</th>
+                      <th className={`${AJUSTE_TH} text-left`}>Centro de custo</th>
+                      <th className={`${AJUSTE_TH} text-left`}>Natureza</th>
+                      <th className={`${AJUSTE_TH} text-left`}>Filial</th>
+                      <th className={`${AJUSTE_TH} text-left`}>Observação</th>
+                      <th className={`${AJUSTE_TH} text-right`}>Valor</th>
+                      <th className={`${AJUSTE_TH} text-right`}>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {paginatedAjustes.map((ajuste) => (
+                      <tr
+                        key={ajuste.id}
+                        className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
                       >
-                        {ajuste.ccusto || '—'}
-                      </td>
-                      <td
-                        className="max-w-[12rem] truncate px-4 py-3 text-gray-700 dark:text-gray-300"
-                        title={ajuste.natureza || undefined}
-                      >
-                        {ajuste.natureza || '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-gray-700 dark:text-gray-300">
-                        {formatFilialLabel(ajuste.codFilial)}
-                      </td>
-                      <td
-                        className="max-w-[14rem] truncate px-4 py-3 text-gray-700 dark:text-gray-300"
-                        title={ajuste.observacao || undefined}
-                      >
-                        {ajuste.observacao?.trim() || '—'}
-                      </td>
-                      <td
-                        className={`whitespace-nowrap px-4 py-3 text-right tabular-nums font-medium ${
-                          ajuste.valor >= 0
-                            ? 'text-green-700 dark:text-green-300'
-                            : 'text-red-600 dark:text-red-400'
+                        <td
+                          className={`${AJUSTE_TD} whitespace-nowrap text-gray-900 dark:text-gray-100`}
+                        >
+                          {formatDateBr(ajuste.dataCompensacao)}
+                        </td>
+                        <td
+                          className={`${AJUSTE_TD} max-w-[12rem] truncate text-gray-900 dark:text-gray-100`}
+                          title={ajuste.ccusto || undefined}
+                        >
+                          {ajuste.ccusto || '—'}
+                        </td>
+                        <td
+                          className={`${AJUSTE_TD} max-w-[12rem] truncate text-gray-900 dark:text-gray-100`}
+                          title={ajuste.natureza || undefined}
+                        >
+                          {ajuste.natureza || '—'}
+                        </td>
+                        <td
+                          className={`${AJUSTE_TD} whitespace-nowrap text-gray-900 dark:text-gray-100`}
+                        >
+                          {formatFilialLabel(ajuste.codFilial)}
+                        </td>
+                        <td
+                          className={`${AJUSTE_TD} max-w-[14rem] truncate text-gray-700 dark:text-gray-300`}
+                          title={ajuste.observacao || undefined}
+                        >
+                          {ajuste.observacao?.trim() || '—'}
+                        </td>
+                        <td
+                          className={`${AJUSTE_TD} whitespace-nowrap text-right tabular-nums font-medium ${
+                            ajuste.valor >= 0
+                              ? 'text-green-700 dark:text-green-300'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}
+                        >
+                          {formatCurrency(ajuste.valor)}
+                        </td>
+                        <td className={`${AJUSTE_TD} whitespace-nowrap text-right`}>
+                          <div className="inline-flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openEdit(ajuste)}
+                              className="rounded-md p-2 text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                              title="Editar"
+                              aria-label="Editar ajuste"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(ajuste)}
+                              className="rounded-md p-2 text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                              title="Excluir"
+                              aria-label="Excluir ajuste"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {showPagination ? (
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                  >
+                    Anterior
+                  </button>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNumber: number;
+                    if (totalPages <= 5) {
+                      pageNumber = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNumber = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNumber = totalPages - 4 + i;
+                    } else {
+                      pageNumber = currentPage - 2 + i;
+                    }
+                    const isActive = pageNumber === currentPage;
+                    return (
+                      <button
+                        key={pageNumber}
+                        type="button"
+                        onClick={() => setCurrentPage(pageNumber)}
+                        className={`min-w-[2.25rem] rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                          isActive
+                            ? 'bg-red-600 text-white'
+                            : 'border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
                         }`}
                       >
-                        {formatCurrency(ajuste.valor)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right">
-                        <div className="inline-flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(ajuste)}
-                            className="rounded-md p-2 text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                            title="Editar"
-                            aria-label="Editar ajuste"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(ajuste)}
-                            className="rounded-md p-2 text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                            title="Excluir"
-                            aria-label="Excluir ajuste"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        {pageNumber}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                  >
+                    Próxima
+                  </button>
+                </div>
+              ) : null}
+            </>
           )}
         </CardContent>
+        ) : null}
       </Card>
 
       <Modal
@@ -339,6 +476,11 @@ export function ExtratoCaixaAjustesPanel({
           onSubmit={(e) => {
             e.preventDefault();
             setFormError(null);
+            const valorNum = parseAjusteValorInput(form.valor);
+            if (Number.isNaN(valorNum)) {
+              setFormError('Informe um valor válido para a correção.');
+              return;
+            }
             saveMutation.mutate();
           }}
         >
@@ -462,16 +604,23 @@ export function ExtratoCaixaAjustesPanel({
             <label htmlFor="ajuste-valor" className={LABEL_CLASS}>
               Valor da correção * (positivo = entrada, negativo = saída)
             </label>
-            <input
-              id="ajuste-valor"
-              type="text"
-              inputMode="decimal"
-              required
-              value={form.valor}
-              onChange={(e) => setForm((f) => ({ ...f, valor: e.target.value }))}
-              placeholder="Ex.: -1500,50 ou 2000"
-              className={INPUT_CLASS}
-            />
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                R$
+              </span>
+              <input
+                id="ajuste-valor"
+                type="text"
+                inputMode="decimal"
+                required
+                value={form.valor}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, valor: maskAjusteValorInput(e.target.value) }))
+                }
+                placeholder="0,00"
+                className={`${INPUT_CLASS} pl-10`}
+              />
+            </div>
           </div>
 
           <div>

@@ -12,7 +12,7 @@ import { COMPANIES_LIST } from '@/constants/payrollFilters';
 import { useCostCenters } from '@/hooks/useCostCenters';
 
 export default function FinanceiroPage() {
-  const { costCentersList } = useCostCenters();
+  const { costCenters } = useCostCenters();
   const currentDate = new Date();
   const currentMonth = currentDate.getMonth() + 1;
   const currentYear = currentDate.getFullYear();
@@ -256,9 +256,12 @@ export default function FinanceiroPage() {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
                   >
                     <option value="">Todos os centros de custo</option>
-                    {costCentersList.map((costCenter) => (
-                      <option key={costCenter} value={costCenter}>
-                        {costCenter}
+                    {costCenters.map((cc, index) => (
+                      <option
+                        key={cc.id ?? `${cc.code}-${index}`}
+                        value={cc.value}
+                      >
+                        {cc.label}
                       </option>
                     ))}
                   </select>

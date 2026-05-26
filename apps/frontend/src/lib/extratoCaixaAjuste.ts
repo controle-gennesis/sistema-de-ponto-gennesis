@@ -160,6 +160,62 @@ export type ExtratoCaixaAjusteForm = {
   observacao: string;
 };
 
+/** Converte texto do campo (pt-BR, opcionalmente negativo) para número. */
+export function parseAjusteValorInput(v: string): number {
+  const trimmed = String(v ?? '').trim();
+  if (!trimmed || trimmed === '-') return NaN;
+  const negative = trimmed.startsWith('-');
+  const normalized = trimmed
+    .replace(/[R$\s]/g, '')
+    .replace(/^-/, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
+  if (!normalized) return NaN;
+  const n = parseFloat(normalized);
+  if (Number.isNaN(n)) return NaN;
+  return negative ? -Math.abs(n) : n;
+}
+
+/** Formata número (ou string já digitada) para exibição no input. */
+export function formatAjusteValorInput(v: string | number | null | undefined): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'number') {
+    if (v === 0) return '';
+    const abs = Math.abs(v);
+    const formatted = abs.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    return v < 0 ? `-${formatted}` : formatted;
+  }
+  const trimmed = String(v).trim();
+  if (!trimmed || trimmed === '-') return trimmed === '-' ? '-' : '';
+  const n = parseAjusteValorInput(trimmed);
+  if (Number.isNaN(n) || n === 0) return '';
+  const abs = Math.abs(n);
+  const formatted = abs.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  return n < 0 ? `-${formatted}` : formatted;
+}
+
+/** Máscara monetária pt-BR enquanto digita (centavos); aceita sinal negativo no início. */
+export function maskAjusteValorInput(raw: string): string {
+  const trimmed = raw.trim();
+  const negative = trimmed.startsWith('-');
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) {
+    return negative ? '-' : '';
+  }
+  const amount = Number(digits) / 100;
+  const formatted = amount.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  return negative ? `-${formatted}` : formatted;
+}
+
 export const EMPTY_AJUSTE_FORM: ExtratoCaixaAjusteForm = {
   dataCompensacao: '',
   codCCusto: '',
@@ -207,7 +263,7 @@ export function ajusteToForm(ajuste: ExtratoCaixaAjuste): ExtratoCaixaAjusteForm
     natureza: ajuste.natureza,
     codFilial: ajuste.codFilial != null ? String(ajuste.codFilial) : '',
     fornecedor: fornecedorSelectValueFromAjuste(ajuste.fornecedor),
-    valor: String(ajuste.valor),
+    valor: formatAjusteValorInput(ajuste.valor),
     observacao: ajuste.observacao ?? ''
   };
 }

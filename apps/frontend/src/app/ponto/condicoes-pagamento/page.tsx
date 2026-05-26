@@ -1,15 +1,20 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CreditCard, Plus, Edit, Trash2, Search } from 'lucide-react';
+import { CreditCard, Plus, Edit, Trash2, Search, X, MoreVertical } from 'lucide-react';
+
+const ROW_ACTION_MENU_WIDTH_PX = 224;
+const ITEMS_PER_PAGE = 20;
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { deletePaymentCondition } from '@/lib/paymentConditions';
 import {
   type PaymentConditionRow,
   formatParcelSummary,
@@ -20,6 +25,12 @@ export default function CondicoesPagamentoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowActionMenu, setRowActionMenu] = useState<{
+    rowId: string;
+    top: number;
+    left: number;
+  } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<PaymentConditionRow | null>(null);
   const [formLabel, setFormLabel] = useState('');
@@ -59,11 +70,61 @@ export default function CondicoesPagamentoPage() {
     }
   });
 
-  const filtered = (listData || []).filter((r) => {
-    if (!searchTerm.trim()) return true;
-    const q = searchTerm.toLowerCase();
-    return r.label.toLowerCase().includes(q) || r.code.toLowerCase().includes(q);
-  });
+  const filtered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return (listData || []).filter((r) => {
+      if (!q) return true;
+      return r.label.toLowerCase().includes(q) || r.code.toLowerCase().includes(q);
+    });
+  }, [listData, searchTerm]);
+
+  const totalFiltered = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedRows = filtered.slice(startIndex, endIndex);
+  const startItem = totalFiltered === 0 ? 0 : startIndex + 1;
+  const endItem = Math.min(endIndex, totalFiltered);
+  const isListEmpty = !isLoading && totalFiltered === 0;
+
+  const rowForActionMenu = rowActionMenu
+    ? filtered.find((r) => r.id === rowActionMenu.rowId) ?? null
+    : null;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    if (!rowActionMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRowActionMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [rowActionMenu]);
+
+  useEffect(() => {
+    if (rowActionMenu && !filtered.some((r) => r.id === rowActionMenu.rowId)) {
+      setRowActionMenu(null);
+    }
+  }, [rowActionMenu, filtered]);
+
+  const modalOpen = showForm || deleteId != null;
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    document.body.classList.add('modal-open');
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [modalOpen]);
 
   const createMutation = useMutation({
     mutationFn: async (body: {
@@ -111,16 +172,19 @@ export default function CondicoesPagamentoPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.delete(`/payment-conditions/${id}`);
-    },
+    mutationFn: deletePaymentCondition,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payment-conditions'] });
       setDeleteId(null);
+      setRowActionMenu(null);
       toast.success('Condição excluída');
     },
     onError: (err: any) => toast.error(err.response?.data?.message || 'Erro ao excluir')
   });
+
+  const handleDelete = (id: string) => {
+    deleteMutation.mutate(id);
+  };
 
   const resetForm = () => {
     setFormLabel('');
@@ -165,118 +229,302 @@ export default function CondicoesPagamentoPage() {
   return (
     <ProtectedRoute route="/ponto/condicoes-pagamento">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6 max-w-5xl mx-auto">
-          <div className="text-center sm:text-left">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center justify-center sm:justify-start gap-3">
-              <CreditCard className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+        <div className="space-y-6">
+          <div className="text-center">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
               Condições de Pagamento
             </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
               Cadastro usado na criação e edição de ordens de compra (à vista e boleto).
             </p>
           </div>
 
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="search"
-                  placeholder="Buscar por nome ou código..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                />
+          <Card className="w-full">
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <CreditCard className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Condições de pagamento
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Gerencie condições à vista e boleto para ordens de compra
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="search"
+                      placeholder="Buscar por nome ou código..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {searchTerm ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(null);
+                      resetForm();
+                      setShowForm(true);
+                    }}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova condição</span>
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(null);
-                  resetForm();
-                  setShowForm(true);
-                }}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                <Plus className="w-4 h-4" />
-                Nova condição
-              </button>
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <Loading message="Carregando condições..." />
+                <div className="py-8 text-center">
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="loading-spinner h-6 w-6" />
+                    <span className="text-gray-600 dark:text-gray-400">Carregando condições...</span>
+                  </div>
+                </div>
+              ) : isListEmpty ? (
+                <div className="py-8 text-center">
+                  <CreditCard className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
+                  <p className="text-gray-600 dark:text-gray-400">Nenhuma condição de pagamento encontrada</p>
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
+                    {searchTerm.trim() ? 'Tente ajustar a busca' : 'Cadastre uma nova condição para começar'}
+                  </p>
+                </div>
               ) : (
+              <>
+                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                  <span>
+                    Mostrando {startItem} a {endItem} de {totalFiltered}{' '}
+                    {totalFiltered === 1 ? 'condição' : 'condições'}
+                  </span>
+                  <span>
+                    Página {currentPage} de {totalPages}
+                  </span>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-gray-700 text-left text-gray-600 dark:text-gray-400">
-                        <th className="py-3 pr-4">Nome</th>
-                        <th className="py-3 pr-4">Parcelas / prazos</th>
-                        <th className="py-3 pr-4">Código</th>
-                        <th className="py-3 pr-4">Tipo</th>
-                        <th className="py-3 pr-4">Ordem</th>
-                        <th className="py-3 pr-4">Ativo</th>
-                        <th className="py-3 pr-4">Sistema</th>
-                        <th className="py-3 text-right">Ações</th>
+                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Nome
+                        </th>
+                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Parcelas / prazos
+                        </th>
+                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Código
+                        </th>
+                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Tipo
+                        </th>
+                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Ordem
+                        </th>
+                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Ativo
+                        </th>
+                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Sistema
+                        </th>
+                        <th className="px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          Ação
+                        </th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {filtered.length === 0 ? (
-                        <tr>
-                          <td colSpan={8} className="px-3 py-10 text-center sm:px-6">
-                            <div className="text-gray-500 dark:text-gray-400">
-                              <p className="font-medium text-gray-700 dark:text-gray-300">
-                                Nenhuma condição de pagamento encontrada.
-                              </p>
-                              <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                      {paginatedRows.map((r) => (
+                        <tr
+                          key={r.id}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        >
+                          <td className="px-3 py-4 font-medium text-gray-900 dark:text-gray-100 sm:px-6">
+                            {r.label}
+                          </td>
+                          <td className="max-w-[14rem] px-3 py-4 text-xs text-gray-600 dark:text-gray-400 sm:px-6">
+                            {formatParcelSummary(r.parcelCount ?? 1, r.parcelDueDays) || '—'}
+                          </td>
+                          <td className="px-3 py-4 font-mono text-xs text-gray-600 dark:text-gray-400 sm:px-6">
+                            {r.code}
+                          </td>
+                          <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
+                            {r.paymentType === 'AVISTA' ? 'À vista' : 'Boleto'}
+                          </td>
+                          <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">{r.sortOrder}</td>
+                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                            {r.isActive ? 'Sim' : 'Não'}
+                          </td>
+                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                            {r.isSystem ? 'Sim' : 'Não'}
+                          </td>
+                          <td className="px-3 py-4 text-right sm:px-6">
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                  setRowActionMenu((prev) => {
+                                    if (prev?.rowId === r.id) return null;
+                                    let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
+                                    left = Math.max(
+                                      8,
+                                      Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8)
+                                    );
+                                    return { rowId: r.id, top: rect.bottom + 4, left };
+                                  });
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                aria-label="Menu de ações"
+                                aria-expanded={rowActionMenu?.rowId === r.id}
+                                aria-haspopup="menu"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
                             </div>
                           </td>
                         </tr>
-                      ) : (
-                        filtered.map((r) => (
-                        <tr key={r.id} className="border-b border-gray-100 dark:border-gray-800/80">
-                          <td className="py-3 pr-4 text-gray-900 dark:text-gray-100 font-medium">{r.label}</td>
-                          <td className="py-3 pr-4 text-gray-600 dark:text-gray-400 text-xs max-w-[14rem]">
-                            {formatParcelSummary(r.parcelCount ?? 1, r.parcelDueDays) || '—'}
-                          </td>
-                          <td className="py-3 pr-4 text-gray-600 dark:text-gray-400 font-mono text-xs">{r.code}</td>
-                          <td className="py-3 pr-4">{r.paymentType === 'AVISTA' ? 'À vista' : 'Boleto'}</td>
-                          <td className="py-3 pr-4">{r.sortOrder}</td>
-                          <td className="py-3 pr-4">{r.isActive ? 'Sim' : 'Não'}</td>
-                          <td className="py-3 pr-4">{r.isSystem ? 'Sim' : 'Não'}</td>
-                          <td className="py-3 text-right whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={() => openEdit(r)}
-                              className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
-                              title="Editar"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            {!r.isSystem && (
-                              <button
-                                type="button"
-                                onClick={() => setDeleteId(r.id)}
-                                className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                        ))
-                      )}
+                      ))}
                     </tbody>
                   </table>
                 </div>
+
+                {totalPages > 1 && (
+                  <div className="mt-6 flex items-center justify-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                    >
+                      Anterior
+                    </button>
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      const pageNumber = i + 1;
+                      const isActive = pageNumber === currentPage;
+                      return (
+                        <button
+                          key={pageNumber}
+                          type="button"
+                          onClick={() => setCurrentPage(pageNumber)}
+                          className={`rounded-md px-3 py-2 text-sm font-medium ${
+                            isActive
+                              ? 'bg-red-600 text-white'
+                              : 'border border-gray-300 bg-white text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
+                          }`}
+                        >
+                          {pageNumber}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                )}
+
+                {rowActionMenu &&
+                  rowForActionMenu &&
+                  typeof document !== 'undefined' &&
+                  createPortal(
+                    <>
+                      <div
+                        className="fixed inset-0 z-[1050]"
+                        aria-hidden
+                        onClick={() => setRowActionMenu(null)}
+                      />
+                      <div
+                        role="menu"
+                        className="fixed z-[1051] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                        style={{ top: rowActionMenu.top, left: rowActionMenu.left }}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRowActionMenu(null);
+                            openEdit(rowForActionMenu);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                          <span>Editar</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRowActionMenu(null);
+                            if (rowForActionMenu.isSystem) {
+                              toast.error('Condição padrão do sistema não pode ser excluída.');
+                              return;
+                            }
+                            setDeleteId(rowForActionMenu.id);
+                          }}
+                          className={`flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
+                            rowForActionMenu.isSystem
+                              ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                              : 'text-gray-700 dark:text-gray-300'
+                          }`}
+                          title={
+                            rowForActionMenu.isSystem
+                              ? 'Condição do sistema não pode ser excluída'
+                              : 'Excluir condição'
+                          }
+                        >
+                          <Trash2
+                            className={`h-4 w-4 shrink-0 ${
+                              rowForActionMenu.isSystem
+                                ? 'text-gray-400 dark:text-gray-500'
+                                : 'text-red-600 dark:text-red-400'
+                            }`}
+                          />
+                          <span>Excluir</span>
+                        </button>
+                      </div>
+                    </>,
+                    document.body
+                  )}
+              </>
               )}
             </CardContent>
           </Card>
 
           {showForm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="absolute inset-0 bg-black/50" onClick={() => setShowForm(false)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/50"
+                aria-hidden
+                onClick={() => {
+                  setShowForm(false);
+                  setEditing(null);
+                  resetForm();
+                }}
+              />
+              <div className="relative z-[1101] max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
                   {editing ? 'Editar condição' : 'Nova condição'}
                 </h3>
@@ -465,21 +713,24 @@ export default function CondicoesPagamentoPage() {
           )}
 
           {deleteId && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="absolute inset-0 bg-black/50" onClick={() => setDeleteId(null)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full p-6">
-                <p className="text-gray-900 dark:text-gray-100 mb-4">Excluir esta condição?</p>
+            <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setDeleteId(null)} />
+              <div className="relative z-[1101] w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+                <p className="mb-4 text-gray-900 dark:text-gray-100">Excluir esta condição de pagamento?</p>
+                <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                  Esta ação não pode ser desfeita.
+                </p>
                 <div className="flex justify-end gap-2">
                   <button type="button" onClick={() => setDeleteId(null)} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
                     Cancelar
                   </button>
                   <button
                     type="button"
-                    onClick={() => deleteMutation.mutate(deleteId)}
+                    onClick={() => deleteId && handleDelete(deleteId)}
                     disabled={deleteMutation.isPending}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg"
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg disabled:opacity-50"
                   >
-                    Excluir
+                    {deleteMutation.isPending ? 'Excluindo...' : 'Excluir'}
                   </button>
                 </div>
               </div>

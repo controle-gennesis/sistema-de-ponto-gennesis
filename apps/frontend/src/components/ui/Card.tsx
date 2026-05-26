@@ -41,14 +41,18 @@ export const CardHeader: React.FC<CardHeaderProps> = ({ children, className }) =
   );
 };
 
-export interface CardContentProps {
+export interface CardContentProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
 }
 
-export const CardContent: React.FC<CardContentProps> = ({ children, className }) => {
+export const CardContent: React.FC<CardContentProps> = ({
+  children,
+  className,
+  ...rest
+}) => {
   return (
-    <div className={clsx('card-content pt-4', className)}>
+    <div className={clsx('card-content pt-4', className)} {...rest}>
       {children}
     </div>
   );

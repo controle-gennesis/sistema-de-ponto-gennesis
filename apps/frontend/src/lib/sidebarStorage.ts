@@ -1,4 +1,5 @@
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
+const SIDEBAR_SELECTED_MODULE_KEY = 'sidebar-selected-module-id';
 
 export function readSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
@@ -14,6 +15,24 @@ export function writeSidebarCollapsed(collapsed: boolean): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, JSON.stringify(collapsed));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+export function readSelectedModuleId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return sessionStorage.getItem(SIDEBAR_SELECTED_MODULE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function writeSelectedModuleId(moduleId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(SIDEBAR_SELECTED_MODULE_KEY, moduleId);
   } catch {
     /* ignore quota / private mode */
   }

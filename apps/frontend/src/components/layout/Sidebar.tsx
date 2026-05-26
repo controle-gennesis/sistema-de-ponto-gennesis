@@ -63,7 +63,12 @@ import {
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
-import { readSidebarCollapsed, writeSidebarCollapsed } from '@/lib/sidebarStorage';
+import {
+  readSelectedModuleId,
+  readSidebarCollapsed,
+  writeSelectedModuleId,
+  writeSidebarCollapsed,
+} from '@/lib/sidebarStorage';
 
 const pk = pathToModuleKey;
 import { useTheme } from '@/context/ThemeContext';
@@ -93,11 +98,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [sidebarHydrated, setSidebarHydrated] = useState(false);
-  const [selectedModuleId, setSelectedModuleId] = useState<string>('main');
+  const [selectedModuleId, setSelectedModuleId] = useState<string>(
+    () => readSelectedModuleId() ?? 'main'
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const tier2Visible = !isCollapsed || isOpen;
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
+  /** true quando o usuário clicou num módulo no rail sem mudar de rota */
+  const userPickedModuleRef = useRef(false);
+  const prevPathnameRef = useRef(pathname);
   const router = useRouter();
   const {
     permissions,
@@ -401,10 +411,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro'))
           },
           {
-            name: 'Financeiro',
+            name: 'Pagamento da Folha',
             href: '/ponto/financeiro',
             icon: DollarSign,
-            description: 'Gerar borderô e CNAB400 para pagamentos',
+            description: 'Borderô em PDF e remessa CNAB400 da folha',
             permission: isAdministrator || can(pk('/ponto/financeiro'))
           },
         ]
@@ -427,13 +437,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: LayoutDashboard,
             description: 'Visão consolidada de todos os contratos',
             permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
-          },
-          {
-            name: 'Pagamento da Folha',
-            href: '/ponto/financeiro',
-            icon: DollarSign,
-            description: 'Borderô em PDF e remessa CNAB400 da folha',
-            permission: isAdministrator || can(pk('/ponto/financeiro'))
           },
         ]
       },
@@ -708,8 +711,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     return pathname === href;
   };
 
-  const selectedModule = menuItems.find((c) => c.id === selectedModuleId) ?? menuItems[0];
-
   const activeModuleId = menuItems.find((category) =>
     category.items.some((item) => item.permission && isActive(item.href))
   )?.id;
@@ -717,12 +718,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const onRailFooterRoute = isRailFooterRoute(pathname);
   const onHomeRoute = isHomeRoute(pathname);
 
-  /** Rail: painel aberto → módulo clicado; recolhido → rota ativa; na home recolhida → nenhum (só logo) */
-  const railModuleActiveId: string | null = tier2Visible
+  // Ao mudar de rota, prioriza o módulo da URL (evita flash em "Principal" após remount do layout)
+  if (pathname !== prevPathnameRef.current) {
+    prevPathnameRef.current = pathname;
+    userPickedModuleRef.current = false;
+    if (activeModuleId && activeModuleId !== selectedModuleId) {
+      setSelectedModuleId(activeModuleId);
+    }
+  }
+
+  const displayedModuleId = userPickedModuleRef.current
     ? selectedModuleId
-    : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : selectedModuleId);
+    : (activeModuleId ?? selectedModuleId);
+
+  const selectedModule = menuItems.find((c) => c.id === displayedModuleId) ?? menuItems[0];
+
+  /** Rail: painel aberto → módulo exibido; recolhido → rota ativa; na home recolhida → nenhum (só logo) */
+  const railModuleActiveId: string | null = tier2Visible
+    ? displayedModuleId
+    : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : displayedModuleId);
 
   const handleCollapseSidebar = () => {
+    userPickedModuleRef.current = false;
     if (activeModuleId) {
       setSelectedModuleId(activeModuleId);
     } else if (!onHomeRoute && onRailFooterRoute && menuItems[0]) {
@@ -748,13 +765,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     }
   }, [pathname, menuItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  React.useEffect(() => {
+    writeSelectedModuleId(selectedModuleId);
+  }, [selectedModuleId]);
+
   const handleSelectModule = (categoryId: string) => {
     const panelOpen = !isCollapsed || isOpen;
-    if (panelOpen && selectedModuleId === categoryId) {
+    if (panelOpen && displayedModuleId === categoryId) {
       setIsCollapsed(true);
       setIsOpen(false);
       return;
     }
+    userPickedModuleRef.current = true;
     setSelectedModuleId(categoryId);
     if (isCollapsed) setIsCollapsed(false);
   };

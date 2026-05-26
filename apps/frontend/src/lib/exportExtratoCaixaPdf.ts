@@ -318,7 +318,7 @@ function drawStatsCards(
   const gap = 4;
   const cardW = (contentW - gap * 2) / 3;
   const cardH = 22;
-  const labels = ['Saídas', 'Entradas', 'Saldo líquido'];
+  const labels = ['Saídas', 'Entradas', 'Valor'];
   const values = [
     formatCurrency(stats.totalSaida),
     formatCurrency(stats.totalEntrada),

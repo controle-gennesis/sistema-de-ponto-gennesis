@@ -161,6 +161,9 @@ export interface PurchaseOrder {
     }>;
   } | null;
   creator?: { id: string; name: string };
+  comprasApprovedBy?: string | null;
+  gestorApprovedBy?: string | null;
+  approvedBy?: string | null;
   items: Array<{
     materialRequestItemId?: string | null;
     quantity: number;
@@ -559,28 +562,65 @@ const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> =
 };
 
 const OC_ACTION_MENU_WIDTH_PX = 224;
-/** Altura estimada do menu (itens variam); usada para abrir acima quando perto do fim da página. */
 const OC_ACTION_MENU_MAX_HEIGHT_PX = 360;
+const OC_ACTION_MENU_GAP_PX = 4;
+const OC_ACTION_MENU_VIEWPORT_PAD_PX = 8;
+const OC_ACTION_MENU_MIN_HEIGHT_PX = 96;
 
-function computeOcActionMenuPosition(rect: DOMRect): { top: number; left: number } {
+type OcActionMenuCoords = {
+  top: number;
+  left: number;
+  maxHeight: number;
+  placement: 'below' | 'above';
+};
+
+function computeOcActionMenuPosition(rect: DOMRect): OcActionMenuCoords {
   let left = rect.right - OC_ACTION_MENU_WIDTH_PX;
-  left = Math.max(8, Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - 8));
+  left = Math.max(
+    OC_ACTION_MENU_VIEWPORT_PAD_PX,
+    Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - OC_ACTION_MENU_VIEWPORT_PAD_PX)
+  );
 
-  const spaceBelow = window.innerHeight - rect.bottom - 8;
-  const spaceAbove = rect.top - 8;
-  const openBelow =
-    spaceBelow >= OC_ACTION_MENU_MAX_HEIGHT_PX || spaceBelow >= spaceAbove;
-  const top = openBelow
-    ? rect.bottom + 4
-    : Math.max(8, rect.top - OC_ACTION_MENU_MAX_HEIGHT_PX - 4);
+  const spaceBelow =
+    window.innerHeight - rect.bottom - OC_ACTION_MENU_GAP_PX - OC_ACTION_MENU_VIEWPORT_PAD_PX;
+  const spaceAbove = rect.top - OC_ACTION_MENU_GAP_PX - OC_ACTION_MENU_VIEWPORT_PAD_PX;
 
-  return { top, left };
+  if (spaceBelow >= OC_ACTION_MENU_MIN_HEIGHT_PX || spaceBelow >= spaceAbove) {
+    return {
+      top: rect.bottom + OC_ACTION_MENU_GAP_PX,
+      left,
+      maxHeight: Math.min(OC_ACTION_MENU_MAX_HEIGHT_PX, Math.max(spaceBelow, OC_ACTION_MENU_MIN_HEIGHT_PX)),
+      placement: 'below'
+    };
+  }
+
+  return {
+    top: rect.top - OC_ACTION_MENU_GAP_PX,
+    left,
+    maxHeight: Math.min(OC_ACTION_MENU_MAX_HEIGHT_PX, Math.max(spaceAbove, OC_ACTION_MENU_MIN_HEIGHT_PX)),
+    placement: 'above'
+  };
 }
 
 const OC_MENU_ITEM_CLASS =
   'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700';
 
 const OC_APPROVAL_FLOW_STATUSES = ['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'] as const;
+
+export type OcApprovalListPhase = 'pending' | 'approved_by_me';
+
+const OC_APPROVAL_TABS: OcTab[] = ['compras', 'gestor', 'diretoria'];
+
+function isOcApprovalTab(tab: OcTab): boolean {
+  return OC_APPROVAL_TABS.includes(tab);
+}
+
+function orderApprovedByUserAtTab(order: PurchaseOrder, tab: OcTab, userId: string): boolean {
+  if (tab === 'compras') return order.comprasApprovedBy === userId;
+  if (tab === 'gestor') return order.gestorApprovedBy === userId;
+  if (tab === 'diretoria') return order.approvedBy === userId;
+  return false;
+}
 
 export function OcStyledCheckbox({
   checked,
@@ -628,8 +668,15 @@ export function OcStyledCheckbox({
   );
 }
 
-function embeddedOcEmptyMessage(tab: OcTab, hasSearch: boolean): string {
+function embeddedOcEmptyMessage(
+  tab: OcTab,
+  hasSearch: boolean,
+  approvalListPhase: OcApprovalListPhase
+): string {
   if (hasSearch) return 'Nenhuma ordem corresponde à busca nesta fase';
+  if (approvalListPhase === 'approved_by_me') {
+    return 'Nenhuma ordem que você tenha aprovado nesta fase.';
+  }
   if (tab === 'FINALIZADAS') return 'Nenhuma OC finalizada com os filtros atuais';
   if (tab === 'ATTACH_BOLETO') return 'Nenhuma OC aguardando anexo de boleto';
   if (tab === 'PROOF_VALIDATION') return 'Nenhuma OC aguardando validação do comprovante';
@@ -637,6 +684,13 @@ function embeddedOcEmptyMessage(tab: OcTab, hasSearch: boolean): string {
   if (tab === 'ATTACH_NF') return 'Nenhuma OC na fase de anexar NF';
   if (tab === 'compras') return 'Nenhuma ordem aguardando aprovação de compras';
   return 'Nenhuma ordem de compra nesta fase';
+}
+
+function approvalTabSubtitle(tab: OcTab, phase: OcApprovalListPhase): string {
+  if (phase === 'approved_by_me') {
+    return 'Ordens que você já aprovou nesta fase';
+  }
+  return EMBEDDED_OC_TAB_META[tab].subtitle;
 }
 
 export function OcPurchaseOrdersPanel({
@@ -665,6 +719,8 @@ export function OcPurchaseOrdersPanel({
   const showOcApprovalActions = (status: string) =>
     OC_APPROVAL_FLOW_STATUSES.includes(status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]) &&
     canActOnOcApproval(status);
+  const [approvalListPhase, setApprovalListPhase] = useState<OcApprovalListPhase>('pending');
+  const [isApprovalFiltersModalOpen, setIsApprovalFiltersModalOpen] = useState(false);
   const [internalActiveTab, setInternalActiveTab] = useState<OcTab>('compras');
   const activeTab = hideTabs ? (activeTabProp ?? 'compras') : internalActiveTab;
   const setActiveTab = (t: OcTab) => {
@@ -679,9 +735,9 @@ export function OcPurchaseOrdersPanel({
   const [orderDetailLoadingId, setOrderDetailLoadingId] = useState<string | null>(null);
   const [cnabSelectedIds, setCnabSelectedIds] = useState<Set<string>>(() => new Set());
   const [cnabGenerating, setCnabGenerating] = useState(false);
-  const [ocActionMenu, setOcActionMenu] = useState<{ orderId: string; top: number; left: number } | null>(
-    null
-  );
+  const [ocActionMenu, setOcActionMenu] = useState<
+    ({ orderId: string } & OcActionMenuCoords) | null
+  >(null);
   const [proofFileDraft, setProofFileDraft] = useState<File | null>(null);
   const [financialEntryModalOpen, setFinancialEntryModalOpen] = useState(false);
   const [editingFinancialEntry, setEditingFinancialEntry] = useState<FinancialControlEntry | null>(null);
@@ -788,6 +844,7 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     }
   });
+  const currentUserId = userData?.data?.id as string | undefined;
 
   const { data: ordersData, isLoading } = useQuery({
     queryKey: ['purchase-orders', 'list-full'],
@@ -1191,12 +1248,29 @@ export function OcPurchaseOrdersPanel({
     [paymentConditionRows]
   );
 
+  const showApprovalPhaseFilter = isOcApprovalTab(activeTab);
+
+  useEffect(() => {
+    setApprovalListPhase('pending');
+  }, [activeTab]);
+
+  const showListApprovalActions =
+    approvalListPhase === 'pending' ? showOcApprovalActions : () => false;
+
   const orders = useMemo(() => {
     if (activeTab === 'compras') {
+      if (approvalListPhase === 'approved_by_me' && currentUserId) {
+        return allOrders.filter((o) => orderApprovedByUserAtTab(o, 'compras', currentUserId));
+      }
       return allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT');
     }
     if (activeTab === 'gestor') {
-      let list = allOrders.filter((o) => o.status === 'PENDING');
+      let list: PurchaseOrder[];
+      if (approvalListPhase === 'approved_by_me' && currentUserId) {
+        list = allOrders.filter((o) => orderApprovedByUserAtTab(o, 'gestor', currentUserId));
+      } else {
+        list = allOrders.filter((o) => o.status === 'PENDING');
+      }
       if (gestorCostCenterIds !== undefined) {
         const allowed = new Set(gestorCostCenterIds);
         list = list.filter((o) => {
@@ -1207,6 +1281,9 @@ export function OcPurchaseOrdersPanel({
       return list;
     }
     if (activeTab === 'diretoria') {
+      if (approvalListPhase === 'approved_by_me' && currentUserId) {
+        return allOrders.filter((o) => orderApprovedByUserAtTab(o, 'diretoria', currentUserId));
+      }
       return allOrders.filter((o) => o.status === 'PENDING_DIRETORIA');
     }
     if (activeTab === 'IN_REVIEW') {
@@ -1246,7 +1323,7 @@ export function OcPurchaseOrdersPanel({
       );
     }
     return allOrders;
-  }, [allOrders, activeTab, gestorCostCenterIds]);
+  }, [allOrders, activeTab, gestorCostCenterIds, approvalListPhase, currentUserId]);
 
   const filteredOrdersBySearch = useMemo(() => {
     const normalizedSearchTerm = normalizeOcSearch(searchTerm);
@@ -1336,7 +1413,6 @@ export function OcPurchaseOrdersPanel({
 
   const displayedOrders = activeTab === 'FINALIZADAS' ? finalizedOrders : filteredOrdersBySearch;
 
-  const currentUserId = userData?.data?.id as string | undefined;
   const userEmployee = userData?.data?.employee as
     | { department?: string | null; position?: string | null }
     | undefined;
@@ -1581,7 +1657,9 @@ export function OcPurchaseOrdersPanel({
   const showToolbarSearch = Boolean(onSearchChange) || activeTab === 'FINALIZADAS';
   const showToolbarCnab = activeTab === 'APPROVED';
   const showToolbarFinalizedExtras = activeTab === 'FINALIZADAS';
-  const showHeaderToolbar = showToolbarSearch || showToolbarCnab || showToolbarFinalizedExtras;
+  const showHeaderToolbar =
+    showToolbarSearch || showToolbarCnab || showToolbarFinalizedExtras || showApprovalPhaseFilter;
+  const hasActiveApprovalPhaseFilter = approvalListPhase !== 'pending';
   const orderForActionMenu = ocActionMenu
     ? displayedOrders.find((o) => o.id === ocActionMenu.orderId)
     : undefined;
@@ -1611,6 +1689,24 @@ export function OcPurchaseOrdersPanel({
               </button>
             ) : null}
           </div>
+        )}
+        {showApprovalPhaseFilter && (
+          <button
+            type="button"
+            onClick={() => setIsApprovalFiltersModalOpen(true)}
+            className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+              hasActiveApprovalPhaseFilter
+                ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+            aria-label="Abrir filtro"
+            title={hasActiveApprovalPhaseFilter ? 'Filtro (status ativo)' : 'Filtro'}
+          >
+            <Filter className="h-4 w-4" />
+            {hasActiveApprovalPhaseFilter ? (
+              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+            ) : null}
+          </button>
         )}
         {showToolbarCnab && (
           <button
@@ -1693,7 +1789,9 @@ export function OcPurchaseOrdersPanel({
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       {integratedMeta.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{integratedMeta.subtitle}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {approvalTabSubtitle(activeTab, approvalListPhase)}
+                    </p>
                   </div>
                 </div>
                 {listHeaderToolbar}
@@ -1744,7 +1842,7 @@ export function OcPurchaseOrdersPanel({
                   <div className="text-center py-8">
                     <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
                     <p className="text-gray-500 dark:text-gray-400">
-                      {embeddedOcEmptyMessage(activeTab, !!searchTerm.trim())}
+                      {embeddedOcEmptyMessage(activeTab, !!searchTerm.trim(), approvalListPhase)}
                     </p>
                     {(effectiveSearchTerm.trim() || hasActiveFinalizedFilters) && activeTab === 'FINALIZADAS' ? (
                       <button
@@ -1768,11 +1866,7 @@ export function OcPurchaseOrdersPanel({
                     ) : null}
                   </div>
                 ) : (
-                <div
-                  className={
-                    isIntegratedFlux ? 'overflow-x-auto [scrollbar-gutter:stable]' : undefined
-                  }
-                >
+                <div className={isIntegratedFlux ? 'overflow-x-auto' : undefined}>
                 <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
@@ -2153,7 +2247,7 @@ export function OcPurchaseOrdersPanel({
                                     )}
                                   </button>
                                 )}
-                                {showOcApprovalActions(o.status) && (
+                                {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
@@ -2163,7 +2257,7 @@ export function OcPurchaseOrdersPanel({
                                     <Check className="w-4 h-4" />
                                   </button>
                                 )}
-                                {showOcApprovalActions(o.status) && (
+                                {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => setCorrectionTarget(o)}
@@ -2173,7 +2267,7 @@ export function OcPurchaseOrdersPanel({
                                     <Wrench className="w-4 h-4" />
                                   </button>
                                 )}
-                                {showOcApprovalActions(o.status) && (
+                                {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -2231,8 +2325,8 @@ export function OcPurchaseOrdersPanel({
                                   const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                                   setOcActionMenu((prev) => {
                                     if (prev?.orderId === o.id) return null;
-                                    const { top, left } = computeOcActionMenuPosition(r);
-                                    return { orderId: o.id, top, left };
+                                    const pos = computeOcActionMenuPosition(r);
+                                    return { orderId: o.id, ...pos };
                                   });
                                 }}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -3702,7 +3796,7 @@ export function OcPurchaseOrdersPanel({
                   Ver mapa de cotação
                 </button>
               )}
-              {showOcApprovalActions(selectedOrder.status) && (
+              {showListApprovalActions(selectedOrder.status) && (
                 <button
                   type="button"
                   onClick={() => approveMutation.mutate({ id: selectedOrder.id, currentStatus: selectedOrder.status })}
@@ -3713,7 +3807,7 @@ export function OcPurchaseOrdersPanel({
                   {approvalLabel(selectedOrder.status)}
                 </button>
               )}
-              {showOcApprovalActions(selectedOrder.status) && (
+              {showListApprovalActions(selectedOrder.status) && (
                 <>
                   <button
                     type="button"
@@ -3792,6 +3886,72 @@ export function OcPurchaseOrdersPanel({
               : `Novo lançamento — ${selectedOrder.orderNumber}`
           }
         />
+      )}
+
+      {isApprovalFiltersModalOpen && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setIsApprovalFiltersModalOpen(false)}
+            aria-hidden
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+              <button
+                type="button"
+                onClick={() => setIsApprovalFiltersModalOpen(false)}
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Fechar filtros"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 px-5 py-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Exibir
+                </label>
+                <select
+                  value={approvalListPhase}
+                  onChange={(e) =>
+                    setApprovalListPhase(e.target.value as OcApprovalListPhase)
+                  }
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="pending">Pendentes de aprovação</option>
+                  <option value="approved_by_me">Aprovadas por mim</option>
+                </select>
+              </div>
+              {approvalListPhase === 'approved_by_me' ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Lista as OCs em que você registrou aprovação nesta fase (compras, gestor ou
+                  diretoria), em qualquer status atual do fluxo.
+                </p>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setApprovalListPhase('pending');
+                  setIsApprovalFiltersModalOpen(false);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsApprovalFiltersModalOpen(false)}
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {isFinalizedFiltersModalOpen && (
@@ -3918,8 +4078,13 @@ export function OcPurchaseOrdersPanel({
             <div className="fixed inset-0 z-[1100]" aria-hidden onClick={() => setOcActionMenu(null)} />
             <div
               role="menu"
-              className="fixed z-[1101] w-56 max-h-[min(70vh,360px)] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-              style={{ top: ocActionMenu.top, left: ocActionMenu.left }}
+              className="fixed z-[1101] w-56 overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              style={{
+                top: ocActionMenu.top,
+                left: ocActionMenu.left,
+                maxHeight: ocActionMenu.maxHeight,
+                transform: ocActionMenu.placement === 'above' ? 'translateY(-100%)' : undefined
+              }}
             >
               <button
                 type="button"
@@ -3984,7 +4149,7 @@ export function OcPurchaseOrdersPanel({
                   <span>Validar comprovante</span>
                 </button>
               )}
-              {showOcApprovalActions(orderForActionMenu.status) && (
+              {showListApprovalActions(orderForActionMenu.status) && (
                 <>
                   <button
                     type="button"

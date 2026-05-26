@@ -816,18 +816,29 @@ export class PurchaseOrderService {
       ...(fillPaymentProofFromLastInstallment || {})
     };
 
+    if (status === 'PENDING' && userId && (st === 'PENDING_COMPRAS' || st === 'DRAFT')) {
+      data.comprasApprovedBy = userId;
+      data.comprasApprovedAt = new Date();
+    }
+
+    if (status === 'PENDING_DIRETORIA' && userId && st === 'PENDING') {
+      data.gestorApprovedBy = userId;
+      data.gestorApprovedAt = new Date();
+    }
+
     if (status === 'APPROVED' && userId) {
       data.approvedBy = userId;
       data.approvedAt = new Date();
     }
 
-    if (
-      status === 'IN_REVIEW' ||
-      status === 'REJECTED' ||
-      status === 'PENDING' ||
-      status === 'PENDING_DIRETORIA' ||
-      (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW')
-    ) {
+    if (status === 'IN_REVIEW' || (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW')) {
+      data.comprasApprovedBy = null;
+      data.comprasApprovedAt = null;
+      data.gestorApprovedBy = null;
+      data.gestorApprovedAt = null;
+      data.approvedBy = null;
+      data.approvedAt = null;
+    } else if (status === 'REJECTED' || status === 'PENDING' || status === 'PENDING_DIRETORIA') {
       data.approvedBy = null;
       data.approvedAt = null;
     }
