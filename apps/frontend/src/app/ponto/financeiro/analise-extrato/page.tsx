@@ -8,16 +8,19 @@ import {
   ArrowUpRight,
   CalendarDays,
   ClipboardList,
+  Eye,
   Filter,
   BookOpen,
   ListPlus,
   Loader2,
   Search,
   Building2,
+  FileDown,
   FileText,
   Wallet,
   X
 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
@@ -26,47 +29,62 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
+import {
+  SEM_CENTRO_CUSTO_KEY,
+  SEM_FORNECEDOR_KEY,
+  SEM_NATUREZA_KEY,
+  ajusteToExtratoItem,
+  isExtratoAjusteManual
+} from '@/lib/extratoCaixaAjuste';
 import { extratoMatchesAnyNatureCodes, normalizeBudgetNatureCode } from '@/lib/budgetNatureMatch';
-type ExtratoCaixaItem = {
-  idxcx: number | null;
-  codColigada: number | null;
-  historico: string;
-  codCxa: string;
-  codCCusto: string;
-  ccusto: string;
-  valor: number;
-  valorBaixa: number;
-  entrada: number;
-  saida: number;
-  codFilial: number | null;
-  data: string | null;
-  dataCompensacao: string | null;
-  codNatFinanceira: string;
-  natureza: string;
-  numeroDocumento: string;
-  fornecedor: string;
-  tipoOperacao: string;
-};
-
-type ExtratoCaixaPathFailure = {
-  path: string;
-  error: string;
-};
-
-type ExtratoCaixaApiResponse = {
-  success: boolean;
-  message?: string;
-  data: {
-    configured: boolean;
-    items: ExtratoCaixaItem[];
-    total: number;
-    configuredYears?: number[];
-    pathFailures?: ExtratoCaixaPathFailure[];
-    message?: string | null;
-  };
-};
+import {
+  exportExtratoCaixaPdf,
+  EXTRATO_RESUMO_TOP_SAIDA,
+  getTopSaidaKeys,
+  pickResumoRowsForPdf,
+  type ExtratoCaixaPdfAjusteRow
+} from '@/lib/exportExtratoCaixaPdf';
+import {
+  buildExtratoResumoPolo,
+  comparePoloKeys,
+  extratoMatchesAnyPoloKeys,
+  poloGroupKey,
+  resolveExtratoPolo
+} from '@/lib/extratoCaixaPolo';
+import {
+  buildExtratoFiltrosDesmarcados,
+  findMatchingExtratoFiltroSalvo,
+  type ExtratoCaixaFiltroPayload,
+  type ExtratoCaixaFiltroSalvo,
+  type ExtratoFiltroAllValues,
+  type ExtratoFiltroLabelMaps
+} from '@/lib/extratoCaixaFiltrosSalvos';
+import { ExtratoCaixaAjustesPanel } from './ExtratoCaixaAjustesPanel';
+import { ExtratoFiltrosDesmarcadosResumo } from './ExtratoFiltrosDesmarcadosResumo';
+import { ExtratoFiltrosSalvosPanel } from './ExtratoFiltrosSalvosPanel';
+import {
+  ExtratoExportPdfModal,
+  type ExtratoPdfNatureMode
+} from './ExtratoExportPdfModal';
+import type { ExtratoCaixaApiResponse, ExtratoCaixaItem } from './extratoCaixaTypes';
 
 const EXTRATO_ITEMS_PER_PAGE = 50;
+
+/** Código da filial no RM → UF exibida no extrato. */
+const FILIAL_UF_POR_CODIGO: Record<number, string> = {
+  1: 'DF',
+  2: 'RS',
+  3: 'RN',
+  4: 'PB',
+  5: 'GO'
+};
+
+function formatFilialLabel(codFilial: number | null): string {
+  if (codFilial == null) return 'Sem filial';
+  const uf = FILIAL_UF_POR_CODIGO[codFilial];
+  if (uf) return `FILIAL ${codFilial} - ${uf}`;
+  return `Filial ${codFilial}`;
+}
 
 function formatCurrency(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -116,6 +134,14 @@ function localDayKey(data: string | null): number | null {
   return new Date(parts.y, parts.m - 1, parts.d).getTime();
 }
 
+function formatIsoDateInputBr(value: string): string {
+  const s = value.trim();
+  if (!s) return '';
+  const parts = s.split('-');
+  if (parts.length !== 3) return s;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
 function parseDateInputToDayKey(value: string): number | null {
   const s = value.trim();
   if (!s) return null;
@@ -135,16 +161,6 @@ function isMultiselectFilterActive(selected: string[], allValues: string[]): boo
   return selected.length > 0 && selected.length < allValues.length;
 }
 
-function extratoMatchesAnyFilialIds(
-  codFilial: number | null,
-  selectedFilialIds: string[],
-  allFilialIds: string[]
-): boolean {
-  if (multiselectFilterShowsAll(selectedFilialIds, allFilialIds)) return true;
-  if (codFilial == null) return false;
-  return selectedFilialIds.includes(String(codFilial));
-}
-
 function extratoMatchesAnyCcCodes(
   codCCusto: string,
   selectedCcCodes: string[],
@@ -152,7 +168,7 @@ function extratoMatchesAnyCcCodes(
 ): boolean {
   if (multiselectFilterShowsAll(selectedCcCodes, allCcCodes)) return true;
   const code = codCCusto.trim();
-  if (!code) return false;
+  if (!code) return selectedCcCodes.includes(SEM_CENTRO_CUSTO_KEY);
   return selectedCcCodes.includes(code);
 }
 
@@ -163,7 +179,7 @@ function extratoMatchesAnyFornecedor(
 ): boolean {
   if (multiselectFilterShowsAll(selected, allFornecedores)) return true;
   const v = fornecedor.trim();
-  if (!v) return false;
+  if (!v) return selected.includes(SEM_FORNECEDOR_KEY);
   return selected.includes(v);
 }
 
@@ -195,6 +211,10 @@ function extratoMatchesAnyNatureCodesFiltered(
   allNatureCodes: string[]
 ): boolean {
   if (multiselectFilterShowsAll(selectedNatureCodes, allNatureCodes)) return true;
+  const code = normalizeBudgetNatureCode(codNatFinanceira);
+  if (!code) {
+    return selectedNatureCodes.includes(SEM_NATUREZA_KEY);
+  }
   return extratoMatchesAnyNatureCodes(codNatFinanceira, selectedNatureCodes);
 }
 
@@ -223,6 +243,674 @@ function itemHasSaida(item: ExtratoCaixaItem): boolean {
 /** Saldo da linha: entrada + saída (saída já vem negativa do SQL). */
 function itemSaldoLinha(item: ExtratoCaixaItem): number {
   return item.entrada + item.saida;
+}
+
+const MESES_CURTOS = [
+  'jan',
+  'fev',
+  'mar',
+  'abr',
+  'mai',
+  'jun',
+  'jul',
+  'ago',
+  'set',
+  'out',
+  'nov',
+  'dez'
+] as const;
+
+type ExtratoResumoRow = {
+  key: string;
+  label: string;
+  totalEntrada: number;
+  totalSaida: number;
+  totalValor: number;
+};
+
+function itemCompensacaoMonthKey(item: ExtratoCaixaItem): string | null {
+  const data = item.dataCompensacao ?? item.data;
+  if (!data) return null;
+  const parts = parseCalendarDateParts(data);
+  if (!parts) return null;
+  return `${parts.y}-${String(parts.m).padStart(2, '0')}`;
+}
+
+function buildExtratoResumoMensal(items: ExtratoCaixaItem[]): ExtratoResumoRow[] {
+  const map = new Map<string, { entrada: number; saida: number; valor: number }>();
+
+  for (const item of items) {
+    const key = itemCompensacaoMonthKey(item);
+    if (!key) continue;
+    const cur = map.get(key) ?? { entrada: 0, saida: 0, valor: 0 };
+    cur.entrada += itemEntrada(item);
+    cur.saida += item.saida;
+    cur.valor += itemSaldoLinha(item);
+    map.set(key, cur);
+  }
+
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([monthKey, totals]) => {
+      const month = Number(monthKey.slice(5, 7));
+      const year = monthKey.slice(0, 4);
+      const short = MESES_CURTOS[month - 1] ?? monthKey;
+      const label = `${short} / ${year}`;
+      return {
+        key: monthKey,
+        label,
+        totalEntrada: totals.entrada,
+        totalSaida: totals.saida,
+        totalValor: totals.valor
+      };
+    });
+}
+
+function ccGroupKey(item: ExtratoCaixaItem): string {
+  const code = item.codCCusto.trim();
+  return code ? code.toUpperCase() : SEM_CENTRO_CUSTO_KEY;
+}
+
+function ccGroupLabel(item: ExtratoCaixaItem): string {
+  const name = item.ccusto.trim();
+  if (name) return name;
+  const code = item.codCCusto.trim();
+  if (!code) return 'Sem centro de custo';
+  return code;
+}
+
+function buildExtratoResumoCentroCusto(items: ExtratoCaixaItem[]): ExtratoResumoRow[] {
+  const map = new Map<
+    string,
+    { label: string; entrada: number; saida: number; valor: number }
+  >();
+
+  for (const item of items) {
+    const key = ccGroupKey(item);
+    const cur = map.get(key) ?? {
+      label: ccGroupLabel(item),
+      entrada: 0,
+      saida: 0,
+      valor: 0
+    };
+    cur.entrada += itemEntrada(item);
+    cur.saida += item.saida;
+    cur.valor += itemSaldoLinha(item);
+    map.set(key, cur);
+  }
+
+  return Array.from(map.entries())
+    .sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
+    .map(([key, totals]) => ({
+      key,
+      label: totals.label,
+      totalEntrada: totals.entrada,
+      totalSaida: totals.saida,
+      totalValor: totals.valor
+    }));
+}
+
+function natureGroupKey(item: ExtratoCaixaItem): string {
+  const code =
+    normalizeBudgetNatureCode(item.codNatFinanceira) || item.codNatFinanceira.trim();
+  return code ? code.toUpperCase() : SEM_NATUREZA_KEY;
+}
+
+function natureGroupLabel(item: ExtratoCaixaItem): string {
+  const name = item.natureza.trim();
+  if (name) return name;
+  const code = item.codNatFinanceira.trim();
+  if (!code) return 'Sem natureza financeira';
+  return code;
+}
+
+function buildExtratoResumoNatureza(items: ExtratoCaixaItem[]): ExtratoResumoRow[] {
+  const map = new Map<
+    string,
+    { label: string; entrada: number; saida: number; valor: number }
+  >();
+
+  for (const item of items) {
+    const key = natureGroupKey(item);
+    const cur = map.get(key) ?? {
+      label: natureGroupLabel(item),
+      entrada: 0,
+      saida: 0,
+      valor: 0
+    };
+    cur.entrada += itemEntrada(item);
+    cur.saida += item.saida;
+    cur.valor += itemSaldoLinha(item);
+    map.set(key, cur);
+  }
+
+  return Array.from(map.entries()).map(([key, totals]) => ({
+    key,
+    label: totals.label,
+    totalEntrada: totals.entrada,
+    totalSaida: totals.saida,
+    totalValor: totals.valor
+  }));
+}
+
+type ExtratoResumoTopExpandLabels = {
+  title: string;
+  rowLabelHeader: string;
+  entityPlural: string;
+  addDropdownLabel: string;
+  addPlaceholder: string;
+  addSearchPlaceholder: string;
+  emptyOptionsMessage: string;
+  emptySearchMessage: string;
+  allVisibleMessage: string;
+  clearAddedLabel: string;
+};
+
+function ExtratoResumoTopExpandSection({
+  allRows,
+  detailItems,
+  getItemGroupKey,
+  labels,
+  icon,
+  dropdownIcon,
+  topLimit = EXTRATO_RESUMO_TOP_SAIDA
+}: {
+  allRows: ExtratoResumoRow[];
+  detailItems: ExtratoCaixaItem[];
+  getItemGroupKey: (item: ExtratoCaixaItem) => string | null;
+  labels: ExtratoResumoTopExpandLabels;
+  icon: React.ReactNode;
+  dropdownIcon: React.ReactNode;
+  topLimit?: number;
+}) {
+  const [extraKeys, setExtraKeys] = useState<string[]>([]);
+
+  const defaultKeys = useMemo(() => getTopSaidaKeys(allRows, topLimit), [allRows, topLimit]);
+
+  useEffect(() => {
+    setExtraKeys((prev) => prev.filter((key) => allRows.some((row) => row.key === key)));
+  }, [allRows]);
+
+  const defaultKeySet = useMemo(() => new Set(defaultKeys), [defaultKeys]);
+
+  const visibleKeySet = useMemo(() => {
+    const keys = new Set(defaultKeys);
+    for (const key of extraKeys) keys.add(key);
+    return keys;
+  }, [defaultKeys, extraKeys]);
+
+  const visibleRows = useMemo(() => {
+    const byKey = new Map(allRows.map((row) => [row.key, row]));
+    const defaultRows = defaultKeys
+      .map((key) => byKey.get(key))
+      .filter((row): row is ExtratoResumoRow => row != null);
+    const extraRows = extraKeys
+      .filter((key) => !defaultKeySet.has(key))
+      .map((key) => byKey.get(key))
+      .filter((row): row is ExtratoResumoRow => row != null)
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+    return [...defaultRows, ...extraRows];
+  }, [allRows, defaultKeys, defaultKeySet, extraKeys]);
+
+  const extraKeySet = useMemo(() => new Set(extraKeys), [extraKeys]);
+
+  /** Inclui itens já adicionados (para desmarcar) e os que ainda podem ser incluídos. */
+  const dropdownOptions = useMemo(
+    () =>
+      allRows
+        .filter((row) => extraKeySet.has(row.key) || !visibleKeySet.has(row.key))
+        .map((row) => ({
+          value: row.key,
+          label: row.label,
+          searchText: row.label
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
+    [allRows, extraKeySet, visibleKeySet]
+  );
+
+  const canAddMore = useMemo(
+    () => allRows.some((row) => !visibleKeySet.has(row.key)),
+    [allRows, visibleKeySet]
+  );
+
+  const showDropdown = extraKeys.length > 0 || canAddMore;
+
+  const handleExtraChange = useCallback(
+    (ids: string[]) => {
+      setExtraKeys(ids.filter((id) => !defaultKeySet.has(id)));
+    },
+    [defaultKeySet]
+  );
+
+  const handleClearAdded = useCallback(() => {
+    setExtraKeys([]);
+  }, []);
+
+  if (allRows.length === 0) return null;
+
+  const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
+  const topSaidaShown = defaultKeys.length;
+
+  return (
+    <ExtratoResumoTable
+      title={labels.title}
+      detailItems={detailItems}
+      getItemGroupKey={getItemGroupKey}
+      subtitle={`Exibindo as ${topSaidaShown} maiores saídas${
+        extraKeys.length > 0 ? ` e mais ${extraKeys.length} adicionado(s).` : '.'
+      }${
+        hiddenCount > 0 ? ` ${hiddenCount} ${labels.entityPlural} oculto(s).` : ' '
+      }Use o menu abaixo para incluir ou remover itens adicionados (desmarque no menu ou use Limpar adicionados).`}
+      icon={icon}
+      rowLabelHeader={labels.rowLabelHeader}
+      rows={visibleRows}
+      totalRowLabel="Total exibido"
+      headerActions={
+        showDropdown ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1">
+              <MultiSelectSearchDropdown
+                label={labels.addDropdownLabel}
+                options={dropdownOptions}
+                selected={extraKeys}
+                onChange={handleExtraChange}
+                placeholder={labels.addPlaceholder}
+                searchPlaceholder={labels.addSearchPlaceholder}
+                emptyOptionsMessage={labels.emptyOptionsMessage}
+                emptySearchMessage={labels.emptySearchMessage}
+                icon={dropdownIcon}
+                menuInline
+              />
+            </div>
+            {extraKeys.length > 0 ? (
+              <button
+                type="button"
+                onClick={handleClearAdded}
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                {labels.clearAddedLabel}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500 dark:text-gray-400">{labels.allVisibleMessage}</p>
+        )
+      }
+    />
+  );
+}
+
+function fornecedorGroupKey(item: ExtratoCaixaItem): string {
+  const name = item.fornecedor.trim();
+  return name ? name.toUpperCase() : SEM_FORNECEDOR_KEY;
+}
+
+function fornecedorGroupLabel(item: ExtratoCaixaItem): string {
+  return item.fornecedor.trim() || 'Sem fornecedor';
+}
+
+function buildExtratoResumoFornecedor(items: ExtratoCaixaItem[]): ExtratoResumoRow[] {
+  const map = new Map<
+    string,
+    { label: string; entrada: number; saida: number; valor: number }
+  >();
+
+  for (const item of items) {
+    const key = fornecedorGroupKey(item);
+    const cur = map.get(key) ?? {
+      label: fornecedorGroupLabel(item),
+      entrada: 0,
+      saida: 0,
+      valor: 0
+    };
+    cur.entrada += itemEntrada(item);
+    cur.saida += item.saida;
+    cur.valor += itemSaldoLinha(item);
+    map.set(key, cur);
+  }
+
+  return Array.from(map.entries())
+    .sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
+    .map(([key, totals]) => ({
+      key,
+      label: totals.label,
+      totalEntrada: totals.entrada,
+      totalSaida: totals.saida,
+      totalValor: totals.valor
+    }));
+}
+
+function valorCellClass(value: number): string {
+  if (value > 0) return 'text-green-700 dark:text-green-300';
+  if (value < 0) return 'text-red-600 dark:text-red-400';
+  return 'text-gray-700 dark:text-gray-300';
+}
+
+const RESUMO_DETALHE_LIMITE = 150;
+
+function itemDetailSortKey(item: ExtratoCaixaItem): number {
+  const d = item.dataCompensacao ?? item.data;
+  if (!d) return Number.NEGATIVE_INFINITY;
+  const parts = parseCalendarDateParts(d);
+  if (!parts) return Number.NEGATIVE_INFINITY;
+  return new Date(parts.y, parts.m - 1, parts.d).getTime();
+}
+
+function sortItemsForResumoDetalhe(items: ExtratoCaixaItem[]): ExtratoCaixaItem[] {
+  return [...items].sort((a, b) => itemDetailSortKey(b) - itemDetailSortKey(a));
+}
+
+function ExtratoResumoDetalheModal({
+  isOpen,
+  onClose,
+  rowLabelHeader,
+  row,
+  items
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  rowLabelHeader: string;
+  row: ExtratoResumoRow | null;
+  items: ExtratoCaixaItem[];
+}) {
+  const sorted = useMemo(() => sortItemsForResumoDetalhe(items), [items]);
+  const visiveis = sorted.slice(0, RESUMO_DETALHE_LIMITE);
+  const restante = sorted.length - visiveis.length;
+
+  if (!row) return null;
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`${rowLabelHeader}: ${row.label}`}
+      size="xl"
+    >
+      <div className="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-900/50 sm:grid-cols-3">
+        <div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Saída</p>
+          <p className={`font-semibold tabular-nums ${valorCellClass(row.totalSaida)}`}>
+            {formatCurrency(row.totalSaida)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Entrada</p>
+          <p className={`font-semibold tabular-nums ${valorCellClass(row.totalEntrada)}`}>
+            {formatCurrency(row.totalEntrada)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Valor</p>
+          <p className={`font-semibold tabular-nums ${valorCellClass(row.totalValor)}`}>
+            {formatCurrency(row.totalValor)}
+          </p>
+        </div>
+      </div>
+
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+        {sorted.length} movimentação(ões) com os filtros atuais
+        {restante > 0 ? ` — exibindo ${visiveis.length}` : null}.
+      </p>
+
+      {sorted.length === 0 ? (
+        <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+          Nenhuma movimentação neste grupo.
+        </p>
+      ) : (
+        <div className="max-h-[min(60vh,32rem)] overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Data
+                </th>
+                <th className="min-w-[12rem] px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Histórico
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Centro de custo
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Natureza
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Fornecedor
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Filial
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-medium uppercase text-gray-500">
+                  Saída
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-medium uppercase text-gray-500">
+                  Entrada
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-medium uppercase text-gray-500">
+                  Valor
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {visiveis.map((item, index) => (
+                <tr
+                  key={item.ajusteId ?? `det-${index}-${item.dataCompensacao}`}
+                  className={item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''}
+                >
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-900 dark:text-gray-100">
+                    {formatDate(item.dataCompensacao)}
+                  </td>
+                  <td className="max-w-[14rem] px-3 py-2">
+                    <span className="line-clamp-2 text-gray-700 dark:text-gray-300" title={item.historico}>
+                      {item.historico || '—'}
+                    </span>
+                    {item.isAjusteManual ? (
+                      <span className="mt-0.5 inline-block rounded bg-amber-200 px-1 py-0.5 text-[10px] font-semibold uppercase text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
+                        Ajuste
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="max-w-[10rem] truncate px-3 py-2 text-gray-700 dark:text-gray-300" title={displayCcLabel(item)}>
+                    {displayCcLabel(item)}
+                  </td>
+                  <td className="max-w-[10rem] truncate px-3 py-2 text-gray-700 dark:text-gray-300" title={displayNatLabel(item)}>
+                    {displayNatLabel(item)}
+                  </td>
+                  <td className="max-w-[8rem] truncate px-3 py-2 text-gray-700 dark:text-gray-300">
+                    {item.fornecedor || '—'}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-gray-300">
+                    {item.codFilial != null ? formatFilialLabel(item.codFilial) : '—'}
+                  </td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${valorCellClass(item.saida)}`}>
+                    {item.saida !== 0 ? formatCurrency(item.saida) : '—'}
+                  </td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${valorCellClass(itemEntrada(item))}`}>
+                    {itemEntrada(item) > 0 ? formatCurrency(itemEntrada(item)) : '—'}
+                  </td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${valorCellClass(itemSaldoLinha(item))}`}>
+                    {formatCurrency(itemSaldoLinha(item))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {restante > 0 ? (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          + {restante} movimentação(ões) não exibida(s). Refine os filtros para reduzir o volume.
+        </p>
+      ) : null}
+    </Modal>
+  );
+}
+
+function ExtratoResumoTable({
+  title,
+  subtitle,
+  icon,
+  rowLabelHeader,
+  rows,
+  detailItems,
+  getItemGroupKey,
+  labelClassName = '',
+  headerActions,
+  totalRowLabel = 'Total geral'
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  rowLabelHeader: string;
+  rows: ExtratoResumoRow[];
+  detailItems: ExtratoCaixaItem[];
+  getItemGroupKey: (item: ExtratoCaixaItem) => string | null;
+  labelClassName?: string;
+  headerActions?: React.ReactNode;
+  totalRowLabel?: string;
+}) {
+  const [detalheRow, setDetalheRow] = useState<ExtratoResumoRow | null>(null);
+
+  const detailsByKey = useMemo(() => {
+    const map = new Map<string, ExtratoCaixaItem[]>();
+    for (const item of detailItems) {
+      const key = getItemGroupKey(item);
+      if (!key) continue;
+      const list = map.get(key) ?? [];
+      list.push(item);
+      map.set(key, list);
+    }
+    return map;
+  }, [detailItems, getItemGroupKey]);
+
+  const totais = useMemo(() => {
+    let totalEntrada = 0;
+    let totalSaida = 0;
+    let totalValor = 0;
+    for (const row of rows) {
+      totalEntrada += row.totalEntrada;
+      totalSaida += row.totalSaida;
+      totalValor += row.totalValor;
+    }
+    return { totalEntrada, totalSaida, totalValor };
+  }, [rows]);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="border-b border-gray-200 px-4 py-4 dark:border-gray-700 sm:px-6">
+        <div className="flex items-center gap-2">
+          <span className="text-gray-500 dark:text-gray-400">{icon}</span>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+        </div>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+          Clique em uma linha ou no ícone para abrir os detalhes em um modal.
+        </p>
+        {headerActions ? <div className="mt-4 max-w-xl">{headerActions}</div> : null}
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="min-w-[36rem] w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-[38%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[8%]" />
+            </colgroup>
+            <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/50">
+              <tr>
+                <th className={`${EXTRATO_TH_CENTER} text-left sm:pl-6`}>{rowLabelHeader}</th>
+                <th className={EXTRATO_TH_CENTER}>Saída</th>
+                <th className={EXTRATO_TH_CENTER}>Entrada</th>
+                <th className={EXTRATO_TH_CENTER}>Valor</th>
+                <th className={`${EXTRATO_TH_CENTER} sm:pr-6`}>
+                  <span className="sr-only">Detalhes</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+              {rows.map((row) => {
+                const detalhes = detailsByKey.get(row.key) ?? [];
+                const qtd = detalhes.length;
+                return (
+                  <tr
+                    key={row.key}
+                    className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                    onClick={() => setDetalheRow(row)}
+                  >
+                    <td
+                      className={`overflow-hidden px-4 py-3 font-medium text-gray-900 dark:text-gray-100 sm:pl-6 ${labelClassName}`}
+                      title={row.label}
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate">{row.label}</span>
+                        <span className="shrink-0 text-xs font-normal text-gray-400 dark:text-gray-500">
+                          ({qtd})
+                        </span>
+                      </div>
+                    </td>
+                    <td
+                      className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(row.totalSaida)}`}
+                    >
+                      {formatCurrency(row.totalSaida)}
+                    </td>
+                    <td
+                      className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(row.totalEntrada)}`}
+                    >
+                      {formatCurrency(row.totalEntrada)}
+                    </td>
+                    <td className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(row.totalValor)}`}>
+                      {formatCurrency(row.totalValor)}
+                    </td>
+                    <td className={`${EXTRATO_TD_CENTER} sm:pr-6`}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDetalheRow(row);
+                        }}
+                        className="inline-flex rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-700 dark:hover:text-red-400"
+                        title="Ver detalhes"
+                        aria-label={`Ver detalhes de ${row.label}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-gray-50 font-semibold dark:bg-gray-900/60">
+                <td className="px-4 py-3 text-gray-900 dark:text-gray-100 sm:pl-6">{totalRowLabel}</td>
+                <td className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(totais.totalSaida)}`}>
+                  {formatCurrency(totais.totalSaida)}
+                </td>
+                <td
+                  className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(totais.totalEntrada)}`}
+                >
+                  {formatCurrency(totais.totalEntrada)}
+                </td>
+                <td className={`${EXTRATO_TD_CENTER} tabular-nums ${valorCellClass(totais.totalValor)}`}>
+                  {formatCurrency(totais.totalValor)}
+                </td>
+                <td className="sm:pr-6" />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+
+      <ExtratoResumoDetalheModal
+        isOpen={detalheRow != null}
+        onClose={() => setDetalheRow(null)}
+        rowLabelHeader={rowLabelHeader}
+        row={detalheRow}
+        items={detalheRow ? (detailsByKey.get(detalheRow.key) ?? []) : []}
+      />
+    </Card>
+  );
 }
 
 const MOVIMENTO_TIPO_FILTER_OPTIONS = [
@@ -302,6 +990,7 @@ function extratoItemMatchesSearch(item: ExtratoCaixaItem, query: string): boolea
     item.fornecedor,
     item.tipoOperacao,
     item.numeroDocumento,
+    item.codFilial != null ? formatFilialLabel(item.codFilial) : '',
     item.codFilial != null ? String(item.codFilial) : '',
     formatDate(item.data),
     formatDate(item.dataCompensacao),
@@ -315,22 +1004,12 @@ function extratoItemMatchesSearch(item: ExtratoCaixaItem, query: string): boolea
 const FILTER_SELECT_CLASS =
   'w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:ring-red-400';
 
-type ExtratoFilterDraft = {
-  ccFilterCodes: string[];
-  natureFilterCodes: string[];
-  filialFilterIds: string[];
-  fornecedorFilterValues: string[];
-  historicoFilterValues: string[];
-  tipoOperacaoFilterValues: string[];
-  movimentoTipoFilter: string[];
-  periodFrom: string;
-  periodTo: string;
-};
+type ExtratoFilterDraft = ExtratoCaixaFiltroPayload;
 
 const EMPTY_FILTER_DRAFT: ExtratoFilterDraft = {
   ccFilterCodes: [],
   natureFilterCodes: [],
-  filialFilterIds: [],
+  poloFilterIds: [],
   fornecedorFilterValues: [],
   historicoFilterValues: [],
   tipoOperacaoFilterValues: [],
@@ -347,6 +1026,14 @@ const EXTRATO_TD_CENTER = 'px-3 py-3 text-center sm:px-4';
 const EXTRATO_TD_HISTORICO =
   'max-w-[16rem] truncate px-3 py-3 text-left text-gray-700 dark:text-gray-300 sm:px-4';
 
+function ExtratoSearchFilterBar({
+  searchQuery,
+  onSearchQueryChange,
+  searchInputRef,
+  onOpenFilters,
+  hasActiveFilters,
+  disabled = false
+}: {
 const skeletonPulse = 'animate-pulse rounded-md bg-gray-200/90 dark:bg-gray-700/80';
 
 function ExtratoCaixaLoadingSkeleton() {
@@ -434,18 +1121,60 @@ interface ExtratoItemsListProps {
   searchInputRef: React.RefObject<HTMLInputElement>;
   onOpenFilters: () => void;
   hasActiveFilters: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+      <div className="relative min-w-0 w-full sm:max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+        <input
+          ref={searchInputRef}
+          type="text"
+          value={searchQuery}
+          onChange={(e) => onSearchQueryChange(e.target.value)}
+          placeholder="Pesquisar movimentação..."
+          disabled={disabled}
+          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+        />
+        {searchQuery ? (
+          <button
+            type="button"
+            onClick={() => onSearchQueryChange('')}
+            disabled={disabled}
+            aria-label="Limpar busca"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:pointer-events-none dark:hover:bg-gray-700 dark:hover:text-gray-300"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onOpenFilters}
+        disabled={disabled}
+        className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+          hasActiveFilters
+            ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+        }`}
+        aria-label="Abrir filtro"
+        title={hasActiveFilters ? 'Filtros ativos' : 'Filtro'}
+      >
+        <Filter className="h-4 w-4" />
+        {hasActiveFilters ? (
+          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+        ) : null}
+      </button>
+    </div>
+  );
+}
+
+interface ExtratoItemsListProps {
+  items: ExtratoCaixaItem[];
   emptyMessage: string;
 }
 
-function ExtratoItemsList({
-  items,
-  searchQuery,
-  onSearchQueryChange,
-  searchInputRef,
-  onOpenFilters,
-  hasActiveFilters,
-  emptyMessage
-}: ExtratoItemsListProps) {
+function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
   const [currentPage, setCurrentPage] = useState(1);
 
   const totalPages = Math.max(1, Math.ceil(items.length / EXTRATO_ITEMS_PER_PAGE));
@@ -471,59 +1200,16 @@ function ExtratoItemsList({
 
   return (
     <Card className="overflow-hidden">
-      <CardHeader className="border-b-0 !pb-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-              <CalendarDays className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Movimentações
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {items.length} {items.length === 1 ? 'movimentação' : 'movimentações'}
-              </p>
-            </div>
+      <CardHeader className="border-b-0 !pb-4">
+        <div className="flex items-center space-x-3">
+          <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+            <CalendarDays className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
           </div>
-          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-            <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => onSearchQueryChange(e.target.value)}
-                placeholder="Pesquisar movimentação..."
-                className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              />
-              {searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => onSearchQueryChange('')}
-                  aria-label="Limpar busca"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={onOpenFilters}
-              className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                hasActiveFilters
-                  ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
-                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
-              }`}
-              aria-label="Abrir filtro"
-              title={hasActiveFilters ? 'Filtros ativos' : 'Filtro'}
-            >
-              <Filter className="h-4 w-4" />
-              {hasActiveFilters ? (
-                <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
-              ) : null}
-            </button>
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Movimentações</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {items.length} {items.length === 1 ? 'movimentação' : 'movimentações'}
+            </p>
           </div>
         </div>
       </CardHeader>
@@ -555,7 +1241,7 @@ function ExtratoItemsList({
                   <th className={EXTRATO_TH_CENTER}>Fornecedor</th>
                   <th className={EXTRATO_TH_CENTER}>Filial</th>
                   <th className={EXTRATO_TH_CENTER}>Tipo operação</th>
-                  <th className={EXTRATO_TH_CENTER}>Saldo</th>
+                  <th className={EXTRATO_TH_CENTER}>Valor</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -565,8 +1251,13 @@ function ExtratoItemsList({
                   const rowIndex = (currentPage - 1) * EXTRATO_ITEMS_PER_PAGE + index;
                   return (
                   <tr
-                    key={`${item.idxcx ?? ''}-${item.data}-${item.dataCompensacao}-${rowIndex}`}
-                    className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                    key={
+                      item.ajusteId ??
+                      `${item.idxcx ?? ''}-${item.data}-${item.dataCompensacao}-${rowIndex}`
+                    }
+                    className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                      item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''
+                    }`}
                   >
                     <td
                       className={`${EXTRATO_TD_CENTER} whitespace-nowrap font-mono text-gray-500 dark:text-gray-400`}
@@ -574,7 +1265,14 @@ function ExtratoItemsList({
                       {item.idxcx ?? '—'}
                     </td>
                     <td className={EXTRATO_TD_HISTORICO} title={item.historico || undefined}>
-                      {item.historico || '—'}
+                      <span className="inline-flex max-w-full items-center gap-2">
+                        <span className="truncate">{item.historico || '—'}</span>
+                        {item.isAjusteManual ? (
+                          <span className="shrink-0 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
+                            Ajuste
+                          </span>
+                        ) : null}
+                      </span>
                     </td>
                     <td
                       className={`${EXTRATO_TD_CENTER} max-w-[12rem] truncate text-gray-900 dark:text-gray-100`}
@@ -610,7 +1308,7 @@ function ExtratoItemsList({
                     <td
                       className={`${EXTRATO_TD_CENTER} whitespace-nowrap text-gray-700 dark:text-gray-300`}
                     >
-                      {item.codFilial ?? '—'}
+                      {item.codFilial != null ? formatFilialLabel(item.codFilial) : '—'}
                     </td>
                     <td
                       className={`${EXTRATO_TD_CENTER} max-w-[10rem] truncate text-gray-700 dark:text-gray-300`}
@@ -705,7 +1403,7 @@ export default function AnaliseExtratoPage() {
 
   const [ccFilterCodes, setCcFilterCodes] = useState<string[]>([]);
   const [natureFilterCodes, setNatureFilterCodes] = useState<string[]>([]);
-  const [filialFilterIds, setFilialFilterIds] = useState<string[]>([]);
+  const [poloFilterIds, setPoloFilterIds] = useState<string[]>([]);
   const [fornecedorFilterValues, setFornecedorFilterValues] = useState<string[]>([]);
   const [historicoFilterValues, setHistoricoFilterValues] = useState<string[]>([]);
   const [tipoOperacaoFilterValues, setTipoOperacaoFilterValues] = useState<string[]>([]);
@@ -714,6 +1412,8 @@ export default function AnaliseExtratoPage() {
   const [periodTo, setPeriodTo] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [exportPdfModalOpen, setExportPdfModalOpen] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [filterDraft, setFilterDraft] = useState<ExtratoFilterDraft>(EMPTY_FILTER_DRAFT);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filtersInitializedRef = useRef(false);
@@ -732,57 +1432,122 @@ export default function AnaliseExtratoPage() {
     enabled: canAccess,
   });
 
-  const items = data?.data?.items ?? [];
+  const rmItems = data?.data?.items ?? [];
 
-  const filialFilterOptions = useMemo(() => {
-    const codes = new Set<number>();
+  const { data: filtrosSalvos = [] } = useQuery({
+    queryKey: ['extrato-caixa-filtros-salvos'],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: ExtratoCaixaFiltroSalvo[] }>(
+        '/extrato-caixa/filtros-salvos'
+      );
+      return res.data?.data ?? [];
+    },
+    enabled: canAccess
+  });
+
+  const { data: ajustesResponse } = useQuery({
+    queryKey: ['extrato-caixa-ajustes'],
+    queryFn: async () => {
+      const res = await api.get<{
+        success: boolean;
+        data: import('@/lib/extratoCaixaAjuste').ExtratoCaixaAjuste[];
+      }>('/extrato-caixa/ajustes');
+      return res.data;
+    },
+    enabled: canAccess
+  });
+
+  const ajustes = ajustesResponse?.data ?? [];
+
+  const items = useMemo(() => {
+    const manual = ajustes.map(ajusteToExtratoItem);
+    return sortItemsByDateDesc([...rmItems, ...manual]);
+  }, [rmItems, ajustes]);
+
+  const poloFilterOptions = useMemo(() => {
+    const byKey = new Map<string, { value: string; label: string; searchText: string }>();
     for (const item of items) {
-      if (item.codFilial != null) codes.add(item.codFilial);
+      const { key, label } = resolveExtratoPolo(item);
+      if (!byKey.has(key)) {
+        byKey.set(key, { value: key, label, searchText: `${key} ${label}` });
+      }
     }
-    return Array.from(codes)
-      .sort((a, b) => a - b)
-      .map((code) => ({
-        value: String(code),
-        label: `Filial ${code}`,
-        searchText: String(code),
-      }));
+    return Array.from(byKey.values()).sort((a, b) => comparePoloKeys(a.value, b.value));
   }, [items]);
 
   const ccFilterOptions = useMemo(() => {
     const byCode = new Map<string, { value: string; label: string; searchText: string }>();
+    let hasSemCc = false;
     for (const item of items) {
       const code = item.codCCusto.trim();
-      if (!code) continue;
+      if (!code) {
+        hasSemCc = true;
+        continue;
+      }
       const key = code.toUpperCase();
       if (byCode.has(key)) continue;
       const label = item.ccusto.trim() || code;
       byCode.set(key, { value: code, label, searchText: `${code} ${label}` });
     }
-    return Array.from(byCode.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+    const options = Array.from(byCode.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, 'pt-BR')
+    );
+    if (hasSemCc) {
+      options.unshift({
+        value: SEM_CENTRO_CUSTO_KEY,
+        label: 'Sem centro de custo',
+        searchText: 'sem centro de custo vazio'
+      });
+    }
+    return options;
   }, [items]);
 
   const natureFilterOptions = useMemo(() => {
     const byCode = new Map<string, { value: string; label: string; searchText: string }>();
+    let hasSemNatureza = false;
     for (const item of items) {
       const code = normalizeBudgetNatureCode(item.codNatFinanceira);
-      if (!code) continue;
+      if (!code) {
+        hasSemNatureza = true;
+        continue;
+      }
       const label = item.natureza.trim() || code;
       const key = code.toUpperCase();
       if (byCode.has(key)) continue;
       byCode.set(key, { value: code, label, searchText: `${code} ${label}` });
     }
-    return Array.from(byCode.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+    const options = Array.from(byCode.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, 'pt-BR')
+    );
+    if (hasSemNatureza) {
+      options.unshift({
+        value: SEM_NATUREZA_KEY,
+        label: 'Sem natureza financeira',
+        searchText: 'sem natureza financeira vazio'
+      });
+    }
+    return options;
   }, [items]);
 
   const fornecedorFilterOptions = useMemo(() => {
     const names = new Set<string>();
+    let hasSemFornecedor = false;
     for (const item of items) {
       const n = item.fornecedor.trim();
       if (n) names.add(n);
+      else hasSemFornecedor = true;
     }
-    return Array.from(names)
+    const options = Array.from(names)
       .sort((a, b) => a.localeCompare(b, 'pt-BR'))
       .map((name) => ({ value: name, label: name, searchText: name }));
+    if (hasSemFornecedor) {
+      options.unshift({
+        value: SEM_FORNECEDOR_KEY,
+        label: 'Sem fornecedor',
+        searchText: 'sem fornecedor vazio'
+      });
+    }
+    return options;
   }, [items]);
 
   const historicoFilterOptions = useMemo(() => {
@@ -807,9 +1572,9 @@ export default function AnaliseExtratoPage() {
       .map((tipo) => ({ value: tipo, label: tipo, searchText: tipo }));
   }, [items]);
 
-  const filialAllValues = useMemo(
-    () => filialFilterOptions.map((o) => o.value),
-    [filialFilterOptions]
+  const poloAllValues = useMemo(
+    () => poloFilterOptions.map((o) => o.value),
+    [poloFilterOptions]
   );
   const ccAllValues = useMemo(() => ccFilterOptions.map((o) => o.value), [ccFilterOptions]);
   const natureAllValues = useMemo(
@@ -829,11 +1594,31 @@ export default function AnaliseExtratoPage() {
     [tipoOperacaoFilterOptions]
   );
 
+  const filtroAllValues: ExtratoFiltroAllValues = useMemo(
+    () => ({
+      cc: ccAllValues,
+      nature: natureAllValues,
+      polo: poloAllValues,
+      fornecedor: fornecedorAllValues,
+      historico: historicoAllValues,
+      tipoOperacao: tipoOperacaoAllValues,
+      movimento: [...MOVIMENTO_TIPO_ALL_VALUES]
+    }),
+    [
+      ccAllValues,
+      natureAllValues,
+      poloAllValues,
+      fornecedorAllValues,
+      historicoAllValues,
+      tipoOperacaoAllValues
+    ]
+  );
+
   const buildDefaultFilters = useCallback(
     (): ExtratoFilterDraft => ({
       ccFilterCodes: [...ccAllValues],
       natureFilterCodes: [...natureAllValues],
-      filialFilterIds: [...filialAllValues],
+      poloFilterIds: [...poloAllValues],
       fornecedorFilterValues: [...fornecedorAllValues],
       historicoFilterValues: [...historicoAllValues],
       tipoOperacaoFilterValues: [...tipoOperacaoAllValues],
@@ -844,7 +1629,7 @@ export default function AnaliseExtratoPage() {
     [
       ccAllValues,
       natureAllValues,
-      filialAllValues,
+      poloAllValues,
       fornecedorAllValues,
       historicoAllValues,
       tipoOperacaoAllValues
@@ -852,18 +1637,18 @@ export default function AnaliseExtratoPage() {
   );
 
   useEffect(() => {
-    if (items.length === 0) return;
+    if (rmItems.length === 0) return;
     if (filtersInitializedRef.current) return;
     const defaults = buildDefaultFilters();
     setCcFilterCodes(defaults.ccFilterCodes);
     setNatureFilterCodes(defaults.natureFilterCodes);
-    setFilialFilterIds(defaults.filialFilterIds);
+    setPoloFilterIds(defaults.poloFilterIds);
     setFornecedorFilterValues(defaults.fornecedorFilterValues);
     setHistoricoFilterValues(defaults.historicoFilterValues);
     setTipoOperacaoFilterValues(defaults.tipoOperacaoFilterValues);
     setMovimentoTipoFilter(defaults.movimentoTipoFilter);
     filtersInitializedRef.current = true;
-  }, [items.length, buildDefaultFilters]);
+  }, [rmItems.length, buildDefaultFilters]);
 
   const openFiltersModal = () => {
     const withAllIfEmpty = (applied: string[], all: string[]) =>
@@ -872,7 +1657,7 @@ export default function AnaliseExtratoPage() {
     setFilterDraft({
       ccFilterCodes: withAllIfEmpty(ccFilterCodes, ccAllValues),
       natureFilterCodes: withAllIfEmpty(natureFilterCodes, natureAllValues),
-      filialFilterIds: withAllIfEmpty(filialFilterIds, filialAllValues),
+      poloFilterIds: withAllIfEmpty(poloFilterIds, poloAllValues),
       fornecedorFilterValues: withAllIfEmpty(fornecedorFilterValues, fornecedorAllValues),
       historicoFilterValues: withAllIfEmpty(historicoFilterValues, historicoAllValues),
       tipoOperacaoFilterValues: withAllIfEmpty(
@@ -891,7 +1676,7 @@ export default function AnaliseExtratoPage() {
   const applyFiltersModal = () => {
     setCcFilterCodes(filterDraft.ccFilterCodes);
     setNatureFilterCodes(filterDraft.natureFilterCodes);
-    setFilialFilterIds(filterDraft.filialFilterIds);
+    setPoloFilterIds(filterDraft.poloFilterIds);
     setFornecedorFilterValues(filterDraft.fornecedorFilterValues);
     setHistoricoFilterValues(filterDraft.historicoFilterValues);
     setTipoOperacaoFilterValues(filterDraft.tipoOperacaoFilterValues);
@@ -905,7 +1690,7 @@ export default function AnaliseExtratoPage() {
 
   const hasCcFilter = isMultiselectFilterActive(ccFilterCodes, ccAllValues);
   const hasNatureFilter = isMultiselectFilterActive(natureFilterCodes, natureAllValues);
-  const hasFilialFilter = isMultiselectFilterActive(filialFilterIds, filialAllValues);
+  const hasPoloFilter = isMultiselectFilterActive(poloFilterIds, poloAllValues);
   const hasFornecedorFilter = isMultiselectFilterActive(fornecedorFilterValues, fornecedorAllValues);
   const hasHistoricoFilter = isMultiselectFilterActive(historicoFilterValues, historicoAllValues);
   const hasTipoOperacaoFilter = isMultiselectFilterActive(
@@ -922,13 +1707,79 @@ export default function AnaliseExtratoPage() {
   const hasActiveFilters =
     hasCcFilter ||
     hasNatureFilter ||
-    hasFilialFilter ||
+    hasPoloFilter ||
     hasFornecedorFilter ||
     hasHistoricoFilter ||
     hasTipoOperacaoFilter ||
     hasMovimentoTipoFilter ||
     hasPeriodFilter;
   const hasListRefinement = hasActiveFilters || hasSearchQuery;
+
+  const appliedFiltroPayload: ExtratoCaixaFiltroPayload = useMemo(
+    () => ({
+      ccFilterCodes,
+      natureFilterCodes,
+      poloFilterIds,
+      fornecedorFilterValues,
+      historicoFilterValues,
+      tipoOperacaoFilterValues,
+      movimentoTipoFilter,
+      periodFrom,
+      periodTo
+    }),
+    [
+      ccFilterCodes,
+      natureFilterCodes,
+      poloFilterIds,
+      fornecedorFilterValues,
+      historicoFilterValues,
+      tipoOperacaoFilterValues,
+      movimentoTipoFilter,
+      periodFrom,
+      periodTo
+    ]
+  );
+
+  const filtroLabelMaps: ExtratoFiltroLabelMaps = useMemo(
+    () => ({
+      cc: ccFilterOptions.map((o) => ({ value: o.value, label: o.label })),
+      nature: natureFilterOptions.map((o) => ({ value: o.value, label: o.label })),
+      polo: poloFilterOptions.map((o) => ({ value: o.value, label: o.label })),
+      fornecedor: fornecedorFilterOptions.map((o) => ({ value: o.value, label: o.label })),
+      historico: historicoFilterOptions.map((o) => ({ value: o.value, label: o.label })),
+      tipoOperacao: tipoOperacaoFilterOptions.map((o) => ({ value: o.value, label: o.label })),
+      movimento: MOVIMENTO_TIPO_FILTER_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
+    }),
+    [
+      ccFilterOptions,
+      natureFilterOptions,
+      poloFilterOptions,
+      fornecedorFilterOptions,
+      historicoFilterOptions,
+      tipoOperacaoFilterOptions
+    ]
+  );
+
+  const filtrosDesmarcados = useMemo(
+    () => buildExtratoFiltrosDesmarcados(appliedFiltroPayload, filtroLabelMaps, filtroAllValues),
+    [appliedFiltroPayload, filtroLabelMaps, filtroAllValues]
+  );
+
+  const activeFiltroSalvo = useMemo(
+    () => findMatchingExtratoFiltroSalvo(appliedFiltroPayload, filtrosSalvos, filtroAllValues),
+    [appliedFiltroPayload, filtrosSalvos, filtroAllValues]
+  );
+
+  const hasMultiselectFilters =
+    hasCcFilter ||
+    hasNatureFilter ||
+    hasPoloFilter ||
+    hasFornecedorFilter ||
+    hasHistoricoFilter ||
+    hasTipoOperacaoFilter ||
+    hasMovimentoTipoFilter;
+
+  const showFiltrosResumo = hasMultiselectFilters || hasPeriodFilter;
 
   const configured = data?.data?.configured ?? false;
   const pathFailures = data?.data?.pathFailures ?? [];
@@ -938,32 +1789,49 @@ export default function AnaliseExtratoPage() {
   const filteredItems = useMemo(
     () =>
       sortItemsByDateDesc(
-        items.filter(
-          (item) =>
+        items.filter((item) => {
+          const matchesPeriod = itemMatchesCompensacaoPeriod(item, periodFrom, periodTo);
+          const matchesSearch = extratoItemMatchesSearch(item, searchQuery);
+
+          /** Ajustes manuais são sempre somados ao extrato (período e busca ainda aplicam). */
+          if (isExtratoAjusteManual(item)) {
+            return matchesPeriod && matchesSearch;
+          }
+
+          return (
             extratoMatchesAnyCcCodes(item.codCCusto, ccFilterCodes, ccAllValues) &&
             extratoMatchesAnyNatureCodesFiltered(
               item.codNatFinanceira,
               natureFilterCodes,
               natureAllValues
             ) &&
-            extratoMatchesAnyFilialIds(item.codFilial, filialFilterIds, filialAllValues) &&
-            extratoMatchesAnyFornecedor(item.fornecedor, fornecedorFilterValues, fornecedorAllValues) &&
-            extratoMatchesAnyHistorico(item.historico, historicoFilterValues, historicoAllValues) &&
+            extratoMatchesAnyPoloKeys(item, poloFilterIds, poloAllValues) &&
+            extratoMatchesAnyFornecedor(
+              item.fornecedor,
+              fornecedorFilterValues,
+              fornecedorAllValues
+            ) &&
+            extratoMatchesAnyHistorico(
+              item.historico,
+              historicoFilterValues,
+              historicoAllValues
+            ) &&
             extratoMatchesAnyTipoOperacao(
               item.tipoOperacao,
               tipoOperacaoFilterValues,
               tipoOperacaoAllValues
             ) &&
             extratoMatchesMovimentoTipo(item, movimentoTipoFilter, MOVIMENTO_TIPO_ALL_VALUES) &&
-            itemMatchesCompensacaoPeriod(item, periodFrom, periodTo) &&
-            extratoItemMatchesSearch(item, searchQuery)
-        )
+            matchesPeriod &&
+            matchesSearch
+          );
+        })
       ),
     [
       items,
       ccFilterCodes,
       natureFilterCodes,
-      filialFilterIds,
+      poloFilterIds,
       fornecedorFilterValues,
       historicoFilterValues,
       tipoOperacaoFilterValues,
@@ -973,12 +1841,29 @@ export default function AnaliseExtratoPage() {
       searchQuery,
       ccAllValues,
       natureAllValues,
-      filialAllValues,
+      poloAllValues,
       fornecedorAllValues,
       historicoAllValues,
       tipoOperacaoAllValues
     ]
   );
+
+  const ajustesManuaisPdf = useMemo((): ExtratoCaixaPdfAjusteRow[] => {
+    return filteredItems
+      .filter(isExtratoAjusteManual)
+      .sort(
+        (a, b) =>
+          (localDayKey(b.dataCompensacao) ?? 0) - (localDayKey(a.dataCompensacao) ?? 0)
+      )
+      .map((item) => ({
+        data: formatDate(item.dataCompensacao),
+        centroCusto: item.ccusto?.trim() || item.codCCusto?.trim() || '—',
+        natureza: item.natureza?.trim() || '—',
+        polo: resolveExtratoPolo(item).label,
+        observacao: item.historico?.trim() || 'Ajuste manual',
+        valor: item.valor
+      }));
+  }, [filteredItems]);
 
   const extratoStats = useMemo(() => {
     let totalEntrada = 0;
@@ -1006,21 +1891,250 @@ export default function AnaliseExtratoPage() {
     };
   }, [filteredItems]);
 
+  const extratoResumoMensal = useMemo(
+    () => buildExtratoResumoMensal(filteredItems),
+    [filteredItems]
+  );
+
+  const extratoResumoCentroCusto = useMemo(
+    () => buildExtratoResumoCentroCusto(filteredItems),
+    [filteredItems]
+  );
+
+  const extratoResumoNatureza = useMemo(
+    () => buildExtratoResumoNatureza(filteredItems),
+    [filteredItems]
+  );
+
+  const extratoResumoPolo = useMemo(
+    () =>
+      buildExtratoResumoPolo(filteredItems, {
+        entrada: itemEntrada,
+        saida: (item) => item.saida,
+        valor: itemSaldoLinha
+      }),
+    [filteredItems]
+  );
+
+  const extratoResumoFornecedor = useMemo(
+    () => buildExtratoResumoFornecedor(filteredItems),
+    [filteredItems]
+  );
+
   const showDashboards =
     !isLoading && !isError && configured && !loadFailed;
+
+  const buildPdfFilterLines = useCallback((): string[] => {
+    const lines: string[] = [];
+
+    if (activeFiltroSalvo) {
+      lines.push(`Filtro salvo: ${activeFiltroSalvo.nome}`);
+    }
+
+    if (periodFrom || periodTo) {
+      const de = periodFrom ? formatIsoDateInputBr(periodFrom) : '—';
+      const ate = periodTo ? formatIsoDateInputBr(periodTo) : '—';
+      lines.push(`Período de compensação: de ${de} até ${ate}`);
+    }
+
+    if (hasSearchQuery) {
+      lines.push(`Busca: "${searchQuery.trim()}"`);
+    }
+
+    if (ajustes.length > 0) {
+      lines.push(
+        'Ajustes manuais: sempre incluídos nos totais e resumos (independente dos filtros de lista).'
+      );
+    }
+
+    for (const campo of filtrosDesmarcados) {
+      const qtd = campo.desmarcados.length;
+      const lista = campo.desmarcados.join(' · ');
+      lines.push(
+        `${campo.campo} (${qtd} excluído${qtd !== 1 ? 's' : ''}): ${lista}`
+      );
+    }
+
+    if (
+      !periodFrom &&
+      !periodTo &&
+      !hasSearchQuery &&
+      filtrosDesmarcados.length === 0 &&
+      !hasMultiselectFilters
+    ) {
+      lines.push('Todos os itens marcados nos filtros de lista (sem restrição por campo).');
+    }
+
+    lines.push(`Movimentações no recorte: ${filteredItems.length.toLocaleString('pt-BR')}`);
+
+    return lines;
+  }, [
+    activeFiltroSalvo,
+    periodFrom,
+    periodTo,
+    hasSearchQuery,
+    searchQuery,
+    filtrosDesmarcados,
+    hasMultiselectFilters,
+    filteredItems.length,
+    ajustes.length
+  ]);
+
+  const handleExportPdf = useCallback(
+    async (mode: ExtratoPdfNatureMode) => {
+      setExportingPdf(true);
+      try {
+        const includeAllNature = mode === 'all';
+        const natureRows = pickResumoRowsForPdf(
+          extratoResumoNatureza,
+          includeAllNature,
+          EXTRATO_RESUMO_TOP_SAIDA
+        );
+
+        await exportExtratoCaixaPdf({
+          title: 'Extrato de Caixa',
+          subtitle: pageSubtitle,
+          stats: {
+            totalEntrada: extratoStats.totalEntrada,
+            totalSaida: extratoStats.totalSaida,
+            saldoLiquido: extratoStats.saldoLiquido,
+            qtdEntrada: extratoStats.qtdEntrada,
+            qtdSaida: extratoStats.qtdSaida
+          },
+          movimentacoesFiltradas: filteredItems.length,
+          filterLines: buildPdfFilterLines(),
+          ajustesManuais: ajustesManuaisPdf,
+          sections: [
+            {
+              title: 'Resumo por mês',
+              rowLabelHeader: 'Mês',
+              rows: extratoResumoMensal,
+              totalRowLabel: 'Total',
+              preserveRowOrder: true
+            },
+            {
+              title: 'Resumo por polo',
+              rowLabelHeader: 'Polo',
+              rows: extratoResumoPolo,
+              totalRowLabel: 'Total',
+              preserveRowOrder: true
+            },
+            {
+              title: 'Resumo por centro de custo',
+              rowLabelHeader: 'Centro de custo',
+              rows: extratoResumoCentroCusto,
+              totalRowLabel: 'Total'
+            },
+            {
+              title: 'Resumo por natureza financeira',
+              rowLabelHeader: 'Natureza financeira',
+              rows: natureRows,
+              totalRowLabel: 'Total exibido',
+              preserveRowOrder: !includeAllNature,
+              footnote: includeAllNature
+                ? 'Todas as naturezas'
+                : `Top ${EXTRATO_RESUMO_TOP_SAIDA} maiores saídas`
+            }
+          ]
+        });
+
+        toast.success('PDF exportado com sucesso.');
+        setExportPdfModalOpen(false);
+      } catch {
+        toast.error('Erro ao gerar o PDF. Tente novamente.');
+      } finally {
+        setExportingPdf(false);
+      }
+    },
+    [
+      buildPdfFilterLines,
+      ajustesManuaisPdf,
+      extratoResumoMensal,
+      extratoResumoCentroCusto,
+      extratoResumoPolo,
+      extratoResumoNatureza,
+      extratoStats,
+      filteredItems.length,
+      pageSubtitle
+    ]
+  );
+
+  if (!canAccess) {
+    return (
+      <ProtectedRoute route="/ponto/financeiro/analise-extrato">
+        <MainLayout userRole="EMPLOYEE" userName="" onLogout={() => {}}>
+          <Card className="border-red-200 dark:border-red-800">
+            <CardContent className="p-6">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-1 h-6 w-6 flex-shrink-0 text-red-600 dark:text-red-400" />
+                <div>
+                  <h3 className="mb-2 text-lg font-semibold text-red-800 dark:text-red-200">
+                    Acesso Negado
+                  </h3>
+                  <p className="text-sm text-red-700 dark:text-red-300">
+                    Você não tem permissão para acessar esta página. Apenas administradores e
+                    membros do departamento financeiro podem acessar.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </MainLayout>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute route="/ponto/financeiro/analise-extrato">
       <MainLayout userRole="EMPLOYEE" userName={user?.name ?? ''}>
         <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">
-              {pageTitle}
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 sm:text-base dark:text-gray-400">
-              {pageSubtitle}
-            </p>
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="text-center sm:text-left">
+              <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">
+                {pageTitle}
+              </h1>
+              <p className="mt-2 text-sm text-gray-600 sm:text-base dark:text-gray-400">
+                {pageSubtitle}
+              </p>
+            </div>
+            {showDashboards ? (
+              <button
+                type="button"
+                onClick={() => setExportPdfModalOpen(true)}
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                <FileDown className="h-4 w-4 text-red-600 dark:text-red-400" aria-hidden />
+                Exportar PDF
+              </button>
+            ) : null}
           </div>
+
+          {canAccess ? (
+            <ExtratoCaixaAjustesPanel enabled={canAccess} sourceItems={rmItems} />
+          ) : null}
+
+          {configured && !loadFailed ? (
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+              {showFiltrosResumo ? (
+                <ExtratoFiltrosDesmarcadosResumo
+                  presetNome={activeFiltroSalvo?.nome ?? null}
+                  camposDesmarcados={filtrosDesmarcados}
+                  periodFrom={periodFrom}
+                  periodTo={periodTo}
+                  hasActiveFilters={hasMultiselectFilters}
+                  temAjustesManuais={ajustes.length > 0}
+                />
+              ) : null}
+              <ExtratoSearchFilterBar
+                searchQuery={searchQuery}
+                onSearchQueryChange={setSearchQuery}
+                searchInputRef={searchInputRef}
+                onOpenFilters={openFiltersModal}
+                hasActiveFilters={hasActiveFilters}
+                disabled={isLoading || isFetching}
+              />
+            </div>
+          ) : null}
 
           {pathFailures.length > 0 ? (
             <Card className="border-amber-200 dark:border-amber-800">
@@ -1050,72 +2164,146 @@ export default function AnaliseExtratoPage() {
           ) : null}
 
           {showDashboards ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
-              <Card>
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
-                      <ArrowDownLeft className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
+                <Card>
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                        <ArrowUpRight className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                      </div>
+                      <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                        <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                          Saídas{' '}
+                          <span className="text-gray-400 dark:text-gray-500">
+                            ({extratoStats.qtdSaida})
+                          </span>
+                        </p>
+                        <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                          {formatCurrency(extratoStats.totalSaida)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Entradas{' '}
-                        <span className="text-gray-400 dark:text-gray-500">
-                          ({extratoStats.qtdEntrada})
-                        </span>
-                      </p>
-                      <p className="mt-1 truncate text-lg font-bold text-green-700 dark:text-green-300 sm:text-2xl">
-                        {formatCurrency(extratoStats.totalEntrada)}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              <Card>
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-                      <ArrowUpRight className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                <Card>
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
+                        <ArrowDownLeft className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
+                      </div>
+                      <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                        <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                          Entradas{' '}
+                          <span className="text-gray-400 dark:text-gray-500">
+                            ({extratoStats.qtdEntrada})
+                          </span>
+                        </p>
+                        <p className="mt-1 truncate text-lg font-bold text-green-700 dark:text-green-300 sm:text-2xl">
+                          {formatCurrency(extratoStats.totalEntrada)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Saídas{' '}
-                        <span className="text-gray-400 dark:text-gray-500">
-                          ({extratoStats.qtdSaida})
-                        </span>
-                      </p>
-                      <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
-                        {formatCurrency(extratoStats.totalSaida)}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              <Card>
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 rounded-lg bg-yellow-100 p-2 sm:p-3 dark:bg-yellow-900/30">
-                      <Wallet className="h-5 w-5 text-yellow-600 dark:text-yellow-400 sm:h-6 sm:w-6" />
+                <Card>
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 rounded-lg bg-yellow-100 p-2 sm:p-3 dark:bg-yellow-900/30">
+                        <Wallet className="h-5 w-5 text-yellow-600 dark:text-yellow-400 sm:h-6 sm:w-6" />
+                      </div>
+                      <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                        <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                          Saldo líquido
+                        </p>
+                        <p
+                          className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
+                            extratoStats.saldoLiquido >= 0
+                              ? 'text-gray-900 dark:text-gray-100'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}
+                        >
+                          {formatCurrency(extratoStats.saldoLiquido)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Saldo líquido
-                      </p>
-                      <p
-                        className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
-                          extratoStats.saldoLiquido >= 0
-                            ? 'text-gray-900 dark:text-gray-100'
-                            : 'text-red-600 dark:text-red-400'
-                        }`}
-                      >
-                        {formatCurrency(extratoStats.saldoLiquido)}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <ExtratoResumoTable
+                title="Resumo por mês"
+                subtitle="Totais de entrada, saída e valor agrupados pela data de compensação (mesmos filtros da listagem)."
+                icon={<CalendarDays className="h-5 w-5" aria-hidden />}
+                rowLabelHeader="Mês"
+                rows={extratoResumoMensal}
+                detailItems={filteredItems}
+                getItemGroupKey={itemCompensacaoMonthKey}
+              />
+
+              <ExtratoResumoTable
+                title="Resumo por polo"
+                subtitle="Totais de entrada, saída e valor agrupados por polo, conforme o centro de custo da movimentação (mesmos filtros da listagem)."
+                icon={<Building2 className="h-5 w-5" aria-hidden />}
+                rowLabelHeader="Polo"
+                rows={extratoResumoPolo}
+                detailItems={filteredItems}
+                getItemGroupKey={poloGroupKey}
+              />
+
+              <ExtratoResumoTable
+                title="Resumo por centro de custo"
+                subtitle="Totais de entrada, saída e valor agrupados por centro de custo (mesmos filtros da listagem)."
+                icon={<ListPlus className="h-5 w-5" aria-hidden />}
+                rowLabelHeader="Centro de custo"
+                rows={extratoResumoCentroCusto}
+                detailItems={filteredItems}
+                getItemGroupKey={ccGroupKey}
+              />
+
+              <ExtratoResumoTopExpandSection
+                allRows={extratoResumoNatureza}
+                detailItems={filteredItems}
+                getItemGroupKey={natureGroupKey}
+                icon={<BookOpen className="h-5 w-5" aria-hidden />}
+                dropdownIcon={<BookOpen className="h-4 w-4" aria-hidden />}
+                labels={{
+                  title: 'Resumo por natureza financeira',
+                  rowLabelHeader: 'Natureza financeira',
+                  entityPlural: 'naturezas',
+                  addDropdownLabel: 'Gerenciar naturezas exibidas',
+                  addPlaceholder: 'Selecione naturezas para exibir...',
+                  addSearchPlaceholder: 'Pesquisar natureza ou código...',
+                  emptyOptionsMessage: 'Nenhuma natureza disponível para adicionar.',
+                  emptySearchMessage: 'Nenhuma natureza encontrada.',
+                  allVisibleMessage:
+                    `As ${EXTRATO_RESUMO_TOP_SAIDA} maiores saídas estão exibidas. Nenhuma adicional selecionada.`,
+                  clearAddedLabel: 'Limpar adicionados'
+                }}
+              />
+
+              <ExtratoResumoTopExpandSection
+                allRows={extratoResumoFornecedor}
+                detailItems={filteredItems}
+                getItemGroupKey={fornecedorGroupKey}
+                icon={<Building2 className="h-5 w-5" aria-hidden />}
+                dropdownIcon={<Building2 className="h-4 w-4" aria-hidden />}
+                labels={{
+                  title: 'Resumo por fornecedor',
+                  rowLabelHeader: 'Fornecedor',
+                  entityPlural: 'fornecedores',
+                  addDropdownLabel: 'Gerenciar fornecedores exibidos',
+                  addPlaceholder: 'Selecione fornecedores para exibir...',
+                  addSearchPlaceholder: 'Pesquisar fornecedor...',
+                  emptyOptionsMessage: 'Nenhum fornecedor disponível para adicionar.',
+                  emptySearchMessage: 'Nenhum fornecedor encontrado.',
+                  allVisibleMessage:
+                    `As ${EXTRATO_RESUMO_TOP_SAIDA} maiores saídas estão exibidas. Nenhum adicional selecionado.`,
+                  clearAddedLabel: 'Limpar adicionados'
+                }}
+              />
             </div>
           ) : null}
 
@@ -1163,6 +2351,14 @@ export default function AnaliseExtratoPage() {
               </CardContent>
             </Card>
           ) : (
+            <ExtratoItemsList
+              items={filteredItems}
+              emptyMessage={
+                hasListRefinement
+                  ? 'Nenhuma movimentação encontrada com os filtros ou termo de busca aplicados.'
+                  : 'Nenhuma movimentação encontrada no extrato.'
+              }
+            />
             <div className="space-y-4">
               {isFetching ? <ExtratoCaixaRefetchBar /> : null}
               <ExtratoItemsList
@@ -1182,6 +2378,15 @@ export default function AnaliseExtratoPage() {
           )}
         </div>
 
+        <ExtratoExportPdfModal
+          isOpen={exportPdfModalOpen}
+          onClose={() => setExportPdfModalOpen(false)}
+          onConfirm={handleExportPdf}
+          exporting={exportingPdf}
+          natureCount={extratoResumoNatureza.length}
+          topLimit={EXTRATO_RESUMO_TOP_SAIDA}
+        />
+
         <Modal
           isOpen={isFiltersModalOpen}
           onClose={closeFiltersModal}
@@ -1189,6 +2394,13 @@ export default function AnaliseExtratoPage() {
           size="lg"
         >
           <div className="space-y-4">
+            <ExtratoFiltrosSalvosPanel
+              filterDraft={filterDraft}
+              onLoadDraft={setFilterDraft}
+              allValues={filtroAllValues}
+              disabled={isLoading}
+            />
+
             <div>
               <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                 Período (data de compensação)
@@ -1252,15 +2464,15 @@ export default function AnaliseExtratoPage() {
 
             <div>
               <MultiSelectSearchDropdown
-                label="Filial"
-                options={filialFilterOptions}
-                selected={filterDraft.filialFilterIds}
-                onChange={(ids) => setFilterDraft((d) => ({ ...d, filialFilterIds: ids }))}
+                label="Polo"
+                options={poloFilterOptions}
+                selected={filterDraft.poloFilterIds}
+                onChange={(ids) => setFilterDraft((d) => ({ ...d, poloFilterIds: ids }))}
                 disabled={isLoading}
-                placeholder="Todas as filiais"
-                searchPlaceholder="Pesquisar filial..."
-                emptyOptionsMessage="Nenhuma filial no extrato carregado."
-                emptySearchMessage="Nenhuma filial encontrada."
+                placeholder="Todos os polos"
+                searchPlaceholder="Pesquisar polo..."
+                emptyOptionsMessage="Nenhum polo no extrato carregado."
+                emptySearchMessage="Nenhum polo encontrado."
                 icon={<Building2 className="h-4 w-4" aria-hidden />}
                 menuInline
               />

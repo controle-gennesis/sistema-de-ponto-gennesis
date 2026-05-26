@@ -12,7 +12,9 @@ export type BoletoInstallmentRow = {
 
 export function parsePaymentBoletoInstallments(raw: unknown): BoletoInstallmentRow[] {
   if (!raw || !Array.isArray(raw)) return [];
-  return raw.map((x: Record<string, unknown>) => {
+  return raw
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => {
     const ps = x.paymentStatus;
     const paymentStatus =
       ps === 'PENDING_BOLETO' || ps === 'AWAITING_PAYMENT' || ps === 'PAID' ? ps : undefined;
@@ -38,6 +40,43 @@ export function rowStatus(row: BoletoInstallmentRow | undefined): BoletoInstallm
   const s = row?.paymentStatus;
   if (s === 'PAID' || s === 'AWAITING_PAYMENT' || s === 'PENDING_BOLETO') return s;
   return 'PENDING_BOLETO';
+}
+
+/** Todas as parcelas da condição de pagamento já têm arquivo de boleto. */
+export function allInstallmentsHaveBoleto(rows: BoletoInstallmentRow[], n: number): boolean {
+  if (n <= 1 || rows.length < n) return false;
+  for (let i = 0; i < n; i++) {
+    if (!(rows[i]?.boletoUrl || '').trim()) return false;
+  }
+  return true;
+}
+
+/** Pagamento em lote: não exige voltar ao comprador entre parcelas. */
+export function useParallelBoletoPaymentFlow(o: OrderBoletoPhasePick): boolean {
+  if (o.paymentType !== 'BOLETO') return false;
+  const n = o.paymentParcelCount ?? 1;
+  if (n <= 1) return false;
+  const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
+  return allInstallmentsHaveBoleto(rows, n);
+}
+
+export function allInstallmentsHavePaymentProof(rows: BoletoInstallmentRow[], n: number): boolean {
+  if (n <= 1 || rows.length < n) return false;
+  for (let i = 0; i < n; i++) {
+    if (!((rows[i]?.installmentProofUrl || '').trim())) return false;
+  }
+  return true;
+}
+
+/** Exibe comprovante geral da OC na seção documentos (oculto quando cada parcela já tem o seu). */
+export function shouldShowOrderLevelPaymentProofInDocuments(
+  o: OrderBoletoPhasePick & { paymentProofUrl?: string | null }
+): boolean {
+  if (!(o.paymentProofUrl || '').trim()) return false;
+  const n = o.paymentParcelCount ?? 1;
+  if (n <= 1 || o.paymentType !== 'BOLETO') return true;
+  const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
+  return !allInstallmentsHavePaymentProof(rows, n);
 }
 
 function isLegacyBulkNoExplicitStatus(rows: BoletoInstallmentRow[], n: number): boolean {
@@ -66,6 +105,13 @@ export type OrderBoletoPhasePick = {
   paymentParcelCount?: number;
   paymentBoletoPhaseReleased?: boolean | null;
 };
+
+/** OC na fase Pagamento (ou correção) em que o lançamento no Controle Financeiro é exigido. */
+export function isOcInFinancialLaunchPhase(o: OrderBoletoPhasePick): boolean {
+  if (o.status !== 'APPROVED' && o.status !== 'PENDING_PROOF_CORRECTION') return false;
+  if (o.paymentType === 'BOLETO') return o.paymentBoletoPhaseReleased === true;
+  return true;
+}
 
 /** Índice da parcela em que o comprador pode anexar/editar boleto (sequencial). */
 export function buyerActiveInstallmentIndex(o: OrderBoletoPhasePick): number | null {
@@ -99,6 +145,7 @@ export function canSendCurrentBoletoToPayment(o: OrderBoletoPhasePick): boolean 
   if (n <= 1) return !!((o.paymentBoletoUrl || '').trim());
   const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
   if (rows.length < n) return false;
+  if (allInstallmentsHaveBoleto(rows, n)) return true;
   if (isLegacyBulkNoExplicitStatus(rows, n)) {
     return true;
   }
@@ -143,6 +190,9 @@ export function orderNeedsPaymentBoleto(o: OrderBoletoPhasePick): boolean {
     return o.paymentBoletoPhaseReleased !== true;
   }
   const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
+  if (allInstallmentsHaveBoleto(rows, n)) {
+    return o.paymentBoletoPhaseReleased !== true;
+  }
   if (allMultiInstallmentsPaid(rows, n)) {
     if (o.paymentBoletoPhaseReleased === undefined) return false;
     return o.paymentBoletoPhaseReleased !== true;
@@ -151,12 +201,18 @@ export function orderNeedsPaymentBoleto(o: OrderBoletoPhasePick): boolean {
   return true;
 }
 
-/** Comprovante só após todas as parcelas pagas (fluxo sequencial). */
+/** Comprovante disponível na fase Pagamento (sequencial: todas pagas; em lote: todas com comprovante por parcela). */
 export function canAttachComprovanteForBoletoOrder(o: OrderBoletoPhasePick): boolean {
   if (o.paymentType !== 'BOLETO') return true;
   const n = o.paymentParcelCount ?? 1;
   if (n <= 1) return true;
   const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
+  if (useParallelBoletoPaymentFlow(o)) {
+    return (
+      o.paymentBoletoPhaseReleased === true &&
+      allInstallmentsHavePaymentProof(rows, n)
+    );
+  }
   return allMultiInstallmentsPaid(rows, n);
 }
 
@@ -174,9 +230,32 @@ export function canSubmitBoletoToProofValidation(o: OrderProofValidationPick): b
   const n = o.paymentParcelCount ?? 1;
   if (n <= 1) return false;
   const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
+  if (useParallelBoletoPaymentFlow(o)) {
+    return (
+      o.paymentBoletoPhaseReleased === true &&
+      allInstallmentsHavePaymentProof(rows, n)
+    );
+  }
   if (!allMultiInstallmentsPaid(rows, n)) return false;
   const last = rows[n - 1];
   return !!((last?.installmentProofUrl || '').trim());
+}
+
+/** Parcelas em que o financeiro ainda pode anexar comprovante (fluxo em lote). */
+export function financeProofTargetInstallmentIndices(o: OrderBoletoPhasePick): number[] {
+  const n = o.paymentParcelCount ?? 1;
+  if (n <= 1 || !useParallelBoletoPaymentFlow(o) || o.paymentBoletoPhaseReleased !== true) {
+    return [];
+  }
+  const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const st = rowStatus(rows[i]);
+    if (st === 'PAID' || st === 'AWAITING_PAYMENT' || st === 'PENDING_BOLETO') {
+      if ((rows[i]?.boletoUrl || '').trim()) out.push(i);
+    }
+  }
+  return out;
 }
 
 /** Comprovante da última parcela (quando todas pagas), para exibir se não houver paymentProofUrl. */

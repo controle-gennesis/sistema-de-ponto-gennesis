@@ -69,6 +69,7 @@ model User {
   messageFavorites         MessageFavorite[]
   chatUserPrivacy          ChatUserPrivacy[]
   messageHiddenForUser     MessageHiddenForUser[]
+  extratoCaixaFiltrosSalvos ExtratoCaixaFiltroSalvo[]
   kanbanBoardsCreated      KanbanBoard[]          @relation("KanbanBoardCreator")
   kanbanCardsAssigned      KanbanCard[]           @relation("KanbanCardAssignee")
   kanbanCardMemberships    KanbanCardMember[]     @relation("KanbanCardMemberUser")
@@ -2219,6 +2220,41 @@ model FinancialControlEntry {
   @@map("financial_control_entries")
 }
 
+/// Ajustes manuais permanentes no extrato de caixa (correções fora do TOTVS RM).
+model ExtratoCaixaAjuste {
+  id               String    @id @default(cuid())
+  dataCompensacao  DateTime  @db.Date
+  codCCusto        String    @default("")
+  ccusto           String    @default("")
+  codNatFinanceira String    @default("")
+  natureza         String    @default("")
+  codFilial        Int?
+  fornecedor       String    @default("")
+  valor            Decimal   @db.Decimal(18, 2)
+  observacao       String?
+  createdById      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([dataCompensacao])
+  @@index([codFilial])
+  @@map("extrato_caixa_ajustes")
+}
+
+/// Presets de filtro do extrato de caixa (por usuário).
+model ExtratoCaixaFiltroSalvo {
+  id        String   @id @default(cuid())
+  userId    String
+  nome      String
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, nome])
+  @@index([userId])
+  @@map("extrato_caixa_filtros_salvos")
 // ─── Tasks (Kanban) ───────────────────────────────────────────────────────────
 
 enum TaskPriority {
