@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FileText,
@@ -19,6 +20,11 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
+  Search,
+  Filter,
+  RotateCcw,
+  MoreVertical
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
@@ -29,6 +35,8 @@ import { exportPurchaseOrderPdf } from '@/lib/exportPurchaseOrderPdf';
 import { PaymentConditionSelect, buildPaymentConditionLabelMap } from '@/components/oc/PaymentConditionSelect';
 import { BoletoParcelasModal } from '@/components/oc/BoletoParcelasModal';
 import { BoletoParcelasList } from '@/components/oc/BoletoParcelasList';
+import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   orderNeedsPaymentBoleto,
   canSendCurrentBoletoToPayment,
@@ -57,6 +65,8 @@ import {
   formatCurrency as formatFinancialCurrency,
   type FinancialControlEntry,
 } from '@/lib/financialControlEntry';
+import { OcFluxTabsNav } from '@/components/oc/OcFluxTabsNav';
+import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 
 export {
   orderNeedsPaymentBoleto,
@@ -484,6 +494,15 @@ export type OcPurchaseOrdersPanelProps = {
   activeTab?: OcTab;
   /** Busca textual aplicada na listagem de OCs. */
   searchTerm?: string;
+  /** Quando informado, exibe o campo de busca no cabeçalho do card (modo integrado). */
+  onSearchChange?: (value: string) => void;
+  /** Card colado às abas do fluxo (sem borda/sombra superior). */
+  flushInCard?: boolean;
+  /**
+   * Fase gestor na tela de Aprovações: limita OCs ao centro de custo dos contratos do gestor.
+   * `undefined` = sem filtro (admin). `[]` = nenhum contrato vinculado.
+   */
+  gestorCostCenterIds?: string[];
 };
 
 const normalizeOcSearch = (value?: string | null) =>
@@ -493,13 +512,160 @@ const normalizeOcSearch = (value?: string | null) =>
     .toLowerCase()
     .trim();
 
+const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> = {
+  compras: {
+    title: 'OC - Aprovação Compras',
+    subtitle: 'Ordens aguardando aprovação do setor de compras'
+  },
+  gestor: {
+    title: 'OC - Aprovação Gestor',
+    subtitle: 'Ordens aguardando aprovação do gestor'
+  },
+  diretoria: {
+    title: 'OC - Aprovação Diretoria',
+    subtitle: 'Ordens aguardando aprovação da diretoria'
+  },
+  IN_REVIEW: {
+    title: 'Correção OC',
+    subtitle: 'Ordens devolvidas para correção antes de seguir no fluxo'
+  },
+  APPROVED: {
+    title: 'Pagamento',
+    subtitle: 'Anexe comprovante, gere CNAB se necessário e envie para validação'
+  },
+  ATTACH_BOLETO: {
+    title: 'Anexar Boleto',
+    subtitle: 'OCs aprovadas em boleto aguardando anexo para pagamento'
+  },
+  PROOF_VALIDATION: {
+    title: 'Validação Comprovante',
+    subtitle: 'Comprovantes enviados aguardando validação do financeiro'
+  },
+  PROOF_CORRECTION: {
+    title: 'Correção Comprovante',
+    subtitle: 'Substitua o comprovante e reenvie para validação'
+  },
+  ATTACH_NF: {
+    title: 'Anexar NF',
+    subtitle: 'Após comprovante validado, anexe a nota fiscal e conclua'
+  },
+  FINALIZADAS: {
+    title: 'OC - Finalizadas',
+    subtitle: 'Histórico de ordens que concluíram o fluxo'
+  },
+  outras: {
+    title: 'Demais status',
+    subtitle: 'Ordens em outros status do fluxo'
+  }
+};
+
+const OC_ACTION_MENU_WIDTH_PX = 224;
+/** Altura estimada do menu (itens variam); usada para abrir acima quando perto do fim da página. */
+const OC_ACTION_MENU_MAX_HEIGHT_PX = 360;
+
+function computeOcActionMenuPosition(rect: DOMRect): { top: number; left: number } {
+  let left = rect.right - OC_ACTION_MENU_WIDTH_PX;
+  left = Math.max(8, Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - 8));
+
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  const openBelow =
+    spaceBelow >= OC_ACTION_MENU_MAX_HEIGHT_PX || spaceBelow >= spaceAbove;
+  const top = openBelow
+    ? rect.bottom + 4
+    : Math.max(8, rect.top - OC_ACTION_MENU_MAX_HEIGHT_PX - 4);
+
+  return { top, left };
+}
+
+const OC_MENU_ITEM_CLASS =
+  'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700';
+
+const OC_APPROVAL_FLOW_STATUSES = ['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'] as const;
+
+export function OcStyledCheckbox({
+  checked,
+  onChange,
+  ariaLabel,
+  title
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel?: string;
+  title?: string;
+}) {
+  return (
+    <label
+      className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center group"
+      title={title}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-label={ariaLabel}
+        className="sr-only"
+      />
+      <span
+        className={`box-border flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors duration-200 ${
+          checked
+            ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+            : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400'
+        }`}
+      >
+        <svg
+          className={`h-3 w-3 shrink-0 text-white transition-opacity duration-200 ${
+            checked ? 'opacity-100' : 'opacity-0'
+          }`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+        </svg>
+      </span>
+    </label>
+  );
+}
+
+function embeddedOcEmptyMessage(tab: OcTab, hasSearch: boolean): string {
+  if (hasSearch) return 'Nenhuma ordem corresponde à busca nesta fase';
+  if (tab === 'FINALIZADAS') return 'Nenhuma OC finalizada com os filtros atuais';
+  if (tab === 'ATTACH_BOLETO') return 'Nenhuma OC aguardando anexo de boleto';
+  if (tab === 'PROOF_VALIDATION') return 'Nenhuma OC aguardando validação do comprovante';
+  if (tab === 'PROOF_CORRECTION') return 'Nenhuma OC em correção do comprovante';
+  if (tab === 'ATTACH_NF') return 'Nenhuma OC na fase de anexar NF';
+  if (tab === 'compras') return 'Nenhuma ordem aguardando aprovação de compras';
+  return 'Nenhuma ordem de compra nesta fase';
+}
+
 export function OcPurchaseOrdersPanel({
   embedded = false,
   hideTabs = false,
   activeTab: activeTabProp,
-  searchTerm = ''
+  searchTerm = '',
+  onSearchChange,
+  flushInCard = false,
+  gestorCostCenterIds
 }: OcPurchaseOrdersPanelProps) {
   const queryClient = useQueryClient();
+  const {
+    isAdministrator,
+    canApproveOcCompras,
+    canApproveOcGestor,
+    canApproveOcDiretoria
+  } = usePermissions();
+  const canActOnOcApproval = (status: string) =>
+    canActOnOcApprovalStatus(status, {
+      isAdministrator,
+      canApproveOcCompras,
+      canApproveOcGestor,
+      canApproveOcDiretoria
+    });
+  const showOcApprovalActions = (status: string) =>
+    OC_APPROVAL_FLOW_STATUSES.includes(status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]) &&
+    canActOnOcApproval(status);
   const [internalActiveTab, setInternalActiveTab] = useState<OcTab>('compras');
   const activeTab = hideTabs ? (activeTabProp ?? 'compras') : internalActiveTab;
   const setActiveTab = (t: OcTab) => {
@@ -514,6 +680,9 @@ export function OcPurchaseOrdersPanel({
   const [orderDetailLoadingId, setOrderDetailLoadingId] = useState<string | null>(null);
   const [cnabSelectedIds, setCnabSelectedIds] = useState<Set<string>>(() => new Set());
   const [cnabGenerating, setCnabGenerating] = useState(false);
+  const [ocActionMenu, setOcActionMenu] = useState<{ orderId: string; top: number; left: number } | null>(
+    null
+  );
   const [proofFileDraft, setProofFileDraft] = useState<File | null>(null);
   const [financialEntryModalOpen, setFinancialEntryModalOpen] = useState(false);
   const [editingFinancialEntry, setEditingFinancialEntry] = useState<FinancialControlEntry | null>(null);
@@ -524,20 +693,34 @@ export function OcPurchaseOrdersPanel({
   );
   const [boletoParcelModalOrder, setBoletoParcelModalOrder] = useState<PurchaseOrder | null>(null);
   const [finalizedPage, setFinalizedPage] = useState(1);
-  const [finalizedDraft, setFinalizedDraft] = useState({
-    q: '',
+  const [internalSearchTerm, setInternalSearchTerm] = useState('');
+  const [isFinalizedFiltersModalOpen, setIsFinalizedFiltersModalOpen] = useState(false);
+  const [exportingFinalizedCsv, setExportingFinalizedCsv] = useState(false);
+  const emptyFinalizedFilters = {
     orderDateFrom: '',
     orderDateTo: '',
     supplierId: '',
     costCenterId: ''
-  });
-  const [finalizedApplied, setFinalizedApplied] = useState({
-    q: '',
-    orderDateFrom: '',
-    orderDateTo: '',
-    supplierId: '',
-    costCenterId: ''
-  });
+  };
+  const [finalizedFilters, setFinalizedFilters] = useState(emptyFinalizedFilters);
+
+  const effectiveSearchTerm = onSearchChange ? searchTerm : internalSearchTerm;
+  const setEffectiveSearchTerm = (value: string) => {
+    if (onSearchChange) onSearchChange(value);
+    else setInternalSearchTerm(value);
+  };
+
+  const hasActiveFinalizedFilters = Boolean(
+    finalizedFilters.orderDateFrom ||
+      finalizedFilters.orderDateTo ||
+      finalizedFilters.supplierId ||
+      finalizedFilters.costCenterId
+  );
+
+  const clearFinalizedFilters = () => {
+    setFinalizedFilters(emptyFinalizedFilters);
+    setFinalizedPage(1);
+  };
 
   useEffect(() => {
     if (activeTab !== 'APPROVED') setCnabSelectedIds(new Set());
@@ -547,7 +730,7 @@ export function OcPurchaseOrdersPanel({
     if (activeTab === 'FINALIZADAS') {
       setFinalizedPage(1);
     }
-  }, [activeTab]);
+  }, [activeTab, effectiveSearchTerm, finalizedFilters]);
 
   useEffect(() => {
     setProofFileDraft(null);
@@ -1035,6 +1218,7 @@ export function OcPurchaseOrdersPanel({
       outras
     };
   }, [allOrders]);
+  const tabCounts = useMemo(() => computeOcTabCounts(allOrders), [allOrders]);
 
   const { data: paymentConditionRows } = useQuery({
     queryKey: ['payment-conditions', 'all-labels'],
@@ -1054,7 +1238,15 @@ export function OcPurchaseOrdersPanel({
       return allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT');
     }
     if (activeTab === 'gestor') {
-      return allOrders.filter((o) => o.status === 'PENDING');
+      let list = allOrders.filter((o) => o.status === 'PENDING');
+      if (gestorCostCenterIds !== undefined) {
+        const allowed = new Set(gestorCostCenterIds);
+        list = list.filter((o) => {
+          const ccId = o.materialRequest?.costCenter?.id;
+          return ccId ? allowed.has(ccId) : false;
+        });
+      }
+      return list;
     }
     if (activeTab === 'diretoria') {
       return allOrders.filter((o) => o.status === 'PENDING_DIRETORIA');
@@ -1096,7 +1288,7 @@ export function OcPurchaseOrdersPanel({
       );
     }
     return allOrders;
-  }, [allOrders, activeTab]);
+  }, [allOrders, activeTab, gestorCostCenterIds]);
 
   const filteredOrdersBySearch = useMemo(() => {
     const normalizedSearchTerm = normalizeOcSearch(searchTerm);
@@ -1132,18 +1324,18 @@ export function OcPurchaseOrdersPanel({
   });
 
   const { data: finalizedListResponse, isFetching: finalizedListFetching } = useQuery({
-    queryKey: ['purchase-orders', 'finalized-list', finalizedPage, finalizedApplied],
+    queryKey: ['purchase-orders', 'finalized-list', finalizedPage, finalizedFilters, effectiveSearchTerm],
     queryFn: async () => {
       const res = await api.get('/purchase-orders', {
         params: {
           status: 'FINALIZED,SENT',
           page: finalizedPage,
           limit: 25,
-          q: finalizedApplied.q.trim() || undefined,
-          orderDateFrom: finalizedApplied.orderDateFrom || undefined,
-          orderDateTo: finalizedApplied.orderDateTo || undefined,
-          supplierId: finalizedApplied.supplierId || undefined,
-          costCenterId: finalizedApplied.costCenterId || undefined
+          q: effectiveSearchTerm.trim() || undefined,
+          orderDateFrom: finalizedFilters.orderDateFrom || undefined,
+          orderDateTo: finalizedFilters.orderDateTo || undefined,
+          supplierId: finalizedFilters.supplierId || undefined,
+          costCenterId: finalizedFilters.costCenterId || undefined
         }
       });
       return res.data;
@@ -1231,14 +1423,15 @@ export function OcPurchaseOrdersPanel({
     items.reduce((s, i) => s + Number(i.totalPrice), 0);
 
   const handleExportFinalizedCsv = async () => {
+    setExportingFinalizedCsv(true);
     try {
       const res = await api.get('/purchase-orders/export-finalized-csv', {
         params: {
-          q: finalizedApplied.q.trim() || undefined,
-          orderDateFrom: finalizedApplied.orderDateFrom || undefined,
-          orderDateTo: finalizedApplied.orderDateTo || undefined,
-          supplierId: finalizedApplied.supplierId || undefined,
-          costCenterId: finalizedApplied.costCenterId || undefined
+          q: effectiveSearchTerm.trim() || undefined,
+          orderDateFrom: finalizedFilters.orderDateFrom || undefined,
+          orderDateTo: finalizedFilters.orderDateTo || undefined,
+          supplierId: finalizedFilters.supplierId || undefined,
+          costCenterId: finalizedFilters.costCenterId || undefined
         },
         responseType: 'blob'
       });
@@ -1252,6 +1445,8 @@ export function OcPurchaseOrdersPanel({
       toast.success('Relatório exportado (CSV).');
     } catch {
       toast.error('Não foi possível exportar o relatório.');
+    } finally {
+      setExportingFinalizedCsv(false);
     }
   };
 
@@ -1421,284 +1616,224 @@ export function OcPurchaseOrdersPanel({
       ? finalizedListFetching && !finalizedListResponse
       : isLoading;
 
+  const isIntegratedFlux = embedded && hideTabs;
+  const flushInTabsCard = isIntegratedFlux && flushInCard;
+  const integratedMeta = isIntegratedFlux ? EMBEDDED_OC_TAB_META[activeTab] : null;
+  const integratedListCount = displayedOrders.length;
+  const showToolbarSearch = Boolean(onSearchChange) || activeTab === 'FINALIZADAS';
+  const showToolbarCnab = activeTab === 'APPROVED';
+  const showToolbarFinalizedExtras = activeTab === 'FINALIZADAS';
+  const showHeaderToolbar = showToolbarSearch || showToolbarCnab || showToolbarFinalizedExtras;
+  const orderForActionMenu = ocActionMenu
+    ? displayedOrders.find((o) => o.id === ocActionMenu.orderId)
+    : undefined;
+
+  const listHeaderToolbar = showHeaderToolbar ? (
+      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+        {showToolbarSearch && (
+          <div className="relative min-w-[240px] flex-1 sm:w-[300px] sm:flex-none sm:max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+            <input
+              type="text"
+              inputMode="search"
+              autoComplete="off"
+              value={effectiveSearchTerm}
+              onChange={(e) => setEffectiveSearchTerm(e.target.value)}
+              placeholder="Buscar OC, SC, fornecedor, centro de custo..."
+              className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            />
+            {effectiveSearchTerm ? (
+              <button
+                type="button"
+                onClick={() => setEffectiveSearchTerm('')}
+                aria-label="Limpar busca"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+        )}
+        {showToolbarCnab && (
+          <button
+            type="button"
+            onClick={() => {
+              if (cnabGenerating || cnabSelectedIds.size === 0) return;
+              handleGenerateCnabOc();
+            }}
+            aria-disabled={cnabGenerating || cnabSelectedIds.size === 0}
+            title={
+              cnabSelectedIds.size === 0
+                ? 'Selecione ao menos uma OC na tabela'
+                : 'Gerar remessa CNAB400 (Itaú) para as OCs selecionadas'
+            }
+            className={`flex h-10 min-w-[8.75rem] shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${
+              cnabGenerating || cnabSelectedIds.size === 0
+                ? 'cursor-not-allowed opacity-50'
+                : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            {cnabGenerating ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4 shrink-0" />
+            )}
+            <span className="whitespace-nowrap">CNAB400</span>
+          </button>
+        )}
+        {showToolbarFinalizedExtras && (
+          <>
+            <button
+              type="button"
+              onClick={() => setIsFinalizedFiltersModalOpen(true)}
+              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white transition-colors hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 ${
+                hasActiveFinalizedFilters
+                  ? 'border-blue-400 text-blue-600 dark:border-blue-500 dark:text-blue-400'
+                  : 'border-gray-300 text-gray-700 dark:border-gray-600 dark:text-gray-200'
+              }`}
+              aria-label="Abrir filtro"
+              title={hasActiveFinalizedFilters ? 'Filtro (ativos)' : 'Filtro'}
+            >
+              <Filter className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExportFinalizedCsv()}
+              disabled={exportingFinalizedCsv}
+              className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+            >
+              {exportingFinalizedCsv ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 shrink-0" />
+              )}
+              <span>Exportar CSV</span>
+            </button>
+          </>
+        )}
+      </div>
+    ) : null;
+
   return (
     <>
-      <section id="fluxo-oc" className="scroll-mt-4">
-        <Card>
-          <CardHeader
-            className={
-              hideTabs
-                ? 'border-b border-gray-200 dark:border-gray-700'
-                : 'border-b-0'
-            }
-          >
-            <div className="flex items-center">
-              <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+      <section id="fluxo-oc" className={flushInTabsCard ? '' : 'scroll-mt-4'}>
+        <Card
+          className={
+            isIntegratedFlux
+              ? `w-full ${flushInTabsCard ? 'rounded-none border-0 border-t-0 shadow-none' : ''}`
+              : undefined
+          }
+        >
+          {isIntegratedFlux && integratedMeta ? (
+            <CardHeader className={`border-b-0 pb-1 ${flushInTabsCard ? 'pt-4' : ''}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                    <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {integratedMeta.title}
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{integratedMeta.subtitle}</p>
+                  </div>
+                </div>
+                {listHeaderToolbar}
               </div>
-              <div className="ml-3 sm:ml-4 min-w-0">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {embedded ? 'Ordens de compra (OC)' : 'Ordens de Compra'}
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {activeTab === 'FINALIZADAS' ? (
-                    <>
-                      {finalizedPagination?.total ?? displayedOrders.length}{' '}
-                      {(finalizedPagination?.total ?? displayedOrders.length) === 1 ? 'ordem' : 'ordens'} no total
-                      {finalizedPagination && finalizedPagination.totalPages > 1
-                        ? ` · página ${finalizedPagination.page} de ${finalizedPagination.totalPages}`
-                        : ''}
-                    </>
-                  ) : (
-                    <>
-                      {orders.length} {orders.length === 1 ? 'ordem' : 'ordens'} encontrada(s)
-                    </>
-                  )}
-                  {embedded && (
-                    <span className="block sm:inline sm:ml-1 text-xs text-gray-500 dark:text-gray-500 mt-1 sm:mt-0">
-                      {activeTab === 'ATTACH_BOLETO'
-                        ? 'OC aprovada em boleto: anexe o boleto para pagamento (financeiro).'
-                        : activeTab === 'APPROVED'
-                          ? 'Pagamento: anexe o comprovante, gere CNAB se precisar e envie para Validação Comprovante.'
-                          : activeTab === 'PROOF_VALIDATION'
-                            ? 'OCs com comprovante enviado — aguardando validação.'
-                            : activeTab === 'PROOF_CORRECTION'
-                              ? 'Financeiro deve substituir o comprovante e reenviar para validação.'
-                              : activeTab === 'ATTACH_NF'
-                              ? 'Após o comprovante validado: anexe uma ou mais notas fiscais e conclua o envio.'
-                              : activeTab === 'FINALIZADAS'
-                                ? 'OCs que concluíram o fluxo (NF anexada). Use filtros e exporte relatório em CSV.'
-                                : 'Após a SC aprovada: criar OC → aprovação Compras → Gestor → Diretoria.'}
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-          </CardHeader>
+            </CardHeader>
+          ) : null}
           {!hideTabs && (
-            <div className="border-b border-gray-200 dark:border-gray-700 px-4">
-              <nav className="-mb-px flex flex-wrap gap-1 sm:gap-2 overflow-x-auto py-2">
-                {(
-                  [
-                    { id: 'compras' as const, label: 'OC - Aprovação Compras', count: tabCounts.compras },
-                    { id: 'gestor' as const, label: 'OC - Aprovação Gestor', count: tabCounts.gestor },
-                    { id: 'diretoria' as const, label: 'OC - Aprovação Diretoria', count: tabCounts.diretoria },
-                    { id: 'IN_REVIEW' as const, label: 'Correção OC', count: tabCounts.IN_REVIEW },
-                    {
-                      id: 'ATTACH_BOLETO' as const,
-                      label: 'Anexar Boleto',
-                      count: tabCounts.ATTACH_BOLETO
-                    },
-                    { id: 'APPROVED' as const, label: 'Pagamento', count: tabCounts.APPROVED },
-                    {
-                      id: 'PROOF_VALIDATION' as const,
-                      label: 'Validação Comprovante',
-                      count: tabCounts.PROOF_VALIDATION
-                    },
-                    {
-                      id: 'PROOF_CORRECTION' as const,
-                      label: 'Correção Comprovante',
-                      count: tabCounts.PROOF_CORRECTION
-                    },
-                    { id: 'ATTACH_NF' as const, label: 'Anexar NF', count: tabCounts.ATTACH_NF },
-                    { id: 'FINALIZADAS' as const, label: 'Finalizadas', count: finalizedTotal },
-                    { id: 'outras' as const, label: 'Demais status', count: tabCounts.outras }
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 py-2 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap rounded-t-lg transition-colors ${
-                      activeTab === tab.id
-                        ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
-                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    {tab.label}
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs ${
-                        activeTab === tab.id
-                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  </button>
-                ))}
-              </nav>
-            </div>
+            <OcFluxTabsNav
+              activeTab={activeTab}
+              onActiveTab={setActiveTab}
+              tabCounts={tabCounts}
+              finalizedTotal={finalizedTotal}
+            />
           )}
-          <CardContent className="p-0">
+          <CardContent className={isIntegratedFlux ? undefined : 'p-0'}>
             {listLoading ? (
-              <div className="px-6 py-12 text-center">
+              <div className={isIntegratedFlux ? 'text-center py-8' : 'px-6 py-12 text-center'}>
                 <Loading message="Carregando ordens..." />
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                {activeTab === 'FINALIZADAS' && (
-                  <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/30 space-y-3">
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div className="min-w-[180px] flex-1">
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Busca (nº OC, fornecedor, SC)
-                        </label>
-                        <input
-                          type="text"
-                          value={finalizedDraft.q}
-                          onChange={(e) => setFinalizedDraft((d) => ({ ...d, q: e.target.value }))}
-                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                          placeholder="Ex.: OC-2026 ou nome do fornecedor"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Data OC (de)
-                        </label>
-                        <input
-                          type="date"
-                          value={finalizedDraft.orderDateFrom}
-                          onChange={(e) => setFinalizedDraft((d) => ({ ...d, orderDateFrom: e.target.value }))}
-                          className="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Data OC (até)
-                        </label>
-                        <input
-                          type="date"
-                          value={finalizedDraft.orderDateTo}
-                          onChange={(e) => setFinalizedDraft((d) => ({ ...d, orderDateTo: e.target.value }))}
-                          className="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        />
-                      </div>
-                      <div className="min-w-[200px]">
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Fornecedor
-                        </label>
-                        <select
-                          value={finalizedDraft.supplierId}
-                          onChange={(e) => setFinalizedDraft((d) => ({ ...d, supplierId: e.target.value }))}
-                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="">Todos</option>
-                          {(suppliersForFilter as Array<{ id: string; name: string }>).map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="min-w-[220px]">
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Centro de custo
-                        </label>
-                        <select
-                          value={finalizedDraft.costCenterId}
-                          onChange={(e) => setFinalizedDraft((d) => ({ ...d, costCenterId: e.target.value }))}
-                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="">Todos</option>
-                          {costCentersForFilter
-                            .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
-                            .map((cc) => (
-                              <option key={cc.id} value={cc.id}>
-                                {[cc.code, cc.name].filter(Boolean).join(' — ') || cc.id}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFinalizedApplied({ ...finalizedDraft });
-                          setFinalizedPage(1);
-                        }}
-                        className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        Aplicar filtros
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const empty = {
-                            q: '',
-                            orderDateFrom: '',
-                            orderDateTo: '',
-                            supplierId: '',
-                            costCenterId: ''
-                          };
-                          setFinalizedDraft(empty);
-                          setFinalizedApplied(empty);
-                          setFinalizedPage(1);
-                        }}
-                        className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
-                      >
-                        Limpar
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleExportFinalizedCsv()}
-                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-                      >
-                        <Download className="w-4 h-4 shrink-0" />
-                        Exportar Relatório (CSV)
-                      </button>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 self-center">
-                        O arquivo usa os mesmos filtros acima (até 25 mil linhas).
-                      </p>
-                    </div>
+              <div className={isIntegratedFlux ? undefined : 'overflow-x-auto'}>
+                {isIntegratedFlux && integratedListCount > 0 && (
+                  <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                    <span>
+                      {activeTab === 'FINALIZADAS' && finalizedPagination
+                        ? (() => {
+                            const total = finalizedPagination.total;
+                            const page = finalizedPagination.page;
+                            const limit = finalizedPagination.limit ?? integratedListCount;
+                            const start = total === 0 ? 0 : (page - 1) * limit + 1;
+                            const end = Math.min((page - 1) * limit + integratedListCount, total);
+                            return `Mostrando ${start} a ${end} de ${total} ordens de compra`;
+                          })()
+                        : `Mostrando 1 a ${integratedListCount} de ${integratedListCount} ${
+                            integratedListCount === 1 ? 'ordem de compra' : 'ordens de compra'
+                          }`}
+                    </span>
+                    <span>
+                      {activeTab === 'FINALIZADAS' &&
+                      finalizedPagination &&
+                      finalizedPagination.totalPages > 1
+                        ? `Página ${finalizedPagination.page} de ${finalizedPagination.totalPages}`
+                        : 'Página 1 de 1'}
+                    </span>
                   </div>
                 )}
-                {activeTab === 'APPROVED' && orders.length > 0 && (
-                  <div className="px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3 bg-gray-50/80 dark:bg-gray-900/30">
-                    <p className="text-xs text-gray-600 dark:text-gray-400 max-w-2xl">
-                      Remessa CNAB400 (Itaú), mesmo layout do módulo Financeiro. O fornecedor precisa ter{' '}
-                      <strong>banco</strong>, <strong>agência</strong> e <strong>conta</strong> no cadastro.
+                {isIntegratedFlux && integratedListCount === 0 ? (
+                  <div className="text-center py-8">
+                    <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                    <p className="text-gray-500 dark:text-gray-400">
+                      {embeddedOcEmptyMessage(activeTab, !!searchTerm.trim())}
                     </p>
-                    <button
-                      type="button"
-                      onClick={handleGenerateCnabOc}
-                      disabled={cnabGenerating || cnabSelectedIds.size === 0}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-800 dark:bg-slate-600 dark:hover:bg-slate-500 text-white disabled:opacity-50 transition-colors shrink-0"
-                    >
-                      {cnabGenerating ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Gerando…
-                        </>
-                      ) : (
-                        <>
-                          <FileText className="w-4 h-4" />
-                          CNAB400
-                        </>
-                      )}
-                    </button>
+                    {(effectiveSearchTerm.trim() || hasActiveFinalizedFilters) && activeTab === 'FINALIZADAS' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEffectiveSearchTerm('');
+                          clearFinalizedFilters();
+                        }}
+                        className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Limpar filtros
+                      </button>
+                    ) : searchTerm.trim() && onSearchChange ? (
+                      <button
+                        type="button"
+                        onClick={() => onSearchChange('')}
+                        className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Limpar busca
+                      </button>
+                    ) : null}
                   </div>
-                )}
-                <table className="w-full">
+                ) : (
+                <div
+                  className={
+                    isIntegratedFlux ? 'overflow-x-auto [scrollbar-gutter:stable]' : undefined
+                  }
+                >
+                <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       {activeTab === 'APPROVED' && (
-                        <th className="w-12 px-2 sm:px-3 py-4 text-center">
-                          <input
-                            type="checkbox"
+                        <th className="w-12 min-w-[3rem] max-w-[3rem] px-2 sm:px-3 py-4">
+                          <div className="flex items-center justify-center">
+                          <OcStyledCheckbox
                             title="Selecionar todas"
-                            aria-label="Selecionar todas as OCs"
+                            ariaLabel="Selecionar todas as OCs"
                             checked={orders.length > 0 && orders.every((x) => cnabSelectedIds.has(x.id))}
-                            onChange={(e) => {
-                              if (e.target.checked) {
+                            onChange={(checked) => {
+                              if (checked) {
                                 setCnabSelectedIds(new Set(orders.map((x) => x.id)));
                               } else {
                                 setCnabSelectedIds(new Set());
                               }
                             }}
-                            className="rounded border-gray-300 dark:border-gray-600"
                           />
+                          </div>
                         </th>
                       )}
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -1734,7 +1869,7 @@ export function OcPurchaseOrdersPanel({
                         </th>
                       )}
                       <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Ações
+                        {isIntegratedFlux ? 'Ação' : 'Ações'}
                       </th>
                     </tr>
                   </thead>
@@ -1746,14 +1881,21 @@ export function OcPurchaseOrdersPanel({
                       return (
                       <tr key={o.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                         {activeTab === 'APPROVED' && (
-                          <td className="px-2 sm:px-3 py-4 text-center align-middle">
-                            <input
-                              type="checkbox"
-                              checked={cnabSelectedIds.has(o.id)}
-                              onChange={() => toggleCnabSelection(o.id)}
-                              aria-label={`Selecionar ${o.orderNumber}`}
-                              className="rounded border-gray-300 dark:border-gray-600"
-                            />
+                          <td className="w-12 min-w-[3rem] max-w-[3rem] px-2 sm:px-3 py-4 align-middle">
+                            <div className="flex items-center justify-center">
+                              <OcStyledCheckbox
+                                checked={cnabSelectedIds.has(o.id)}
+                                onChange={(checked) => {
+                                  setCnabSelectedIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (checked) next.add(o.id);
+                                    else next.delete(o.id);
+                                    return next;
+                                  });
+                                }}
+                                ariaLabel={`Selecionar ${o.orderNumber}`}
+                              />
+                            </div>
                           </td>
                         )}
                         <td className="px-3 sm:px-6 py-4 text-sm font-mono font-medium text-gray-900 dark:text-gray-100">
@@ -2027,104 +2169,130 @@ export function OcPurchaseOrdersPanel({
                         )}
                         <td className="px-3 sm:px-6 py-4 text-right whitespace-nowrap">
                           <div className="inline-flex items-center justify-end gap-1 flex-wrap">
-                            {o.status === 'PENDING_PROOF_VALIDATION' && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (
-                                    !window.confirm(
-                                      'Confirmar validação do comprovante e liberar a fase Anexar NF para o comprador?'
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  validateProofMutation.mutate(o.id);
-                                }}
-                                disabled={validateProofMutation.isPending}
-                                className="p-2 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
-                                title="Validar comprovante — liberar anexo de NF"
-                              >
-                                {validateProofMutation.isPending ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Check className="w-4 h-4" />
+                            {!isIntegratedFlux && (
+                              <>
+                                {o.status === 'PENDING_PROOF_VALIDATION' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (
+                                        !window.confirm(
+                                          'Confirmar validação do comprovante e liberar a fase Anexar NF para o comprador?'
+                                        )
+                                      ) {
+                                        return;
+                                      }
+                                      validateProofMutation.mutate(o.id);
+                                    }}
+                                    disabled={validateProofMutation.isPending}
+                                    className="p-2 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
+                                    title="Validar comprovante — liberar anexo de NF"
+                                  >
+                                    {validateProofMutation.isPending ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Check className="w-4 h-4" />
+                                    )}
+                                  </button>
                                 )}
-                              </button>
-                            )}
-                            {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(o.status) && (
-                              <button
-                                type="button"
-                                onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
-                                className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors inline-flex"
-                                title={approvalLabel(o.status)}
-                              >
-                                <Check className="w-4 h-4" />
-                              </button>
-                            )}
-                            {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(o.status) && (
-                              <button
-                                type="button"
-                                onClick={() => setCorrectionTarget(o)}
-                                className="p-2 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors inline-flex"
-                                title="Enviar para CORREÇÃO OC"
-                              >
-                                <Wrench className="w-4 h-4" />
-                              </button>
-                            )}
-                            {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(o.status) && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRejectTarget(o);
-                                  setRejectReason('');
-                                }}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors inline-flex"
-                                title="Reprovar"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            )}
-                            {o.status === 'IN_REVIEW' &&
-                              o.creator?.id &&
-                              currentUserId === o.creator.id && (
+                                {showOcApprovalActions(o.status) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
+                                    className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors inline-flex"
+                                    title={approvalLabel(o.status)}
+                                  >
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {showOcApprovalActions(o.status) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCorrectionTarget(o)}
+                                    className="p-2 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors inline-flex"
+                                    title="Enviar para CORREÇÃO OC"
+                                  >
+                                    <Wrench className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {showOcApprovalActions(o.status) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRejectTarget(o);
+                                      setRejectReason('');
+                                    }}
+                                    className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors inline-flex"
+                                    title="Reprovar"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {o.status === 'IN_REVIEW' &&
+                                  o.creator?.id &&
+                                  currentUserId === o.creator.id && (
+                                    <button
+                                      type="button"
+                                      onClick={() => resubmitOcMutation.mutate(o.id)}
+                                      disabled={resubmitOcMutation.isPending}
+                                      className="p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
+                                      title="Reenviar para aprovação"
+                                    >
+                                      <Send className="w-4 h-4" />
+                                    </button>
+                                  )}
                                 <button
                                   type="button"
-                                  onClick={() => resubmitOcMutation.mutate(o.id)}
-                                  disabled={resubmitOcMutation.isPending}
-                                  className="p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
-                                  title="Reenviar para aprovação"
+                                  onClick={() => handleExportPdf(o.id)}
+                                  disabled={pdfExportingId === o.id}
+                                  className="inline-flex rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-700/50"
+                                  title="Baixar OC (PDF)"
                                 >
-                                  <Send className="w-4 h-4" />
+                                  <Download className="h-4 w-4" />
                                 </button>
-                              )}
-                            <button
-                              type="button"
-                              onClick={() => handleExportPdf(o.id)}
-                              disabled={pdfExportingId === o.id}
-                              className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-colors inline-flex disabled:opacity-50"
-                              title="Baixar OC (PDF)"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openOrderDetail(o)}
-                              disabled={orderDetailLoadingId === o.id}
-                              className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
-                              title="Ver detalhes"
-                            >
-                              {orderDetailLoadingId === o.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Eye className="w-4 h-4" />
-                              )}
-                            </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openOrderDetail(o)}
+                                  disabled={orderDetailLoadingId === o.id}
+                                  className="inline-flex rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                                  title="Ver detalhes"
+                                >
+                                  {orderDetailLoadingId === o.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </>
+                            )}
+                            {isIntegratedFlux && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                  setOcActionMenu((prev) => {
+                                    if (prev?.orderId === o.id) return null;
+                                    const { top, left } = computeOcActionMenuPosition(r);
+                                    return { orderId: o.id, top, left };
+                                  });
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                aria-label="Menu de ações"
+                                aria-expanded={ocActionMenu?.orderId === o.id}
+                                aria-haspopup="menu"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
                     )})}
                   </tbody>
                 </table>
+                </div>
+                )}
                 {activeTab === 'FINALIZADAS' &&
                   finalizedPagination &&
                   finalizedPagination.totalPages > 0 &&
@@ -2158,8 +2326,9 @@ export function OcPurchaseOrdersPanel({
                       </div>
                     </div>
                   )}
-                {((activeTab === 'FINALIZADAS' && displayedOrders.length === 0 && !listLoading) ||
-                  (activeTab !== 'FINALIZADAS' && orders.length === 0 && !isLoading)) && (
+                {!isIntegratedFlux &&
+                  ((activeTab === 'FINALIZADAS' && displayedOrders.length === 0 && !listLoading) ||
+                    (activeTab !== 'FINALIZADAS' && orders.length === 0 && !isLoading)) && (
                   <div className="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                     {activeTab === 'FINALIZADAS' ? (
                       <>
@@ -2193,7 +2362,7 @@ export function OcPurchaseOrdersPanel({
       </section>
 
       {rejectTarget && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => { setRejectTarget(null); setRejectReason(''); }} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Reprovar OC</h2>
@@ -2228,7 +2397,7 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {correctionTarget && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setCorrectionTarget(null)} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Enviar para CORREÇÃO OC</h2>
@@ -2253,7 +2422,7 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {showEditOcModal && selectedOrder && editOcForm && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowEditOcModal(false)} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
             <div className="flex items-start justify-between gap-3 mb-4">
@@ -2484,7 +2653,7 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedOrder(null)} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
             <div className="flex justify-between items-start gap-2 mb-4">
@@ -3575,7 +3744,7 @@ export function OcPurchaseOrdersPanel({
                   Ver mapa de cotação
                 </button>
               )}
-              {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(selectedOrder.status) && (
+              {showOcApprovalActions(selectedOrder.status) && (
                 <button
                   type="button"
                   onClick={() => approveMutation.mutate({ id: selectedOrder.id, currentStatus: selectedOrder.status })}
@@ -3586,7 +3755,7 @@ export function OcPurchaseOrdersPanel({
                   {approvalLabel(selectedOrder.status)}
                 </button>
               )}
-              {['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'].includes(selectedOrder.status) && (
+              {showOcApprovalActions(selectedOrder.status) && (
                 <>
                   <button
                     type="button"
@@ -3666,6 +3835,275 @@ export function OcPurchaseOrdersPanel({
           }
         />
       )}
+
+      {isFinalizedFiltersModalOpen && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setIsFinalizedFiltersModalOpen(false)}
+            aria-hidden
+          />
+          <div className="relative mx-4 w-full max-w-2xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+              <button
+                type="button"
+                onClick={() => setIsFinalizedFiltersModalOpen(false)}
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Fechar filtros"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Data OC (de)
+                  </label>
+                  <input
+                    type="date"
+                    value={finalizedFilters.orderDateFrom}
+                    onChange={(e) =>
+                      setFinalizedFilters((f) => ({ ...f, orderDateFrom: e.target.value }))
+                    }
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Data OC (até)
+                  </label>
+                  <input
+                    type="date"
+                    value={finalizedFilters.orderDateTo}
+                    onChange={(e) =>
+                      setFinalizedFilters((f) => ({ ...f, orderDateTo: e.target.value }))
+                    }
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Fornecedor
+                  </label>
+                  <select
+                    value={finalizedFilters.supplierId}
+                    onChange={(e) =>
+                      setFinalizedFilters((f) => ({ ...f, supplierId: e.target.value }))
+                    }
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  >
+                    <option value="">Todos</option>
+                    {(suppliersForFilter as Array<{ id: string; name: string }>).map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Centro de custo
+                  </label>
+                  <select
+                    value={finalizedFilters.costCenterId}
+                    onChange={(e) =>
+                      setFinalizedFilters((f) => ({ ...f, costCenterId: e.target.value }))
+                    }
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  >
+                    <option value="">Todos</option>
+                    {costCentersForFilter
+                      .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
+                      .map((cc) => (
+                        <option key={cc.id} value={cc.id}>
+                          {[cc.code, cc.name].filter(Boolean).join(' — ') || cc.id}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+              <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                A exportação CSV usa a busca do cabeçalho e estes filtros (até 25 mil linhas).
+              </p>
+            </div>
+            <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  clearFinalizedFilters();
+                  setIsFinalizedFiltersModalOpen(false);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFinalizedFiltersModalOpen(false)}
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ocActionMenu &&
+        orderForActionMenu &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[1100]" aria-hidden onClick={() => setOcActionMenu(null)} />
+            <div
+              role="menu"
+              className="fixed z-[1101] w-56 max-h-[min(70vh,360px)] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              style={{ top: ocActionMenu.top, left: ocActionMenu.left }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOcActionMenu(null);
+                  openOrderDetail(orderForActionMenu);
+                }}
+                disabled={orderDetailLoadingId === orderForActionMenu.id}
+                className={OC_MENU_ITEM_CLASS}
+              >
+                {orderDetailLoadingId === orderForActionMenu.id ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
+                ) : (
+                  <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                )}
+                <span>Ver detalhes</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOcActionMenu(null);
+                  handleExportPdf(orderForActionMenu.id);
+                }}
+                disabled={pdfExportingId === orderForActionMenu.id}
+                className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+              >
+                {pdfExportingId === orderForActionMenu.id ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-600 dark:text-slate-300" />
+                ) : (
+                  <Download className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300" />
+                )}
+                <span>Baixar OC (PDF)</span>
+              </button>
+              {orderForActionMenu.status === 'PENDING_PROOF_VALIDATION' && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOcActionMenu(null);
+                    if (
+                      !window.confirm(
+                        'Confirmar validação do comprovante e liberar a fase Anexar NF para o comprador?'
+                      )
+                    ) {
+                      return;
+                    }
+                    validateProofMutation.mutate(orderForActionMenu.id);
+                  }}
+                  disabled={validateProofMutation.isPending}
+                  className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                >
+                  {validateProofMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-teal-600 dark:text-teal-400" />
+                  ) : (
+                    <Check className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
+                  )}
+                  <span>Validar comprovante</span>
+                </button>
+              )}
+              {showOcApprovalActions(orderForActionMenu.status) && (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      approveMutation.mutate({
+                        id: orderForActionMenu.id,
+                        currentStatus: orderForActionMenu.status
+                      });
+                    }}
+                    disabled={approveMutation.isPending}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    {approveMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-green-600 dark:text-green-400" />
+                    ) : (
+                      <Check className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                    )}
+                    <span>{approvalLabel(orderForActionMenu.status)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      setCorrectionTarget(orderForActionMenu);
+                    }}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    <Wrench className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>Enviar para correção</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      setRejectTarget(orderForActionMenu);
+                      setRejectReason('');
+                    }}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                    <span>Reprovar</span>
+                  </button>
+                </>
+              )}
+              {orderForActionMenu.status === 'IN_REVIEW' &&
+                orderForActionMenu.creator?.id &&
+                currentUserId === orderForActionMenu.creator.id && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOcActionMenu(null);
+                      resubmitOcMutation.mutate(orderForActionMenu.id);
+                    }}
+                    disabled={resubmitOcMutation.isPending}
+                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                  >
+                    {resubmitOcMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+                    ) : (
+                      <Send className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                    )}
+                    <span>Reenviar para aprovação</span>
+                  </button>
+                )}
+            </div>
+          </>,
+          document.body
+        )}
     </>
   );
 }

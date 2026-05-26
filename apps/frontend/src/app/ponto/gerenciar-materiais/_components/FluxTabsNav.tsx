@@ -17,25 +17,30 @@ export function FluxTabsNav({
   fluxTab,
   onFluxTab,
   stats,
-  ocTabCounts
+  ocTabCounts,
+  embeddedInCard = false
 }: {
   fluxTab: FluxTab;
   onFluxTab: (t: FluxTab) => void;
   stats: GerenciarStats;
   ocTabCounts: OcTabCounts;
+  /** Abas coladas ao card da lista (sem cantos/ espaço extras). */
+  embeddedInCard?: boolean;
 }) {
   return (
-    <div id="secao-fluxo-tabs" className="scroll-mt-4">
-      <p className="text-center text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-        Requisições de materiais e fases de OC
-      </p>
-      <div className="border-b border-gray-200 dark:border-gray-700 rounded-t-lg bg-gray-50/80 dark:bg-gray-900/40 px-2">
+    <div id="secao-fluxo-tabs" className={embeddedInCard ? '' : 'scroll-mt-4'}>
+      {!embeddedInCard && (
+        <p className="text-center text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
+          Requisições de materiais e fases de OC
+        </p>
+      )}
+      <div className="px-2 bg-transparent">
         <nav className="-mb-px flex flex-wrap justify-center gap-x-1 gap-y-2 sm:gap-x-2 overflow-x-auto py-3">
           {(
             [
               { id: 'rm_PENDING' as const, label: 'Pendentes', count: stats.pending },
               { id: 'rm_IN_REVIEW' as const, label: 'Correção RM', count: stats.inReview },
-              { id: 'rm_APPROVED' as const, label: 'RMs aprovadas', count: stats.approved }
+              { id: 'rm_APPROVED' as const, label: 'RMs Aprovadas', count: stats.approved }
             ] as const
           ).map((tab) => (
             <button

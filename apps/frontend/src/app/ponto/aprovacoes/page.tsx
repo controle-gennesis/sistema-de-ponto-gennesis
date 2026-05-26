@@ -26,6 +26,7 @@ import {
   resolveEspelhoApprovalStatus,
   updateEspelhoApprovalStatus
 } from '@/lib/espelhoNfApproval';
+import { OcApprovalsSection } from './_components/OcApprovalsSection';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -307,7 +308,7 @@ export default function AprovacoesPage() {
     }
   };
 
-  const { canAccessDpApproverPages, canApproveEspelhoNf } = usePermissions();
+  const { canAccessDpApproverPages, canApproveEspelhoNf, canApproveOc } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -590,7 +591,7 @@ export default function AprovacoesPage() {
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Aprovações</h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Caixa de entrada de aprovações pendentes
+              Solicitações, espelhos fiscais e ordens de compra pendentes de decisão
             </p>
           </div>
 
@@ -656,12 +657,16 @@ export default function AprovacoesPage() {
                 </div>
               ) : loadingDp ? (
                 <Loading message="Carregando aprovações..." />
+              ) : dpFiltered.length === 0 ? (
+                <div className="py-8 text-center">
+                  <FileText className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" aria-hidden />
+                  <p className="text-gray-500 dark:text-gray-400">Nenhuma aprovação pendente.</p>
+                </div>
               ) : (
                 <>
                   <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                     <span>
-                      Mostrando {dpFiltered.length === 0 ? 0 : 1} a {dpFiltered.length} de {dpFiltered.length}{' '}
-                      solicitações
+                      Mostrando 1 a {dpFiltered.length} de {dpFiltered.length} solicitações
                     </span>
                     <span>Página 1 de 1</span>
                   </div>
@@ -739,13 +744,6 @@ export default function AprovacoesPage() {
                             </td>
                           </tr>
                         ))}
-                        {dpFiltered.length === 0 && (
-                          <tr>
-                            <td className="py-8 text-center text-gray-500" colSpan={8}>
-                              Nenhuma aprovação pendente.
-                            </td>
-                          </tr>
-                        )}
                       </tbody>
                     </table>
                   </div>
@@ -813,12 +811,16 @@ export default function AprovacoesPage() {
             <CardContent>
               {loadingEspelhoApprovals ? (
                 <Loading message="Carregando espelhos..." />
+              ) : espelhoFiltered.length === 0 ? (
+                <div className="py-8 text-center">
+                  <FileText className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" aria-hidden />
+                  <p className="text-gray-500 dark:text-gray-400">Nenhum espelho neste filtro.</p>
+                </div>
               ) : (
                 <>
                   <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                     <span>
-                      Mostrando {espelhoFiltered.length === 0 ? 0 : 1} a {espelhoFiltered.length} de {espelhoFiltered.length}{' '}
-                      espelhos
+                      Mostrando 1 a {espelhoFiltered.length} de {espelhoFiltered.length} espelhos
                     </span>
                     <span>Página 1 de 1</span>
                   </div>
@@ -914,13 +916,6 @@ export default function AprovacoesPage() {
                             </tr>
                           );
                         })}
-                        {espelhoFiltered.length === 0 && (
-                          <tr>
-                            <td className="py-8 text-center text-gray-500" colSpan={4}>
-                              Nenhum espelho neste filtro.
-                            </td>
-                          </tr>
-                        )}
                       </tbody>
                     </table>
                   </div>
@@ -929,6 +924,8 @@ export default function AprovacoesPage() {
             </CardContent>
           </Card>
           )}
+
+          {canApproveOc && <OcApprovalsSection />}
 
           <Modal
             isOpen={!!detailRequest}

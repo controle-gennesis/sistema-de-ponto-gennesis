@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ShoppingCart,
   Plus,
-  List,
   X,
   AlertCircle,
   Send,
@@ -15,7 +15,9 @@ import {
   ExternalLink,
   Loader2,
   Search,
-  Eye
+  Filter,
+  Eye,
+  RotateCcw
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -49,6 +51,31 @@ function rmPriorityLabelPt(p: string | undefined): string {
   return p ? m[p] || p : '—';
 }
 
+function rmPriorityBadgeClass(p: string | undefined): string {
+  const base = 'inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium';
+  if (p === 'URGENT') return `${base} bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200`;
+  if (p === 'HIGH') return `${base} bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200`;
+  if (p === 'LOW') return `${base} bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300`;
+  return `${base} bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200`;
+}
+
+function DetailField({
+  label,
+  children,
+  className = ''
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
+      <div className="mt-1 text-sm text-gray-900 dark:text-gray-100">{children}</div>
+    </div>
+  );
+}
+
 function rmStatusLabelPt(status: string): string {
   const m: Record<string, string> = {
     PENDING: 'Pendente',
@@ -69,6 +96,23 @@ function rmStatusRowClass(status: string): string {
   if (status === 'REJECTED') return 'text-red-600 dark:text-red-400';
   if (status === 'CANCELLED') return 'text-gray-500 dark:text-gray-400';
   return 'text-gray-600 dark:text-gray-400';
+}
+
+function rmStatusBadgeClass(status: string): string {
+  const base = 'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold';
+  if (status === 'APPROVED')
+    return `${base} bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200`;
+  if (status === 'PENDING')
+    return `${base} bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200`;
+  if (status === 'IN_REVIEW')
+    return `${base} bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200`;
+  if (status === 'REJECTED')
+    return `${base} bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200`;
+  if (status === 'CANCELLED')
+    return `${base} bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300`;
+  if (status === 'PARTIALLY_FULFILLED' || status === 'FULFILLED')
+    return `${base} bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200`;
+  return `${base} bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300`;
 }
 
 type RmListPurchaseOrder = { id: string; status: string; orderNumber?: string | null };
@@ -181,6 +225,18 @@ function rmCostCenterLine(req: {
   return '—';
 }
 
+function rmCostCenterName(req: {
+  costCenter?: { code?: string | null; name?: string | null } | null;
+  costCenterId?: string | null;
+}) {
+  const cc = req.costCenter;
+  if (cc?.name) return String(cc.name);
+  if (cc?.code) return String(cc.code);
+  return '—';
+}
+
+const LIST_ITEMS_PER_PAGE = 12;
+
 /** YYYY-MM-DD no fuso local (para comparar com input type="date"). */
 function toYmdLocal(iso: string | undefined | null): string | null {
   if (!iso) return null;
@@ -190,6 +246,151 @@ function toYmdLocal(iso: string | undefined | null): string | null {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+const emptyNewFormData = () => ({
+  costCenterId: '',
+  serviceOrder: '',
+  obra: '',
+  description: '',
+  priority: 'MEDIUM',
+  demandSheet: '',
+  demandSheetAttachmentUrl: '',
+  demandSheetAttachmentName: '',
+  items: [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
+});
+
+type RmMaterialOption = {
+  id: string;
+  code?: string;
+  description?: string;
+  name?: string;
+  unit?: string;
+};
+
+function RmMaterialAutocomplete({
+  searchValue,
+  isOpen,
+  onOpen,
+  onClose,
+  onSearchChange,
+  onSelect,
+  materials,
+  loading,
+  loadError,
+  getMaterialLabel,
+  inputClassName,
+  placeholder = 'Digite para buscar material...'
+}: {
+  searchValue: string;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onSearchChange: (value: string) => void;
+  onSelect: (material: RmMaterialOption) => void;
+  materials: RmMaterialOption[];
+  loading: boolean;
+  loadError: boolean;
+  getMaterialLabel: (material?: RmMaterialOption | null) => string;
+  inputClassName: string;
+  placeholder?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const syncMenuPosition = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setMenuStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setMenuStyle(null);
+      return;
+    }
+    syncMenuPosition();
+    const onReposition = () => syncMenuPosition();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [isOpen, syncMenuPosition, searchValue]);
+
+  const filteredMaterials = useMemo(() => {
+    const q = searchValue.trim().toLowerCase();
+    return materials
+      .filter((material) => {
+        if (!q) return true;
+        return getMaterialLabel(material).toLowerCase().includes(q);
+      })
+      .slice(0, 50);
+  }, [materials, searchValue, getMaterialLabel]);
+
+  const dropdown =
+    isOpen &&
+    menuStyle &&
+    typeof document !== 'undefined' &&
+    createPortal(
+      <div
+        role="listbox"
+        className="max-h-56 overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
+        style={{
+          position: 'fixed',
+          top: menuStyle.top,
+          left: menuStyle.left,
+          width: menuStyle.width,
+          zIndex: 1200
+        }}
+      >
+        {loading ? (
+          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Carregando materiais…</p>
+        ) : loadError ? (
+          <p className="px-3 py-2 text-sm text-red-600 dark:text-red-400">Erro ao carregar materiais.</p>
+        ) : filteredMaterials.length === 0 ? (
+          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+            {materials.length === 0
+              ? 'Nenhum material ativo em Materiais de Construção.'
+              : 'Nenhum material encontrado para esta busca.'}
+          </p>
+        ) : (
+          filteredMaterials.map((material) => (
+            <button
+              key={material.id}
+              type="button"
+              role="option"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSelect(material)}
+              className="w-full px-3 py-2 text-left text-sm text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700"
+            >
+              {getMaterialLabel(material)}
+            </button>
+          ))
+        )}
+      </div>,
+      document.body
+    );
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        value={searchValue}
+        onFocus={onOpen}
+        onClick={onOpen}
+        onBlur={() => setTimeout(onClose, 120)}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder={placeholder}
+        className={inputClassName}
+        autoComplete="off"
+      />
+      {dropdown}
+    </>
+  );
 }
 
 function SolicitarMateriaisPage() {
@@ -209,6 +410,8 @@ function SolicitarMateriaisPage() {
     demandSheetAttachmentName: '',
     items: [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
   });
+  const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
+  const [formData, setFormData] = useState(emptyNewFormData);
 
   const [correctionEditId, setCorrectionEditId] = useState<string | null>(null);
   const [detailViewId, setDetailViewId] = useState<string | null>(null);
@@ -241,6 +444,8 @@ function SolicitarMateriaisPage() {
   const [rmListCostCenterId, setRmListCostCenterId] = useState('');
   const [rmListDateFrom, setRmListDateFrom] = useState('');
   const [rmListDateTo, setRmListDateTo] = useState('');
+  const [isListFiltersModalOpen, setIsListFiltersModalOpen] = useState(false);
+  const [listCurrentPage, setListCurrentPage] = useState(1);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -297,14 +502,25 @@ function SolicitarMateriaisPage() {
     setEditFormData((prev) => ({ ...prev, serviceOrderId: '', serviceOrder: '' }));
   };
 
-  // Buscar materiais
-  const { data: materialsData } = useQuery({
-    queryKey: ['materials'],
+  // Materiais de Construção ativos (espelhados para a RM)
+  const {
+    data: materialsData,
+    isLoading: loadingMaterials,
+    isError: materialsLoadError,
+    refetch: refetchMaterials
+  } = useQuery({
+    queryKey: ['materials-rm-dropdown'],
     queryFn: async () => {
       const res = await api.get('/material-requests/materials');
       return res.data;
     }
   });
+
+  useEffect(() => {
+    if (isNewRequestModalOpen || correctionEditId) {
+      void refetchMaterials();
+    }
+  }, [isNewRequestModalOpen, correctionEditId, refetchMaterials]);
 
   // Buscar requisições do usuário
   const { data: requestsData, isLoading: loadingRequests, isError: hasRequestsError, error: requestsError } = useQuery({
@@ -315,7 +531,7 @@ function SolicitarMateriaisPage() {
       });
       return res.data;
     },
-    enabled: !!userData?.data?.id && (activeTab === 'list' || !!correctionEditId)
+    enabled: !!userData?.data?.id
   });
 
   const { data: detailRmData, isLoading: loadingDetailRm } = useQuery({
@@ -399,6 +615,15 @@ function SolicitarMateriaisPage() {
     }
   });
 
+  const closeNewRequestModal = () => {
+    setIsNewRequestModalOpen(false);
+    setFormData(emptyNewFormData());
+    setNewItemMaterialSearch(['']);
+    setActiveNewMaterialDropdownIndex(null);
+    setUploadingAttachment(null);
+    setUploadingDemandSheetAttachment(null);
+  };
+
   // Criar requisição
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -420,19 +645,16 @@ function SolicitarMateriaisPage() {
         demandSheetAttachmentName: '',
         items: [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
       });
+      closeNewRequestModal();
+      toast.success('Solicitação criada com sucesso!');
     }
   });
 
   const requests = requestsData?.data?.requests || requestsData?.data || [];
-  const materials = (materialsData?.data || []) as Array<{
-    id: string;
-    description?: string;
-    name?: string;
-    unit?: string;
-  }>;
+  const materials = (materialsData?.data || []) as RmMaterialOption[];
 
-  const getMaterialLabel = (material?: { description?: string; name?: string } | null) =>
-    material?.description || material?.name || 'Material sem nome';
+  const getMaterialLabel = (material?: RmMaterialOption | null) =>
+    material?.name?.trim() || material?.code?.trim() || material?.description?.trim() || 'Material sem nome';
 
   const obraOptionsFromRequests = useMemo(() => {
     const set = new Set<string>();
@@ -497,11 +719,36 @@ function SolicitarMateriaisPage() {
     rmListDateTo
   ]);
 
+  const listTotal = filteredRequests.length;
+  const listTotalPages = Math.max(1, Math.ceil(listTotal / LIST_ITEMS_PER_PAGE));
+  const listStartIndex = (listCurrentPage - 1) * LIST_ITEMS_PER_PAGE;
+  const paginatedRequests = filteredRequests.slice(listStartIndex, listStartIndex + LIST_ITEMS_PER_PAGE);
+  const listStartItem = listTotal === 0 ? 0 : listStartIndex + 1;
+  const listEndItem = Math.min(listStartIndex + LIST_ITEMS_PER_PAGE, listTotal);
+
+  const clearListFilters = () => {
+    setRmListFaseAtual('');
+    setRmListObra('');
+    setRmListCostCenterId('');
+    setRmListDateFrom('');
+    setRmListDateTo('');
+    setListCurrentPage(1);
+  };
+
+  useEffect(() => {
+    setListCurrentPage(1);
+  }, [rmListSearch, rmListFaseAtual, rmListObra, rmListCostCenterId, rmListDateFrom, rmListDateTo]);
+
+  useEffect(() => {
+    if (listCurrentPage > listTotalPages) {
+      setListCurrentPage(listTotalPages);
+    }
+  }, [listCurrentPage, listTotalPages]);
+
   useEffect(() => {
     const id = searchParams?.get('editRm') ?? null;
     if (!id) return;
     setCorrectionEditId(id);
-    setActiveTab('list');
     router.replace('/ponto/solicitar-materiais', { scroll: false });
   }, [searchParams, router]);
 
@@ -565,6 +812,22 @@ function SolicitarMateriaisPage() {
       setEditFormData((prev) => ({ ...prev, serviceOrderId: match.id }));
     }
   }, [correctionEditId, editFormData.serviceOrder, editFormData.serviceOrderId, editFormServiceOrders]);
+    if (!isNewRequestModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeNewRequestModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isNewRequestModalOpen]);
+
+  useEffect(() => {
+    if (!detailViewId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDetailViewId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detailViewId]);
 
   useEffect(() => {
     setNewItemMaterialSearch((prev) =>
@@ -859,325 +1122,421 @@ function SolicitarMateriaisPage() {
         <div className="space-y-6">
           {/* Cabeçalho */}
           <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Solicitar Materiais</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Solicitação de Materiais</h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Solicite materiais para seus projetos</p>
           </div>
 
-          {/* Navegação */}
-          <div className="border-b border-gray-200 dark:border-gray-700">
-            <nav className="-mb-px flex space-x-8">
-              <button
-                onClick={() => setActiveTab('list')}
-                className={`flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'list'
-                    ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                }`}
-              >
-                <List className="w-4 h-4" />
-                Minhas Solicitações
-              </button>
-              <button
-                onClick={() => setActiveTab('new')}
-                className={`flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'new'
-                    ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                }`}
-              >
-                <Plus className="w-4 h-4" />
-                Nova Solicitação
-              </button>
-            </nav>
-          </div>
-
-          {/* Conteúdo */}
           <Card>
-            <CardHeader>
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                  <ShoppingCart className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
+                    <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Minhas Solicitações</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Visualize suas solicitações de materiais
+                    </p>
+                  </div>
                 </div>
-                <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {activeTab === 'list' ? 'Minhas Solicitações' : 'Nova Solicitação de Material'}
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {activeTab === 'list' ? 'Visualize suas solicitações de materiais' : 'Preencha os dados para criar uma nova solicitação'}
-                  </p>
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="search"
+                      value={rmListSearch}
+                      onChange={(e) => setRmListSearch(e.target.value)}
+                      placeholder="Nº SC, OS, obra, centro de custo..."
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {rmListSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setRmListSearch('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsListFiltersModalOpen(true)}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    aria-label="Abrir filtro"
+                    title="Filtro"
+                  >
+                    <Filter className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsNewRequestModalOpen(true)}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova Solicitação</span>
+                  </button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              {activeTab === 'list' ? (
-                <div className="space-y-4">
-                  {loadingRequests ? (
-                    <div className="text-center py-8">
-                      <Loading message="Carregando solicitações..." />
-                    </div>
-                  ) : hasRequestsError ? (
-                    <div className="text-center py-8">
-                      <p className="text-red-600 dark:text-red-400">
-                        Não foi possível carregar suas solicitações.
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        {(requestsError as any)?.response?.data?.message ||
-                          'Verifique se as migrations do backend foram aplicadas e tente novamente.'}
-                      </p>
-                    </div>
-                  ) : requests.length === 0 ? (
-                    <div className="text-center py-8">
-                      <p className="text-gray-500 dark:text-gray-400">Nenhuma solicitação encontrada</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="space-y-3">
-                        <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end">
-                          <div className="flex-1 min-w-[min(100%,220px)]">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Buscar
-                            </label>
-                            <div className="relative">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                              <input
-                                type="search"
-                                value={rmListSearch}
-                                onChange={(e) => setRmListSearch(e.target.value)}
-                                placeholder="Nº SC, OS, obra, centro de custo..."
-                                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-                          </div>
-                          <div className="w-full sm:min-w-[min(100%,280px)] sm:max-w-md shrink-0">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Fase atual
-                            </label>
-                            <select
-                              value={rmListFaseAtual}
-                              onChange={(e) => setRmListFaseAtual(e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <option value="">Todas</option>
-                              <optgroup label="SC (solicitação)">
-                                {RM_FASE_FILTER_ORDER.map((st) => (
-                                  <option key={`rm:${st}`} value={`rm:${st}`}>
-                                    {rmStatusLabelPt(st)}
-                                  </option>
-                                ))}
-                              </optgroup>
-                              <optgroup label="OC (ordem de compra)">
-                                {OC_FASE_FILTER_ORDER.filter((k) => k in OC_STATUS_LABELS_PT).map((st) => (
-                                  <option key={`oc:${st}`} value={`oc:${st}`}>
-                                    {purchaseOrderPhaseShortLabel(st)}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            </select>
-                          </div>
-                          <div className="w-full sm:w-48 shrink-0">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Obra
-                            </label>
-                            <select
-                              value={rmListObra}
-                              onChange={(e) => setRmListObra(e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <option value="">Todas</option>
-                              {obraOptionsFromRequests.map((obra) => (
-                                <option key={obra} value={obra}>
-                                  {obra}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="flex-1 min-w-[min(100%,260px)]">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Centro de custo
-                            </label>
-                            {loadingCostCenters ? (
-                              <div className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-500">
-                                Carregando...
-                              </div>
-                            ) : (
-                              <select
-                                value={rmListCostCenterId}
-                                onChange={(e) => setRmListCostCenterId(e.target.value)}
-                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              >
-                                <option value="">Todos</option>
-                                {costCenters
-                                  .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
-                                  .map((cc) => (
-                                    <option key={cc.id} value={cc.id}>
-                                      {cc.code} — {cc.name}
-                                      {cc.description ? ` (${cc.description})` : ''}
-                                    </option>
-                                  ))}
-                              </select>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:items-end">
-                          <div className="w-full sm:w-44">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Data inicial
-                            </label>
-                            <input
-                              type="date"
-                              value={rmListDateFrom}
-                              onChange={(e) => setRmListDateFrom(e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                          <div className="w-full sm:w-44">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Data final
-                            </label>
-                            <input
-                              type="date"
-                              value={rmListDateTo}
-                              onChange={(e) => setRmListDateTo(e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 sm:pb-2 sm:ml-1">
-                            Período pela data da solicitação (fuso local).
-                          </p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Exibindo {filteredRequests.length} de {requests.length} solicitação(ões)
-                      </p>
-                      {filteredRequests.length === 0 ? (
-                        <div className="text-center py-8 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                          <p className="text-gray-500 dark:text-gray-400 text-sm">
-                            Nenhuma solicitação corresponde aos filtros.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRmListSearch('');
-                              setRmListFaseAtual('');
-                              setRmListObra('');
-                              setRmListCostCenterId('');
-                              setRmListDateFrom('');
-                              setRmListDateTo('');
-                            }}
-                            className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                          >
-                            Limpar filtros
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                          <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                              <tr>
-                                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Nº SC</th>
-                                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Data</th>
-                                <th className="px-3 py-2.5 font-medium min-w-[140px]">Centro de custo</th>
-                                <th className="px-3 py-2.5 font-medium whitespace-nowrap">OS</th>
-                                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Obra</th>
-                                <th className="px-3 py-2.5 font-medium min-w-[140px]">Descrição</th>
-                                <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[160px]">Fase atual</th>
-                                <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Ações</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900/30">
-                              {filteredRequests.map(
-                                (
-                                  request: Record<string, unknown> & {
-                                    id: string;
-                                    status?: string;
-                                    purchaseOrders?: RmListPurchaseOrder[];
-                                  }
-                                ) => (
-                                <tr key={request.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                                    {String(request.requestNumber || '—')}
-                                  </td>
-                                  <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                    {request.requestedAt
-                                      ? new Date(String(request.requestedAt)).toLocaleDateString('pt-BR')
-                                      : '—'}
-                                  </td>
-                                  <td
-                                    className="px-3 py-2 text-gray-700 dark:text-gray-300 max-w-[200px]"
-                                    title={rmCostCenterLine(request as Parameters<typeof rmCostCenterLine>[0])}
-                                  >
-                                    <span className="line-clamp-2 text-sm">
-                                      {rmCostCenterLine(request as Parameters<typeof rmCostCenterLine>[0])}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2 text-gray-700 dark:text-gray-300 max-w-[120px] truncate" title={rmOsLine(request as Parameters<typeof rmOsLine>[0])}>
-                                    {rmOsLine(request as Parameters<typeof rmOsLine>[0])}
-                                  </td>
-                                  <td className="px-3 py-2 text-gray-700 dark:text-gray-300 max-w-[120px] truncate" title={String(request.obra || '')}>
-                                    {request.obra ? String(request.obra) : '—'}
-                                  </td>
-                                  <td className="px-3 py-2 text-gray-600 dark:text-gray-400 max-w-[220px]">
-                                    <span className="line-clamp-2" title={String(request.description || '')}>
-                                      {request.description ? String(request.description) : '—'}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2 align-top">
-                                    <div className="flex flex-col gap-0.5 text-xs sm:text-sm">
-                                      {materialRequestFaseAtualLines(request).map((line) => (
-                                        <span
-                                          key={line.key}
-                                          className={`font-medium whitespace-normal break-words ${line.className}`}
-                                          title={line.text}
-                                        >
-                                          {line.text}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </td>
-                                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                                    <div className="inline-flex flex-col sm:flex-row gap-1 sm:justify-end items-end sm:items-center">
-                                      <button
-                                        type="button"
-                                        onClick={() => setDetailViewId(request.id)}
-                                        className="inline-flex items-center justify-center p-1.5 rounded-md text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                                        title="Ver detalhes da solicitação"
-                                        aria-label="Ver detalhes da solicitação"
-                                      >
-                                        <Eye className="w-4 h-4" />
-                                      </button>
-                                      {request.status === 'IN_REVIEW' ? (
-                                        <>
-                                          <button
-                                            type="button"
-                                            onClick={() => setCorrectionEditId(request.id)}
-                                            className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-amber-600 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
-                                          >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                            Editar
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => resubmitAfterCorrectionMutation.mutate(request.id)}
-                                            disabled={resubmitAfterCorrectionMutation.isPending}
-                                            className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                                          >
-                                            <Send className="w-3.5 h-3.5" />
-                                            Reenviar
-                                          </button>
-                                        </>
-                                      ) : null}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </>
-                  )}
+              {loadingRequests ? (
+                <div className="text-center py-8">
+                  <Loading message="Carregando solicitações..." />
+                </div>
+              ) : hasRequestsError ? (
+                <div className="text-center py-8">
+                  <p className="text-red-600 dark:text-red-400">
+                    Não foi possível carregar suas solicitações.
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {(requestsError as any)?.response?.data?.message ||
+                      'Verifique se as migrations do backend foram aplicadas e tente novamente.'}
+                  </p>
+                </div>
+              ) : requests.length === 0 ? (
+                <div className="text-center py-8">
+                  <ShoppingCart className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">Nenhuma solicitação encontrada</p>
+                </div>
+              ) : listTotal === 0 ? (
+                <div className="text-center py-8 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">
+                    Nenhuma solicitação corresponde aos filtros.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRmListSearch('');
+                      clearListFilters();
+                    }}
+                    className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Limpar filtros
+                  </button>
                 </div>
               ) : (
+                <>
+                  <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                    <span>
+                      Mostrando {listStartItem} a {listEndItem} de {listTotal} solicitação(ões)
+                    </span>
+                    <span>
+                      Página {listCurrentPage} de {listTotalPages}
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            Nº SC
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            Data
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Centro de Custo
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            OS
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            Obra
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Descrição
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[160px]">
+                            Fase Atual
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            Ação
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {paginatedRequests.map(
+                          (
+                            request: Record<string, unknown> & {
+                              id: string;
+                              status?: string;
+                              purchaseOrders?: RmListPurchaseOrder[];
+                            }
+                          ) => (
+                            <tr
+                              key={request.id}
+                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                            >
+                              <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                {String(request.requestNumber || '—')}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                {request.requestedAt
+                                  ? new Date(String(request.requestedAt)).toLocaleDateString('pt-BR')
+                                  : '—'}
+                              </td>
+                              <td
+                                className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[200px]"
+                                title={rmCostCenterName(request as Parameters<typeof rmCostCenterName>[0])}
+                              >
+                                <span className="line-clamp-2">
+                                  {rmCostCenterName(request as Parameters<typeof rmCostCenterName>[0])}
+                                </span>
+                              </td>
+                              <td
+                                className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
+                                title={rmOsLine(request as Parameters<typeof rmOsLine>[0])}
+                              >
+                                {rmOsLine(request as Parameters<typeof rmOsLine>[0])}
+                              </td>
+                              <td
+                                className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
+                                title={String(request.obra || '')}
+                              >
+                                {request.obra ? String(request.obra) : '—'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-600 dark:text-gray-400 max-w-[220px]">
+                                <span className="line-clamp-2" title={String(request.description || '')}>
+                                  {request.description ? String(request.description) : '—'}
+                                </span>
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 align-middle">
+                                <div className="flex flex-col justify-center gap-0.5 text-xs sm:text-sm">
+                                  {materialRequestFaseAtualLines(request).map((line) => (
+                                    <span
+                                      key={line.key}
+                                      className={`font-medium whitespace-normal break-words ${line.className}`}
+                                      title={line.text}
+                                    >
+                                      {line.text}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap">
+                                <div className="inline-flex items-center justify-end gap-1">
+                                  {request.status === 'IN_REVIEW' ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => setCorrectionEditId(request.id)}
+                                        className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-amber-600 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                                        title="Editar correção"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => resubmitAfterCorrectionMutation.mutate(request.id)}
+                                        disabled={resubmitAfterCorrectionMutation.isPending}
+                                        className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                                        title="Reenviar"
+                                      >
+                                        <Send className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetailViewId(request.id)}
+                                    className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                    aria-label="Ver detalhes"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {listTotalPages > 1 && (
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setListCurrentPage((prev) => Math.max(prev - 1, 1))}
+                        disabled={listCurrentPage === 1}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        Anterior
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setListCurrentPage((prev) => Math.min(prev + 1, listTotalPages))}
+                        disabled={listCurrentPage === listTotalPages}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        Próxima
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {isListFiltersModalOpen && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setIsListFiltersModalOpen(false)} aria-hidden />
+              <div className="relative mx-4 w-full max-w-2xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+                <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsListFiltersModalOpen(false)}
+                    className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                    aria-label="Fechar filtros"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Fase atual
+                      </label>
+                      <select
+                        value={rmListFaseAtual}
+                        onChange={(e) => setRmListFaseAtual(e.target.value)}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      >
+                        <option value="">Todas</option>
+                        <optgroup label="SC (solicitação)">
+                          {RM_FASE_FILTER_ORDER.map((st) => (
+                            <option key={`rm:${st}`} value={`rm:${st}`}>
+                              {rmStatusLabelPt(st)}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="OC (ordem de compra)">
+                          {OC_FASE_FILTER_ORDER.filter((k) => k in OC_STATUS_LABELS_PT).map((st) => (
+                            <option key={`oc:${st}`} value={`oc:${st}`}>
+                              {purchaseOrderPhaseShortLabel(st)}
+                            </option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Obra</label>
+                      <select
+                        value={rmListObra}
+                        onChange={(e) => setRmListObra(e.target.value)}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      >
+                        <option value="">Todas</option>
+                        {obraOptionsFromRequests.map((obra) => (
+                          <option key={obra} value={obra}>
+                            {obra}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Centro de custo
+                      </label>
+                      {loadingCostCenters ? (
+                        <div className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm text-gray-500 dark:border-gray-600 dark:bg-gray-800">
+                          Carregando...
+                        </div>
+                      ) : (
+                        <select
+                          value={rmListCostCenterId}
+                          onChange={(e) => setRmListCostCenterId(e.target.value)}
+                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        >
+                          <option value="">Todos</option>
+                          {costCenters
+                            .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
+                            .map((cc) => (
+                              <option key={cc.id} value={cc.id}>
+                                {cc.name}
+                              </option>
+                            ))}
+                        </select>
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Data inicial
+                      </label>
+                      <input
+                        type="date"
+                        value={rmListDateFrom}
+                        onChange={(e) => setRmListDateFrom(e.target.value)}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Data final
+                      </label>
+                      <input
+                        type="date"
+                        value={rmListDateTo}
+                        onChange={(e) => setRmListDateTo(e.target.value)}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 sm:col-span-2">
+                      Período pela data da solicitação (fuso local).
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                  <button
+                    type="button"
+                    onClick={clearListFilters}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Limpar filtros
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsListFiltersModalOpen(false)}
+                    className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isNewRequestModalOpen && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={closeNewRequestModal} aria-hidden />
+              <div
+                className="relative flex max-h-[min(92vh,720px)] w-full max-w-3xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="new-request-modal-title"
+              >
+                <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                  <h3
+                    id="new-request-modal-title"
+                    className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                  >
+                    Nova Solicitação de Material
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={closeNewRequestModal}
+                    className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-0 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                    aria-label="Fechar"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="overflow-y-auto px-5 py-4 [&_*:focus]:outline-none [&_*:focus]:ring-0 [&_*:focus-visible]:outline-none [&_*:focus-visible]:ring-0">
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1235,6 +1594,31 @@ function SolicitarMateriaisPage() {
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="Identificação da obra (opcional)"
                     />
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Ordem de Serviço
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.serviceOrder}
+                        onChange={(e) => setFormData({ ...formData, serviceOrder: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Digite o número da ordem de serviço (opcional)"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Obra
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.obra}
+                        onChange={(e) => setFormData({ ...formData, obra: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Identificação da obra (opcional)"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -1250,39 +1634,24 @@ function SolicitarMateriaisPage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Prioridade
-                    </label>
-                    <select
-                      value={formData.priority}
-                      onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                    >
-                      <option value="LOW">Baixa</option>
-                      <option value="MEDIUM">Média</option>
-                      <option value="HIGH">Alta</option>
-                      <option value="URGENT">Urgente</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Ficha de Demanda
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.demandSheet}
-                      onChange={(e) => setFormData({ ...formData, demandSheet: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                      placeholder="Número ou referência da FD (opcional)"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Anexar FD
-                    </label>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Ficha de Demanda
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.demandSheet}
+                          onChange={(e) => setFormData({ ...formData, demandSheet: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                          placeholder="Número ou referência da FD (opcional)"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Anexar FD
+                        </label>
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50">
                         {uploadingDemandSheetAttachment === 'new' ? (
@@ -1325,6 +1694,23 @@ function SolicitarMateriaisPage() {
                         </>
                       )}
                     </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Prioridade
+                      </label>
+                      <select
+                        value={formData.priority}
+                        onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      >
+                        <option value="LOW">Baixa</option>
+                        <option value="MEDIUM">Média</option>
+                        <option value="HIGH">Alta</option>
+                        <option value="URGENT">Urgente</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div>
@@ -1361,48 +1747,27 @@ function SolicitarMateriaisPage() {
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Material *
                               </label>
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  required
-                                  value={newItemMaterialSearch[index] || ''}
-                                  onFocus={() => setActiveNewMaterialDropdownIndex(index)}
-                                  onBlur={() => {
-                                    setTimeout(() => {
-                                      setActiveNewMaterialDropdownIndex((prev) => (prev === index ? null : prev));
-                                    }, 120);
+                              <div>
+                                <RmMaterialAutocomplete
+                                  searchValue={newItemMaterialSearch[index] || ''}
+                                  isOpen={activeNewMaterialDropdownIndex === index}
+                                  onOpen={() => setActiveNewMaterialDropdownIndex(index)}
+                                  onClose={() =>
+                                    setActiveNewMaterialDropdownIndex((prev) => (prev === index ? null : prev))
+                                  }
+                                  onSearchChange={(value) => handleNewItemMaterialSearchChange(index, value)}
+                                  onSelect={(material) => {
+                                    handleItemChange(index, 'materialId', material.id);
+                                    handleNewItemMaterialSearchChange(index, getMaterialLabel(material));
+                                    setActiveNewMaterialDropdownIndex(null);
                                   }}
-                                  onChange={(e) => handleNewItemMaterialSearchChange(index, e.target.value)}
-                                  placeholder="Digite para buscar material..."
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                  materials={materials}
+                                  loading={loadingMaterials}
+                                  loadError={materialsLoadError}
+                                  getMaterialLabel={getMaterialLabel}
+                                  inputClassName="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
                                 />
                                 <input type="hidden" required value={item.materialId} readOnly />
-                                {activeNewMaterialDropdownIndex === index && (
-                                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg">
-                                    {materials
-                                      .filter((material) => {
-                                        const q = (newItemMaterialSearch[index] || '').trim().toLowerCase();
-                                        if (!q) return true;
-                                        const label = getMaterialLabel(material).toLowerCase();
-                                        return label.includes(q);
-                                      })
-                                      .slice(0, 50)
-                                      .map((material) => (
-                                        <button
-                                          key={material.id}
-                                          type="button"
-                                          onClick={() => {
-                                            handleItemChange(index, 'materialId', material.id);
-                                            handleNewItemMaterialSearchChange(index, getMaterialLabel(material));
-                                            setActiveNewMaterialDropdownIndex(null);
-                                          }}
-                                          className="w-full px-3 py-2 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                        >
-                                          {getMaterialLabel(material)}
-                                        </button>
-                                      ))}
-                                  </div>
-                                )}
                               </div>
                             </div>
                             <div>
@@ -1512,7 +1877,7 @@ function SolicitarMateriaisPage() {
                   <div className="flex justify-end gap-3">
                     <button
                       type="button"
-                      onClick={() => setActiveTab('list')}
+                      onClick={closeNewRequestModal}
                       className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
                     >
                       Cancelar
@@ -1526,154 +1891,235 @@ function SolicitarMateriaisPage() {
                     </button>
                   </div>
                 </form>
-              )}
-            </CardContent>
-          </Card>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {detailViewId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setDetailViewId(null)} />
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Detalhes da solicitação</h2>
-              {loadingDetailRm ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400 py-6">Carregando…</p>
-              ) : detailRmData ? (
-                (() => {
-                  const d = detailRmData as Record<string, unknown> & {
-                    requestNumber?: string;
-                    requestedAt?: string;
-                    status?: string;
-                    description?: string;
-                    obra?: string;
-                    serviceOrder?: string;
-                    priority?: string;
-                    costCenter?: { code?: string; name?: string };
-                    items?: Array<{
-                      quantity?: unknown;
-                      unit?: string;
-                      notes?: string | null;
-                      attachmentUrl?: string | null;
-                      attachmentName?: string | null;
-                      material?: { description?: string | null; name?: string | null; sinapiCode?: string | null };
-                    }>;
-                    purchaseOrders?: Array<{ id: string; orderNumber?: string | null; status: string }>;
-                  };
-                  const pos = Array.isArray(d.purchaseOrders) ? d.purchaseOrders : [];
-                  return (
-                    <div className="space-y-4 text-sm text-gray-700 dark:text-gray-200">
-                      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
-                        <div>
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">Nº SC</dt>
-                          <dd className="font-medium">{String(d.requestNumber || '—')}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">Data</dt>
-                          <dd>
-                            {d.requestedAt
-                              ? new Date(String(d.requestedAt)).toLocaleString('pt-BR')
-                              : '—'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">Fase da SC</dt>
-                          <dd>{d.status ? rmStatusLabelPt(String(d.status)) : '—'}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">Prioridade</dt>
-                          <dd>{rmPriorityLabelPt(d.priority)}</dd>
-                        </div>
-                        <div className="sm:col-span-2">
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">Centro de custo</dt>
-                          <dd>{rmCostCenterLine(d as Parameters<typeof rmCostCenterLine>[0])}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">OS</dt>
-                          <dd>{rmOsLine(d as Parameters<typeof rmOsLine>[0])}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">Obra</dt>
-                          <dd>{d.obra ? String(d.obra) : '—'}</dd>
-                        </div>
-                        <div className="sm:col-span-2">
-                          <dt className="text-xs text-gray-500 dark:text-gray-400">Descrição</dt>
-                          <dd className="whitespace-pre-wrap">{d.description ? String(d.description) : '—'}</dd>
-                        </div>
-                      </dl>
-                      {d.items && d.items.length > 0 ? (
-                        <div>
-                          <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">Itens</p>
-                          <ul className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-600 divide-y divide-gray-200 dark:divide-gray-600">
-                            {d.items.map((it, idx) => {
-                              const mat = it.material;
-                              const line =
-                                mat?.description?.trim() ||
-                                mat?.name?.trim() ||
-                                mat?.sinapiCode ||
-                                'Material';
-                              return (
-                                <li key={idx} className="p-2.5 space-y-1">
-                                  <p className="font-medium text-gray-900 dark:text-gray-100">{line}</p>
-                                  <p className="text-xs text-gray-600 dark:text-gray-400">
-                                    Qtd.:{' '}
-                                    {it.quantity !== undefined && it.quantity !== null
-                                      ? String(it.quantity)
-                                      : '—'}{' '}
-                                    {it.unit ? String(it.unit) : ''}
-                                    {typeof it.notes === 'string' && it.notes.trim()
-                                      ? ` · ${it.notes.trim()}`
-                                      : ''}
-                                  </p>
-                                  {it.attachmentUrl ? (
-                                    <a
-                                      href={absoluteUploadUrl(String(it.attachmentUrl))}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400"
-                                    >
-                                      <ExternalLink className="w-3 h-3" />
-                                      {it.attachmentName || 'Anexo'}
-                                    </a>
-                                  ) : null}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ) : null}
-                      {pos.length > 0 ? (
-                        <div>
-                          <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">
-                            Ordens de compra
-                          </p>
-                          <ul className="space-y-1">
-                            {sortPurchaseOrdersForDisplay(pos as RmListPurchaseOrder[]).map((po) => {
-                              const num =
-                                (po.orderNumber && String(po.orderNumber).trim()) || po.id.slice(0, 8);
-                              return (
-                                <li key={po.id} className="text-sm">
-                                  <span className="text-gray-600 dark:text-gray-400">OC {num}</span>
-                                  {' · '}
-                                  <span className={ocStatusTextClass(po.status)}>
-                                    {purchaseOrderPhaseLabel(po.status)}
-                                  </span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })()
-              ) : (
-                <p className="text-sm text-red-600 dark:text-red-400 py-4">Não foi possível carregar os detalhes.</p>
-              )}
-              <div className="mt-6 flex justify-end">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setDetailViewId(null)}
+              aria-hidden
+            />
+            <div
+              className="relative flex max-h-[min(92vh,720px)] w-full max-w-2xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="rm-detail-modal-title"
+            >
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                <div className="min-w-0">
+                  <h3
+                    id="rm-detail-modal-title"
+                    className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                  >
+                    Detalhes da solicitação
+                  </h3>
+                  {!loadingDetailRm && detailRmData ? (
+                    <p className="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-400">
+                      {String(
+                        (detailRmData as { requestNumber?: string }).requestNumber || 'Solicitação'
+                      )}
+                    </p>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   onClick={() => setDetailViewId(null)}
-                  className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                  className="shrink-0 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Fechar"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 py-4">
+                {loadingDetailRm ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-400" />
+                  </div>
+                ) : detailRmData ? (
+                  (() => {
+                    const d = detailRmData as Record<string, unknown> & {
+                      requestNumber?: string;
+                      requestedAt?: string;
+                      status?: string;
+                      description?: string;
+                      obra?: string;
+                      serviceOrder?: string;
+                      priority?: string;
+                      costCenter?: { code?: string; name?: string };
+                      items?: Array<{
+                        quantity?: unknown;
+                        unit?: string;
+                        notes?: string | null;
+                        attachmentUrl?: string | null;
+                        attachmentName?: string | null;
+                        material?: {
+                          description?: string | null;
+                          name?: string | null;
+                          sinapiCode?: string | null;
+                        };
+                      }>;
+                      purchaseOrders?: Array<{ id: string; orderNumber?: string | null; status: string }>;
+                    };
+                    const pos = Array.isArray(d.purchaseOrders) ? d.purchaseOrders : [];
+                    const requestedDate = d.requestedAt ? new Date(String(d.requestedAt)) : null;
+                    const statusKey = d.status ? String(d.status) : '';
+
+                    return (
+                      <div className="space-y-5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {statusKey ? (
+                            <span className={rmStatusBadgeClass(statusKey)}>
+                              SC · {rmStatusLabelPt(statusKey)}
+                            </span>
+                          ) : null}
+                          {d.priority ? (
+                            <span className={rmPriorityBadgeClass(String(d.priority))}>
+                              {rmPriorityLabelPt(String(d.priority))}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <section className="rounded-lg border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-600 dark:bg-gray-900/40">
+                          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Informações gerais
+                          </h4>
+                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <DetailField label="Nº SC">
+                              <span className="font-semibold">{String(d.requestNumber || '—')}</span>
+                            </DetailField>
+                            <DetailField label="Data da solicitação">
+                              {requestedDate && !Number.isNaN(requestedDate.getTime()) ? (
+                                <>
+                                  <span className="block">
+                                    {requestedDate.toLocaleDateString('pt-BR')}
+                                  </span>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    {requestedDate.toLocaleTimeString('pt-BR', {
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}
+                                  </span>
+                                </>
+                              ) : (
+                                '—'
+                              )}
+                            </DetailField>
+                            <DetailField label="Centro de custo" className="sm:col-span-2">
+                              {rmCostCenterName(d as Parameters<typeof rmCostCenterName>[0])}
+                            </DetailField>
+                            <DetailField label="OS">{rmOsLine(d as Parameters<typeof rmOsLine>[0])}</DetailField>
+                            <DetailField label="Obra">{d.obra ? String(d.obra) : '—'}</DetailField>
+                            {d.description ? (
+                              <DetailField label="Descrição" className="sm:col-span-2">
+                                <p className="whitespace-pre-wrap leading-relaxed">{String(d.description)}</p>
+                              </DetailField>
+                            ) : null}
+                          </div>
+                        </section>
+
+                        {d.items && d.items.length > 0 ? (
+                          <section>
+                            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              Itens ({d.items.length})
+                            </h4>
+                            <ul className="space-y-2">
+                              {d.items.map((it, idx) => {
+                                const mat = it.material;
+                                const line =
+                                  mat?.description?.trim() ||
+                                  mat?.name?.trim() ||
+                                  mat?.sinapiCode ||
+                                  'Material';
+                                const qty =
+                                  it.quantity !== undefined && it.quantity !== null
+                                    ? String(it.quantity)
+                                    : '—';
+                                const unit = it.unit ? String(it.unit) : '';
+                                return (
+                                  <li
+                                    key={idx}
+                                    className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-600 dark:bg-gray-800/60"
+                                  >
+                                    <p className="font-medium text-gray-900 dark:text-gray-100">{line}</p>
+                                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                                      <span className="font-medium text-gray-700 dark:text-gray-300">
+                                        {qty}
+                                      </span>
+                                      {unit ? ` ${unit}` : ''}
+                                      {typeof it.notes === 'string' && it.notes.trim() ? (
+                                        <span className="text-gray-500 dark:text-gray-500">
+                                          {' '}
+                                          · {it.notes.trim()}
+                                        </span>
+                                      ) : null}
+                                    </p>
+                                    {it.attachmentUrl ? (
+                                      <a
+                                        href={absoluteUploadUrl(String(it.attachmentUrl))}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                                      >
+                                        <ExternalLink className="h-3.5 w-3.5" />
+                                        {it.attachmentName || 'Ver anexo'}
+                                      </a>
+                                    ) : null}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </section>
+                        ) : null}
+
+                        {pos.length > 0 ? (
+                          <section>
+                            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              Ordens de compra ({pos.length})
+                            </h4>
+                            <ul className="space-y-2">
+                              {sortPurchaseOrdersForDisplay(pos as RmListPurchaseOrder[]).map((po) => {
+                                const num =
+                                  (po.orderNumber && String(po.orderNumber).trim()) || po.id.slice(0, 8);
+                                return (
+                                  <li
+                                    key={po.id}
+                                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-gray-600 dark:bg-gray-800/60"
+                                  >
+                                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                      OC {num}
+                                    </span>
+                                    <span
+                                      className={`text-xs font-medium ${ocStatusTextClass(po.status)}`}
+                                    >
+                                      {purchaseOrderPhaseShortLabel(po.status)}
+                                    </span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </section>
+                        ) : null}
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <p className="py-8 text-center text-sm text-red-600 dark:text-red-400">
+                    Não foi possível carregar os detalhes.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex shrink-0 justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setDetailViewId(null)}
+                  className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
                 >
                   Fechar
                 </button>
@@ -1683,7 +2129,7 @@ function SolicitarMateriaisPage() {
         )}
 
         {correctionEditId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/50"
               onClick={() => !updateCorrectionMutation.isPending && setCorrectionEditId(null)}
@@ -1874,47 +2320,25 @@ function SolicitarMateriaisPage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Material *</label>
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={editItemMaterialSearch[index] || ''}
-                                onFocus={() => setActiveEditMaterialDropdownIndex(index)}
-                                onBlur={() => {
-                                  setTimeout(() => {
-                                    setActiveEditMaterialDropdownIndex((prev) => (prev === index ? null : prev));
-                                  }, 120);
-                                }}
-                                onChange={(e) => handleEditItemMaterialSearchChange(index, e.target.value)}
-                                placeholder="Digite para buscar material..."
-                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
-                              />
-                              {activeEditMaterialDropdownIndex === index && (
-                                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg">
-                                  {materials
-                                    .filter((material) => {
-                                      const q = (editItemMaterialSearch[index] || '').trim().toLowerCase();
-                                      if (!q) return true;
-                                      const label = getMaterialLabel(material).toLowerCase();
-                                      return label.includes(q);
-                                    })
-                                    .slice(0, 50)
-                                    .map((material) => (
-                                      <button
-                                        key={material.id}
-                                        type="button"
-                                        onClick={() => {
-                                          handleEditItemChange(index, 'materialId', material.id);
-                                          handleEditItemMaterialSearchChange(index, getMaterialLabel(material));
-                                          setActiveEditMaterialDropdownIndex(null);
-                                        }}
-                                        className="w-full px-2 py-1.5 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                      >
-                                        {getMaterialLabel(material)}
-                                      </button>
-                                    ))}
-                                </div>
-                              )}
-                            </div>
+                            <RmMaterialAutocomplete
+                              searchValue={editItemMaterialSearch[index] || ''}
+                              isOpen={activeEditMaterialDropdownIndex === index}
+                              onOpen={() => setActiveEditMaterialDropdownIndex(index)}
+                              onClose={() =>
+                                setActiveEditMaterialDropdownIndex((prev) => (prev === index ? null : prev))
+                              }
+                              onSearchChange={(value) => handleEditItemMaterialSearchChange(index, value)}
+                              onSelect={(material) => {
+                                handleEditItemChange(index, 'materialId', material.id);
+                                handleEditItemMaterialSearchChange(index, getMaterialLabel(material));
+                                setActiveEditMaterialDropdownIndex(null);
+                              }}
+                              materials={materials}
+                              loading={loadingMaterials}
+                              loadError={materialsLoadError}
+                              getMaterialLabel={getMaterialLabel}
+                              inputClassName="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
+                            />
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Quantidade *</label>

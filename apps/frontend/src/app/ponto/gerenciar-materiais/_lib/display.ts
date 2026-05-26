@@ -92,27 +92,25 @@ function sanitizeMaterialDisplayText(value?: string | null): string {
     .trim();
 }
 
-/** Título do material: descrição primeiro (texto legível), depois nome/códigos. */
+/** Título do material: nome do cadastro em destaque; descrição vai no subtítulo. */
 export function materialItemLabel(item: MaterialLineItem): string {
   const m = item.material;
-  const desc = sanitizeMaterialDisplayText(m.description);
-  if (desc) return desc;
   const name = sanitizeMaterialDisplayText(m.name);
   if (name) return name;
+  const desc = sanitizeMaterialDisplayText(m.description);
+  if (desc) return desc;
   if (m.sinapiCode) return String(m.sinapiCode).trim();
   if (m.code) return String(m.code).trim();
   return 'Material';
 }
 
-/** Linha auxiliar: exibe nome curto, sem códigos técnicos (SINAPI/CM). */
+/** Linha auxiliar: descrição quando existir e for diferente do nome. */
 export function materialItemSubtitle(item: MaterialLineItem): string | null {
   const m = item.material;
-  const main = materialItemLabel(item);
-  const parts: string[] = [];
   const name = sanitizeMaterialDisplayText(m.name);
   const desc = sanitizeMaterialDisplayText(m.description);
-  if (desc && name && name !== desc) parts.push(name);
-  return parts.length ? parts.join(' · ') : null;
+  if (desc && name && desc !== name) return desc;
+  return null;
 }
 
 export function formatDate(dateString: string): string {

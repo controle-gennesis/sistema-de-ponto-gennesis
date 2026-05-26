@@ -1,15 +1,29 @@
-'use client';
+﻿'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Package, Plus, ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, History, Box, Filter, ChevronDown, ChevronUp, RotateCcw, Download, Eye } from 'lucide-react';
+import {
+  ArrowUpCircle,
+  ArrowDownCircle,
+  ArrowLeftRight,
+  History,
+  Box,
+  Filter,
+  MoreVertical,
+  RotateCcw,
+  Download,
+  Search,
+  X
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
@@ -164,20 +178,61 @@ const extractOcNumberFromNotes = (notes?: string | null) => {
   return ocMatch?.[1]?.trim() || '';
 };
 
+function MovementSegButton({
+  active,
+  onClick,
+  label,
+  icon: Icon,
+  variant
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  variant: 'in' | 'out';
+}) {
+  const activeCls =
+    variant === 'in'
+      ? 'border-green-600 bg-green-50 text-green-800 dark:border-green-500 dark:bg-green-950/40 dark:text-green-200'
+      : 'border-red-600 bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200';
+  const inactiveCls =
+    'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+        active ? activeCls : inactiveCls
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </button>
+  );
+}
+
 export default function EstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'balance' | 'movements' | 'new'>('balance');
+  const [activeTab, setActiveTab] = useState<'balance' | 'movements'>('balance');
+  const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
   const [filtersCategory, setFiltersCategory] = useState('');
   const [filtersMonth, setFiltersMonth] = useState('');
   const [filtersYear, setFiltersYear] = useState(new Date().getFullYear().toString());
   const [filtersSearch, setFiltersSearch] = useState('');
-  const [isFiltersExpanded, setIsFiltersExpanded] = useState(true);
+  const [historySearch, setHistorySearch] = useState('');
+  const [isBalanceFiltersModalOpen, setIsBalanceFiltersModalOpen] = useState(false);
+  const [isHistoryFiltersModalOpen, setIsHistoryFiltersModalOpen] = useState(false);
+  const [balanceCurrentPage, setBalanceCurrentPage] = useState(1);
+  const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
+  const [historyDetail, setHistoryDetail] = useState<StockMovement | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const BALANCE_ITEMS_PER_PAGE = 12;
+  const HISTORY_ITEMS_PER_PAGE = 12;
   const [ocMovementItems, setOcMovementItems] = useState<OcMovementItemState[]>([]);
   const [isOcDropdownOpen, setIsOcDropdownOpen] = useState(false);
-  const [expandedOcHistoryKey, setExpandedOcHistoryKey] = useState<string | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<UploadedInvoice | null>(null);
   const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
   const [withdrawalSheetFile, setWithdrawalSheetFile] = useState<UploadedInvoice | null>(null);
@@ -246,7 +301,7 @@ export default function EstoquePage() {
       const res = await api.get('/construction-materials', { params: { limit: 1000 } });
       return res.data;
     },
-    enabled: activeTab === 'new'
+    enabled: isMovementModalOpen
   });
 
   const { data: balanceData, isLoading: loadingBalance } = useQuery({
@@ -287,7 +342,7 @@ export default function EstoquePage() {
       const res = await api.get('/stock/movements', { params: { limit: 1000 } });
       return res.data;
     },
-    enabled: activeTab === 'new'
+    enabled: isMovementModalOpen
   });
 
   const { data: purchaseOrdersData, isLoading: loadingPurchaseOrders } = useQuery({
@@ -296,7 +351,7 @@ export default function EstoquePage() {
       const res = await api.get('/purchase-orders', { params: { limit: 500 } });
       return res.data;
     },
-    enabled: activeTab === 'new'
+    enabled: isMovementModalOpen
   });
 
   const selectedPurchaseOrder = useMemo(
@@ -313,8 +368,28 @@ export default function EstoquePage() {
       const res = await api.get(`/purchase-orders/${selectedPurchaseOrder?.id}`);
       return res.data;
     },
-    enabled: activeTab === 'new' && !!selectedPurchaseOrder?.id
+    enabled: isMovementModalOpen && !!selectedPurchaseOrder?.id
   });
+
+  const resetMovementForm = () => {
+    setFormData({
+      costCenterId: '',
+      type: 'IN',
+      ocNumber: '',
+      movementSplit: '',
+      notes: ''
+    });
+    setInvoiceFile(null);
+    setWithdrawalSheetFile(null);
+    setPaymentSlips([]);
+    setOcMovementItems([]);
+    setIsOcDropdownOpen(false);
+  };
+
+  const closeMovementModal = () => {
+    setIsMovementModalOpen(false);
+    resetMovementForm();
+  };
 
   const createMovementMutation = useMutation({
     mutationFn: async (data: MovementPayload[]) => {
@@ -338,6 +413,7 @@ export default function EstoquePage() {
       setPaymentSlips([]);
       setOcMovementItems([]);
       setActiveTab('balance');
+      closeMovementModal();
       toast.success('Movimentação registrada com sucesso!');
     },
     onError: (error: any) => {
@@ -480,9 +556,25 @@ export default function EstoquePage() {
     );
   }, [balances]);
   const movements: StockMovement[] = movementsData?.data || [];
+
+  const clearBalanceFilters = () => {
+    setFiltersCostCenterId('');
+    setFiltersCategory('');
+    setFiltersSearch('');
+    setBalanceCurrentPage(1);
+  };
+
+  const clearHistoryFilters = () => {
+    setFiltersCostCenterId('');
+    setFiltersCategory('');
+    setFiltersMonth('');
+    setFiltersYear(String(new Date().getFullYear()));
+    setHistorySearch('');
+    setHistoryCurrentPage(1);
+  };
+
   const movementsForOc: StockMovement[] = movementOcData?.data || [];
   const purchaseOrders: PurchaseOrderOption[] = purchaseOrdersData?.data || [];
-  const constructionMaterials: Material[] = materialsData?.data || [];
   const balanceByMaterialAndCostCenter = useMemo(() => {
     const map = new Map<string, number>();
     balances.forEach((balance) => {
@@ -491,47 +583,77 @@ export default function EstoquePage() {
     });
     return map;
   }, [balances]);
-  const movementHistoryByOc = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        key: string;
-        ocNumber: string;
-        movements: StockMovement[];
-        latestCreatedAtMs: number;
-      }
-    >();
-
-    movements.forEach((movement) => {
-      const ocNumber = extractOcNumberFromNotes(movement.notes);
-      const key = ocNumber || 'SEM_OC';
-      const existing = grouped.get(key);
-      const createdAtMs = new Date(movement.createdAt).getTime();
-      if (!existing) {
-        grouped.set(key, {
-          key,
-          ocNumber,
-          movements: [movement],
-          latestCreatedAtMs: createdAtMs
-        });
-        return;
-      }
-      existing.movements.push(movement);
-      if (createdAtMs > existing.latestCreatedAtMs) {
-        existing.latestCreatedAtMs = createdAtMs;
-      }
+  const filteredMovements = useMemo(() => {
+    const term = historySearch.trim().toLowerCase();
+    const list = [...movements].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    if (!term) return list;
+    return list.filter((mov) => {
+      const oc = extractOcNumberFromNotes(mov.notes).toLowerCase();
+      const material = mov.material.name.toLowerCase();
+      const user = mov.user.name.toLowerCase();
+      const cc = (mov.costCenter?.name || mov.costCenter?.code || '').toLowerCase();
+      return oc.includes(term) || material.includes(term) || user.includes(term) || cc.includes(term);
     });
+  }, [movements, historySearch]);
 
-    return Array.from(grouped.values()).sort((a, b) => b.latestCreatedAtMs - a.latestCreatedAtMs);
-  }, [movements]);
+  const historyTotal = filteredMovements.length;
+  const historyTotalPages = Math.max(1, Math.ceil(historyTotal / HISTORY_ITEMS_PER_PAGE));
+  const historyStartIndex = (historyCurrentPage - 1) * HISTORY_ITEMS_PER_PAGE;
+  const historyEndIndex = historyStartIndex + HISTORY_ITEMS_PER_PAGE;
+  const paginatedMovements = filteredMovements.slice(historyStartIndex, historyEndIndex);
+  const historyStartItem = historyTotal === 0 ? 0 : historyStartIndex + 1;
+  const historyEndItem = Math.min(historyEndIndex, historyTotal);
+
+  useEffect(() => {
+    setBalanceCurrentPage(1);
+  }, [filtersCostCenterId, filtersCategory, filtersSearch]);
+
+  useEffect(() => {
+    setHistoryCurrentPage(1);
+  }, [filtersCostCenterId, filtersCategory, filtersMonth, filtersYear, historySearch]);
+
+  useEffect(() => {
+    if (balanceCurrentPage > balanceTotalPages) {
+      setBalanceCurrentPage(balanceTotalPages);
+    }
+  }, [balanceCurrentPage, balanceTotalPages]);
+
+  useEffect(() => {
+    if (historyCurrentPage > historyTotalPages) {
+      setHistoryCurrentPage(historyTotalPages);
+    }
+  }, [historyCurrentPage, historyTotalPages]);
+
+  useEffect(() => {
+    if (!historyDetail) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHistoryDetail(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [historyDetail]);
+
+  useEffect(() => {
+    if (!isMovementModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMovementModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMovementModalOpen]);
+
   const selectedOrderDetail: PurchaseOrderDetail | null = selectedPurchaseOrderData?.data || null;
   const constructionMaterialIdByName = useMemo(() => {
     const map = new Map<string, string>();
-    constructionMaterials.forEach((material) => {
+    const list = materialsData?.data;
+    if (!Array.isArray(list)) return map;
+    list.forEach((material) => {
       map.set(normalizeMaterialName(material.name), material.id);
     });
     return map;
-  }, [constructionMaterials]);
+  }, [materialsData?.data]);
   const availableOcOptions = useMemo(() => {
     const ocWithTotalOut = new Set<string>();
 
@@ -567,16 +689,28 @@ export default function EstoquePage() {
     });
   }, [availableOcOptions, formData.ocNumber]);
 
+  const selectedOrderDetailId = selectedOrderDetail?.id ?? null;
+  const movementSplit = formData.movementSplit;
+  const ocCostCenterIdFromOrder =
+    selectedOrderDetail?.materialRequest?.costCenter?.id ?? null;
+
   useEffect(() => {
-    if (!selectedOrderDetail || !formData.movementSplit) {
-      setOcMovementItems([]);
+    if (!selectedOrderDetailId || !movementSplit) {
+      setOcMovementItems((prev) => (prev.length === 0 ? prev : []));
       return;
     }
 
-    const nextItems = selectedOrderDetail.items.map((item, index) => {
+    const detail = selectedPurchaseOrderData?.data as PurchaseOrderDetail | null | undefined;
+    if (!detail?.items?.length) {
+      setOcMovementItems((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    const nextItems = detail.items.map((item, index) => {
       const originalQuantity = Number(item.quantity || 0);
       const materialName = item.material?.name || `Material ${index + 1}`;
-      const resolvedMaterialId = constructionMaterialIdByName.get(normalizeMaterialName(materialName)) || '';
+      const resolvedMaterialId =
+        constructionMaterialIdByName.get(normalizeMaterialName(materialName)) || '';
       return {
         key: `${item.materialId}-${index}`,
         materialId: resolvedMaterialId,
@@ -585,23 +719,30 @@ export default function EstoquePage() {
         unit: item.unit || '-',
         originalQuantity,
         quantity: String(originalQuantity),
-        checked: formData.movementSplit === 'TOTAL'
+        checked: movementSplit === 'TOTAL',
       };
     });
 
     setOcMovementItems(nextItems);
-  }, [selectedOrderDetail, formData.movementSplit, constructionMaterialIdByName]);
+  }, [
+    selectedOrderDetailId,
+    movementSplit,
+    materialsData?.data,
+    selectedPurchaseOrderData?.data,
+    constructionMaterialIdByName,
+  ]);
 
   useEffect(() => {
-    const ocCostCenterId = selectedOrderDetail?.materialRequest?.costCenter?.id;
-    if (ocCostCenterId && !formData.costCenterId) {
-      setFormData((prev) => ({ ...prev, costCenterId: ocCostCenterId }));
-    }
-  }, [selectedOrderDetail, formData.costCenterId]);
+    if (!ocCostCenterIdFromOrder) return;
+    setFormData((prev) => {
+      if (prev.costCenterId) return prev;
+      return { ...prev, costCenterId: ocCostCenterIdFromOrder };
+    });
+  }, [ocCostCenterIdFromOrder]);
   const exportRows = balances.map((b) => ({
     material: b.material.name,
     categoria: b.material.category || '-',
-    centroDeCusto: b.costCenter ? `${b.costCenter.code} - ${b.costCenter.name}` : 'Nao informado',
+    centroDeCusto: b.costCenter?.name || 'Nao informado',
     quantidade: b.balance,
     unidadeDeMedida: b.material.unit
   }));
@@ -827,173 +968,255 @@ export default function EstoquePage() {
                 <History className="w-4 h-4" />
                 Histórico
               </button>
-              <button
-                onClick={() => setActiveTab('new')}
-                className={`flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'new'
-                    ? 'border-red-600 text-red-600'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <Plus className="w-4 h-4" />
-                Movimentação
-              </button>
             </nav>
           </div>
 
-          {activeTab !== 'new' && (
-            <Card>
-              <CardHeader className="border-b-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+          {activeTab === 'balance' && (
+            <Card className="w-full">
+              <CardHeader className="border-b-0 pb-1">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                      <Box className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Saldo Atual</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Consulte materiais e quantidades em estoque por centro de custo
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-4">
-                    {isFiltersExpanded && (
-                      <button
-                        onClick={() => {
-                          setFiltersCostCenterId('');
-                          setFiltersCategory('');
-                          setFiltersMonth('');
-                          setFiltersYear(new Date().getFullYear().toString());
-                          setFiltersSearch('');
-                        }}
-                        className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                        title="Limpar filtros"
-                      >
-                        <RotateCcw className="w-5 h-5" />
-                      </button>
-                    )}
+                  <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                      <input
+                        type="text"
+                        value={filtersSearch}
+                        onChange={(e) => setFiltersSearch(e.target.value)}
+                        placeholder="Pesquisar material..."
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                      {filtersSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setFiltersSearch('')}
+                          aria-label="Limpar busca"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                     <button
-                      onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
-                      className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                      type="button"
+                      onClick={() => setIsBalanceFiltersModalOpen(true)}
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      aria-label="Abrir filtro"
+                      title="Filtro"
                     >
-                      {isFiltersExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                      <Filter className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportExcel}
+                      disabled={isExporting || balances.length === 0}
+                      className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                    >
+                      <Download className="h-4 w-4 shrink-0" />
+                      <span>Exportar Excel</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportPdf}
+                      disabled={isExporting || balances.length === 0}
+                      className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                    >
+                      <Download className="h-4 w-4 shrink-0" />
+                      <span>Exportar PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsMovementModalOpen(true)}
+                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                    >
+                      <ArrowLeftRight className="h-4 w-4 shrink-0" />
+                      <span>Nova Movimentação</span>
                     </button>
                   </div>
                 </div>
               </CardHeader>
-              {isFiltersExpanded && (
-                <CardContent className="p-4 sm:p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Centro de Custo
-                      </label>
-                      <select
-                        value={filtersCostCenterId}
-                        onChange={(e) => setFiltersCostCenterId(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      >
-                        <option value="">Todos</option>
-                        {costCenters.map((cc: any) => (
-                          <option key={cc.id} value={cc.id}>
-                            {cc.code} - {cc.name}
-                          </option>
-                        ))}
-                      </select>
+              <CardContent>
+                {loadingBalance ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600 dark:text-gray-400">Carregando saldo...</p>
+                  </div>
+                ) : balances.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Box className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400">Nenhum material em estoque</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                      Ajuste os filtros ou cadastre materiais para exibir o saldo
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                      <span>
+                        Mostrando {balanceStartItem} a {balanceEndItem} de {balanceTotal} materiais
+                      </span>
+                      <span>
+                        Página {balanceCurrentPage} de {balanceTotalPages}
+                      </span>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Categoria</label>
-                      <select
-                        value={filtersCategory}
-                        onChange={(e) => setFiltersCategory(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      >
-                        <option value="">Todas</option>
-                        {categories.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                          <tr>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Material
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Categoria
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Centro de Custo
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Quantidade
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Unidade
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                          {paginatedBalances.map((b) => (
+                            <tr
+                              key={`${b.material.id}-${b.costCenter?.id || 'sem-cc'}`}
+                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                            >
+                              <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {b.material.name}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
+                                {b.material.category || '—'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
+                                {b.costCenter?.name || 'Não informado'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
+                                {b.balance.toLocaleString('pt-BR')}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                                {b.material.unit}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    {activeTab === 'balance' && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Buscar Material
-                        </label>
-                        <input
-                          type="text"
-                          value={filtersSearch}
-                          onChange={(e) => setFiltersSearch(e.target.value)}
-                          placeholder="Digite o nome..."
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        />
+                    {balanceTotalPages > 1 && (
+                      <div className="mt-4 flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setBalanceCurrentPage((prev) => Math.max(prev - 1, 1))}
+                          disabled={balanceCurrentPage === 1}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          Anterior
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBalanceCurrentPage((prev) => Math.min(prev + 1, balanceTotalPages))}
+                          disabled={balanceCurrentPage === balanceTotalPages}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          Próxima
+                        </button>
                       </div>
                     )}
-                    {activeTab === 'movements' && (
-                      <>
+                  </>
+                )}
+              </CardContent>
+
+              {isBalanceFiltersModalOpen && (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+                  <div
+                    className="absolute inset-0 bg-black/40"
+                    onClick={() => setIsBalanceFiltersModalOpen(false)}
+                  />
+                  <div className="relative mx-4 w-full max-w-2xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+                    <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsBalanceFiltersModalOpen(false)}
+                        className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                        aria-label="Fechar filtros"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="px-5 py-4">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mês</label>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Centro de Custo
+                          </label>
                           <select
-                            value={filtersMonth}
-                            onChange={(e) => setFiltersMonth(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            value={filtersCostCenterId}
+                            onChange={(e) => setFiltersCostCenterId(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
                             <option value="">Todos</option>
-                            {Array.from({ length: 12 }, (_, i) => (
-                              <option key={i + 1} value={i + 1}>
-                                {new Date(0, i).toLocaleString('pt-BR', { month: 'long' })}
+                            {costCenters.map((cc: { id: string; code: string; name: string }) => (
+                              <option key={cc.id} value={cc.id}>
+                                {cc.name}
                               </option>
                             ))}
                           </select>
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Ano</label>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Categoria
+                          </label>
                           <select
-                            value={filtersYear}
-                            onChange={(e) => setFiltersYear(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            value={filtersCategory}
+                            onChange={(e) => setFiltersCategory(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
-                            {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
-                              <option key={year} value={year}>
-                                {year}
+                            <option value="">Todas</option>
+                            {categories.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
                               </option>
                             ))}
                           </select>
                         </div>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              )}
-            </Card>
-          )}
-
-          <Card>
-            <CardContent className="p-0">
-              {activeTab === 'balance' && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Saldo Atual</h3>
-                    <div className="flex items-center gap-2">
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
                       <button
                         type="button"
                         onClick={handleExportExcel}
                         disabled={isExporting || balancesByMaterial.length === 0}
                         className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 text-sm disabled:opacity-50"
+                        onClick={clearBalanceFilters}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                       >
-                        <Download className="w-4 h-4" />
-                        Exportar Excel
+                        <RotateCcw className="h-4 w-4" />
+                        Limpar filtros
                       </button>
                       <button
                         type="button"
                         onClick={handleExportPdf}
                         disabled={isExporting || balancesByMaterial.length === 0}
                         className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 text-sm disabled:opacity-50"
+                        onClick={() => setIsBalanceFiltersModalOpen(false)}
+                        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
                       >
-                        <Download className="w-4 h-4" />
-                        Exportar PDF
+                        Fechar
                       </button>
-                      <Link
-                        href="/ponto/materiais-construcao"
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Cadastrar Material
-                      </Link>
                     </div>
                   </div>
                   {loadingBalance ? (
@@ -1001,21 +1224,113 @@ export default function EstoquePage() {
                   ) : balancesByMaterial.length === 0 ? (
                     <p className="text-center py-8 text-gray-500">Nenhum material em estoque</p>
                   ) : (
+                </div>
+              )}
+            </Card>
+          )}
+
+          {activeTab === 'movements' && (
+            <Card className="w-full">
+              <CardHeader className="border-b-0 pb-1">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                      <History className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        Histórico de Movimentações
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Consulte entradas e saídas registradas no estoque
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                      <input
+                        type="text"
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        placeholder="Pesquisar OC, material..."
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                      {historySearch && (
+                        <button
+                          type="button"
+                          onClick={() => setHistorySearch('')}
+                          aria-label="Limpar busca"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsHistoryFiltersModalOpen(true)}
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      aria-label="Abrir filtro"
+                      title="Filtro"
+                    >
+                      <Filter className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingMovements ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600 dark:text-gray-400">Carregando histórico...</p>
+                  </div>
+                ) : filteredMovements.length === 0 ? (
+                  <div className="text-center py-8">
+                    <History className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400">Nenhuma movimentação encontrada</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                      Ajuste os filtros ou registre uma nova movimentação
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                      <span>
+                        Mostrando {historyStartItem} a {historyEndItem} de {historyTotal} movimentações
+                      </span>
+                      <span>
+                        Página {historyCurrentPage} de {historyTotalPages}
+                      </span>
+                    </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full">
+                      <table className="w-full text-sm">
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Data
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              OC
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Material
                             </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                              Categoria
+                            <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Movimento
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Quantidade
                             </th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                               Quantidade total
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Centro de Custo
                             </th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                              Unidade de Medida
+                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Registrado por
+                            </th>
+                            <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Ação
                             </th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                               Ações
@@ -1173,492 +1488,701 @@ export default function EstoquePage() {
                             <div className="flex items-start gap-3 flex-1">
                               <div
                                 className="p-2 rounded-lg bg-slate-100 dark:bg-slate-700/40"
+                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                          {paginatedMovements.map((mov) => {
+                            const ocNumber = extractOcNumberFromNotes(mov.notes) || '—';
+                            return (
+                              <tr
+                                key={mov.id}
+                                className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                               >
-                                <ArrowLeftRight className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div>
-                                    <p className="font-medium text-gray-900 dark:text-gray-100">
-                                      {historyGroup.ocNumber ? `OC: ${historyGroup.ocNumber}` : 'Sem OC informada'}
-                                    </p>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                      Entradas: {totalEntries} | Saídas: {totalOutputs} | Itens: {historyGroup.movements.length}
-                                    </p>
-                                  </div>
+                                <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                  {new Date(mov.createdAt).toLocaleString('pt-BR')}
+                                </td>
+                                <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  {ocNumber}
+                                </td>
+                                <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
+                                  {mov.material.name}
+                                </td>
+                                <td className="px-3 sm:px-6 py-3 text-center">
+                                  <span
+                                    className={`inline-flex items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                                      mov.type === 'IN'
+                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                    }`}
+                                  >
+                                    {mov.type === 'IN' ? (
+                                      <ArrowDownCircle className="h-3.5 w-3.5 shrink-0" />
+                                    ) : (
+                                      <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" />
+                                    )}
+                                    {mov.type === 'IN' ? 'Entrada' : 'Saída'}
+                                  </span>
+                                </td>
+                                <td className="px-3 sm:px-6 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                  {mov.quantity.toLocaleString('pt-BR')} {mov.material.unit}
+                                </td>
+                                <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
+                                  {mov.costCenter?.name || '—'}
+                                </td>
+                                <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
+                                  {mov.user.name}
+                                </td>
+                                <td className="px-3 sm:px-6 py-3 text-right">
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      setExpandedOcHistoryKey((prev) => (prev === historyGroup.key ? null : historyGroup.key))
-                                    }
-                                    className="text-xs px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                    onClick={() => setHistoryDetail(mov)}
+                                    className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                    aria-label="Ver detalhes"
                                   >
-                                    {expandedOcHistoryKey === historyGroup.key ? 'Ocultar detalhes' : 'Ver detalhes'}
+                                    <MoreVertical className="w-4 h-4" />
                                   </button>
-                                </div>
-                                {expandedOcHistoryKey === historyGroup.key && (
-                                  <div className="mt-2 space-y-1">
-                                    {historyGroup.movements.map((mov) => (
-                                      <div key={mov.id} className="text-xs border border-gray-200 dark:border-gray-700 rounded-md p-2">
-                                        <p className="text-gray-700 dark:text-gray-300">
-                                          <span className="font-medium">{mov.material.name}</span> —{' '}
-                                          {mov.type === 'IN' ? 'Entrada' : 'Saída'}: {mov.quantity} {mov.material.unit}
-                                        </p>
-                                        <p className="text-gray-500 dark:text-gray-500">
-                                          <span className="font-medium">Saldo atual no estoque (CC):</span>{' '}
-                                          {(() => {
-                                            const key = `${mov.material.id}:${mov.costCenter?.id || 'no-cost-center'}`;
-                                            const currentBalance = balanceByMaterialAndCostCenter.get(key);
-                                            if (currentBalance === undefined) return '0';
-                                            return `${currentBalance} ${mov.material.unit}`;
-                                          })()}
-                                        </p>
-                                        {mov.costCenter && (
-                                          <p className="text-gray-500 dark:text-gray-500">
-                                            <span className="font-medium">Centro de custo:</span> {mov.costCenter.code}
-                                          </p>
-                                        )}
-                                        {mov.notes && (
-                                          <p className="text-gray-500 dark:text-gray-500 whitespace-pre-line">
-                                            <span className="font-medium">Observações:</span> {mov.notes}
-                                          </p>
-                                        )}
-                                        {mov.notes && extractFirstUrl(mov.notes) && (
-                                          <a
-                                            href={absoluteUploadUrl(extractFirstUrl(mov.notes))}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-600 dark:text-blue-400 hover:underline inline-block"
-                                          >
-                                            Abrir anexo
-                                          </a>
-                                        )}
-                                        <p className="text-gray-400 dark:text-gray-600">
-                                          {new Date(mov.createdAt).toLocaleString('pt-BR')} - {mov.user.name}
-                                        </p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {historyTotalPages > 1 && (
+                      <div className="mt-4 flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryCurrentPage((prev) => Math.max(prev - 1, 1))}
+                          disabled={historyCurrentPage === 1}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          Anterior
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHistoryCurrentPage((prev) => Math.min(prev + 1, historyTotalPages))}
+                          disabled={historyCurrentPage === historyTotalPages}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          Próxima
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+
+              {isHistoryFiltersModalOpen && (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+                  <div
+                    className="absolute inset-0 bg-black/40"
+                    onClick={() => setIsHistoryFiltersModalOpen(false)}
+                  />
+                  <div className="relative mx-4 w-full max-w-2xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+                    <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsHistoryFiltersModalOpen(false)}
+                        className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                        aria-label="Fechar filtros"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="px-5 py-4">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Centro de Custo
+                          </label>
+                          <select
+                            value={filtersCostCenterId}
+                            onChange={(e) => setFiltersCostCenterId(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            <option value="">Todos</option>
+                            {costCenters.map((cc: { id: string; code: string; name: string }) => (
+                              <option key={cc.id} value={cc.id}>
+                                {cc.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Categoria
+                          </label>
+                          <select
+                            value={filtersCategory}
+                            onChange={(e) => setFiltersCategory(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            <option value="">Todas</option>
+                            {categories.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Mês
+                          </label>
+                          <select
+                            value={filtersMonth}
+                            onChange={(e) => setFiltersMonth(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            <option value="">Todos</option>
+                            {Array.from({ length: 12 }, (_, i) => (
+                              <option key={i + 1} value={i + 1}>
+                                {new Date(0, i).toLocaleString('pt-BR', { month: 'long' })}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Ano
+                          </label>
+                          <select
+                            value={filtersYear}
+                            onChange={(e) => setFiltersYear(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          >
+                            {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
+                              <option key={year} value={year}>
+                                {year}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                      <button
+                        type="button"
+                        onClick={clearHistoryFilters}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Limpar filtros
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsHistoryFiltersModalOpen(false)}
+                        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {historyDetail && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/40"
+                onClick={() => setHistoryDetail(null)}
+                aria-hidden
+              />
+              <div className="relative z-10 w-full max-w-lg max-h-[min(90vh,32rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
+                <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 pr-2">
+                    Detalhe da movimentação
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDetail(null)}
+                    className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-4 space-y-3 text-sm text-gray-800 dark:text-gray-200">
+                  <p>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block">Material</span>
+                    <span className="font-medium">{historyDetail.material.name}</span>
+                  </p>
+                  <p>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block">OC</span>
+                    <span>{extractOcNumberFromNotes(historyDetail.notes) || '—'}</span>
+                  </p>
+                  <p>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block">Movimento</span>
+                    <span>{historyDetail.type === 'IN' ? 'Entrada' : 'Saída'} — {historyDetail.quantity}{' '}
+                      {historyDetail.material.unit}</span>
+                  </p>
+                  {historyDetail.costCenter && (
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Centro de custo</span>
+                      <span>{historyDetail.costCenter.name || historyDetail.costCenter.code}</span>
+                    </p>
+                  )}
+                  <p>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block">Saldo atual (CC)</span>
+                    <span>
+                      {(() => {
+                        const key = `${historyDetail.material.id}:${historyDetail.costCenter?.id || 'no-cost-center'}`;
+                        const currentBalance = balanceByMaterialAndCostCenter.get(key);
+                        if (currentBalance === undefined) return `0 ${historyDetail.material.unit}`;
+                        return `${currentBalance.toLocaleString('pt-BR')} ${historyDetail.material.unit}`;
+                      })()}
+                    </span>
+                  </p>
+                  {historyDetail.notes && (
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Observações</span>
+                      <span className="whitespace-pre-line">{historyDetail.notes}</span>
+                    </p>
+                  )}
+                  {historyDetail.notes && extractFirstUrl(historyDetail.notes) && (
+                    <a
+                      href={absoluteUploadUrl(extractFirstUrl(historyDetail.notes))}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 dark:text-blue-400 hover:underline inline-block"
+                    >
+                      Abrir anexo
+                    </a>
+                  )}
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {new Date(historyDetail.createdAt).toLocaleString('pt-BR')} — {historyDetail.user.name}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isMovementModalOpen && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={closeMovementModal} aria-hidden />
+              <div
+                className="relative flex max-h-[min(92vh,900px)] w-full max-w-4xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="movement-modal-title"
+              >
+                <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                  <h3 id="movement-modal-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Nova Movimentação
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={closeMovementModal}
+                    className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-0 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                    aria-label="Fechar"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="overflow-y-auto px-5 py-4 [&_*:focus]:outline-none [&_*:focus]:ring-0 [&_*:focus-visible]:outline-none [&_*:focus-visible]:ring-0">
+                  <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Número da OC
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={formData.ocNumber}
+                      onFocus={() => setIsOcDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setIsOcDropdownOpen(false), 150)}
+                      onChange={(e) => {
+                        setFormData({ ...formData, ocNumber: e.target.value });
+                        setIsOcDropdownOpen(true);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      disabled={loadingPurchaseOrders}
+                      placeholder={loadingPurchaseOrders ? 'Carregando OCs...' : 'Digite para pesquisar OC'}
+                    />
+                    {isOcDropdownOpen && !loadingPurchaseOrders && filteredOcOptions.length > 0 && (
+                      <div className="absolute z-[1100] mt-1 max-h-64 w-full min-w-[280px] overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 shadow-xl">
+                        {filteredOcOptions.map((order) => {
+                          const costCenterLabel = order.materialRequest?.costCenter
+                            ? `${order.materialRequest.costCenter.code || ''} ${order.materialRequest.costCenter.name || ''}`.trim()
+                            : 'Sem CC';
+                          const supplierLabel = order.supplier?.name || 'Sem fornecedor';
+                          const totalLabel = orderTotalValue(order).toLocaleString('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL'
+                          });
+                          const detailsLabel = `${order.orderNumber} | ${costCenterLabel} | ${supplierLabel} | ${totalLabel}`;
+
+                          return (
+                            <button
+                              key={order.id}
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setFormData((prev) => ({ ...prev, ocNumber: order.orderNumber }));
+                                setIsOcDropdownOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm text-gray-100 hover:bg-gray-800 border-b border-gray-800 last:border-b-0"
+                              title={detailsLabel}
+                            >
+                              {detailsLabel}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {!loadingPurchaseOrders && availableOcOptions.length === 0 && (
+                    <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
+                      Nenhuma OC disponível. Todas já tiveram saída total ou não há OCs cadastradas.
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Centro de Custo
+                  </label>
+                  <select
+                    value={formData.costCenterId}
+                    onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
+                    disabled={loadingCostCenters}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                  >
+                    <option value="">Selecione um centro de custo</option>
+                    {loadingCostCenters && <option disabled>Carregando centros de custo...</option>}
+                    {!loadingCostCenters && costCenters.length === 0 && (
+                      <option disabled>Nenhum centro de custo cadastrado</option>
+                    )}
+                    {costCenters.map((cc: { id: string; code: string; name: string }) => (
+                      <option key={cc.id} value={cc.id}>
+                        {cc.name}
+                      </option>
+                    ))}
+                  </select>
+                  {!loadingCostCenters && costCenters.length === 0 && (
+                    <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
+                      ⚠️ Não há centros de custo cadastrados.{' '}
+                      <Link href="/ponto/centros-de-custo" className="underline hover:text-yellow-700">
+                        Cadastre aqui
+                      </Link>
+                      .
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Movimento *
+                </label>
+                <div className="flex gap-2">
+                  <MovementSegButton
+                    active={formData.type === 'IN'}
+                    variant="in"
+                    icon={ArrowDownCircle}
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, type: 'IN' }));
+                      setWithdrawalSheetFile(null);
+                    }}
+                    label="Entrada"
+                  />
+                  <MovementSegButton
+                    active={formData.type === 'OUT'}
+                    variant="out"
+                    icon={ArrowUpCircle}
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, type: 'OUT' }));
+                      setInvoiceFile(null);
+                      setPaymentSlips([]);
+                    }}
+                    label="Saída"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Tipo da Movimentação *
+                </label>
+                <div className="flex gap-2">
+                  <ButtonSeg
+                    active={formData.movementSplit === 'TOTAL'}
+                    onClick={() => setFormData((prev) => ({ ...prev, movementSplit: 'TOTAL' }))}
+                    label="Total"
+                  />
+                  <ButtonSeg
+                    active={formData.movementSplit === 'PARCIAL'}
+                    onClick={() => setFormData((prev) => ({ ...prev, movementSplit: 'PARCIAL' }))}
+                    label="Parcial"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Itens da OC *
+                </label>
+                {loadingSelectedPurchaseOrder ? (
+                  <p className="text-sm text-gray-500">Carregando itens da OC...</p>
+                ) : !formData.ocNumber ? (
+                  <p className="text-sm text-gray-500">Selecione uma OC para exibir os itens.</p>
+                ) : ocMovementItems.length === 0 ? (
+                  <p className="text-sm text-gray-500">Selecione o tipo da movimentação (Total ou Parcial).</p>
+                ) : (
+                  <div className="border border-gray-300 dark:border-gray-600 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+                    {ocMovementItems.map((item) => (
+                      <div key={item.key} className="p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <label className="md:col-span-6 flex items-center gap-3 text-sm text-gray-800 dark:text-gray-200">
+                          <input
+                            type="checkbox"
+                            checked={item.checked}
+                            disabled={formData.movementSplit === 'TOTAL'}
+                            onChange={(e) =>
+                              setOcMovementItems((prev) =>
+                                prev.map((row) =>
+                                  row.key === item.key ? { ...row, checked: e.target.checked } : row
+                                )
+                              )
+                            }
+                            className="rounded border-gray-300 dark:border-gray-600"
+                          />
+                          <span>{item.materialName}</span>
+                          {item.unresolvedMaterialId && (
+                            <span className="text-xs text-red-500 dark:text-red-400">(não encontrado no estoque)</span>
+                          )}
+                        </label>
+                        <div className="md:col-span-4">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={item.quantity}
+                            disabled={formData.movementSplit === 'TOTAL' || !item.checked}
+                            onChange={(e) =>
+                              setOcMovementItems((prev) =>
+                                prev.map((row) =>
+                                  row.key === item.key ? { ...row, quantity: e.target.value } : row
+                                )
+                              )
+                            }
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-60"
+                          />
+                        </div>
+                        <div className="md:col-span-2 text-sm text-gray-600 dark:text-gray-400">{item.unit}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Observações
+                </label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  placeholder="Observações sobre a movimentação..."
+                />
+              </div>
+              {formData.type === 'OUT' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Ficha de Retirada *
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
+                      {isUploadingWithdrawalSheet ? 'Enviando...' : 'Escolher arquivo'}
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".pdf,image/*"
+                        disabled={isUploadingWithdrawalSheet}
+                        onChange={(e) => {
+                          const selectedFile = e.target.files?.[0] || null;
+                          void handleWithdrawalSheetUpload(selectedFile);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
+                    {withdrawalSheetFile && (
+                      <>
+                        <a
+                          href={absoluteUploadUrl(withdrawalSheetFile.url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {withdrawalSheetFile.originalName}
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setWithdrawalSheetFile(null)}
+                          className="text-sm text-red-600 dark:text-red-400 hover:underline"
+                        >
+                          Remover
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Obrigatório para saída. Formatos aceitos: PDF, PNG, JPG e WEBP (até 15MB).
+                  </p>
+                </div>
+              )}
+              {formData.type === 'IN' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Nota Fiscal *
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
+                      {isUploadingInvoice ? 'Enviando...' : 'Escolher arquivo'}
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".pdf,.xml,image/*"
+                        disabled={isUploadingInvoice}
+                        onChange={(e) => {
+                          const selectedFile = e.target.files?.[0] || null;
+                          void handleInvoiceUpload(selectedFile);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
+                    {invoiceFile && (
+                      <>
+                        <a
+                          href={absoluteUploadUrl(invoiceFile.url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {invoiceFile.originalName}
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setInvoiceFile(null)}
+                          className="text-sm text-red-600 dark:text-red-400 hover:underline"
+                        >
+                          Remover
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Obrigatório para entrada. Formatos aceitos: PDF, XML, PNG, JPG e WEBP (até 15MB).
+                  </p>
+                </div>
+              )}
+              {formData.type === 'IN' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Boletos para Pagamento
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleAddPaymentSlip}
+                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      + Adicionar boleto
+                    </button>
+                  </div>
+                  {paymentSlips.length === 0 ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Adicione quantos boletos forem necessários.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {paymentSlips.map((slip, index) => (
+                        <div
+                          key={slip.id}
+                          className="p-3 border border-gray-300 dark:border-gray-600 rounded-lg space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm text-gray-700 dark:text-gray-300">Boleto {index + 1}</p>
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePaymentSlip(slip.id)}
+                              className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
+                              {uploadingPaymentSlipId === slip.id ? 'Enviando...' : 'Escolher arquivo'}
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept=".pdf,image/*"
+                                disabled={uploadingPaymentSlipId === slip.id}
+                                onChange={(e) => {
+                                  const selectedFile = e.target.files?.[0] || null;
+                                  void handlePaymentSlipUpload(slip.id, selectedFile);
+                                  e.currentTarget.value = '';
+                                }}
+                              />
+                            </label>
+                            {slip.url && (
+                              <a
+                                href={absoluteUploadUrl(slip.url)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                {slip.originalName}
+                              </a>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Valor do boleto"
+                              value={slip.amount}
+                              onChange={(e) =>
+                                handlePaymentSlipFieldChange(slip.id, 'amount', e.target.value)
+                              }
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            />
+                            <input
+                              type="date"
+                              value={slip.dueDate}
+                              onChange={(e) =>
+                                handlePaymentSlipFieldChange(slip.id, 'dueDate', e.target.value)
+                              }
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                            />
                           </div>
                         </div>
-                      )})}
+                      ))}
                     </div>
                   )}
                 </div>
               )}
-
-              {activeTab === 'new' && (
-                <div className="p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                    Nova Movimentação
-                  </h3>
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Nº OC
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          required
-                          value={formData.ocNumber}
-                          onFocus={() => setIsOcDropdownOpen(true)}
-                          onBlur={() => setTimeout(() => setIsOcDropdownOpen(false), 150)}
-                          onChange={(e) => {
-                            setFormData({ ...formData, ocNumber: e.target.value });
-                            setIsOcDropdownOpen(true);
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                          disabled={loadingPurchaseOrders}
-                          placeholder={loadingPurchaseOrders ? 'Carregando OCs...' : 'Digite para pesquisar OC'}
-                        />
-                        {isOcDropdownOpen && !loadingPurchaseOrders && filteredOcOptions.length > 0 && (
-                          <div className="absolute z-50 mt-1 max-h-64 overflow-y-auto w-[min(1100px,95vw)] bg-gray-900 border border-gray-700 rounded-lg shadow-xl">
-                            {filteredOcOptions.map((order) => {
-                              const costCenterLabel = order.materialRequest?.costCenter
-                                ? `${order.materialRequest.costCenter.code || ''} ${order.materialRequest.costCenter.name || ''}`.trim()
-                                : 'Sem CC';
-                              const supplierLabel = order.supplier?.name || 'Sem fornecedor';
-                              const totalLabel = orderTotalValue(order).toLocaleString('pt-BR', {
-                                style: 'currency',
-                                currency: 'BRL'
-                              });
-                              const detailsLabel = `${order.orderNumber} | ${costCenterLabel} | ${supplierLabel} | ${totalLabel}`;
-
-                              return (
-                                <button
-                                  key={order.id}
-                                  type="button"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setFormData((prev) => ({ ...prev, ocNumber: order.orderNumber }));
-                                    setIsOcDropdownOpen(false);
-                                  }}
-                                  className="w-full text-left px-3 py-2 text-sm text-gray-100 hover:bg-gray-800 border-b border-gray-800 last:border-b-0"
-                                  title={detailsLabel}
-                                >
-                                  {detailsLabel}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                      {!loadingPurchaseOrders && availableOcOptions.length === 0 && (
-                        <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
-                          Nenhuma OC disponível. Todas já tiveram saída total ou não há OCs cadastradas.
-                        </p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Movimento *
-                      </label>
-                      <select
-                        required
-                        value={formData.type}
-                        onChange={(e) => setFormData({ ...formData, type: e.target.value as 'IN' | 'OUT' })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      >
-                        <option value="IN">Entrada</option>
-                        <option value="OUT">Saída</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Centro de Custo
-                      </label>
-                      <select
-                        value={formData.costCenterId}
-                        onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
-                        disabled={loadingCostCenters}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                      >
-                        <option value="">Selecione um centro de custo</option>
-                        {loadingCostCenters && <option disabled>Carregando centros de custo...</option>}
-                        {!loadingCostCenters && costCenters.length === 0 && (
-                          <option disabled>Nenhum centro de custo cadastrado</option>
-                        )}
-                        {costCenters.map((cc: any) => (
-                          <option key={cc.id} value={cc.id}>
-                            {cc.code} - {cc.name}
-                          </option>
-                        ))}
-                      </select>
-                      {!loadingCostCenters && costCenters.length === 0 && (
-                        <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
-                          ⚠️ Não há centros de custo cadastrados.{' '}
-                          <Link href="/ponto/centros-de-custo" className="underline hover:text-yellow-700">
-                            Cadastre aqui
-                          </Link>
-                          .
-                        </p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Tipo da Movimentação
-                      </label>
-                      <div className="flex items-center gap-6 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
-                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                          <input
-                            type="checkbox"
-                            checked={formData.movementSplit === 'TOTAL'}
-                            onChange={() =>
-                              setFormData((prev) => ({
-                                ...prev,
-                                movementSplit: prev.movementSplit === 'TOTAL' ? '' : 'TOTAL'
-                              }))
-                            }
-                            className="rounded border-gray-300 dark:border-gray-600"
-                          />
-                          Total
-                        </label>
-                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                          <input
-                            type="checkbox"
-                            checked={formData.movementSplit === 'PARCIAL'}
-                            onChange={() =>
-                              setFormData((prev) => ({
-                                ...prev,
-                                movementSplit: prev.movementSplit === 'PARCIAL' ? '' : 'PARCIAL'
-                              }))
-                            }
-                            className="rounded border-gray-300 dark:border-gray-600"
-                          />
-                          Parcial
-                        </label>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Itens da OC *
-                      </label>
-                      {loadingSelectedPurchaseOrder ? (
-                        <p className="text-sm text-gray-500">Carregando itens da OC...</p>
-                      ) : !formData.ocNumber ? (
-                        <p className="text-sm text-gray-500">Selecione uma OC para exibir os itens.</p>
-                      ) : ocMovementItems.length === 0 ? (
-                        <p className="text-sm text-gray-500">Selecione o tipo da movimentação (Total ou Parcial).</p>
-                      ) : (
-                        <div className="border border-gray-300 dark:border-gray-600 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-                          {ocMovementItems.map((item) => (
-                            <div key={item.key} className="p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                              <label className="md:col-span-6 flex items-center gap-3 text-sm text-gray-800 dark:text-gray-200">
-                                <input
-                                  type="checkbox"
-                                  checked={item.checked}
-                                  disabled={formData.movementSplit === 'TOTAL'}
-                                  onChange={(e) =>
-                                    setOcMovementItems((prev) =>
-                                      prev.map((row) =>
-                                        row.key === item.key ? { ...row, checked: e.target.checked } : row
-                                      )
-                                    )
-                                  }
-                                  className="rounded border-gray-300 dark:border-gray-600"
-                                />
-                                <span>{item.materialName}</span>
-                                {item.unresolvedMaterialId && (
-                                  <span className="text-xs text-red-500 dark:text-red-400">(não encontrado no estoque)</span>
-                                )}
-                              </label>
-                              <div className="md:col-span-4">
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={item.quantity}
-                                  disabled={formData.movementSplit === 'TOTAL' || !item.checked}
-                                  onChange={(e) =>
-                                    setOcMovementItems((prev) =>
-                                      prev.map((row) =>
-                                        row.key === item.key ? { ...row, quantity: e.target.value } : row
-                                      )
-                                    )
-                                  }
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-60"
-                                />
-                              </div>
-                              <div className="md:col-span-2 text-sm text-gray-600 dark:text-gray-400">{item.unit}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Observações
-                      </label>
-                      <textarea
-                        value={formData.notes}
-                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                        rows={3}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        placeholder="Observações sobre a movimentação..."
-                      />
-                    </div>
-                    {formData.type === 'OUT' && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Ficha de Retirada *
-                        </label>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
-                            {isUploadingWithdrawalSheet ? 'Enviando...' : 'Escolher arquivo'}
-                            <input
-                              type="file"
-                              className="hidden"
-                              accept=".pdf,image/*"
-                              disabled={isUploadingWithdrawalSheet}
-                              onChange={(e) => {
-                                const selectedFile = e.target.files?.[0] || null;
-                                void handleWithdrawalSheetUpload(selectedFile);
-                                e.currentTarget.value = '';
-                              }}
-                            />
-                          </label>
-                          {withdrawalSheetFile && (
-                            <>
-                              <a
-                                href={absoluteUploadUrl(withdrawalSheetFile.url)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                {withdrawalSheetFile.originalName}
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => setWithdrawalSheetFile(null)}
-                                className="text-sm text-red-600 dark:text-red-400 hover:underline"
-                              >
-                                Remover
-                              </button>
-                            </>
-                          )}
-                        </div>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          Obrigatório para saída. Formatos aceitos: PDF, PNG, JPG e WEBP (até 15MB).
-                        </p>
-                      </div>
-                    )}
-                    {formData.type === 'IN' && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Nota Fiscal *
-                        </label>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
-                            {isUploadingInvoice ? 'Enviando...' : 'Escolher arquivo'}
-                            <input
-                              type="file"
-                              className="hidden"
-                              accept=".pdf,.xml,image/*"
-                              disabled={isUploadingInvoice}
-                              onChange={(e) => {
-                                const selectedFile = e.target.files?.[0] || null;
-                                void handleInvoiceUpload(selectedFile);
-                                e.currentTarget.value = '';
-                              }}
-                            />
-                          </label>
-                          {invoiceFile && (
-                            <>
-                              <a
-                                href={absoluteUploadUrl(invoiceFile.url)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                {invoiceFile.originalName}
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => setInvoiceFile(null)}
-                                className="text-sm text-red-600 dark:text-red-400 hover:underline"
-                              >
-                                Remover
-                              </button>
-                            </>
-                          )}
-                        </div>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          Obrigatório para entrada. Formatos aceitos: PDF, XML, PNG, JPG e WEBP (até 15MB).
-                        </p>
-                      </div>
-                    )}
-                    {formData.type === 'IN' && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Boletos para Pagamento
-                          </label>
-                          <button
-                            type="button"
-                            onClick={handleAddPaymentSlip}
-                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                          >
-                            + Adicionar boleto
-                          </button>
-                        </div>
-                        {paymentSlips.length === 0 ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Adicione quantos boletos forem necessários.
-                          </p>
-                        ) : (
-                          <div className="space-y-3">
-                            {paymentSlips.map((slip, index) => (
-                              <div
-                                key={slip.id}
-                                className="p-3 border border-gray-300 dark:border-gray-600 rounded-lg space-y-2"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <p className="text-sm text-gray-700 dark:text-gray-300">Boleto {index + 1}</p>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemovePaymentSlip(slip.id)}
-                                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
-                                  >
-                                    Remover
-                                  </button>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
-                                    {uploadingPaymentSlipId === slip.id ? 'Enviando...' : 'Escolher arquivo'}
-                                    <input
-                                      type="file"
-                                      className="hidden"
-                                      accept=".pdf,image/*"
-                                      disabled={uploadingPaymentSlipId === slip.id}
-                                      onChange={(e) => {
-                                        const selectedFile = e.target.files?.[0] || null;
-                                        void handlePaymentSlipUpload(slip.id, selectedFile);
-                                        e.currentTarget.value = '';
-                                      }}
-                                    />
-                                  </label>
-                                  {slip.url && (
-                                    <a
-                                      href={absoluteUploadUrl(slip.url)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                                    >
-                                      {slip.originalName}
-                                    </a>
-                                  )}
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                  <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="Valor do boleto"
-                                    value={slip.amount}
-                                    onChange={(e) =>
-                                      handlePaymentSlipFieldChange(slip.id, 'amount', e.target.value)
-                                    }
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                                  />
-                                  <input
-                                    type="date"
-                                    value={slip.dueDate}
-                                    onChange={(e) =>
-                                      handlePaymentSlipFieldChange(slip.id, 'dueDate', e.target.value)
-                                    }
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('balance')}
-                        className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={createMovementMutation.isPending}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-                      >
-                        {createMovementMutation.isPending ? 'Registrando...' : 'Registrar Movimentação'}
-                      </button>
-                    </div>
-                  </form>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeMovementModal}
+                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={createMovementMutation.isPending}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  {createMovementMutation.isPending ? 'Registrando...' : 'Registrar Movimentação'}
+                </button>
+              </div>
+            </form>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          )}
+
         </div>
       </MainLayout>
     </ProtectedRoute>

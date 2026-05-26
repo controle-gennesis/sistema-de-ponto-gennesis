@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '../lib/prisma';
+import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 
 export interface CreateChatData {
   initiatorId: string;
@@ -2047,6 +2048,7 @@ export class ChatService {
   async listUsers(currentUserId: string) {
     const users = await prisma.user.findMany({
       where: {
+        ...gennecyBotUserWhereExclude(),
         id: { not: currentUserId },
         isActive: true
       },

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 
 export class UserController {
   async updateUserPassword(req: AuthRequest, res: Response, next: NextFunction) {
@@ -54,7 +55,9 @@ export class UserController {
       const limitNum = Math.min(Number(limit), 1000); // Máximo de 1000 registros por página
       const skip = (Number(page) - 1) * limitNum;
 
-      const where: any = {};
+      const where: any = {
+        ...gennecyBotUserWhereExclude(),
+      };
 
       // Filtro de status (ativo/inativo)
       if (status === 'inactive') {
@@ -572,6 +575,7 @@ export class UserController {
       const [users, total] = await Promise.all([
         prisma.user.findMany({
           where: {
+            ...gennecyBotUserWhereExclude(),
             isActive: true,
             employee: {
               department: { contains: department, mode: 'insensitive' }
@@ -593,6 +597,7 @@ export class UserController {
         }),
         prisma.user.count({
           where: {
+            ...gennecyBotUserWhereExclude(),
             isActive: true,
             employee: {
               department: { contains: department, mode: 'insensitive' }

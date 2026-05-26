@@ -53,6 +53,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Processos do Fluig', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
   { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações Gerais', href: '/ponto/solicitacoes-dp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/drive'), name: 'Meu Drive', href: '/ponto/drive', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/kanban'), name: 'Tasks', href: '/ponto/kanban', category: 'Principal' },
   // Departamento Pessoal
   { key: pathToModuleKey('/ponto/funcionarios'), name: 'Funcionários', href: '/ponto/funcionarios', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/folha-pagamento'), name: 'Folha de Pagamento', href: '/ponto/folha-pagamento', category: 'Departamento Pessoal' },
@@ -69,8 +70,8 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/aniversariantes'), name: 'Aniversariantes', href: '/ponto/aniversariantes', category: 'Departamento Pessoal' },
   // Financeiro
   { key: pathToModuleKey('/ponto/financeiro/controle-financeiro'), name: 'Controle Financeiro', href: '/ponto/financeiro/controle-financeiro', category: 'Financeiro' },
-  { key: pathToModuleKey('/ponto/financeiro/analise-extrato'), name: 'Extrato de Caixa', href: '/ponto/financeiro/analise-extrato', category: 'Métricas' },
-  { key: pathToModuleKey('/ponto/financeiro'), name: 'Financeiro', href: '/ponto/financeiro', category: 'Financeiro' },
+  { key: pathToModuleKey('/ponto/financeiro/analise-extrato'), name: 'Extrato de Caixa', href: '/ponto/financeiro/analise-extrato', category: 'Financeiro' },
+  { key: pathToModuleKey('/ponto/financeiro'), name: 'Pagamento da Folha', href: '/ponto/financeiro', category: 'Financeiro' },
   // Engenharia
   { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamento', href: '/ponto/orcamento', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos'), name: 'Contratos', href: '/ponto/contratos', category: 'Engenharia' },
@@ -85,7 +86,15 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Contratos e Licitações',
   },
   { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contratos e Licitações' },
+  {
+    key: pathToModuleKey('/ponto/contratos/medicao'),
+    name: 'Medições',
+    href: '/ponto/contratos/medicao',
+    category: 'Contratos e Licitações',
+  },
   { key: pathToModuleKey('/ponto/pleitos-gerados'), name: 'Pleitos Gerados', href: '/ponto/pleitos-gerados', category: 'Engenharia' },
+  // Jurídico
+  { key: pathToModuleKey('/ponto/juridico'), name: 'Processos Trabalhistas', href: '/ponto/juridico', category: 'Jurídico' },
   // Suprimentos
   { key: pathToModuleKey('/ponto/solicitar-materiais'), name: 'Solicitar Materiais', href: '/ponto/solicitar-materiais', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/gerenciar-materiais'), name: 'Requisições de Materiais', href: '/ponto/gerenciar-materiais', category: 'Suprimentos' },
@@ -153,6 +162,30 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
     name: 'Aprovar Espelho da Nota Fiscal',
     href: '/ponto/controle/aprovar-espelho-nf',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-compras'),
+    name: 'Aprovar OCs — Compras',
+    href: '/ponto/controle/aprovar-oc-compras',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-gestor'),
+    name: 'Aprovar OCs — Gestor',
+    href: '/ponto/controle/aprovar-oc-gestor',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-diretoria'),
+    name: 'Aprovar OCs — Diretoria',
+    href: '/ponto/controle/aprovar-oc-diretoria',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/visualizar-todos-kanbans'),
+    name: 'Visualizar Kanbans de todos os setores',
+    href: '/ponto/controle/visualizar-todos-kanbans',
     category: 'Controle',
   },
 ] as const;

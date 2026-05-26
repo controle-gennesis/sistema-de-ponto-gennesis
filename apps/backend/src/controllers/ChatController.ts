@@ -2,6 +2,12 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { ChatService } from '../services/ChatService';
+import {
+  gennecyChatAssistant,
+  getGennecyBotUserId,
+  resolveGennecyInvokeMode,
+  shouldProcessGennecyMessage,
+} from '../services/GennecyChatAssistantService';
 import multer from 'multer';
 import { prisma } from '../lib/prisma';
 import { getActiveGroupCallForChat } from '../realtime/wsCallSignaling';
@@ -419,6 +425,20 @@ export class ChatController {
     }
   }
 
+  /** Abre (ou cria) conversa direta com a assistente Gennecy. */
+  async openGennecyDirectChat(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const initiatorId = req.user?.id;
+      if (!initiatorId) throw createError('Usuário não autenticado', 401);
+
+      const botId = await getGennecyBotUserId();
+      const chat = await chatService.getOrCreateDirectChat(initiatorId, botId);
+      res.json({ success: true, data: chat });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
   /**
    * Cria um grupo com múltiplos participantes (suporta multipart com foto opcional)
    */
@@ -640,7 +660,22 @@ export class ChatController {
         replyToId
       });
 
-      res.json({ success: true, message: 'Mensagem enviada', data: message });
+      const gennecyMode = await resolveGennecyInvokeMode(chatId, userId, content);
+      if (gennecyMode) {
+        void gennecyChatAssistant
+          .processOutgoingMessage({ chatId, senderId: userId, content })
+          .catch((err) => console.error('[Gennecy] async', err));
+      }
+
+      const gennecyProcessing = await shouldProcessGennecyMessage(chatId, userId, content);
+
+      res.json({
+        success: true,
+        message: 'Mensagem enviada',
+        data: message,
+        gennecyProcessing,
+        gennecyMode,
+      });
     } catch (error: any) {
       next(error);
     }

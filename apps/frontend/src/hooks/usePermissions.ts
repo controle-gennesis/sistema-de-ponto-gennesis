@@ -15,7 +15,13 @@ export function usePermissions() {
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
-    }
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: (failureCount, error) => {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 429 || status === 401 || status === 403) return false;
+      return failureCount < 1;
+    },
   });
 
   const user = userData?.data;
@@ -90,6 +96,10 @@ export function usePermissions() {
 
   const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
 
+  const isDepartmentJuridico =
+    userDepartment?.toLowerCase().includes('jurídico') ||
+    userDepartment?.toLowerCase().includes('juridico');
+
   const employeesKey = pk('/ponto/funcionarios');
   /** Ações granulares persistidas além do `acesso` do módulo (matriz Ver/Criar/Editar/Excluir). */
   const EMPLOYEE_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
@@ -145,6 +155,20 @@ export function usePermissions() {
     isAdministrator ||
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-espelho-nf'));
+
+  const canApproveOcCompras =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
+  const canApproveOcDiretoria =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-diretoria'));
+  const canApproveOcGestor =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-gestor'));
+  const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
+
+  /** Lista e visualização dos quadros Tasks de todos os setores (somente leitura fora do próprio setor). */
+  const canViewAllKanbanBoards =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/visualizar-todos-kanbans'));
 
   /** Lista de orçamentos: módulo Contratos + permissão checklist «Orçamento» em pelo menos um contrato. */
   const canAccessOrcamentoRoutePage =
@@ -217,6 +241,7 @@ export function usePermissions() {
     isDepartmentProjetos,
     isDepartmentFinanceiro,
     isDepartmentCompras,
+    isDepartmentJuridico,
     permissions: finalPermissions,
     can,
     canAction,
@@ -225,6 +250,11 @@ export function usePermissions() {
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
     canApproveEspelhoNf,
+    canApproveOc,
+    canApproveOcCompras,
+    canApproveOcDiretoria,
+    canApproveOcGestor,
+    canViewAllKanbanBoards,
     canAccessContract,
     contractModuleFlags,
     canAccessOrcamentoRoutePage,
@@ -261,6 +291,7 @@ export function useRoutePermission(route: string) {
     isDepartmentProjetos,
     isDepartmentFinanceiro,
     isDepartmentCompras,
+    isDepartmentJuridico,
     userPosition,
     can,
     dpApprovalContractIds,
@@ -283,13 +314,17 @@ export function useRoutePermission(route: string) {
      * sobre algum bloco. Não há mais entrada na matriz de acessos.
      *  - Gestor de algum contrato (decide Solicitações Gerais) → vê o bloco de Solicitações.
      *  - Permissão «Aprovar Espelho da Nota Fiscal» (Controle) → vê o bloco de Espelhos da Nota Fiscal.
+     *  - Compras / Gerenciar materiais → vê o bloco de aprovação de OC.
      * Cada bloco é renderizado independentemente dentro da própria página.
      */
     '/ponto/aprovacoes':
       isAdministrator ||
       dpApprovalContractIds.length > 0 ||
       can(pk('/ponto/controle/aprovar-solicitacoes-dp')) ||
-      canApproveEspelhoNf,
+      canApproveEspelhoNf ||
+      can(pk('/ponto/controle/aprovar-oc-compras')) ||
+      can(pk('/ponto/controle/aprovar-oc-gestor')) ||
+      can(pk('/ponto/controle/aprovar-oc-diretoria')),
     '/ponto/funcionarios':
       isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal || can(pk('/ponto/aniversariantes')),
@@ -339,6 +374,7 @@ export function useRoutePermission(route: string) {
       can(pk('/ponto/espelho-nf/codigos-tributarios')) ||
       can(pk('/ponto/espelho-nf')),
     '/ponto/licitacoes': isAdministrator || can(pk('/ponto/licitacoes')),
+    '/ponto/contratos/medicao': isAdministrator || can(pk('/ponto/contratos/medicao')),
     '/ponto/solicitar-materiais': isAdministrator || can(pk('/ponto/solicitar-materiais')),
     '/ponto/gerenciar-materiais': isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais')),
     '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),
@@ -351,6 +387,10 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),
     '/ponto/natureza-orcamentaria':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/natureza-orcamentaria')),
+    '/ponto/juridico':
+      isAdministrator || isDepartmentJuridico || can(pk('/ponto/juridico')),
+    '/ponto/financeiro/controle-financeiro':
+      isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro')),
   };
 
   return {

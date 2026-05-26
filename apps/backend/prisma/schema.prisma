@@ -70,6 +70,12 @@ model User {
   chatUserPrivacy          ChatUserPrivacy[]
   messageHiddenForUser     MessageHiddenForUser[]
   extratoCaixaFiltrosSalvos ExtratoCaixaFiltroSalvo[]
+  kanbanBoardsCreated      KanbanBoard[]          @relation("KanbanBoardCreator")
+  kanbanCardsAssigned      KanbanCard[]           @relation("KanbanCardAssignee")
+  kanbanCardMemberships    KanbanCardMember[]     @relation("KanbanCardMemberUser")
+  kanbanCardComments       KanbanCardComment[]    @relation("KanbanCardCommentAuthor")
+  kanbanCardAttachments    KanbanCardAttachment[] @relation("KanbanCardAttachmentUploader")
+  kanbanChecklistAssigned  KanbanChecklistItem[]  @relation("KanbanChecklistAssignee")
 
   @@map("users")
 }
@@ -2249,4 +2255,144 @@ model ExtratoCaixaFiltroSalvo {
   @@unique([userId, nome])
   @@index([userId])
   @@map("extrato_caixa_filtros_salvos")
+// ─── Tasks (Kanban) ───────────────────────────────────────────────────────────
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model KanbanBoard {
+  id              String   @id @default(cuid())
+  name            String   @default("Tasks")
+  slug            String   @unique
+  departmentKey   String   @unique @map("department_key")
+  departmentLabel String   @map("department_label")
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  columns KanbanColumn[]
+  creator User? @relation("KanbanBoardCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("kanban_boards")
+}
+
+model KanbanColumn {
+  id        String   @id @default(cuid())
+  boardId   String
+  title     String
+  color     String   @default("#6B7280")
+  position  Int      @default(0)
+  cardLimit Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board KanbanBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards KanbanCard[]
+
+  @@index([boardId])
+  @@map("kanban_columns")
+}
+
+model KanbanCard {
+  id             String       @id @default(cuid())
+  columnId       String
+  title          String
+  description    String       @default("")
+  priority       TaskPriority @default(MEDIUM)
+  startDate      DateTime?
+  endDate        DateTime?    @map("dueDate")
+  assigneeUserId String?
+  assigneeName   String?
+  totalTasks        Int          @default(0)
+  completedTasks    Int          @default(0)
+  checklistEnabled    Boolean      @default(false)
+  attachmentsEnabled  Boolean      @default(false)
+  labels              Json         @default("[]")
+  position       Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  column         KanbanColumn          @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  assignee       User?                 @relation("KanbanCardAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  members        KanbanCardMember[]
+  checklistItems KanbanChecklistItem[]
+  comments       KanbanCardComment[]
+  attachments    KanbanCardAttachment[]
+
+  @@index([columnId])
+  @@index([assigneeUserId])
+  @@map("kanban_cards")
+}
+
+model KanbanCardMember {
+  id        String   @id @default(cuid())
+  cardId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  card KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User       @relation("KanbanCardMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, userId])
+  @@index([cardId])
+  @@index([userId])
+  @@map("kanban_card_members")
+}
+
+model KanbanChecklistItem {
+  id             String    @id @default(cuid())
+  cardId         String
+  title          String
+  isDone         Boolean   @default(false)
+  position       Int       @default(0)
+  assigneeUserId String?
+  dueDate        DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  card     KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  assignee User?      @relation("KanbanChecklistAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+
+  @@index([cardId])
+  @@index([assigneeUserId])
+  @@map("kanban_checklist_items")
+}
+
+model KanbanCardComment {
+  id        String   @id @default(cuid())
+  cardId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  card   KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  author User       @relation("KanbanCardCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@index([userId])
+  @@map("kanban_card_comments")
+}
+
+model KanbanCardAttachment {
+  id        String   @id @default(cuid())
+  cardId    String
+  userId    String
+  fileName  String
+  fileUrl   String
+  fileKey   String?
+  fileSize  Int      @default(0)
+  mimeType  String   @default("application/octet-stream")
+  createdAt DateTime @default(now())
+
+  card     KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  uploader User       @relation("KanbanCardAttachmentUploader", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@index([userId])
+  @@map("kanban_card_attachments")
 }

@@ -153,6 +153,7 @@ const CATEGORY_ORDER = [
   'Métricas',
   'Engenharia',
   'Contratos e Licitações',
+  'Jurídico',
   'Suprimentos',
   'Cadastros',
   'Registros de Ponto',
@@ -211,9 +212,10 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Engenharia';
   }
-  if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes') {
+  if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes' || h === '/ponto/contratos/medicao') {
     return 'Contratos e Licitações';
   }
+  if (h === '/ponto/juridico') return 'Jurídico';
   if (
     [
       '/ponto/solicitar-materiais',

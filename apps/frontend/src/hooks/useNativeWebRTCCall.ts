@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getWsCallsUrl } from '@/lib/wsCallUrl';
+import {
+  startOutgoingCallRingback,
+  stopOutgoingCallRingback,
+  unlockChatAudio,
+} from '@/lib/chatSounds';
 import { toast } from 'react-hot-toast';
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -164,6 +169,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
   const endCallRef = useRef<() => void>(() => {});
 
   const endCall = useCallback(() => {
+    stopOutgoingCallRingback();
     const ctx = callCtxRef.current;
     if (ctx && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'call:end', callId: ctx.callId }));
@@ -181,6 +187,12 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
   }, [closePeer, stopAllMedia]);
 
   endCallRef.current = endCall;
+
+  useEffect(() => {
+    if (phase === 'connected' || phase === 'ringing' || phase === 'idle') {
+      stopOutgoingCallRingback();
+    }
+  }, [phase]);
 
   useEffect(() => {
     if (phase !== 'connected') {
@@ -852,6 +864,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
       setActiveChatId(chatId);
       setCallSideChatId(null);
       setPhase('calling');
+      void unlockChatAudio();
+      startOutgoingCallRingback();
       setRemoteStream(null);
       closePeer();
       setCallIsVideo(video);
@@ -878,6 +892,7 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
         console.error(e);
         toast.error('Não foi possível acessar microfone ou câmera');
         callCtxRef.current = null;
+        stopOutgoingCallRingback();
         setPhase('idle');
         setPeerName('');
         setCallIsVideo(false);
@@ -939,6 +954,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
       setPeerName('Chamada em grupo');
       setActiveChatId(chatId);
       setPhase('calling');
+      void unlockChatAudio();
+      startOutgoingCallRingback();
       setCallIsVideo(video);
 
       try {
@@ -959,10 +976,12 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
             targetUserIds: invitees,
           })
         );
+        stopOutgoingCallRingback();
         setPhase('connected');
       } catch (e) {
         console.error(e);
         toast.error('Não foi possível acessar microfone ou câmera');
+        stopOutgoingCallRingback();
         callCtxRef.current = null;
         setIsGroupCall(false);
         setGroupPeers({});

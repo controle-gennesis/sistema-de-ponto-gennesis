@@ -12,6 +12,7 @@
     "apps/frontend"
   ],
   "scripts": {
+    "postinstall": "npm run build:permission-modules",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cd apps/backend && npm run dev",
     "dev:frontend": "cd apps/frontend && npm run dev",

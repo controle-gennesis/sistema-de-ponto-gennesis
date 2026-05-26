@@ -25,6 +25,7 @@ import { EditEmployeeForm } from './EditEmployeeForm';
 import { usePermissions } from '@/hooks/usePermissions';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
+import { isGennecyBotUser } from '@/lib/gennecyBot';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData, SalaryDiscount, CreateDiscountData, UpdateDiscountData } from '@/types';
 import toast from 'react-hot-toast';
@@ -1062,6 +1063,9 @@ export function EmployeeList({
     return employees.filter((emp: Employee) => {
       // Apenas funcionários (não RH/Admin)
       if (emp.role !== 'EMPLOYEE') return false;
+
+      // Conta de serviço da assistente Gennecy (chat interno)
+      if (isGennecyBotUser(emp)) return false;
       
       // Ocultar funcionários com cargo "Administrador"
       if (emp.employee?.position === 'Administrador') return false;

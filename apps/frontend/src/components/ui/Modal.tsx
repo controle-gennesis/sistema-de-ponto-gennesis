@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  title?: string;
+  title?: React.ReactNode;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   closeOnOverlayClick?: boolean;
@@ -14,6 +14,8 @@ export interface ModalProps {
   headerActions?: React.ReactNode;
   /** Permite dropdowns absolutos saírem do conteúdo sem serem cortados. */
   contentOverflowVisible?: boolean;
+  /** Acima de modais padrão (ex.: etiquetas/datas abertas sobre o card). */
+  elevated?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -26,6 +28,7 @@ export const Modal: React.FC<ModalProps> = ({
   showCloseButton = true,
   headerActions,
   contentOverflowVisible = false,
+  elevated = false,
 }) => {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -56,7 +59,7 @@ export const Modal: React.FC<ModalProps> = ({
   };
 
   const modalContent = (
-    <div className="fixed inset-0 z-[1000]">
+    <div className={clsx('fixed inset-0', elevated ? 'z-[1100]' : 'z-[1000]')}>
       <div className="flex min-h-screen items-center justify-center p-4">
         {/* Overlay */}
         <div
@@ -74,21 +77,28 @@ export const Modal: React.FC<ModalProps> = ({
         >
           {/* Header */}
           {(title || showCloseButton || headerActions) && (
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
-              {title && (
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+            <div className="flex items-center gap-3 p-6 border-b border-gray-200 dark:border-gray-700 shrink-0 w-full">
+              {title ? (
+                <div className="flex-1 min-w-0 pr-2">
+                  {typeof title === 'string' ? (
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+                      {title}
+                    </h3>
+                  ) : (
+                    title
+                  )}
+                </div>
+              ) : (
+                <div className="flex-1 min-w-0" aria-hidden />
               )}
-              
-              <div className="flex items-center gap-2">
-                {headerActions && (
-                  <div className="flex items-center">
-                    {headerActions}
-                  </div>
-                )}
+              <div className="flex items-center gap-2 shrink-0 ml-auto">
+                {headerActions}
                 {showCloseButton && (
                   <button
+                    type="button"
                     onClick={onClose}
-                    className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    aria-label="Fechar"
                   >
                     <X className="w-6 h-6" />
                   </button>

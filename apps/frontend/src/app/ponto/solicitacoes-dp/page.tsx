@@ -707,13 +707,50 @@ export function SolicitacoesGeraisPage() {
                       <Loader2 className="h-8 w-8 shrink-0 animate-spin text-red-600 dark:text-red-400" aria-hidden />
                       <span className="text-sm font-medium">Carregando solicitações…</span>
                     </div>
+                  ) : myRequests.length === 0 ? (
+                    <div className="py-10 text-center">
+                      <ClipboardList
+                        className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500"
+                        aria-hidden
+                        strokeWidth={1.25}
+                      />
+                      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                        Nenhuma solicitação ainda.
+                      </p>
+                      <p className="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
+                        Use <span className="font-medium text-gray-700 dark:text-gray-300">Nova solicitação</span> acima para
+                        enviar um pedido e acompanhar o andamento nesta lista.
+                      </p>
+                    </div>
+                  ) : filteredMyRequests.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-gray-300 py-8 text-center dark:border-gray-600">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Nenhuma solicitação encontrada para os filtros aplicados.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMySearch('');
+                          setMyStatusFilter('all');
+                          setFilterUrgency('all');
+                          setFilterRequestType('all');
+                          setFilterContractId('all');
+                        }}
+                        className="mt-2 text-sm font-medium text-red-600 hover:underline dark:text-red-400"
+                      >
+                        Limpar filtros
+                      </button>
+                    </div>
                   ) : (
                     <>
                       <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <span>
-                          Mostrando {filteredMyRequests.length === 0 ? 0 : 1} a {filteredMyRequests.length} de{' '}
-                          {myRequests.length} solicitações
-                          {mySearch.trim() || myStatusFilter !== 'all' ? (
+                          Mostrando 1 a {filteredMyRequests.length} de {myRequests.length} solicitações
+                          {mySearch.trim() ||
+                          myStatusFilter !== 'all' ||
+                          filterUrgency !== 'all' ||
+                          filterRequestType !== 'all' ||
+                          filterContractId !== 'all' ? (
                             <span className="text-gray-500 dark:text-gray-500"> · filtro ativo</span>
                           ) : null}
                         </span>
@@ -755,37 +792,8 @@ export function SolicitacoesGeraisPage() {
                               </th>
                             </tr>
                           </thead>
-                          <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                            {filteredMyRequests.length === 0 ? (
-                              <tr>
-                                <td
-                                  colSpan={10}
-                                  className="px-6 py-10 text-center"
-                                >
-                                  {myRequests.length === 0 ? (
-                                    <div className="py-1">
-                                      <ClipboardList
-                                        className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500"
-                                        aria-hidden
-                                        strokeWidth={1.25}
-                                      />
-                                      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                                        Nenhuma solicitação ainda.
-                                      </p>
-                                      <p className="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
-                                        Use <span className="font-medium text-gray-700 dark:text-gray-300">Nova solicitação</span> acima para
-                                        enviar um pedido e acompanhar o andamento nesta lista.
-                                      </p>
-                                    </div>
-                                  ) : (
-                                    <span className="text-sm text-gray-500 dark:text-gray-400">
-                                      Nenhuma solicitação encontrada para essa busca.
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ) : (
-                              filteredMyRequests.map((r) => (
+                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                            {filteredMyRequests.map((r) => (
                                 <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                   <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
                                     {r.displayNumber ?? '—'}
@@ -867,8 +875,7 @@ export function SolicitacoesGeraisPage() {
                                     )}
                                   </td>
                                 </tr>
-                              ))
-                            )}
+                            ))}
                           </tbody>
                         </table>
                       </div>

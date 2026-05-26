@@ -643,7 +643,7 @@ export default function ConversasWhatsAppPage() {
       userName={userData?.data?.name ?? ''}
       onLogout={handleLogout}
     >
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         {/* Título e subtítulo centralizados */}
         <div className="text-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">

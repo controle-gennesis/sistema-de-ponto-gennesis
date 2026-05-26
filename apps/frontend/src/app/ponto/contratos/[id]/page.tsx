@@ -209,6 +209,9 @@ const MESES_FILTRO = [
 const CONTROLE_GERAL_META_AJUDA =
   'Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em "Valor + Aditivos" recalculam da data do evento até o fim do contrato; ajuste do valor anual recalcula só entre o mês da data e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência. Meta real recalcula como saldo ÷ meses restantes na vigência inteira: sem faturamento ainda, igual à meta ideal; depois do primeiro faturamento, usa (soma das metas ideais na vigência completa − faturamento já acumulado no contrato até o mês anterior) ÷ meses de vigência restantes.';
 
+/** Oculta gasto total e linha Gastos na UI; dados RM continuam sendo carregados. */
+const EXIBIR_GASTOS_CONTRATO_NA_UI = false;
+
 const TIMEZONE_BRASILIA = 'America/Sao_Paulo';
 const pk = pathToModuleKey;
 
@@ -2602,28 +2605,72 @@ export default function ContractDetailPage() {
                 <ArrowLeft className="h-4 w-4 shrink-0" />
                 Voltar
               </Link>
-              <div className="absolute right-0 top-1/2 z-10 max-w-[45%] -translate-y-1/2 text-right sm:max-w-none">
-                {paidDisplay.loading || totvsRmCarregando ? (
-                  <div className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                    <span className="hidden sm:inline">Carregando…</span>
+              <div className="absolute right-0 top-1/2 z-10 max-w-[50%] -translate-y-1/2 sm:max-w-none">
+                {EXIBIR_GASTOS_CONTRATO_NA_UI ? (
+                  <div className="text-right">
+                    {paidDisplay.loading || totvsRmCarregando ? (
+                      <div className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                        <span className="hidden sm:inline">Carregando…</span>
+                      </div>
+                    ) : paidDisplay.totvsErrorMessage ? (
+                      <span className="text-xs text-amber-600 dark:text-amber-400" title={paidDisplay.totvsErrorMessage}>
+                        RM indisponível
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openPaidNaturezaModal(null)}
+                        className="rounded-lg px-1 py-0.5 text-base font-bold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 sm:text-lg"
+                        title="Ver totais por natureza (RM)"
+                      >
+                        {paidHeaderTotal.toLocaleString('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL'
+                        })}
+                      </button>
+                    )}
                   </div>
-                ) : paidDisplay.totvsErrorMessage ? (
-                  <span className="text-xs text-amber-600 dark:text-amber-400" title={paidDisplay.totvsErrorMessage}>
-                    RM indisponível
-                  </span>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => openPaidNaturezaModal(null)}
-                    className="rounded-lg px-1 py-0.5 text-base font-bold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 sm:text-lg"
-                    title="Ver totais por natureza (RM)"
-                  >
-                    {paidHeaderTotal.toLocaleString('pt-BR', {
-                      style: 'currency',
-                      currency: 'BRL'
-                    })}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative">
+                      <select
+                        aria-label="Mês"
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                        className="h-8 min-w-[9.5rem] max-w-[10.5rem] appearance-none rounded-md border border-gray-300 bg-white py-1 pl-2 pr-8 text-xs text-gray-900 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      >
+                        {MESES_FILTRO.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500 dark:text-gray-400"
+                        aria-hidden
+                      />
+                    </div>
+                    <div className="relative">
+                      <select
+                        aria-label="Ano"
+                        value={selectedYear}
+                        onChange={(e) => setSelectedYear(Number(e.target.value))}
+                        className="h-8 min-w-[4.75rem] appearance-none rounded-md border border-gray-300 bg-white py-1 pl-2 pr-7 text-xs text-gray-900 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      >
+                        <option value={0}>Todos</option>
+                        {availableYears.map((year) => (
+                          <option key={year} value={year}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500 dark:text-gray-400"
+                        aria-hidden
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
               <div className="w-full max-w-3xl px-24 text-center sm:px-32">
@@ -2636,35 +2683,6 @@ export default function ContractDetailPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400">Período</span>
-              <select
-                aria-label="Mês"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                className="h-9 min-w-[9.5rem] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              >
-                {MESES_FILTRO.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Ano"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="h-9 min-w-[5.5rem] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              >
-                <option value={0}>Todos os anos</option>
-                {availableYears.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             {!paidDisplay.loading &&
             !paidDisplay.totvsErrorMessage &&
             totvsTotalPagoRes?.success !== false &&
@@ -2674,7 +2692,8 @@ export default function ContractDetailPage() {
                 Reinicie a API após alterar o .env.
               </p>
             ) : null}
-            {!paidDisplay.loading &&
+            {EXIBIR_GASTOS_CONTRATO_NA_UI &&
+            !paidDisplay.loading &&
             !paidDisplay.totvsErrorMessage &&
             totvsTotalPagoRes?.data?.configured === true &&
             paidHeaderTotal === 0 &&
@@ -2940,7 +2959,8 @@ export default function ContractDetailPage() {
                   </div>
                 ) : null}
               </div>
-              {!isAllYears &&
+              {EXIBIR_GASTOS_CONTRATO_NA_UI &&
+              !isAllYears &&
               solicitacoesControleTotvsPronto &&
               !solicitacoesRmTemLancamentosNoRelatorio &&
               !totvsRmCarregando ? (
@@ -3122,64 +3142,66 @@ export default function ContractDetailPage() {
                           );
                         })}
                       </tr>
-                      <tr className="bg-red-50/40 dark:bg-red-900/15">
-                        <td className="px-4 py-3 text-sm font-medium text-red-800 dark:text-red-300">
-                          <div className="flex items-center gap-2">
-                            <span>
-                              {totvsRmCarregando ? 'Gastos (carregando…)' : 'Gastos'}
-                            </span>
-                            {totvsRmCarregando ? (
-                              <Loader2
-                                className="h-3.5 w-3.5 shrink-0 animate-spin text-red-600 dark:text-red-400"
-                                aria-label="Carregando gastos RM"
-                              />
-                            ) : null}
-                          </div>
-                        </td>
-                        {MESES.map((mes, i) => {
-                          const v = solicitacoesRateioPorMes[i];
-                          const semDadoRmSomado =
-                            solicitacoesControleTotvsPronto &&
-                            !solicitacoesRmTemLancamentosNoRelatorio &&
-                            !totvsRmCarregando;
-                          const mostrarZeroComoTraco =
-                            v !== null && semDadoRmSomado && Math.abs(v) < 1e-9;
-                          const textoCelula = totvsRmCarregando
-                            ? '…'
-                            : v === null
-                              ? '-'
-                              : mostrarZeroComoTraco
+                      {EXIBIR_GASTOS_CONTRATO_NA_UI ? (
+                        <tr className="bg-red-50/40 dark:bg-red-900/15">
+                          <td className="px-4 py-3 text-sm font-medium text-red-800 dark:text-red-300">
+                            <div className="flex items-center gap-2">
+                              <span>
+                                {totvsRmCarregando ? 'Gastos (carregando…)' : 'Gastos'}
+                              </span>
+                              {totvsRmCarregando ? (
+                                <Loader2
+                                  className="h-3.5 w-3.5 shrink-0 animate-spin text-red-600 dark:text-red-400"
+                                  aria-label="Carregando gastos RM"
+                                />
+                              ) : null}
+                            </div>
+                          </td>
+                          {MESES.map((mes, i) => {
+                            const v = solicitacoesRateioPorMes[i];
+                            const semDadoRmSomado =
+                              solicitacoesControleTotvsPronto &&
+                              !solicitacoesRmTemLancamentosNoRelatorio &&
+                              !totvsRmCarregando;
+                            const mostrarZeroComoTraco =
+                              v !== null && semDadoRmSomado && Math.abs(v) < 1e-9;
+                            const textoCelula = totvsRmCarregando
+                              ? '…'
+                              : v === null
                                 ? '-'
-                                : formatCurrency(v);
-                          const celulaClicavel =
-                            !totvsRmCarregando && v !== null && !mostrarZeroComoTraco;
-                          return (
-                            <td
-                              key={mes}
-                              role={celulaClicavel ? 'button' : undefined}
-                              tabIndex={celulaClicavel ? 0 : undefined}
-                              onClick={() => {
-                                if (celulaClicavel) openPaidNaturezaModal(i);
-                              }}
-                              onKeyDown={(e) => {
-                                if (!celulaClicavel) return;
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  openPaidNaturezaModal(i);
-                                }
-                              }}
-                              title={celulaClicavel ? 'Ver gastos por natureza' : undefined}
-                              className={`px-4 py-3 text-center text-sm font-medium text-red-800 dark:text-red-300 ${
-                                celulaClicavel
-                                  ? 'cursor-pointer transition-colors hover:bg-red-100/70 hover:underline dark:hover:bg-red-900/35'
-                                  : ''
-                              }`}
-                            >
-                              {textoCelula}
-                            </td>
-                          );
-                        })}
-                      </tr>
+                                : mostrarZeroComoTraco
+                                  ? '-'
+                                  : formatCurrency(v);
+                            const celulaClicavel =
+                              !totvsRmCarregando && v !== null && !mostrarZeroComoTraco;
+                            return (
+                              <td
+                                key={mes}
+                                role={celulaClicavel ? 'button' : undefined}
+                                tabIndex={celulaClicavel ? 0 : undefined}
+                                onClick={() => {
+                                  if (celulaClicavel) openPaidNaturezaModal(i);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (!celulaClicavel) return;
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    openPaidNaturezaModal(i);
+                                  }
+                                }}
+                                title={celulaClicavel ? 'Ver gastos por natureza' : undefined}
+                                className={`px-4 py-3 text-center text-sm font-medium text-red-800 dark:text-red-300 ${
+                                  celulaClicavel
+                                    ? 'cursor-pointer transition-colors hover:bg-red-100/70 hover:underline dark:hover:bg-red-900/35'
+                                    : ''
+                                }`}
+                              >
+                                {textoCelula}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ) : null}
                       <tr className="bg-amber-50/50 dark:bg-amber-900/10">
                         <td className="px-4 py-3 text-sm font-medium text-amber-700 dark:text-amber-400">
                           Produção
