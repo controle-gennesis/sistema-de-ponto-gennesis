@@ -1169,6 +1169,15 @@ function KanbanPage() {
           cardId={cardModal.mode === 'detail' ? cardModal.cardId : undefined}
           columnId={cardModal.columnId}
           currentUserId={meUser?.id}
+          currentUser={
+            meUser
+              ? {
+                  id: meUser.id,
+                  name: meUser.name,
+                  profilePhotoUrl: meUser.profilePhotoUrl ?? null,
+                }
+              : null
+          }
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
         />

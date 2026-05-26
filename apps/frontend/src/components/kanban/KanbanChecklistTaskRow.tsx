@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Clock, Loader2, Trash2, UserMinus, UserPlus, X } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -73,9 +73,15 @@ function useFixedPopoverStyle(
   return style;
 }
 
+export type KanbanTaskAssigneeOption = Pick<
+  KanbanCardMember,
+  'userId' | 'name' | 'profilePhotoUrl' | 'avatarColor'
+>;
+
 export interface KanbanChecklistTaskRowProps {
   item: KanbanChecklistItem;
   cardMembers: KanbanCardMember[];
+  currentUser?: KanbanTaskAssigneeOption | null;
   isDeleting?: boolean;
   onToggle: () => void;
   onDelete: () => void;
@@ -85,6 +91,7 @@ export interface KanbanChecklistTaskRowProps {
 export function KanbanChecklistTaskRow({
   item,
   cardMembers,
+  currentUser,
   isDeleting = false,
   onToggle,
   onDelete,
@@ -99,6 +106,12 @@ export function KanbanChecklistTaskRow({
   const assignBtnRef = useRef<HTMLButtonElement>(null);
   const datePopoverStyle = useFixedPopoverStyle(openMenu === 'date', dateBtnRef, 208, 120);
   const assignPopoverStyle = useFixedPopoverStyle(openMenu === 'assign', assignBtnRef, 224, 160);
+
+  const assignableMembers = useMemo(() => {
+    if (!currentUser?.userId) return cardMembers;
+    if (cardMembers.some((m) => m.userId === currentUser.userId)) return cardMembers;
+    return [currentUser, ...cardMembers];
+  }, [cardMembers, currentUser]);
 
   useEffect(() => {
     setDraftDate(splitDateTime(item.dueDate).date);
@@ -313,34 +326,41 @@ export function KanbanChecklistTaskRow({
             style={assignPopoverStyle}
             className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1 max-h-48 overflow-y-auto"
           >
-            {cardMembers.length === 0 ? (
+            {assignableMembers.length === 0 ? (
               <p className="text-xs text-gray-500 dark:text-gray-400 px-3 py-3 text-center">
-                Adicione membros ao card para atribuir tarefas.
+                Nenhum usuário disponível para atribuição.
               </p>
             ) : (
               <>
-                {cardMembers.map((m) => (
-                  <button
-                    key={m.userId}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => patch({ assigneeUserId: m.userId })}
-                    className={clsx(
-                      'w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700/60',
-                      item.assigneeUserId === m.userId &&
-                        'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300',
-                    )}
-                  >
-                    <KanbanUserAvatar
-                      name={m.name}
-                      profilePhotoUrl={m.profilePhotoUrl}
-                      colorKey={m.userId}
-                      colorClass={m.avatarColor}
-                      size="sm"
-                    />
-                    <span className="truncate">{m.name}</span>
-                  </button>
-                ))}
+                {assignableMembers.map((m) => {
+                  const isSelf =
+                    currentUser?.userId === m.userId &&
+                    !cardMembers.some((cm) => cm.userId === m.userId);
+                  return (
+                    <button
+                      key={m.userId}
+                      type="button"
+                      disabled={saving}
+                      onClick={() => patch({ assigneeUserId: m.userId })}
+                      className={clsx(
+                        'w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700/60',
+                        item.assigneeUserId === m.userId &&
+                          'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300',
+                      )}
+                    >
+                      <KanbanUserAvatar
+                        name={m.name}
+                        profilePhotoUrl={m.profilePhotoUrl}
+                        colorKey={m.userId}
+                        colorClass={m.avatarColor}
+                        size="sm"
+                      />
+                      <span className="truncate">
+                        {isSelf ? 'Atribuir a mim' : m.name}
+                      </span>
+                    </button>
+                  );
+                })}
                 {item.assignee && (
                   <div className="border-t border-gray-200 dark:border-gray-600 mt-1">
                     <button

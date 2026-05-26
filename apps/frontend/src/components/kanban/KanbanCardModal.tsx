@@ -107,11 +107,18 @@ function formatRelativeTimeLong(iso: string): string {
   });
 }
 
+export interface KanbanCardModalCurrentUser {
+  id: string;
+  name: string;
+  profilePhotoUrl?: string | null;
+}
+
 export interface KanbanCardModalProps {
   mode: 'create' | 'detail';
   cardId?: string;
   columnId: string;
   currentUserId?: string;
+  currentUser?: KanbanCardModalCurrentUser | null;
   onClose: () => void;
   onBoardRefresh: () => void;
 }
@@ -121,6 +128,7 @@ export function KanbanCardModal({
   cardId: initialCardId,
   columnId: initialColumnId,
   currentUserId,
+  currentUser,
   onClose,
   onBoardRefresh,
 }: KanbanCardModalProps) {
@@ -747,6 +755,16 @@ export function KanbanCardModal({
                           key={item.id}
                           item={item}
                           cardMembers={members}
+                          currentUser={
+                            currentUser
+                              ? {
+                                  userId: currentUser.id,
+                                  name: currentUser.name,
+                                  profilePhotoUrl: currentUser.profilePhotoUrl ?? null,
+                                  avatarColor: '',
+                                }
+                              : null
+                          }
                           isDeleting={deletingTaskId === item.id}
                           onToggle={() => toggleTask(item.id, item.isDone)}
                           onDelete={() => handleDeleteTask(item.id)}
