@@ -173,6 +173,12 @@ export interface KanbanChecklistItem {
   assignee: KanbanChecklistItemAssignee | null;
 }
 
+export const KANBAN_LINK_MIME_TYPE = 'text/x-kanban-link';
+
+export function isKanbanLinkAttachment(mimeType: string): boolean {
+  return mimeType === KANBAN_LINK_MIME_TYPE;
+}
+
 export interface KanbanCardAttachment {
   id: string;
   fileName: string;
@@ -255,6 +261,14 @@ export async function uploadKanbanAttachments(cardId: string, files: File[]) {
   const form = new FormData();
   files.forEach((f) => form.append('attachments', f));
   const res = await api.post(`/kanban/cards/${cardId}/attachments`, form);
+  return res.data.data as KanbanCardDetail;
+}
+
+export async function addKanbanLinkAttachment(
+  cardId: string,
+  payload: { url: string; displayName?: string },
+) {
+  const res = await api.post(`/kanban/cards/${cardId}/attachments/link`, payload);
   return res.data.data as KanbanCardDetail;
 }
 

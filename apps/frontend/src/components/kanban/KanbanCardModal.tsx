@@ -29,6 +29,7 @@ import {
   updateChecklistItem,
   deleteChecklistItem,
   uploadKanbanAttachments,
+  addKanbanLinkAttachment,
   createKanbanComment,
   deleteKanbanComment,
 } from '@/lib/kanban';
@@ -46,7 +47,9 @@ import { KanbanMemberChip } from './KanbanMemberChip';
 import {
   KanbanAttachmentsModal,
   type KanbanDraftAttachment,
+  type KanbanDraftLink,
 } from './KanbanAttachmentsModal';
+import { KanbanCardAttachmentsInline } from './KanbanCardAttachmentsInline';
 import { KanbanChecklistTaskRow } from './KanbanChecklistTaskRow';
 import { formatKanbanDateRange } from './kanbanDateTime';
 import { getKanbanInitials, kanbanAvatarColorForKey } from './kanbanAvatar';
@@ -110,6 +113,7 @@ function formatRelativeTimeLong(iso: string): string {
 export interface KanbanCardModalCurrentUser {
   id: string;
   name: string;
+  email?: string;
   profilePhotoUrl?: string | null;
 }
 
@@ -159,6 +163,7 @@ export function KanbanCardModal({
   const [postingComment, setPostingComment] = useState(false);
   const [draftTasks, setDraftTasks] = useState<DraftChecklistTask[]>([]);
   const [draftFiles, setDraftFiles] = useState<KanbanDraftAttachment[]>([]);
+  const [draftLinks, setDraftLinks] = useState<KanbanDraftLink[]>([]);
 
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
@@ -232,6 +237,15 @@ export function KanbanCardModal({
     }
   }
 
+  const pickerCurrentUser: KanbanPickerUser | null = currentUser
+    ? {
+        id: currentUser.id,
+        name: currentUser.name,
+        email: currentUser.email ?? '',
+        profilePhotoUrl: currentUser.profilePhotoUrl ?? null,
+      }
+    : null;
+
   async function assignMember(user: KanbanPickerUser) {
     if (members.some((m) => m.userId === user.id)) return;
     const next = pickerUserToMember(user);
@@ -282,11 +296,32 @@ export function KanbanCardModal({
         title: title.trim(),
       });
 
+      const newCardId = created.id;
+      if (draftFiles.length > 0) {
+        await uploadKanbanAttachments(
+          newCardId,
+          draftFiles.map((d) => d.file),
+        );
+        setDraftFiles([]);
+      }
+      if (draftLinks.length > 0) {
+        for (const link of draftLinks) {
+          await addKanbanLinkAttachment(newCardId, {
+            url: link.url,
+            displayName:
+              link.displayName.trim() && link.displayName !== link.url
+                ? link.displayName
+                : undefined,
+          });
+        }
+        setDraftLinks([]);
+      }
+
       toast.success('Card criado');
-      await onBoardRefresh();
-      setCardId(created.id);
+      setCardId(newCardId);
       setMode('detail');
-      queryClient.invalidateQueries({ queryKey: ['kanban-card', created.id] });
+      queryClient.invalidateQueries({ queryKey: ['kanban-card', newCardId] });
+      await onBoardRefresh();
     } catch {
       toast.error('Erro ao criar card');
     } finally {
@@ -371,8 +406,9 @@ export function KanbanCardModal({
   const visibleDraftTasks = hideDone ? draftTasks.filter((t) => !t.isDone) : draftTasks;
   const hasLabels = labels.length > 0;
   const hasDates = !!(startDate || endDate);
+  const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
-    (isDetail && (card?.attachments ?? 0) > 0) || (isCreate && draftFiles.length > 0);
+    attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
   const showChecklistPanel = checklistEnabled && isDetail;
   const draftTotal = draftTasks.length;
   const draftCompleted = draftTasks.filter((t) => t.isDone).length;
@@ -456,6 +492,7 @@ export function KanbanCardModal({
         onClose={() => setShowMemberPicker(false)}
         excludeUserIds={members.map((m) => m.userId)}
         currentUserId={currentUserId}
+        currentUser={pickerCurrentUser}
         onSelect={assignMember}
       />
 
@@ -468,6 +505,8 @@ export function KanbanCardModal({
           attachments={card?.attachmentsList ?? []}
           draftFiles={draftFiles}
           onDraftFilesChange={setDraftFiles}
+          draftLinks={draftLinks}
+          onDraftLinksChange={setDraftLinks}
           currentUserId={currentUserId}
           onUpdated={refreshAll}
         />
@@ -620,6 +659,18 @@ export function KanbanCardModal({
                       onRemove={() => removeMember(member.userId)}
                     />
                   ))}
+                  {pickerCurrentUser &&
+                    !members.some((m) => m.userId === pickerCurrentUser.id) && (
+                      <button
+                        type="button"
+                        onClick={() => assignMember(pickerCurrentUser)}
+                        disabled={saving}
+                        className="h-10 rounded-full border-2 border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 shrink-0"
+                        title="Atribuir card a mim"
+                      >
+                        Atribuir a mim
+                      </button>
+                    )}
                   <button
                     type="button"
                     onClick={() => setShowMemberPicker(true)}
@@ -684,6 +735,19 @@ export function KanbanCardModal({
                 className={kanbanTextarea}
               />
             </div>
+
+            {isDetail && hasAttachments ? (
+              <KanbanCardAttachmentsInline
+                attachments={attachmentsList}
+                draftFiles={draftFiles}
+                draftLinks={draftLinks}
+                currentUserId={currentUserId}
+                onDraftFilesChange={setDraftFiles}
+                onDraftLinksChange={setDraftLinks}
+                onUpdated={refreshAll}
+                onAddClick={() => setShowAttachmentsModal(true)}
+              />
+            ) : null}
 
             {showChecklistPanel && (
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 p-4 flex flex-col gap-3 min-w-0">

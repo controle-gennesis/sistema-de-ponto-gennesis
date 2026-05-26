@@ -774,11 +774,10 @@ export class KanbanService {
     await prisma.kanbanCard.delete({ where: { id } });
   }
 
-  async listPickerUsers(requesterId: string) {
+  async listPickerUsers(_requesterId: string) {
     const users = await prisma.user.findMany({
       where: {
         isActive: true,
-        id: { not: requesterId },
       },
       select: {
         id: true,
@@ -988,6 +987,57 @@ export class KanbanService {
     if (!comment) throw new Error('Comentário não encontrado');
     await this.assertCardAccess(requesterId, comment.cardId);
     await prisma.kanbanCardComment.delete({ where: { id } });
+  }
+
+  static readonly LINK_ATTACHMENT_MIME = 'text/x-kanban-link';
+
+  private normalizeLinkUrl(raw: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) throw new Error('URL é obrigatória');
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    let parsed: URL;
+    try {
+      parsed = new URL(withScheme);
+    } catch {
+      throw new Error('URL inválida');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('URL inválida');
+    }
+    return parsed.href;
+  }
+
+  async addLinkAttachment(
+    requesterId: string,
+    cardId: string,
+    data: { url: string; displayName?: string },
+  ) {
+    await this.assertCardAccess(requesterId, cardId);
+    const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
+    if (!card) throw new Error('Card não encontrado');
+
+    const fileUrl = this.normalizeLinkUrl(data.url);
+    const display = data.displayName?.trim();
+    const fileName = (display || fileUrl).slice(0, 500);
+
+    await prisma.kanbanCardAttachment.create({
+      data: {
+        cardId,
+        userId: requesterId,
+        fileName,
+        fileUrl,
+        fileKey: null,
+        fileSize: 0,
+        mimeType: KanbanService.LINK_ATTACHMENT_MIME,
+      },
+    });
+
+    await prisma.kanbanCard.update({
+      where: { id: cardId },
+      data: { attachmentsEnabled: true },
+    });
+
+    return this.getCardById(requesterId, cardId);
   }
 
   async addAttachments(

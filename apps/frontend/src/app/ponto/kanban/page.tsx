@@ -20,6 +20,7 @@ import {
   type Priority,
   type KanbanCard,
   type KanbanColumn,
+  type KanbanBoard,
   type KanbanBoardSummary,
   fetchKanbanBoard,
   fetchKanbanBoards,
@@ -85,6 +86,37 @@ function isOverdue(dateStr: string | null): boolean {
   const { date } = splitDateTime(dateStr);
   if (!date) return false;
   return new Date(date + 'T23:59:59') < new Date();
+}
+
+function moveCardInBoardCache(
+  board: KanbanBoard | undefined,
+  cardId: string,
+  fromColumnId: string,
+  toColumnId: string,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  let movedCard: KanbanCard | undefined;
+  const columnsWithoutCard = board.columns.map((col) => {
+    if (col.id !== fromColumnId) return col;
+    const cards = col.cards.filter((card) => {
+      if (card.id === cardId) {
+        movedCard = card;
+        return false;
+      }
+      return true;
+    });
+    return { ...col, cards };
+  });
+
+  if (!movedCard) return board;
+
+  return {
+    ...board,
+    columns: columnsWithoutCard.map((col) =>
+      col.id === toColumnId ? { ...col, cards: [...col.cards, movedCard!] } : col,
+    ),
+  };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -307,14 +339,35 @@ function KanbanCardItem({
       role="button"
       tabIndex={0}
       className={clsx(
-        'group relative bg-white dark:bg-gray-800 rounded-2xl p-4',
-        'shadow-[0_1px_3px_rgba(0,0,0,0.08)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)]',
-        'transition-all duration-200 cursor-pointer active:cursor-grabbing select-none',
-        isDragging ? 'opacity-50 scale-[0.98]' : '',
+        'group relative overflow-hidden rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
+        'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
+        'transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+        'motion-reduce:transition-none',
+        'active:cursor-grabbing',
+        isDragging
+          ? 'z-10 scale-[0.98] opacity-50 shadow-lg'
+          : [
+              'hover:-translate-y-1.5 hover:scale-[1.015]',
+              'hover:border-gray-200/80 hover:shadow-[0_14px_32px_-10px_rgba(0,0,0,0.14),0_8px_16px_-8px_rgba(0,0,0,0.1)]',
+              'dark:hover:border-gray-600/80 dark:hover:shadow-[0_14px_32px_-10px_rgba(0,0,0,0.5),0_8px_16px_-8px_rgba(0,0,0,0.35)]',
+              'motion-reduce:hover:translate-y-0 motion-reduce:hover:scale-100',
+            ],
       )}
     >
+      <span
+        aria-hidden
+        className={clsx(
+          'pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300',
+          'bg-gradient-to-br from-white/50 via-white/10 to-transparent',
+          'dark:from-white/[0.07] dark:via-transparent',
+          !isDragging && 'group-hover:opacity-100',
+        )}
+      />
       {!readOnly && (
-        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity" ref={menuRef}>
+        <div
+          className="absolute top-3 right-3 z-[2] opacity-0 transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0 translate-y-0.5"
+          ref={menuRef}
+        >
           <button
             onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
             className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -340,6 +393,7 @@ function KanbanCardItem({
         </div>
       )}
 
+      <div className="relative z-[1]">
       {card.labels.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {card.labels.map((l) => (
@@ -381,6 +435,7 @@ function KanbanCardItem({
             <CardMemberAvatars card={card} />
           </>
         )}
+      </div>
       </div>
     </div>
   );
@@ -874,7 +929,10 @@ function KanbanPage() {
     dragRef.current = dragState;
   }, [dragState]);
 
-  const refreshBoard = () => queryClient.invalidateQueries({ queryKey: kanbanBoardQueryKey });
+  const refreshBoard = useCallback(
+    () => queryClient.refetchQueries({ queryKey: kanbanBoardQueryKey }),
+    [queryClient, kanbanBoardQueryKey],
+  );
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
     e.dataTransfer.effectAllowed = 'move';
@@ -891,19 +949,33 @@ function KanbanPage() {
     setDragState((prev) => (prev.overColumnId === columnId ? prev : { ...prev, overColumnId: columnId }));
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent, targetColumnId: string) => {
-    e.preventDefault();
-    const { draggingCardId, fromColumnId } = dragRef.current;
-    setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null });
-    if (!draggingCardId || !fromColumnId || fromColumnId === targetColumnId) return;
-    try {
-      await updateKanbanCard(draggingCardId, { columnId: targetColumnId });
-      await refreshBoard();
-      toast.success('Card movido!', { duration: 1500 });
-    } catch {
-      toast.error('Não foi possível mover o card');
-    }
-  }, [queryClient]);
+  const handleDrop = useCallback(
+    async (e: React.DragEvent, targetColumnId: string) => {
+      e.preventDefault();
+      const { draggingCardId, fromColumnId } = dragRef.current;
+      setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null });
+      if (!draggingCardId || !fromColumnId || fromColumnId === targetColumnId) return;
+
+      const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        moveCardInBoardCache(old, draggingCardId, fromColumnId, targetColumnId),
+      );
+
+      try {
+        await updateKanbanCard(draggingCardId, { columnId: targetColumnId });
+        await refreshBoard();
+        toast.success('Card movido!', { duration: 1500 });
+      } catch {
+        if (previousBoard !== undefined) {
+          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+        } else {
+          await refreshBoard();
+        }
+        toast.error('Não foi possível mover o card');
+      }
+    },
+    [queryClient, kanbanBoardQueryKey, refreshBoard],
+  );
 
   function openCreateCard(columnId: string) {
     setCardModal({ mode: 'create', columnId });
@@ -1174,6 +1246,7 @@ function KanbanPage() {
               ? {
                   id: meUser.id,
                   name: meUser.name,
+                  email: meUser.email ?? '',
                   profilePhotoUrl: meUser.profilePhotoUrl ?? null,
                 }
               : null

@@ -44,6 +44,9 @@ router.post(
   KanbanController.uploadAttachments(),
   (req, res, next) => controller.addAttachments(req, res, next),
 );
+router.post('/cards/:cardId/attachments/link', (req, res, next) =>
+  controller.addLinkAttachment(req, res, next),
+);
 router.delete('/attachments/:id', (req, res, next) => controller.deleteAttachment(req, res, next));
 
 export default router;

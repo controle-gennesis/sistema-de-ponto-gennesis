@@ -380,6 +380,26 @@ export class KanbanController {
     }
   }
 
+  async addLinkAttachment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { url, displayName } = req.body as { url?: string; displayName?: string };
+      const card = await kanbanService.addLinkAttachment(userId, req.params.cardId, {
+        url: url ?? '',
+        displayName,
+      });
+      res.status(201).json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      if (msg === 'URL é obrigatória' || msg === 'URL inválida') {
+        return next(createError(msg, 400));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
   async deleteAttachment(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

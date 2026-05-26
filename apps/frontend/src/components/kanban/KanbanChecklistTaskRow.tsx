@@ -2,9 +2,11 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Clock, Loader2, Trash2, UserMinus, UserPlus, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 import {
   type KanbanCardMember,
   type KanbanChecklistItem,
@@ -107,11 +109,33 @@ export function KanbanChecklistTaskRow({
   const datePopoverStyle = useFixedPopoverStyle(openMenu === 'date', dateBtnRef, 208, 120);
   const assignPopoverStyle = useFixedPopoverStyle(openMenu === 'assign', assignBtnRef, 224, 160);
 
+  const { data: authMe } = useQuery({
+    queryKey: ['user'],
+    queryFn: async () => {
+      const res = await api.get('/auth/me');
+      return res.data?.data as
+        | { id: string; name: string; profilePhotoUrl?: string | null }
+        | undefined;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const resolvedCurrentUser = useMemo((): KanbanTaskAssigneeOption | null => {
+    if (currentUser?.userId) return currentUser;
+    if (!authMe?.id) return null;
+    return {
+      userId: authMe.id,
+      name: authMe.name,
+      profilePhotoUrl: authMe.profilePhotoUrl ?? null,
+      avatarColor: '',
+    };
+  }, [currentUser, authMe]);
+
   const assignableMembers = useMemo(() => {
-    if (!currentUser?.userId) return cardMembers;
-    if (cardMembers.some((m) => m.userId === currentUser.userId)) return cardMembers;
-    return [currentUser, ...cardMembers];
-  }, [cardMembers, currentUser]);
+    if (!resolvedCurrentUser?.userId) return cardMembers;
+    if (cardMembers.some((m) => m.userId === resolvedCurrentUser.userId)) return cardMembers;
+    return [resolvedCurrentUser, ...cardMembers];
+  }, [cardMembers, resolvedCurrentUser]);
 
   useEffect(() => {
     setDraftDate(splitDateTime(item.dueDate).date);
@@ -334,7 +358,7 @@ export function KanbanChecklistTaskRow({
               <>
                 {assignableMembers.map((m) => {
                   const isSelf =
-                    currentUser?.userId === m.userId &&
+                    resolvedCurrentUser?.userId === m.userId &&
                     !cardMembers.some((cm) => cm.userId === m.userId);
                   return (
                     <button
