@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Loader2,
@@ -56,7 +56,8 @@ import {
 import { KanbanCardAttachmentsInline } from './KanbanCardAttachmentsInline';
 import { KanbanChecklistTaskRow } from './KanbanChecklistTaskRow';
 import { formatKanbanDateRange } from './kanbanDateTime';
-import { getKanbanInitials, kanbanAvatarColorForKey } from './kanbanAvatar';
+import { kanbanAvatarColorForKey } from './kanbanAvatar';
+import { KanbanUserAvatar } from './KanbanUserAvatar';
 
 type OpenMenu = 'labels' | 'dates' | null;
 
@@ -175,6 +176,10 @@ export function KanbanCardModal({
   const [editingDraftTaskId, setEditingDraftTaskId] = useState<string | null>(null);
   const [draftFiles, setDraftFiles] = useState<KanbanDraftAttachment[]>([]);
   const [draftLinks, setDraftLinks] = useState<KanbanDraftLink[]>([]);
+  const mainColumnRef = useRef<HTMLDivElement>(null);
+  const [commentsPanelMaxHeight, setCommentsPanelMaxHeight] = useState<number | undefined>(
+    undefined,
+  );
 
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
@@ -556,6 +561,45 @@ export function KanbanCardModal({
       : '0/0';
   const taskTotal = isCreate ? draftTotal : (card?.totalTasks ?? 0);
 
+  useLayoutEffect(() => {
+    if (!isDetail) {
+      setCommentsPanelMaxHeight(undefined);
+      return;
+    }
+
+    const el = mainColumnRef.current;
+    if (!el) return;
+
+    const syncHeight = () => {
+      const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+      setCommentsPanelMaxHeight(isDesktop ? el.offsetHeight : undefined);
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(el);
+    window.addEventListener('resize', syncHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncHeight);
+    };
+  }, [
+    isDetail,
+    isLoading,
+    card?.id,
+    card?.commentsList.length,
+    checklistEnabled,
+    showChecklistPanel,
+    labels.length,
+    members.length,
+    description,
+    hasAttachments,
+    startDate,
+    endDate,
+    taskTotal,
+  ]);
+
   const modalTitle =
     mode === 'create' ? (
       'Novo card'
@@ -718,7 +762,7 @@ export function KanbanCardModal({
         <div
           className={clsx(
             'flex flex-1 min-h-0 flex-col overflow-hidden',
-            isDetail && 'lg:flex-row lg:gap-0',
+            isDetail && 'lg:flex-row lg:items-start lg:gap-0',
             isCreate && 'gap-0',
             '[&_input:focus]:outline-none [&_input:focus]:ring-0 [&_input:focus-visible]:ring-0',
             '[&_textarea:focus]:outline-none [&_textarea:focus]:ring-0 [&_textarea:focus-visible]:ring-0',
@@ -727,8 +771,9 @@ export function KanbanCardModal({
         >
           {/* Coluna principal — único scroll vertical do conteúdo do card */}
           <div
+            ref={mainColumnRef}
             className={clsx(
-              'flex flex-col flex-1 min-w-0 min-h-0 overflow-y-scroll overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]',
+              'flex flex-col flex-1 min-w-0 min-h-0 max-h-full overflow-y-auto overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]',
               isDetail && 'lg:pr-6',
             )}
           >
@@ -1056,63 +1101,84 @@ export function KanbanCardModal({
           </div>
 
           {isDetail && (
-          <div className="w-full lg:w-[280px] shrink-0 flex flex-col min-h-0 overflow-hidden border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 lg:pl-6 pt-6 lg:pt-0">
+          <div
+            className="w-full lg:w-[360px] shrink-0 flex flex-col min-h-0 overflow-hidden border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 lg:pl-6 pt-6 lg:pt-0"
+            style={
+              commentsPanelMaxHeight != null
+                ? { height: commentsPanelMaxHeight, maxHeight: commentsPanelMaxHeight }
+                : undefined
+            }
+          >
             <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 shrink-0">
               Comentários
             </h4>
 
-              <>
-                <div className="mb-4 flex-1 min-h-0 space-y-4 overflow-x-hidden overflow-y-scroll [scrollbar-gutter:stable]">
+            <div className="flex flex-1 flex-col min-h-0">
+                <div className="mb-4 flex flex-1 min-h-0 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
                   {card?.commentsList.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-6">
+                    <p className="flex flex-1 items-center justify-center text-sm text-gray-400 text-center px-2">
                       Nenhum comentário ainda.
                     </p>
                   ) : (
-                    card?.commentsList.map((comment) => (
+                    <div className="space-y-4">
+                    {card?.commentsList.map((comment) => {
+                      const canDeleteComment = currentUserId === comment.author.id;
+                      const commentTimeLabel = formatRelativeTime(comment.createdAt);
+                      return (
                       <div
                         key={comment.id}
-                        className="group flex gap-2.5 rounded-lg px-1.5 py-1 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
+                        className="group/comment flex items-start gap-2.5 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/40"
                       >
-                        <div
-                          className={clsx(
-                            'w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 self-center',
-                            comment.author.avatarColor,
-                          )}
-                        >
-                          {getKanbanInitials(comment.author.name)}
-                        </div>
-                        <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
-                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-tight">
-                            {comment.author.name}
-                          </span>
-                          <p className="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words leading-snug">
+                        <KanbanUserAvatar
+                          name={comment.author.name}
+                          profilePhotoUrl={comment.author.profilePhotoUrl}
+                          colorKey={comment.author.id}
+                          colorClass={comment.author.avatarColor}
+                          size="sm"
+                          className="!h-8 !w-8 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight text-gray-900 dark:text-gray-100">
+                              {comment.author.name}
+                            </span>
+                            <div className="relative flex h-6 min-w-[3.25rem] shrink-0 items-center justify-end">
+                              <span
+                                className={clsx(
+                                  'text-[10px] leading-none whitespace-nowrap text-gray-400 transition-opacity duration-150',
+                                  canDeleteComment &&
+                                    'group-hover/comment:invisible group-hover/comment:opacity-0',
+                                )}
+                              >
+                                {commentTimeLabel}
+                              </span>
+                              {canDeleteComment && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await deleteKanbanComment(comment.id);
+                                      await refreshAll();
+                                    } catch {
+                                      toast.error('Erro ao excluir comentário');
+                                    }
+                                  }}
+                                  className="absolute inset-0 flex items-center justify-end rounded-md text-gray-400 opacity-0 invisible transition-all duration-150 hover:text-red-600 group-hover/comment:visible group-hover/comment:opacity-100"
+                                  title="Excluir comentário"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <p className="mt-1 text-sm leading-snug text-gray-600 break-words whitespace-pre-wrap dark:text-gray-300">
                             {comment.content}
                           </p>
                         </div>
-                        <div className="flex flex-col items-end justify-center gap-1 shrink-0 self-center min-w-[2rem]">
-                          <span className="text-[10px] text-gray-400 leading-none">
-                            {formatRelativeTime(comment.createdAt)}
-                          </span>
-                          {currentUserId === comment.author.id && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await deleteKanbanComment(comment.id);
-                                  await refreshAll();
-                                } catch {
-                                  toast.error('Erro ao excluir comentário');
-                                }
-                              }}
-                              className="p-1 rounded-md text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
-                              title="Excluir comentário"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
                       </div>
-                    ))
+                    );
+                    })}
+                    </div>
                   )}
                 </div>
 
@@ -1136,7 +1202,7 @@ export function KanbanCardModal({
                     Comentar
                   </Button>
                 </div>
-              </>
+            </div>
           </div>
           )}
         </div>
