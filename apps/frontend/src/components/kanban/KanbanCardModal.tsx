@@ -20,7 +20,9 @@ import {
   type Priority,
   type KanbanCardLabel,
   type KanbanCardMember,
+  type KanbanCardDetail,
   fetchKanbanCard,
+  normalizeKanbanCardDetail,
   createKanbanCard,
   updateKanbanCard,
   addKanbanCardMember,
@@ -210,6 +212,43 @@ export function KanbanCardModal({
     onBoardRefresh();
   }, [cardId, onBoardRefresh, queryClient, refetch]);
 
+  const applyCardDetail = useCallback(
+    (detail: KanbanCardDetail) => {
+      if (!cardId) return;
+      queryClient.setQueryData(['kanban-card', cardId], normalizeKanbanCardDetail(detail));
+    },
+    [cardId, queryClient],
+  );
+
+  const syncChecklistFromApi = useCallback(
+    (detail: KanbanCardDetail) => {
+      applyCardDetail(detail);
+      void onBoardRefresh();
+    },
+    [applyCardDetail, onBoardRefresh],
+  );
+
+  function buildOptimisticChecklistToggle(
+    current: KanbanCardDetail,
+    itemId: string,
+    nextDone: boolean,
+  ): KanbanCardDetail {
+    const checklistItems = current.checklistItems.map((item) =>
+      item.id === itemId ? { ...item, isDone: nextDone } : item,
+    );
+    const completedTasks = Math.max(
+      0,
+      Math.min(current.totalTasks, current.completedTasks + (nextDone ? 1 : -1)),
+    );
+    const totalTasks = current.totalTasks;
+    return {
+      ...current,
+      checklistItems,
+      completedTasks,
+      progress: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+    };
+  }
+
   async function saveMeta(
     partial?: Partial<{
       title: string;
@@ -347,9 +386,9 @@ export function KanbanCardModal({
     if (!cardId) return;
     setAddingTask(true);
     createChecklistItem(cardId, newTask.trim())
-      .then(async () => {
+      .then(({ card: updated }) => {
         setNewTask('');
-        await refreshAll();
+        syncChecklistFromApi(updated);
       })
       .catch(() => toast.error('Erro ao adicionar tarefa'))
       .finally(() => setAddingTask(false));
@@ -366,26 +405,51 @@ export function KanbanCardModal({
   }
 
   async function toggleTask(itemId: string, isDone: boolean) {
+    if (!card || !cardId) return;
+    const nextDone = !isDone;
+    const previous = card;
+    applyCardDetail(buildOptimisticChecklistToggle(card, itemId, nextDone));
     try {
-      await updateChecklistItem(itemId, { isDone: !isDone });
-      await refreshAll();
+      const { card: updated } = await updateChecklistItem(itemId, { isDone: nextDone });
+      syncChecklistFromApi(updated);
     } catch {
+      applyCardDetail(previous);
       toast.error('Erro ao atualizar tarefa');
     }
   }
 
   async function handleDeleteTask(itemId: string) {
-    if (deletingTaskId) return;
+    if (deletingTaskId || !card || !cardId) return;
+    const removed = card.checklistItems.find((i) => i.id === itemId);
+    if (!removed) return;
+
+    const previous = card;
     setDeletingTaskId(itemId);
+    const checklistItems = card.checklistItems.filter((i) => i.id !== itemId);
+    const totalTasks = Math.max(0, card.totalTasks - 1);
+    const completedTasks = Math.max(
+      0,
+      removed.isDone ? card.completedTasks - 1 : card.completedTasks,
+    );
+    applyCardDetail({
+      ...card,
+      checklistItems,
+      totalTasks,
+      completedTasks,
+      progress: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      checklistEnabled: totalTasks > 0 ? card.checklistEnabled : false,
+    });
+
     try {
       await deleteChecklistItem(itemId);
-      await refreshAll();
+      syncChecklistFromApi(await fetchKanbanCard(cardId));
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) {
-        await refreshAll();
+        void onBoardRefresh();
         return;
       }
+      applyCardDetail(previous);
       toast.error('Erro ao remover tarefa');
     } finally {
       setDeletingTaskId(null);
@@ -607,7 +671,7 @@ export function KanbanCardModal({
               isDetail && 'lg:pr-6',
             )}
           >
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-5 pr-1">
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]">
             {/* Botões de ação */}
             <div className="flex flex-wrap gap-2">
               <KanbanCardActionButton
@@ -799,14 +863,14 @@ export function KanbanCardModal({
               {taskTotal > 0 && (
                 <div className="relative h-px w-full overflow-hidden rounded-full bg-gray-200/80 dark:bg-gray-700/80">
                   <div
-                    className="absolute inset-y-0 left-0 bg-red-600 transition-all duration-300"
+                    className="absolute inset-y-0 left-0 bg-red-600 transition-[width] duration-200"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
               )}
 
               {(isCreate ? visibleDraftTasks.length > 0 : visibleTasks.length > 0) && (
-                <ul className="max-h-[min(220px,28vh)] overflow-y-auto overflow-x-hidden overscroll-contain space-y-1 -mx-0.5 px-0.5 scrollbar-hide">
+                <ul className="space-y-1 -mx-0.5 px-0.5">
                   {isCreate
                     ? visibleDraftTasks.map((task) => (
                         <li
@@ -855,7 +919,7 @@ export function KanbanCardModal({
                           isDeleting={deletingTaskId === item.id}
                           onToggle={() => toggleTask(item.id, item.isDone)}
                           onDelete={() => handleDeleteTask(item.id)}
-                          onUpdated={refreshAll}
+                          onUpdated={syncChecklistFromApi}
                         />
                       ))}
                 </ul>

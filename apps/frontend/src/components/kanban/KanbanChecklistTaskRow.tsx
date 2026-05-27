@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import {
   type KanbanCardMember,
+  type KanbanCardDetail,
   type KanbanChecklistItem,
   updateChecklistItem,
 } from '@/lib/kanban';
@@ -87,10 +88,10 @@ export interface KanbanChecklistTaskRowProps {
   isDeleting?: boolean;
   onToggle: () => void;
   onDelete: () => void;
-  onUpdated: () => void | Promise<void>;
+  onUpdated: (card: KanbanCardDetail) => void | Promise<void>;
 }
 
-export function KanbanChecklistTaskRow({
+function KanbanChecklistTaskRowInner({
   item,
   cardMembers,
   currentUser,
@@ -159,8 +160,8 @@ export function KanbanChecklistTaskRow({
   }) {
     setSaving(true);
     try {
-      await updateChecklistItem(item.id, partial);
-      await onUpdated();
+      const { card: updated } = await updateChecklistItem(item.id, partial);
+      await onUpdated(updated);
       setOpenMenu(null);
     } catch {
       toast.error('Erro ao atualizar tarefa');
@@ -193,7 +194,6 @@ export function KanbanChecklistTaskRow({
         title={item.title}
         className={clsx(
           'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-snug break-words',
-          'line-clamp-1 group-hover:line-clamp-none',
           item.isDone && 'line-through text-gray-400',
         )}
       >
@@ -406,3 +406,5 @@ export function KanbanChecklistTaskRow({
     </li>
   );
 }
+
+export const KanbanChecklistTaskRow = React.memo(KanbanChecklistTaskRowInner);

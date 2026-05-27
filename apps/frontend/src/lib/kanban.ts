@@ -242,9 +242,7 @@ export interface KanbanCardDetail extends KanbanCard {
   attachmentsList: KanbanCardAttachment[];
 }
 
-export async function fetchKanbanCard(id: string): Promise<KanbanCardDetail> {
-  const res = await api.get(`/kanban/cards/${id}`);
-  const data = res.data.data as KanbanCardDetail;
+export function normalizeKanbanCardDetail(data: KanbanCardDetail): KanbanCardDetail {
   return {
     ...data,
     attachmentsList: data.attachmentsList ?? [],
@@ -255,6 +253,11 @@ export async function fetchKanbanCard(id: string): Promise<KanbanCardDetail> {
       assignee: item.assignee ?? null,
     })),
   };
+}
+
+export async function fetchKanbanCard(id: string): Promise<KanbanCardDetail> {
+  const res = await api.get(`/kanban/cards/${id}`);
+  return normalizeKanbanCardDetail(res.data.data as KanbanCardDetail);
 }
 
 export async function createChecklistItem(cardId: string, title: string) {
