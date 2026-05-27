@@ -16,6 +16,8 @@ export interface ModalProps {
   contentOverflowVisible?: boolean;
   /** Acima de modais padrão (ex.: etiquetas/datas abertas sobre o card). */
   elevated?: boolean;
+  /** Quando false, o corpo não rola — o filho controla o overflow (ex.: Kanban card). */
+  scrollContent?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -29,6 +31,7 @@ export const Modal: React.FC<ModalProps> = ({
   headerActions,
   contentOverflowVisible = false,
   elevated = false,
+  scrollContent = true,
 }) => {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -111,7 +114,11 @@ export const Modal: React.FC<ModalProps> = ({
           <div
             className={clsx(
               'p-6 flex-1 min-h-0',
-              contentOverflowVisible ? 'overflow-visible' : 'overflow-y-auto'
+              contentOverflowVisible
+                ? 'overflow-visible'
+                : scrollContent
+                  ? 'overflow-y-auto [scrollbar-gutter:stable]'
+                  : 'overflow-hidden flex flex-col',
             )}
           >
             {children}

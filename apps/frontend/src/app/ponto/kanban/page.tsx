@@ -29,6 +29,8 @@ import {
   deleteKanbanColumn,
   updateKanbanCard,
   deleteKanbanCard,
+  patchCardInBoardCache,
+  type KanbanBoardCardChecklistPatch,
 } from '@/lib/kanban';
 import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG } from '@/components/kanban/kanbanPriority';
@@ -221,7 +223,9 @@ function ProgressRing({ value }: { value: number }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{value}%</span>
+      <span className="min-w-[2.25rem] text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+        {value}%
+      </span>
     </div>
   );
 }
@@ -419,12 +423,12 @@ function KanbanCardItem({
 
       <CardMetaRow card={card} />
 
-      <div className="border-t border-gray-100 dark:border-gray-700/80 pt-3 flex items-center justify-between gap-2">
+      <div className="min-h-[2.25rem] border-t border-gray-100 dark:border-gray-700/80 pt-3 flex items-center justify-between gap-2">
         {card.checklistEnabled && card.totalTasks > 0 ? (
           <>
             <ProgressRing value={card.progress} />
-            <span className="flex flex-1 items-center justify-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <ListChecks className="h-3.5 w-3.5" />
+            <span className="flex flex-1 items-center justify-center gap-1.5 text-xs tabular-nums text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              <ListChecks className="h-3.5 w-3.5 shrink-0" />
               {card.completedTasks}/{card.totalTasks} Tasks
             </span>
             <CardMemberAvatars card={card} />
@@ -933,6 +937,15 @@ function KanbanPage() {
     [queryClient, kanbanBoardQueryKey],
   );
 
+  const patchBoardCard = useCallback(
+    (targetCardId: string, patch: KanbanBoardCardChecklistPatch) => {
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        patchCardInBoardCache(old, targetCardId, patch),
+      );
+    },
+    [queryClient, kanbanBoardQueryKey],
+  );
+
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
     e.dataTransfer.effectAllowed = 'move';
     setDragState({ draggingCardId: cardId, fromColumnId: columnId, overColumnId: null });
@@ -1259,6 +1272,7 @@ function KanbanPage() {
           canViewAllKanbanBoards={canViewAllKanbanBoards}
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
+          onBoardCardPatch={patchBoardCard}
         />
       )}
 

@@ -103,6 +103,42 @@ export async function fetchKanbanBoard(departmentKey?: string): Promise<KanbanBo
   return res.data.data;
 }
 
+export type KanbanBoardCardChecklistPatch = Pick<
+  KanbanCard,
+  'completedTasks' | 'totalTasks' | 'progress' | 'checklistEnabled'
+>;
+
+/** Atualiza contadores de checklist de um card no cache do board (sem refetch). */
+export function patchCardInBoardCache(
+  board: KanbanBoard | undefined,
+  cardId: string,
+  patch: KanbanBoardCardChecklistPatch,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  let changed = false;
+  const columns = board.columns.map((col) => {
+    let colChanged = false;
+    const cards = col.cards.map((card) => {
+      if (card.id !== cardId) return card;
+      if (
+        card.completedTasks === patch.completedTasks &&
+        card.totalTasks === patch.totalTasks &&
+        card.progress === patch.progress &&
+        card.checklistEnabled === patch.checklistEnabled
+      ) {
+        return card;
+      }
+      colChanged = true;
+      changed = true;
+      return { ...card, ...patch };
+    });
+    return colChanged ? { ...col, cards } : col;
+  });
+
+  return changed ? { ...board, columns } : board;
+}
+
 export async function createKanbanColumn(payload: {
   title: string;
   color: string;

@@ -365,7 +365,13 @@
     padding: 0 !important;
   }
   
+  /* Evita “pulo” da página quando a barra vertical aparece/some */
+  html {
+    scrollbar-gutter: stable;
+  }
+
   /* Bloqueia scroll da página com modal aberto (sem position:fixed no body — quebra portais/dropdowns fixed) */
+  html:has(body.modal-open),
   body.modal-open {
     overflow: hidden !important;
   }

@@ -21,6 +21,7 @@ import {
   type KanbanCardLabel,
   type KanbanCardMember,
   type KanbanCardDetail,
+  type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
   normalizeKanbanCardDetail,
   createKanbanCard,
@@ -129,6 +130,8 @@ export interface KanbanCardModalProps {
   canViewAllKanbanBoards?: boolean;
   onClose: () => void;
   onBoardRefresh: () => void;
+  /** Atualiza só o card no board (contadores de checklist) sem refetch da página. */
+  onBoardCardPatch?: (cardId: string, patch: KanbanBoardCardChecklistPatch) => void;
 }
 
 export function KanbanCardModal({
@@ -140,6 +143,7 @@ export function KanbanCardModal({
   canViewAllKanbanBoards = false,
   onClose,
   onBoardRefresh,
+  onBoardCardPatch,
 }: KanbanCardModalProps) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'create' | 'detail'>(initialMode);
@@ -193,15 +197,42 @@ export function KanbanCardModal({
 
   useEffect(() => {
     if (!card || card.id !== cardId) return;
-    setTitle(card.title);
-    setDescription(card.description);
-    setPriority(card.priority);
-    setStartDate(card.startDate ?? '');
-    setEndDate(card.endDate ?? '');
-    setMembers(Array.isArray(card.members) ? card.members : []);
-    setChecklistEnabled(card.checklistEnabled ?? false);
-    setColumnId(card.columnId);
-    setLabels(Array.isArray(card.labels) ? card.labels : []);
+    setTitle((prev) => (prev === card.title ? prev : card.title));
+    setDescription((prev) => (prev === card.description ? prev : card.description));
+    setPriority((prev) => (prev === card.priority ? prev : card.priority));
+    setStartDate((prev) => {
+      const next = card.startDate ?? '';
+      return prev === next ? prev : next;
+    });
+    setEndDate((prev) => {
+      const next = card.endDate ?? '';
+      return prev === next ? prev : next;
+    });
+    setMembers((prev) => {
+      const next = Array.isArray(card.members) ? card.members : [];
+      if (
+        prev.length === next.length &&
+        prev.every((m, i) => m.userId === next[i]?.userId)
+      ) {
+        return prev;
+      }
+      return next;
+    });
+    setChecklistEnabled((prev) => {
+      const next = card.checklistEnabled ?? false;
+      return prev === next ? prev : next;
+    });
+    setColumnId((prev) => (prev === card.columnId ? prev : card.columnId));
+    setLabels((prev) => {
+      const next = Array.isArray(card.labels) ? card.labels : [];
+      if (
+        prev.length === next.length &&
+        prev.every((l, i) => l.color === next[i]?.color && l.text === next[i]?.text)
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, [card, cardId]);
 
   const refreshAll = useCallback(async () => {
@@ -220,12 +251,25 @@ export function KanbanCardModal({
     [cardId, queryClient],
   );
 
+  const patchBoardCard = useCallback(
+    (detail: KanbanCardDetail) => {
+      if (!onBoardCardPatch) return;
+      onBoardCardPatch(detail.id, {
+        completedTasks: detail.completedTasks,
+        totalTasks: detail.totalTasks,
+        progress: detail.progress,
+        checklistEnabled: detail.checklistEnabled,
+      });
+    },
+    [onBoardCardPatch],
+  );
+
   const syncChecklistFromApi = useCallback(
     (detail: KanbanCardDetail) => {
       applyCardDetail(detail);
-      void onBoardRefresh();
+      patchBoardCard(detail);
     },
-    [applyCardDetail, onBoardRefresh],
+    [applyCardDetail, patchBoardCard],
   );
 
   function buildOptimisticChecklistToggle(
@@ -408,12 +452,15 @@ export function KanbanCardModal({
     if (!card || !cardId) return;
     const nextDone = !isDone;
     const previous = card;
-    applyCardDetail(buildOptimisticChecklistToggle(card, itemId, nextDone));
+    const optimistic = buildOptimisticChecklistToggle(card, itemId, nextDone);
+    applyCardDetail(optimistic);
+    patchBoardCard(optimistic);
     try {
       const { card: updated } = await updateChecklistItem(itemId, { isDone: nextDone });
       syncChecklistFromApi(updated);
     } catch {
       applyCardDetail(previous);
+      patchBoardCard(previous);
       toast.error('Erro ao atualizar tarefa');
     }
   }
@@ -431,14 +478,16 @@ export function KanbanCardModal({
       0,
       removed.isDone ? card.completedTasks - 1 : card.completedTasks,
     );
-    applyCardDetail({
+    const optimistic = {
       ...card,
       checklistItems,
       totalTasks,
       completedTasks,
       progress: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
       checklistEnabled: totalTasks > 0 ? card.checklistEnabled : false,
-    });
+    };
+    applyCardDetail(optimistic);
+    patchBoardCard(optimistic);
 
     try {
       await deleteChecklistItem(itemId);
@@ -446,10 +495,10 @@ export function KanbanCardModal({
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) {
-        void onBoardRefresh();
         return;
       }
       applyCardDetail(previous);
+      patchBoardCard(previous);
       toast.error('Erro ao remover tarefa');
     } finally {
       setDeletingTaskId(null);
@@ -599,6 +648,7 @@ export function KanbanCardModal({
       isOpen
       onClose={onClose}
       size={isCreate ? 'sm' : 'xl'}
+      scrollContent={!isDetail}
       title={modalTitle}
       headerActions={
         isDetail ? (
@@ -656,7 +706,7 @@ export function KanbanCardModal({
       ) : (
         <div
           className={clsx(
-            'flex flex-col min-h-0 max-h-[calc(100dvh-11rem)]',
+            'flex flex-1 min-h-0 flex-col overflow-hidden',
             isDetail && 'lg:flex-row lg:gap-0',
             isCreate && 'gap-0',
             '[&_input:focus]:outline-none [&_input:focus]:ring-0 [&_input:focus-visible]:ring-0',
@@ -664,14 +714,13 @@ export function KanbanCardModal({
             '[&_button:focus]:outline-none [&_button:focus]:ring-0 [&_button:focus-visible]:ring-0',
           )}
         >
-          {/* Coluna principal */}
+          {/* Coluna principal — único scroll vertical do conteúdo do card */}
           <div
             className={clsx(
-              'flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden',
+              'flex flex-col flex-1 min-w-0 min-h-0 overflow-y-scroll overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]',
               isDetail && 'lg:pr-6',
             )}
           >
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]">
             {/* Botões de ação */}
             <div className="flex flex-wrap gap-2">
               <KanbanCardActionButton
@@ -798,10 +847,10 @@ export function KanbanCardModal({
                       <div
                         className={clsx(
                           kanbanInput,
-                          'mt-2 !w-auto h-10 box-border inline-flex items-center justify-center px-3 bg-gray-100 dark:bg-gray-700/70 border-gray-300 dark:border-gray-600 cursor-default pointer-events-none whitespace-nowrap',
+                          'mt-2 !w-auto min-w-[9.5rem] h-10 box-border inline-flex items-center justify-center px-3 bg-gray-100 dark:bg-gray-700/70 border-gray-300 dark:border-gray-600 cursor-default pointer-events-none whitespace-nowrap',
                         )}
                       >
-                        <span className="text-sm text-gray-600 dark:text-gray-300">
+                        <span className="text-sm text-gray-600 dark:text-gray-300 tabular-nums">
                           {formatRelativeTimeLong(card.updatedAt)}
                         </span>
                       </div>
@@ -843,7 +892,7 @@ export function KanbanCardModal({
                   <ListChecks className="w-4 h-4 text-red-600" />
                   <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Tarefas</h4>
                   {taskTotal > 0 && (
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
                       {taskCountLabel} · {progress}%
                     </span>
                   )}
@@ -955,18 +1004,16 @@ export function KanbanCardModal({
             </div>
             )}
 
-            </div>
-
           </div>
 
           {isDetail && (
-          <div className="w-full lg:w-[280px] shrink-0 flex flex-col min-h-0 max-h-[calc(100dvh-11rem)] border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 lg:pl-6 pt-6 lg:pt-0">
+          <div className="w-full lg:w-[280px] shrink-0 flex flex-col min-h-0 overflow-hidden border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 lg:pl-6 pt-6 lg:pt-0">
             <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 shrink-0">
               Comentários
             </h4>
 
               <>
-                <div className="mb-4 space-y-4 overflow-x-hidden lg:max-h-[min(280px,35vh)] lg:overflow-y-auto">
+                <div className="mb-4 flex-1 min-h-0 space-y-4 overflow-x-hidden overflow-y-scroll [scrollbar-gutter:stable]">
                   {card?.commentsList.length === 0 ? (
                     <p className="text-sm text-gray-400 text-center py-6">
                       Nenhum comentário ainda.

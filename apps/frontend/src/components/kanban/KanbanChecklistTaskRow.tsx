@@ -181,7 +181,7 @@ function KanbanChecklistTaskRowInner({
   return (
     <li
       ref={rowRef}
-      className="group relative flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+      className="group relative flex items-start gap-2 min-h-[2.25rem] rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800"
     >
       <CheckboxIndicator
         checked={item.isDone}
@@ -193,8 +193,8 @@ function KanbanChecklistTaskRowInner({
       <span
         title={item.title}
         className={clsx(
-          'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-snug break-words',
-          item.isDone && 'line-through text-gray-400',
+          'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-5 break-words',
+          item.isDone && 'line-through text-gray-400 dark:text-gray-500',
         )}
       >
         {item.title}
