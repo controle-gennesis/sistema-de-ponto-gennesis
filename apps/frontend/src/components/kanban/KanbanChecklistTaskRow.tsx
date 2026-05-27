@@ -102,8 +102,11 @@ function KanbanChecklistTaskRowInner({
 }: KanbanChecklistTaskRowProps) {
   const [openMenu, setOpenMenu] = useState<'date' | 'assign' | null>(null);
   const [saving, setSaving] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(item.title);
   const [draftDate, setDraftDate] = useState(() => splitDateTime(item.dueDate).date);
   const rowRef = useRef<HTMLLIElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const dateBtnRef = useRef<HTMLButtonElement>(null);
   const assignBtnRef = useRef<HTMLButtonElement>(null);
@@ -143,6 +146,14 @@ function KanbanChecklistTaskRowInner({
   }, [item.dueDate]);
 
   useEffect(() => {
+    if (!editingTitle) setDraftTitle(item.title);
+  }, [item.title, editingTitle]);
+
+  useEffect(() => {
+    if (editingTitle) titleInputRef.current?.focus();
+  }, [editingTitle]);
+
+  useEffect(() => {
     if (!openMenu) return;
     function onDocClick(e: MouseEvent) {
       const target = e.target as Node;
@@ -174,35 +185,101 @@ function KanbanChecklistTaskRowInner({
     await patch({ dueDate: draftDate || null });
   }
 
+  async function saveTitle() {
+    const trimmed = draftTitle.trim();
+    if (!trimmed) {
+      setDraftTitle(item.title);
+      setEditingTitle(false);
+      return;
+    }
+    if (trimmed === item.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const { card: updated } = await updateChecklistItem(item.id, { title: trimmed });
+      await onUpdated(updated);
+      setEditingTitle(false);
+    } catch {
+      toast.error('Erro ao atualizar tarefa');
+      setDraftTitle(item.title);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelTitleEdit() {
+    setDraftTitle(item.title);
+    setEditingTitle(false);
+  }
+
   const overdue = item.dueDate && !item.isDone && isOverdue(item.dueDate);
+  const titleClass = clsx(
+    'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-5 break-words',
+    item.isDone && 'line-through text-gray-400 dark:text-gray-500',
+  );
+  const titleInputClass = clsx(
+    titleClass,
+    'h-5 bg-transparent border-0 p-0 shadow-none outline-none ring-0',
+    'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
+  );
   const showActions = openMenu !== null;
   const hasMeta = !!(item.dueDate || item.assignee);
 
   return (
     <li
       ref={rowRef}
-      className="group relative flex items-start gap-2 min-h-[2.25rem] rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800"
+      className="group relative flex items-center gap-2 min-h-[2.25rem] rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800"
     >
       <CheckboxIndicator
         checked={item.isDone}
         onChange={onToggle}
         asButton
-        className="mt-0.5 shrink-0"
+        className="shrink-0"
       />
 
-      <span
-        title={item.title}
-        className={clsx(
-          'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-5 break-words',
-          item.isDone && 'line-through text-gray-400 dark:text-gray-500',
-        )}
-      >
-        {item.title}
-      </span>
+      {editingTitle ? (
+        <input
+          ref={titleInputRef}
+          type="text"
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={() => void saveTitle()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void saveTitle();
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelTitleEdit();
+            }
+          }}
+          className={titleInputClass}
+          aria-label="Editar tarefa"
+        />
+      ) : (
+        <span
+          role="button"
+          tabIndex={0}
+          title={item.title}
+          onClick={() => setEditingTitle(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setEditingTitle(true);
+            }
+          }}
+          className={clsx(titleClass, 'cursor-text')}
+        >
+          {item.title}
+        </span>
+      )}
 
       <div
         className={clsx(
-          'relative shrink-0 flex items-center justify-end min-h-7 self-start',
+          'relative shrink-0 flex items-center justify-end min-h-7',
           hasMeta ? 'min-w-[5.5rem]' : 'min-w-[4.5rem]',
         )}
       >

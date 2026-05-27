@@ -172,6 +172,7 @@ export function KanbanCardModal({
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [postingComment, setPostingComment] = useState(false);
   const [draftTasks, setDraftTasks] = useState<DraftChecklistTask[]>([]);
+  const [editingDraftTaskId, setEditingDraftTaskId] = useState<string | null>(null);
   const [draftFiles, setDraftFiles] = useState<KanbanDraftAttachment[]>([]);
   const [draftLinks, setDraftLinks] = useState<KanbanDraftLink[]>([]);
 
@@ -446,6 +447,16 @@ export function KanbanCardModal({
 
   function deleteDraftTask(taskId: string) {
     setDraftTasks((prev) => prev.filter((t) => t.id !== taskId));
+    if (editingDraftTaskId === taskId) setEditingDraftTaskId(null);
+  }
+
+  function renameDraftTask(taskId: string, title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setDraftTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, title: trimmed } : t)),
+    );
+    setEditingDraftTaskId(null);
   }
 
   async function toggleTask(itemId: string, isDone: boolean) {
@@ -921,25 +932,62 @@ export function KanbanCardModal({
               {(isCreate ? visibleDraftTasks.length > 0 : visibleTasks.length > 0) && (
                 <ul className="space-y-1 -mx-0.5 px-0.5">
                   {isCreate
-                    ? visibleDraftTasks.map((task) => (
+                    ? visibleDraftTasks.map((task) => {
+                        const draftTitleClass = clsx(
+                          'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-5 break-words',
+                          task.isDone && 'line-through text-gray-400',
+                        );
+                        const isEditingDraft = editingDraftTaskId === task.id;
+                        return (
                         <li
                           key={task.id}
-                          className="group flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+                          className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800 transition-colors"
                         >
                           <CheckboxIndicator
                             checked={task.isDone}
                             onChange={() => toggleDraftTask(task.id)}
                             asButton
-                            className="mt-0.5 shrink-0"
+                            className="shrink-0"
                           />
-                          <span
-                            className={clsx(
-                              'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-snug break-words',
-                              task.isDone && 'line-through text-gray-400',
-                            )}
-                          >
-                            {task.title}
-                          </span>
+                          {isEditingDraft ? (
+                            <input
+                              type="text"
+                              defaultValue={task.title}
+                              autoFocus
+                              onBlur={(e) => renameDraftTask(task.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  renameDraftTask(task.id, e.currentTarget.value);
+                                }
+                                if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  setEditingDraftTaskId(null);
+                                }
+                              }}
+                              className={clsx(
+                                draftTitleClass,
+                                'h-5 bg-transparent border-0 p-0 shadow-none outline-none ring-0',
+                                'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
+                              )}
+                              aria-label="Editar tarefa"
+                            />
+                          ) : (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setEditingDraftTaskId(task.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setEditingDraftTaskId(task.id);
+                                }
+                              }}
+                              className={clsx(draftTitleClass, 'cursor-text')}
+                            >
+                              {task.title}
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => deleteDraftTask(task.id)}
@@ -949,7 +997,8 @@ export function KanbanCardModal({
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </li>
-                      ))
+                        );
+                      })
                     : visibleTasks.map((item) => (
                         <KanbanChecklistTaskRow
                           key={item.id}
