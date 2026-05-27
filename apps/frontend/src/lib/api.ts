@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { API_BASE_URL } from './apiBaseUrl';
+import { clearStoredAuth, forceAuthRedirect, notifyAuthTokenRefreshed } from './authSession';
 
 export { API_BASE_URL } from './apiBaseUrl';
 
@@ -101,11 +102,7 @@ api.interceptors.response.use(
       // Se não tem token, redireciona para login
       if (!token) {
         isRefreshing = false;
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('user');
-        window.location.href = '/auth/login';
+        forceAuthRedirect();
         return Promise.reject(error);
       }
 
@@ -141,6 +138,7 @@ api.interceptors.response.use(
           processQueue(null, newToken);
 
           isRefreshing = false;
+          notifyAuthTokenRefreshed();
 
           // Retentar a requisição original
           return api(originalRequest);
@@ -152,11 +150,7 @@ api.interceptors.response.use(
         processQueue(refreshError, null);
         isRefreshing = false;
 
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('user');
-        window.location.href = '/auth/login';
+        forceAuthRedirect();
         return Promise.reject(refreshError);
       }
     }

@@ -498,6 +498,8 @@ export type OcPurchaseOrdersPanelProps = {
   searchTerm?: string;
   /** Quando informado, exibe o campo de busca no cabeçalho do card (modo integrado). */
   onSearchChange?: (value: string) => void;
+  /** Busca global no pai — oculta o campo duplicado no card. */
+  hideSearch?: boolean;
   /** Card colado às abas do fluxo (sem borda/sombra superior). */
   flushInCard?: boolean;
   /**
@@ -699,6 +701,7 @@ export function OcPurchaseOrdersPanel({
   activeTab: activeTabProp,
   searchTerm = '',
   onSearchChange,
+  hideSearch = false,
   flushInCard = false,
   gestorCostCenterIds
 }: OcPurchaseOrdersPanelProps) {
@@ -1654,7 +1657,8 @@ export function OcPurchaseOrdersPanel({
   const flushInTabsCard = isIntegratedFlux && flushInCard;
   const integratedMeta = isIntegratedFlux ? EMBEDDED_OC_TAB_META[activeTab] : null;
   const integratedListCount = displayedOrders.length;
-  const showToolbarSearch = Boolean(onSearchChange) || activeTab === 'FINALIZADAS';
+  const showToolbarSearch =
+    !hideSearch && (Boolean(onSearchChange) || activeTab === 'FINALIZADAS');
   const showToolbarCnab = activeTab === 'APPROVED';
   const showToolbarFinalizedExtras = activeTab === 'FINALIZADAS';
   const showHeaderToolbar =

@@ -78,6 +78,10 @@ model User {
   kanbanCardComments       KanbanCardComment[]    @relation("KanbanCardCommentAuthor")
   kanbanCardAttachments    KanbanCardAttachment[] @relation("KanbanCardAttachmentUploader")
   kanbanChecklistAssigned  KanbanChecklistItem[]  @relation("KanbanChecklistAssignee")
+  demandSheetApprovalsCreated       DemandSheetApproval[] @relation("DemandSheetApprovalCreator")
+  demandSheetApprovalsAsSolicitante DemandSheetApproval[] @relation("DemandSheetApprovalSolicitante")
+  demandSheetApprovalsManagerApproved DemandSheetApproval[] @relation("DemandSheetApprovalManager")
+  demandSheetApprovalsPurchaseStatusUpdated DemandSheetApproval[] @relation("DemandSheetApprovalPurchaseStatusUpdater")
 
   @@map("users")
 }
@@ -1130,10 +1134,73 @@ model Contract {
   weeklyProductions ContractWeeklyProduction[]
   userPermissions   UserContractPermission[]
   dpApprovalUsers   UserDpApprovalContract[]
+  demandSheetApprovals DemandSheetApproval[]
 
   @@index([costCenterId])
   @@index([number])
   @@map("contracts")
+}
+
+enum DemandSheetApprovalStatus {
+  WAITING_MANAGER
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// Status de compras/suprimentos após aprovação do gestor (um único valor por FD).
+enum DemandSheetPurchaseStatus {
+  WAREHOUSE_DF
+  WAREHOUSE_GO
+  FULLY_FULFILLED_BY_STOCK
+  PARTIALLY_FULFILLED_BY_STOCK
+  PURCHASE_REQUEST
+  SUPPLIES
+  FINISHED
+}
+
+/// Ficha de demanda (FD) — fluxo de aprovação pelo gestor do contrato (mesmo escopo das solicitações DP).
+model DemandSheetApproval {
+  id                      String                      @id @default(cuid())
+  numMovRm                String
+  idMovRm                 String
+  codigoPedido            String
+  solicitanteId           String
+  contratoId              String
+  obra                    String
+  codFichaDemanda         String
+  faturamentoEstimado     Decimal                     @db.Decimal(15, 2)
+  custoEstimado           Decimal                     @db.Decimal(15, 2)
+  observacao              String
+  dataHora                DateTime
+  polo                    String
+  anexos                  Json                        @default("[]")
+  status                  DemandSheetApprovalStatus   @default(WAITING_MANAGER)
+  createdBy               String
+  managerApprovedBy       String?
+  managerApprovedAt       DateTime?
+  managerApprovalComment  String?
+  managerRejectionReason  String?
+  managerRejectionComment String?
+  purchaseStatus          DemandSheetPurchaseStatus?
+  purchaseStatusUpdatedBy String?
+  purchaseStatusUpdatedAt DateTime?
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+
+  solicitante            User     @relation("DemandSheetApprovalSolicitante", fields: [solicitanteId], references: [id], onDelete: Restrict)
+  contrato               Contract @relation(fields: [contratoId], references: [id], onDelete: Restrict)
+  creator                User     @relation("DemandSheetApprovalCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  managerApprover        User?    @relation("DemandSheetApprovalManager", fields: [managerApprovedBy], references: [id], onDelete: SetNull)
+  purchaseStatusUpdater  User?    @relation("DemandSheetApprovalPurchaseStatusUpdater", fields: [purchaseStatusUpdatedBy], references: [id], onDelete: SetNull)
+
+  @@index([contratoId])
+  @@index([solicitanteId])
+  @@index([createdBy])
+  @@index([status])
+  @@index([purchaseStatus])
+  @@index([codFichaDemanda])
+  @@map("demand_sheet_approvals")
 }
 
 // Aditivos do contrato (permite múltiplos lançamentos com data de efeito)

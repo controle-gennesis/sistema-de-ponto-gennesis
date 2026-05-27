@@ -64,6 +64,7 @@ import purchaseOrderRoutes from './routes/purchaseOrders';
 import budgetNatureRoutes from './routes/budgetNatures';
 import orcamentoRoutes from './routes/orcamento';
 import pleitoRoutes from './routes/pleitos';
+import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
 import fluigRoutes from './routes/fluig';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
@@ -77,7 +78,7 @@ import callHistoryRoutes from './routes/callHistory';
 import kanbanRoutes from './routes/kanban';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 import { prisma } from './lib/prisma';
-import { ensureContractAddendaTable } from './lib/ensureContractAddendaSchema';
+import { ensureProductionSchema } from './lib/ensureProductionSchema';
 import { attachCallSignaling } from './realtime/wsCallSignaling';
 
 console.log('🚀 Iniciando aplicação...');
@@ -273,6 +274,7 @@ app.use('/api/quote-maps', quoteMapRoutes);
 app.use('/api/budget-natures', budgetNatureRoutes);
 app.use('/api/orcamento', orcamentoRoutes);
 app.use('/api/pleitos', pleitoRoutes);
+app.use('/api/demand-sheet-approvals', demandSheetApprovalRoutes);
 app.use('/api/fluig', fluigRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/permissions', permissionRoutes);
@@ -300,7 +302,7 @@ try {
   server.listen(PORT, '0.0.0.0', () => {
     void (async () => {
       try {
-        await ensureContractAddendaTable(prisma);
+        await ensureProductionSchema(prisma);
         const { removed } = await removeOrphanUserPermissions();
         if (removed > 0) {
           console.log(`🧹 Permissões de módulos removidos do registro: ${removed} registro(s) limpo(s).`);

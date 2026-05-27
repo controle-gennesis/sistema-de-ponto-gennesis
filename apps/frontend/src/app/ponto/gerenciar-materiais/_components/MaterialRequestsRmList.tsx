@@ -68,11 +68,13 @@ export function MaterialRequestsRmList({
   onCorrection,
   onCancel,
   onDetails,
-  flushInCard = false
+  flushInCard = false,
+  hideSearch = false
 }: {
   fluxTab: FluxTab;
   searchTerm: string;
   onSearchChange: (value: string) => void;
+  hideSearch?: boolean;
   flushInCard?: boolean;
   loadingRequests: boolean;
   filteredRequests: MaterialRequest[];
@@ -136,7 +138,13 @@ export function MaterialRequestsRmList({
       className={`w-full ${flushInCard ? 'rounded-none border-0 border-t-0 shadow-none' : ''}`}
     >
       <CardHeader className={`border-b-0 pb-1 ${flushInCard ? 'pt-4' : ''}`}>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div
+          className={
+            hideSearch
+              ? 'flex items-center space-x-3'
+              : 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'
+          }
+        >
           <div className="flex items-center space-x-3">
             <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
               <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
@@ -146,28 +154,30 @@ export function MaterialRequestsRmList({
               <p className="text-sm text-gray-600 dark:text-gray-400">{meta.subtitle}</p>
             </div>
           </div>
-          <div className="relative min-w-[240px] flex-1 sm:w-[300px] sm:flex-none sm:max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            <input
-              type="text"
-              inputMode="search"
-              autoComplete="off"
-              value={searchTerm}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Buscar por nome, descrição ou centro de custo..."
-              className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-            />
-            {searchTerm ? (
-              <button
-                type="button"
-                onClick={() => onSearchChange('')}
-                aria-label="Limpar busca"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            ) : null}
-          </div>
+          {!hideSearch ? (
+            <div className="relative min-w-[240px] flex-1 sm:w-[300px] sm:flex-none sm:max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+              <input
+                type="text"
+                inputMode="search"
+                autoComplete="off"
+                value={searchTerm}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Buscar por nome, descrição ou centro de custo..."
+                className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              />
+              {searchTerm ? (
+                <button
+                  type="button"
+                  onClick={() => onSearchChange('')}
+                  aria-label="Limpar busca"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent>

@@ -1,0 +1,164 @@
+import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
+import { orderNeedsFinanceBoleto } from './flux';
+import type { FluxTab, MaterialRequest } from './types';
+import { rmSolicitante } from './display';
+
+export const normalizeFluxSearch = (value?: string | null) =>
+  (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+export const FLUX_TAB_LABELS: Record<FluxTab, string> = {
+  rm_PENDING: 'Pendentes',
+  rm_IN_REVIEW: 'Correção RM',
+  rm_APPROVED: 'RMs Aprovadas',
+  rm_CANCELLED: 'Canceladas',
+  oc_compras: 'OC - Aprovação Compras',
+  oc_gestor: 'OC - Aprovação Gestor',
+  oc_diretoria: 'OC - Aprovação Diretoria',
+  oc_IN_REVIEW: 'Correção OC',
+  oc_ATTACH_BOLETO: 'Anexar Boleto',
+  oc_APPROVED: 'Pagamento',
+  oc_PROOF_VALIDATION: 'Validação Comprovante',
+  oc_PROOF_CORRECTION: 'Correção Comprovante',
+  oc_ATTACH_NF: 'Anexar NF',
+  oc_FINALIZADAS: 'OC - Finalizadas'
+};
+
+export function matchesMaterialRequestSearch(
+  request: MaterialRequest,
+  normalizedSearchTerm: string
+): boolean {
+  if (!normalizedSearchTerm) return true;
+  const searchableParts = [
+    rmSolicitante(request)?.name,
+    request.description,
+    request.requestNumber,
+    request.serviceOrder,
+    request.costCenter?.name,
+    request.costCenter?.id,
+    ...request.items.map((item) => item.material?.name || ''),
+    ...request.items.map((item) => item.material?.description || ''),
+    ...request.items.map((item) => item.material?.sinapiCode || '')
+  ];
+  return searchableParts.some((part) =>
+    normalizeFluxSearch(part).includes(normalizedSearchTerm)
+  );
+}
+
+export function matchesPurchaseOrderSearch(
+  order: PurchaseOrder,
+  normalizedSearchTerm: string
+): boolean {
+  if (!normalizedSearchTerm) return true;
+  const searchableParts = [
+    order.orderNumber,
+    order.status,
+    order.materialRequest?.requestNumber,
+    order.materialRequest?.serviceOrder,
+    order.materialRequest?.description,
+    order.materialRequest?.costCenter?.code,
+    order.materialRequest?.costCenter?.name,
+    order.supplier?.name,
+    order.supplier?.code,
+    order.creator?.name
+  ];
+  return searchableParts.some((part) =>
+    normalizeFluxSearch(String(part ?? '')).includes(normalizedSearchTerm)
+  );
+}
+
+export function getFluxTabForMaterialRequest(
+  request: MaterialRequest,
+  materialRequestIdsWithOc: Set<string>
+): FluxTab | null {
+  if (request.status === 'PENDING') return 'rm_PENDING';
+  if (request.status === 'IN_REVIEW') return 'rm_IN_REVIEW';
+  if (request.status === 'CANCELLED' || request.status === 'REJECTED') return 'rm_CANCELLED';
+  if (request.status === 'APPROVED') {
+    if (materialRequestIdsWithOc.has(request.id)) return null;
+    return 'rm_APPROVED';
+  }
+  return null;
+}
+
+export function getFluxTabForPurchaseOrder(order: PurchaseOrder): FluxTab {
+  if (order.status === 'PENDING_COMPRAS' || order.status === 'DRAFT') return 'oc_compras';
+  if (order.status === 'PENDING') return 'oc_gestor';
+  if (order.status === 'PENDING_DIRETORIA') return 'oc_diretoria';
+  if (order.status === 'IN_REVIEW') return 'oc_IN_REVIEW';
+  if (orderNeedsFinanceBoleto(order)) return 'oc_ATTACH_BOLETO';
+  if (order.status === 'APPROVED') return 'oc_APPROVED';
+  if (order.status === 'PENDING_PROOF_VALIDATION') return 'oc_PROOF_VALIDATION';
+  if (order.status === 'PENDING_PROOF_CORRECTION') return 'oc_PROOF_CORRECTION';
+  if (order.status === 'PENDING_NF_ATTACHMENT') return 'oc_ATTACH_NF';
+  if (order.status === 'FINALIZED' || order.status === 'SENT') return 'oc_FINALIZADAS';
+  return 'oc_gestor';
+}
+
+export type FluxSearchHit =
+  | {
+      kind: 'rm';
+      id: string;
+      tab: FluxTab;
+      title: string;
+      subtitle: string;
+    }
+  | {
+      kind: 'oc';
+      id: string;
+      tab: FluxTab;
+      title: string;
+      subtitle: string;
+    };
+
+export function buildFluxSearchHits(input: {
+  requests: MaterialRequest[];
+  orders: PurchaseOrder[];
+  materialRequestIdsWithOc: Set<string>;
+  searchTerm: string;
+}): FluxSearchHit[] {
+  const normalizedSearchTerm = normalizeFluxSearch(input.searchTerm);
+  if (!normalizedSearchTerm) return [];
+
+  const hits: FluxSearchHit[] = [];
+  const seenOcIds = new Set<string>();
+
+  for (const request of input.requests) {
+    if (!matchesMaterialRequestSearch(request, normalizedSearchTerm)) continue;
+
+    if (request.status === 'APPROVED' && input.materialRequestIdsWithOc.has(request.id)) {
+      continue;
+    }
+
+    const tab = getFluxTabForMaterialRequest(request, input.materialRequestIdsWithOc);
+    if (!tab) continue;
+
+    hits.push({
+      kind: 'rm',
+      id: request.id,
+      tab,
+      title: request.requestNumber || `SC #${request.id.slice(0, 8)}`,
+      subtitle: `${FLUX_TAB_LABELS[tab]} · ${request.costCenter?.name || 'Sem centro de custo'}`
+    });
+  }
+
+  for (const order of input.orders) {
+    if (!matchesPurchaseOrderSearch(order, normalizedSearchTerm)) continue;
+    if (seenOcIds.has(order.id)) continue;
+    seenOcIds.add(order.id);
+
+    const tab = getFluxTabForPurchaseOrder(order);
+    hits.push({
+      kind: 'oc',
+      id: order.id,
+      tab,
+      title: order.orderNumber || `OC #${order.id.slice(0, 8)}`,
+      subtitle: `${FLUX_TAB_LABELS[tab]} · ${order.supplier?.name || 'Sem fornecedor'}`
+    });
+  }
+
+  return hits.slice(0, 12);
+}

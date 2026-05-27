@@ -906,7 +906,6 @@ function KanbanPage() {
     router.push('/auth/login');
   };
 
-  const user = meUser || { name: 'Usuário', role: 'EMPLOYEE' };
   const columns = board?.columns ?? [];
 
   const [search, setSearch] = useState('');
@@ -1048,6 +1047,12 @@ function KanbanPage() {
   if (loadingUser || loadingPerms || (showBoardList ? loadingBoardsList : loadingBoard)) {
     return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
   }
+
+  if (!meUser) {
+    return <Loading message="Verificando sessão..." fullScreen size="lg" />;
+  }
+
+  const user = meUser;
 
   if (!showBoardList && boardError) {
     return (

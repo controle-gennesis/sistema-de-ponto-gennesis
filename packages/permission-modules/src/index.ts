@@ -93,6 +93,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Contratos e Licitações',
   },
   { key: pathToModuleKey('/ponto/pleitos-gerados'), name: 'Pleitos Gerados', href: '/ponto/pleitos-gerados', category: 'Engenharia' },
+  { key: pathToModuleKey('/ponto/aprovacao-fds'), name: 'Fichas de Demanda', href: '/ponto/aprovacao-fds', category: 'Engenharia' },
   // Jurídico
   { key: pathToModuleKey('/ponto/juridico'), name: 'Processos Trabalhistas', href: '/ponto/juridico', category: 'Jurídico' },
   // Suprimentos
@@ -103,6 +104,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/estoque'), name: 'Estoque', href: '/ponto/estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/furo-estoque'), name: 'Furo de Estoque', href: '/ponto/furo-estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/ajuste-estoque'), name: 'Ajuste de Estoque', href: '/ponto/ajuste-estoque', category: 'Suprimentos' },
+  { key: pathToModuleKey('/ponto/fds-aprovadas'), name: "FD's Aprovadas", href: '/ponto/fds-aprovadas', category: 'Suprimentos' },
   // Cadastros
   { key: pathToModuleKey('/ponto/centros-custo'), name: 'Centros de Custo', href: '/ponto/centros-custo', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/materiais-construcao'), name: 'Materiais de Construção', href: '/ponto/materiais-construcao', category: 'Cadastros' },

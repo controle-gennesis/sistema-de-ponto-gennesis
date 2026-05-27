@@ -1,28 +1,69 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import {
   pathToModuleKey,
   PERMISSION_ACCESS_ACTION,
 } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
+import {
+  AUTH_TOKEN_REFRESHED_EVENT,
+  forceAuthRedirect,
+  hasStoredAuthToken,
+} from '@/lib/authSession';
 
 type PermissionItem = { module: string; action: string };
 
 const pk = pathToModuleKey;
 
 export function usePermissions() {
-  const { data: userData, isLoading: isLoadingUser } = useQuery({
+  const queryClient = useQueryClient();
+
+  const {
+    data: userData,
+    isLoading: isLoadingUser,
+    isError: isUserError,
+    error: userError,
+  } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
     },
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: () => hasStoredAuthToken(),
     retry: (failureCount, error) => {
       const status = (error as { response?: { status?: number } })?.response?.status;
       if (status === 429 || status === 401 || status === 403) return false;
       return failureCount < 1;
     },
   });
+
+  useEffect(() => {
+    const refreshUser = () => {
+      void queryClient.invalidateQueries({ queryKey: ['user'] });
+      void queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
+    };
+
+    window.addEventListener(AUTH_TOKEN_REFRESHED_EVENT, refreshUser);
+    return () => window.removeEventListener(AUTH_TOKEN_REFRESHED_EVENT, refreshUser);
+  }, [queryClient]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || isLoadingUser) return;
+    if (userData?.data) return;
+    if (window.location.pathname.startsWith('/auth/')) return;
+
+    const status = (userError as { response?: { status?: number } } | undefined)?.response?.status;
+
+    if (!hasStoredAuthToken()) {
+      forceAuthRedirect();
+      return;
+    }
+
+    if (isUserError && (status === 401 || status === 403)) {
+      forceAuthRedirect();
+    }
+  }, [isLoadingUser, isUserError, userData, userError]);
 
   const user = userData?.data;
   const userPosition = user?.employee?.position;
@@ -234,6 +275,7 @@ export function usePermissions() {
 
   return {
     user,
+    isAuthenticated: !!user,
     userPosition,
     userDepartment,
     isAdministrator,
@@ -356,6 +398,7 @@ export function useRoutePermission(route: string) {
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
+    '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
     '/ponto/espelho-nf': isAdministrator || can(pk('/ponto/espelho-nf')),
     '/ponto/prestadores-servico':
       isAdministrator ||
@@ -382,6 +425,8 @@ export function useRoutePermission(route: string) {
     '/ponto/estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
     '/ponto/ajuste-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/ajuste-estoque')),
     '/ponto/furo-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque')),
+    '/ponto/fds-aprovadas':
+      isAdministrator || isDepartmentCompras || can(pk('/ponto/fds-aprovadas')),
     '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
     '/ponto/condicoes-pagamento':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),
