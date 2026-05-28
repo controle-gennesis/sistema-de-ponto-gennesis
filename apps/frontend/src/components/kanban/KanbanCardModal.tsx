@@ -738,7 +738,7 @@ export function KanbanCardModal({
     <Modal
       isOpen
       onClose={onClose}
-      size={isCreate ? 'sm' : 'xl'}
+      size={isCreate ? 'sm' : '5xl'}
       scrollContent={!isDetail}
       title={modalTitle}
       headerActions={
@@ -810,68 +810,76 @@ export function KanbanCardModal({
             '[&_button:focus]:outline-none [&_button:focus]:ring-0 [&_button:focus-visible]:ring-0',
           )}
         >
-          {/* Coluna principal — scroll interno */}
+          {/* Coluna principal — scroll na borda direita; padding só no conteúdo (folga antes dos comentários) */}
           <div
             ref={mainColumnRef}
-            className={clsx(
-              'flex flex-col flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]',
-              isDetail && 'lg:pr-6',
-            )}
+            className="flex flex-1 min-w-0 min-h-0 flex-col overflow-y-auto overflow-x-hidden"
           >
-            {/* Botões de ação */}
-            <div className="flex flex-wrap gap-2">
-              <KanbanCardActionButton
-                icon={<Tag className="w-4 h-4" />}
-                active={hasLabels}
-                onClick={() => setOpenMenu((m) => (m === 'labels' ? null : 'labels'))}
-              >
-                Etiquetas
-              </KanbanCardActionButton>
-              <KanbanCardActionButton
-                icon={<Clock className="w-4 h-4" />}
-                active={hasDates}
-                onClick={() => setOpenMenu((m) => (m === 'dates' ? null : 'dates'))}
-              >
-                Datas
-              </KanbanCardActionButton>
-              <KanbanCardActionButton
-                icon={<ListChecks className="w-4 h-4" />}
-                active={checklistEnabled}
-                onClick={async () => {
-                  const next = !checklistEnabled;
-                  setChecklistEnabled(next);
-                  setSaving(true);
-                  try {
-                    await updateKanbanCard(cardId!, { checklistEnabled: next });
-                    await refreshAll();
-                  } catch {
-                    setChecklistEnabled(!next);
-                    toast.error('Erro ao atualizar checklist');
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-              >
-                Checklist
-              </KanbanCardActionButton>
-              <KanbanCardActionButton
-                icon={<Paperclip className="w-4 h-4" />}
-                active={hasAttachments}
-                onClick={() => setShowAttachmentsModal(true)}
-              >
-                Anexos
-              </KanbanCardActionButton>
-              {showCostButton ? (
+            <div
+              className={clsx(
+                'flex flex-col gap-5 min-h-0',
+                isDetail && 'pr-6',
+              )}
+            >
+              <div className="flex flex-nowrap items-center gap-2 min-w-0">
                 <KanbanCardActionButton
-                  active={showCostModal}
-                  onClick={() => setShowCostModal(true)}
+                  icon={<Tag className="w-4 h-4" />}
+                  active={hasLabels}
+                  onClick={() => setOpenMenu((m) => (m === 'labels' ? null : 'labels'))}
+                  className="shrink-0"
                 >
-                  $
+                  Etiquetas
                 </KanbanCardActionButton>
-              ) : null}
-            </div>
+                <KanbanCardActionButton
+                  icon={<Clock className="w-4 h-4" />}
+                  active={hasDates}
+                  onClick={() => setOpenMenu((m) => (m === 'dates' ? null : 'dates'))}
+                  className="shrink-0"
+                >
+                  Datas
+                </KanbanCardActionButton>
+                <KanbanCardActionButton
+                  icon={<ListChecks className="w-4 h-4" />}
+                  active={checklistEnabled}
+                  className="shrink-0"
+                  onClick={async () => {
+                    const next = !checklistEnabled;
+                    setChecklistEnabled(next);
+                    setSaving(true);
+                    try {
+                      await updateKanbanCard(cardId!, { checklistEnabled: next });
+                      await refreshAll();
+                    } catch {
+                      setChecklistEnabled(!next);
+                      toast.error('Erro ao atualizar checklist');
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
+                  Checklist
+                </KanbanCardActionButton>
+                <KanbanCardActionButton
+                  icon={<Paperclip className="w-4 h-4" />}
+                  active={hasAttachments}
+                  onClick={() => setShowAttachmentsModal(true)}
+                  className="shrink-0"
+                >
+                  Anexos
+                </KanbanCardActionButton>
+                {showCostButton ? (
+                  <KanbanCardActionButton
+                    active={showCostModal}
+                    onClick={() => setShowCostModal(true)}
+                    className="shrink-0 min-w-[2.75rem] justify-center"
+                    title="Custos"
+                  >
+                    $
+                  </KanbanCardActionButton>
+                ) : null}
+              </div>
 
-            {labels.length > 0 && <KanbanLabelChips labels={labels} />}
+              {labels.length > 0 && <KanbanLabelChips labels={labels} />}
 
             <div className="space-y-4">
               {/* Membros */}
@@ -1141,6 +1149,7 @@ export function KanbanCardModal({
             </div>
             )}
 
+            </div>
           </div>
 
           {isDetail && (
@@ -1157,7 +1166,7 @@ export function KanbanCardModal({
             </h4>
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+                <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
                   {card?.commentsList.length === 0 ? (
                     <p className="flex min-h-[8rem] items-center justify-center px-2 text-center text-sm text-gray-400">
                       Nenhum comentário ainda.

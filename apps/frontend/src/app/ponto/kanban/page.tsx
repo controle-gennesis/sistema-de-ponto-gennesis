@@ -38,6 +38,10 @@ import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG } from '@/components/kanban/kanbanPriority';
 import { KanbanPriorityBars } from '@/components/kanban/KanbanPriorityBars';
 import {
+  isKanbanEditableLabelColor,
+  normalizeKanbanLabels,
+} from '@/components/kanban/kanbanLabels';
+import {
   formatKanbanCardEndDate,
   splitDateTime,
 } from '@/components/kanban/kanbanDateTime';
@@ -257,7 +261,7 @@ function resolveColumnInsertIndex(
 }
 
 function setKanbanColumnDragGhost(
-  e: React.DragEvent<HTMLElement>,
+  e: React.DragEvent,
   ghostRef: React.MutableRefObject<HTMLElement | null>,
 ) {
   const columnEl = e.currentTarget;
@@ -598,7 +602,9 @@ function KanbanCardItem({
       <div className="relative z-[1]">
       {card.labels.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
-          {card.labels.map((l) => (
+          {normalizeKanbanLabels(card.labels)
+            .filter((l) => !isKanbanEditableLabelColor(l.color) || l.text.trim())
+            .map((l) => (
             <span
               key={`${l.color}-${l.text}`}
               className="h-2 w-10 rounded-sm shrink-0"
@@ -692,7 +698,7 @@ function KanbanColumnDropGutter({
 }) {
   return (
     <div
-      className="relative w-4 shrink-0 self-stretch min-h-[200px] -mx-3 z-[2]"
+      className="relative w-2 shrink-0 self-stretch min-h-[200px] -mx-2.5 z-[2]"
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1370,7 +1376,7 @@ function KanbanPage() {
   }, []);
 
   const handleColumnDragStart = useCallback(
-    (e: React.DragEvent<HTMLElement>, columnId: string) => {
+    (e: React.DragEvent, columnId: string) => {
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', columnId);
       e.stopPropagation();
@@ -1745,12 +1751,11 @@ function KanbanPage() {
           >
             {filteredColumns.map((column, columnIndex) => (
               <React.Fragment key={column.id}>
-                {!boardReadOnly && (
+                {!boardReadOnly &&
+                  columnDrag.draggingColumnId &&
+                  columnDrag.overIndex === columnIndex && (
                   <KanbanColumnDropGutter
-                    active={
-                      !!columnDrag.draggingColumnId &&
-                      columnDrag.overIndex === columnIndex
-                    }
+                    active
                     onDragOver={(e) => handleColumnDragOver(e, columnIndex)}
                     onDrop={(e) => handleColumnDrop(e, columnIndex)}
                   />
@@ -1812,12 +1817,11 @@ function KanbanPage() {
                 </div>
               </React.Fragment>
             ))}
-            {!boardReadOnly && filteredColumns.length > 0 && (
+            {!boardReadOnly &&
+              columnDrag.draggingColumnId &&
+              columnDrag.overIndex === filteredColumns.length && (
               <KanbanColumnDropGutter
-                active={
-                  !!columnDrag.draggingColumnId &&
-                  columnDrag.overIndex === filteredColumns.length
-                }
+                active
                 onDragOver={(e) => handleColumnDragOver(e, filteredColumns.length)}
                 onDrop={(e) => handleColumnDrop(e, filteredColumns.length)}
               />

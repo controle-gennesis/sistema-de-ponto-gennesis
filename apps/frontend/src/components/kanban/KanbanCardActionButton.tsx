@@ -9,6 +9,8 @@ interface KanbanCardActionButtonProps {
   onClick?: () => void;
   active?: boolean;
   disabled?: boolean;
+  className?: string;
+  title?: string;
 }
 
 export function KanbanCardActionButton({
@@ -17,14 +19,18 @@ export function KanbanCardActionButton({
   onClick,
   active,
   disabled,
+  className,
+  title,
 }: KanbanCardActionButtonProps) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       disabled={disabled}
       className={clsx(
         'inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
+        className,
         disabled && 'opacity-50 cursor-not-allowed',
         active
           ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
