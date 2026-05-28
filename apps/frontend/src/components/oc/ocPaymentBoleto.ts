@@ -224,6 +224,14 @@ export type OrderProofValidationPick = OrderBoletoPhasePick & {
  * Envio para validação do comprovante: aceita comprovante geral da OC ou,
  * em boleto parcelado com todas as parcelas pagas, o comprovante já anexado na última parcela.
  */
+export function canSubmitProofValidationWithFinancialEntry(
+  o: OrderProofValidationPick,
+  hasFinancialControlEntry: boolean
+): boolean {
+  if (!hasFinancialControlEntry) return false;
+  return canSubmitBoletoToProofValidation(o);
+}
+
 export function canSubmitBoletoToProofValidation(o: OrderProofValidationPick): boolean {
   if ((o.paymentProofUrl || '').trim()) return true;
   if (o.paymentType !== 'BOLETO') return false;

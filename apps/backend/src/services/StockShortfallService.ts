@@ -44,6 +44,33 @@ function resolveConstructionMaterialForEngineering(
   return null;
 }
 
+function parseMovementSplitFromNotes(notes: string | null | undefined): 'TOTAL' | 'PARCIAL' | '' {
+  if (!notes) return '';
+  const raw = notes.match(/Tipo:\s*(TOTAL|PARCIAL)/i)?.[1]?.toUpperCase() ?? '';
+  return raw === 'TOTAL' || raw === 'PARCIAL' ? raw : '';
+}
+
+export type StockReceiptSummaryLine = {
+  materialLabel: string;
+  ordered: number;
+  received: number;
+  gap: number;
+  unit: string;
+};
+
+export type StockReceiptSummaryBatch = {
+  createdAt: string;
+  split: 'TOTAL' | 'PARCIAL' | '';
+  userName: string;
+  items: Array<{ materialName: string; quantity: number; unit: string }>;
+};
+
+export type StockReceiptSummary = {
+  hasReceipts: boolean;
+  lines: StockReceiptSummaryLine[];
+  batches: StockReceiptSummaryBatch[];
+};
+
 export class StockShortfallService {
   private lastRebuildAt = 0;
   private static readonly REBUILD_THROTTLE_MS = 30_000;
@@ -266,6 +293,112 @@ export class StockShortfallService {
     }
   }
 
+  /**
+   * Resumo de entradas de estoque vinculadas à OC (por Nº OC nas observações da movimentação).
+   */
+  async getReceiptSummaryForOrderNumber(orderNumber: string): Promise<StockReceiptSummary> {
+    const trimmed = orderNumber.trim();
+    const empty: StockReceiptSummary = { hasReceipts: false, lines: [], batches: [] };
+    if (!trimmed) return empty;
+
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { orderNumber: trimmed },
+      include: { items: { include: { material: true } } }
+    });
+    if (!po) return empty;
+
+    const movements = await prisma.stockMovement.findMany({
+      where: {
+        notes: { contains: trimmed, mode: 'insensitive' }
+      },
+      include: {
+        material: { select: { id: true, name: true, unit: true } },
+        user: { select: { name: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500
+    });
+
+    const forOc = movements.filter((m) => movementNotesMatchOc(m.notes, trimmed));
+    const inMovements = forOc.filter((m) => m.type === 'IN');
+    if (inMovements.length === 0) {
+      return {
+        hasReceipts: false,
+        lines: po.items.map((item) => {
+          const eng = item.material;
+          const label = (eng?.name || eng?.description || '').trim() || '—';
+          const ordered = Number(item.quantity);
+          return {
+            materialLabel: label,
+            ordered: Number.isFinite(ordered) ? ordered : 0,
+            received: 0,
+            gap: Number.isFinite(ordered) ? Math.max(0, ordered) : 0,
+            unit: item.unit || '—'
+          };
+        }),
+        batches: []
+      };
+    }
+
+    const sumByConstructionMaterial = new Map<string, number>();
+    for (const m of inMovements) {
+      sumByConstructionMaterial.set(
+        m.materialId,
+        (sumByConstructionMaterial.get(m.materialId) || 0) + Number(m.quantity)
+      );
+    }
+
+    const constructionMaterials = await prisma.constructionMaterial.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, unit: true }
+    });
+    const cmByNormName = new Map<string, { id: string; unit: string }>();
+    for (const cm of constructionMaterials) {
+      cmByNormName.set(normalizeMaterialName(cm.name), { id: cm.id, unit: cm.unit });
+    }
+
+    const lines: StockReceiptSummaryLine[] = [];
+    for (const item of po.items) {
+      const eng = item.material;
+      const label = (eng?.name || eng?.description || '').trim() || '—';
+      const ordered = Number(item.quantity);
+      const cm = cmByNormName.get(normalizeMaterialName(label));
+      const received = cm ? sumByConstructionMaterial.get(cm.id) || 0 : 0;
+      const gap = Math.max(0, Math.round(((Number.isFinite(ordered) ? ordered : 0) - received) * 1000) / 1000);
+      lines.push({
+        materialLabel: label,
+        ordered: Number.isFinite(ordered) ? ordered : 0,
+        received,
+        gap,
+        unit: cm?.unit || item.unit || '—'
+      });
+    }
+
+    const batchMap = new Map<string, StockReceiptSummaryBatch>();
+    for (const m of inMovements) {
+      const key = `${m.notes || ''}::${m.createdAt.toISOString()}`;
+      let batch = batchMap.get(key);
+      if (!batch) {
+        batch = {
+          createdAt: m.createdAt.toISOString(),
+          split: parseMovementSplitFromNotes(m.notes),
+          userName: m.user?.name || '—',
+          items: []
+        };
+        batchMap.set(key, batch);
+      }
+      batch.items.push({
+        materialName: m.material.name,
+        quantity: Number(m.quantity),
+        unit: m.material.unit
+      });
+    }
+
+    const batches = Array.from(batchMap.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    return { hasReceipts: true, lines, batches };
   /** Quantidade de furos abertos (com recálculo leve e limitado por throttle). */
   async countOpenPending(): Promise<number> {
     const now = Date.now();

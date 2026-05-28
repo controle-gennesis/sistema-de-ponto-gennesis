@@ -21,8 +21,11 @@ import {
   Search,
   Filter,
   RotateCcw,
-  MoreVertical
+  MoreVertical,
+  CircleDollarSign
 } from 'lucide-react';
+import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
+import { buildFormFromPurchaseOrder } from '@/components/financeiro/financialControlEntry';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
@@ -41,6 +44,7 @@ import {
   canSendCurrentBoletoToPayment,
   canAttachComprovanteForBoletoOrder,
   canSubmitBoletoToProofValidation,
+  canSubmitProofValidationWithFinancialEntry,
   lastPaidInstallmentProofUrl,
   hasAwaitingInstallmentPayment,
   awaitingBoletoInstallmentHasProof,
@@ -72,6 +76,7 @@ export {
   canSendCurrentBoletoToPayment,
   canAttachComprovanteForBoletoOrder,
   canSubmitBoletoToProofValidation,
+  canSubmitProofValidationWithFinancialEntry,
   lastPaidInstallmentProofUrl,
   hasAwaitingInstallmentPayment,
   awaitingBoletoInstallmentHasProof,
@@ -177,6 +182,22 @@ export interface PurchaseOrder {
       sinapiCode?: string | null;
     };
   }>;
+  stockReceipt?: {
+    hasReceipts: boolean;
+    lines: Array<{
+      materialLabel: string;
+      ordered: number;
+      received: number;
+      gap: number;
+      unit: string;
+    }>;
+    batches: Array<{
+      createdAt: string;
+      split: 'TOTAL' | 'PARCIAL' | '';
+      userName: string;
+      items: Array<{ materialName: string; quantity: number; unit: string }>;
+    }>;
+  };
 }
 
 interface StockMovementForOcTag {
@@ -738,6 +759,10 @@ export function OcPurchaseOrdersPanel({
   const [orderDetailLoadingId, setOrderDetailLoadingId] = useState<string | null>(null);
   const [cnabSelectedIds, setCnabSelectedIds] = useState<Set<string>>(() => new Set());
   const [cnabGenerating, setCnabGenerating] = useState(false);
+  const [ocActionMenu, setOcActionMenu] = useState<{ orderId: string; top: number; left: number } | null>(
+    null
+  );
+  const [financialEntryOrder, setFinancialEntryOrder] = useState<PurchaseOrder | null>(null);
   const [ocActionMenu, setOcActionMenu] = useState<
     ({ orderId: string } & OcActionMenuCoords) | null
   >(null);
@@ -863,6 +888,18 @@ export function OcPurchaseOrdersPanel({
       const res = await api.get('/stock/movements', { params: { limit: 1000 } });
       return res.data;
     }
+  });
+
+  const { data: hasFinancialControlEntry = false, isFetching: financialEntryCheckLoading } = useQuery({
+    queryKey: ['financial-control-has-entry', selectedOrder?.orderNumber],
+    queryFn: async () => {
+      const oc = selectedOrder!.orderNumber.trim();
+      const res = await api.get(`/financial-control/check-by-oc/${encodeURIComponent(oc)}`);
+      return res.data?.data?.hasEntry === true;
+    },
+    enabled:
+      !!selectedOrder?.orderNumber?.trim() &&
+      (selectedOrder.status === 'APPROVED' || selectedOrder.status === 'PENDING_PROOF_CORRECTION')
   });
 
   const approveMutation = useMutation({
@@ -1667,6 +1704,11 @@ export function OcPurchaseOrdersPanel({
   const orderForActionMenu = ocActionMenu
     ? displayedOrders.find((o) => o.id === ocActionMenu.orderId)
     : undefined;
+
+  const financialEntryInitialValues = useMemo(
+    () => (financialEntryOrder ? buildFormFromPurchaseOrder(financialEntryOrder) : undefined),
+    [financialEntryOrder]
+  );
 
   const listHeaderToolbar = showHeaderToolbar ? (
       <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -3273,6 +3315,94 @@ export function OcPurchaseOrdersPanel({
                   </p>
                 )}
               </div>
+              <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 space-y-3">
+                <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
+                  Recebimento no estoque
+                </p>
+                {selectedOrder.stockReceipt?.hasReceipts ? (
+                  <>
+                    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600">
+                      <table className="w-full text-xs sm:text-sm">
+                        <thead className="bg-gray-50 dark:bg-gray-700/50">
+                          <tr className="text-left">
+                            <th className="p-2 font-medium text-gray-700 dark:text-gray-300">Material</th>
+                            <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">
+                              Pedido
+                            </th>
+                            <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">
+                              Recebido
+                            </th>
+                            <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">
+                              Falta
+                            </th>
+                            <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">
+                              Unidade de medida
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                          {(selectedOrder.stockReceipt.lines || []).map((line, idx) => (
+                            <tr key={`${line.materialLabel}-${idx}`} className="text-gray-600 dark:text-gray-400">
+                              <td className="p-2 align-top max-w-[200px] sm:max-w-none">{line.materialLabel}</td>
+                              <td className="p-2 text-right whitespace-nowrap align-top">
+                                {line.ordered.toLocaleString('pt-BR')}
+                              </td>
+                              <td className="p-2 text-right whitespace-nowrap align-top">
+                                {line.received.toLocaleString('pt-BR')}
+                              </td>
+                              <td
+                                className={`p-2 text-right whitespace-nowrap align-top font-semibold ${
+                                  line.gap > 0
+                                    ? 'text-red-600 dark:text-red-400'
+                                    : 'text-gray-700 dark:text-gray-300'
+                                }`}
+                              >
+                                {line.gap.toLocaleString('pt-BR')}
+                              </td>
+                              <td className="p-2 text-right whitespace-nowrap align-top">{line.unit}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {(selectedOrder.stockReceipt.batches || []).length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Histórico de entradas</p>
+                        {selectedOrder.stockReceipt.batches.map((batch, batchIdx) => (
+                          <div
+                            key={`${batch.createdAt}-${batchIdx}`}
+                            className="rounded-md border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/40 px-3 py-2 text-xs sm:text-sm"
+                          >
+                            <p className="text-gray-700 dark:text-gray-300">
+                              <span className="font-medium">Entrada</span> em{' '}
+                              {new Date(batch.createdAt).toLocaleString('pt-BR')}
+                              {batch.split ? (
+                                <span className="ml-1 text-gray-500 dark:text-gray-400">({batch.split})</span>
+                              ) : null}
+                              <span className="text-gray-500 dark:text-gray-400"> — {batch.userName}</span>
+                            </p>
+                            <ul className="mt-1.5 space-y-0.5 text-gray-600 dark:text-gray-400">
+                              {batch.items.map((item, itemIdx) => (
+                                <li key={`${item.materialName}-${itemIdx}`}>
+                                  {item.materialName}:{' '}
+                                  <span className="font-medium text-gray-800 dark:text-gray-200">
+                                    {item.quantity.toLocaleString('pt-BR')}
+                                  </span>{' '}
+                                  {item.unit}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Nenhum recebimento registrado no estoque para esta OC.
+                  </p>
+                )}
+              </div>
               {selectedOrderInFinancialLaunchPhase && (
                 <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/25 px-3 py-3 space-y-3">
                   <p className="text-xs font-semibold text-amber-900 dark:text-amber-200 uppercase tracking-wide">
@@ -3645,11 +3775,23 @@ export function OcPurchaseOrdersPanel({
                           {attachPaymentProofMutation.isPending ? 'Enviando…' : 'Anexar / substituir comprovante'}
                         </button>
                       </div>
+                      {!financialEntryCheckLoading && !hasFinancialControlEntry && (
+                        <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-2 py-1.5">
+                          Para enviar o comprovante para validação, registre primeiro o lançamento no Controle
+                          Financeiro (menu ⋮ da OC → Fazer lançamento).
+                        </p>
+                      )}
                       <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
                         <button
                           type="button"
                           disabled={
                             submitProofValidationMutation.isPending ||
+                            financialEntryCheckLoading ||
+                            !canSubmitProofValidationWithFinancialEntry(
+                              selectedOrder,
+                              hasFinancialControlEntry
+                            ) ||
+                            !canAttachComprovanteForBoletoOrder(selectedOrder)
                             !canSubmitBoletoToProofValidation(selectedOrder) ||
                             !canAttachComprovanteForBoletoOrder(selectedOrder) ||
                             !hasFinancialEntryForOc
@@ -4108,6 +4250,21 @@ export function OcPurchaseOrdersPanel({
                 )}
                 <span>Ver detalhes</span>
               </button>
+              {orderForActionMenu.status === 'APPROVED' && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOcActionMenu(null);
+                    setFinancialEntryOrder(orderForActionMenu);
+                  }}
+                  className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                >
+                  <CircleDollarSign className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>Fazer lançamento</span>
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -4231,6 +4388,12 @@ export function OcPurchaseOrdersPanel({
           </>,
           document.body
         )}
+
+      <FinancialControlEntryModal
+        isOpen={!!financialEntryOrder}
+        onClose={() => setFinancialEntryOrder(null)}
+        initialValues={financialEntryInitialValues}
+      />
     </>
   );
 }
