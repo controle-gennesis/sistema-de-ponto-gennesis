@@ -20,8 +20,7 @@ import {
   Eye,
   MoreVertical,
   Search,
-  X,
-  Eye
+  X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -64,6 +63,8 @@ interface GroupedStockBalance {
     costCenter?: { id: string; code: string; name: string } | null;
     balance: number;
   }>;
+}
+
 interface MaterialBalanceGroup {
   material: Material;
   lines: Array<{ costCenter: StockBalance['costCenter']; balance: number }>;
@@ -649,14 +650,6 @@ export default function EstoquePage() {
   const paginatedMovements = filteredMovements.slice(historyStartIndex, historyEndIndex);
   const historyStartItem = historyTotal === 0 ? 0 : historyStartIndex + 1;
   const historyEndItem = Math.min(historyEndIndex, historyTotal);
-
-  const balanceTotal = balances.length;
-  const balanceTotalPages = Math.max(1, Math.ceil(balanceTotal / BALANCE_ITEMS_PER_PAGE));
-  const balanceStartIndex = (balanceCurrentPage - 1) * BALANCE_ITEMS_PER_PAGE;
-  const balanceEndIndex = balanceStartIndex + BALANCE_ITEMS_PER_PAGE;
-  const paginatedBalances = balances.slice(balanceStartIndex, balanceEndIndex);
-  const balanceStartItem = balanceTotal === 0 ? 0 : balanceStartIndex + 1;
-  const balanceEndItem = Math.min(balanceEndIndex, balanceTotal);
 
   useEffect(() => {
     setBalanceCurrentPage(1);

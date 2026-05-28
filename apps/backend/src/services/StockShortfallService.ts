@@ -399,6 +399,8 @@ export class StockShortfallService {
     );
 
     return { hasReceipts: true, lines, batches };
+  }
+
   /** Quantidade de furos abertos (com recálculo leve e limitado por throttle). */
   async countOpenPending(): Promise<number> {
     const now = Date.now();

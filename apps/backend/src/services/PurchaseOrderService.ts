@@ -613,9 +613,7 @@ export class PurchaseOrderService {
       include: purchaseOrderIncludeDetail
     });
     if (!order) return null;
-    const [withPlan] = await enrichOrdersParcelPlans([order]);
-    const stockReceipt = await stockShortfallService.getReceiptSummaryForOrderNumber(withPlan.orderNumber);
-    return { ...withPlan, stockReceipt };
+
     try {
       await this.syncBoletoInstallmentsFromStockReceipt(order.orderNumber);
     } catch (err) {
@@ -631,13 +629,16 @@ export class PurchaseOrderService {
     } catch (err) {
       console.error('[PurchaseOrder] syncInstallmentProofsFromOrderPaymentProof on getById', order.orderNumber, err);
     }
+
     const refreshed = await prisma.purchaseOrder.findUnique({
       where: { id },
       include: purchaseOrderIncludeDetail
     });
     if (!refreshed) return null;
+
     const [withPlan] = await enrichOrdersParcelPlans([refreshed]);
-    return withPlan;
+    const stockReceipt = await stockShortfallService.getReceiptSummaryForOrderNumber(withPlan.orderNumber);
+    return { ...withPlan, stockReceipt };
   }
 
   async updateStatus(

@@ -759,9 +759,6 @@ export function OcPurchaseOrdersPanel({
   const [orderDetailLoadingId, setOrderDetailLoadingId] = useState<string | null>(null);
   const [cnabSelectedIds, setCnabSelectedIds] = useState<Set<string>>(() => new Set());
   const [cnabGenerating, setCnabGenerating] = useState(false);
-  const [ocActionMenu, setOcActionMenu] = useState<{ orderId: string; top: number; left: number } | null>(
-    null
-  );
   const [financialEntryOrder, setFinancialEntryOrder] = useState<PurchaseOrder | null>(null);
   const [ocActionMenu, setOcActionMenu] = useState<
     ({ orderId: string } & OcActionMenuCoords) | null
@@ -3790,11 +3787,7 @@ export function OcPurchaseOrdersPanel({
                             !canSubmitProofValidationWithFinancialEntry(
                               selectedOrder,
                               hasFinancialControlEntry
-                            ) ||
-                            !canAttachComprovanteForBoletoOrder(selectedOrder)
-                            !canSubmitBoletoToProofValidation(selectedOrder) ||
-                            !canAttachComprovanteForBoletoOrder(selectedOrder) ||
-                            !hasFinancialEntryForOc
+                            )
                           }
                           onClick={() => submitProofValidationMutation.mutate(selectedOrder.id)}
                           className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
