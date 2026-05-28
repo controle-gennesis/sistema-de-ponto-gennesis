@@ -95,29 +95,45 @@ function moveCardInBoardCache(
   cardId: string,
   fromColumnId: string,
   toColumnId: string,
+  targetIndex?: number,
 ): KanbanBoard | undefined {
   if (!board) return board;
 
-  let movedCard: KanbanCard | undefined;
-  const columnsWithoutCard = board.columns.map((col) => {
-    if (col.id !== fromColumnId) return col;
-    const cards = col.cards.filter((card) => {
-      if (card.id === cardId) {
-        movedCard = card;
-        return false;
-      }
-      return true;
-    });
-    return { ...col, cards };
-  });
+  const fromColumn = board.columns.find((col) => col.id === fromColumnId);
+  const toColumn = board.columns.find((col) => col.id === toColumnId);
+  if (!fromColumn || !toColumn) return board;
 
-  if (!movedCard) return board;
+  const sourceIndex = fromColumn.cards.findIndex((card) => card.id === cardId);
+  if (sourceIndex < 0) return board;
+
+  const movedCard = fromColumn.cards[sourceIndex];
+  const fromCards = fromColumn.cards.filter((card) => card.id !== cardId);
+
+  let insertIndex = Math.max(0, Math.min(targetIndex ?? toColumn.cards.length, toColumn.cards.length));
+  if (fromColumnId === toColumnId) {
+    // Ao mover para baixo na mesma coluna, o índice alvo chega com o card ainda presente.
+    if (insertIndex > sourceIndex) insertIndex -= 1;
+    insertIndex = Math.max(0, Math.min(insertIndex, fromCards.length));
+  }
+
+  const toCardsWithoutMoved =
+    fromColumnId === toColumnId ? fromCards : toColumn.cards.filter((card) => card.id !== cardId);
+  const toCards = [
+    ...toCardsWithoutMoved.slice(0, insertIndex),
+    movedCard,
+    ...toCardsWithoutMoved.slice(insertIndex),
+  ];
 
   return {
     ...board,
-    columns: columnsWithoutCard.map((col) =>
-      col.id === toColumnId ? { ...col, cards: [...col.cards, movedCard!] } : col,
-    ),
+    columns: board.columns.map((col) => {
+      if (fromColumnId === toColumnId && col.id === fromColumnId) {
+        return { ...col, cards: toCards };
+      }
+      if (col.id === fromColumnId) return { ...col, cards: fromCards };
+      if (col.id === toColumnId) return { ...col, cards: toCards };
+      return col;
+    }),
   };
 }
 
@@ -445,6 +461,44 @@ function KanbanCardItem({
   );
 }
 
+function KanbanDropGutter({
+  active,
+  readOnly,
+  onDragOver,
+  onDrop,
+}: {
+  active: boolean;
+  readOnly?: boolean;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+}) {
+  if (readOnly) return <div className="h-0 shrink-0" aria-hidden />;
+
+  return (
+    <div
+      className="relative h-3 shrink-0"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDragOver(e);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDrop(e);
+      }}
+    >
+      <div
+        className={clsx(
+          'pointer-events-none absolute inset-x-3 top-1/2 h-px -translate-y-1/2 rounded-full transition-opacity',
+          active && 'opacity-100 bg-red-500/90',
+          !active && 'opacity-0',
+        )}
+      />
+    </div>
+  );
+}
+
 // ─── Column Component ─────────────────────────────────────────────────────────
 
 interface KanbanColumnProps {
@@ -479,6 +533,7 @@ function KanbanColumnComponent({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const isTarget = dragState.overColumnId === column.id;
+  const overIndex = isTarget ? dragState.overIndex : null;
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -497,8 +552,8 @@ function KanbanColumnComponent({
           ? 'ring-2 ring-red-400/70 ring-offset-2 dark:ring-red-500/50 dark:ring-offset-gray-900'
           : '',
       )}
-      onDragOver={readOnly ? undefined : (e) => onDragOver(e, column.id)}
-      onDrop={readOnly ? undefined : (e) => onDrop(e, column.id)}
+      onDragOver={readOnly ? undefined : (e) => onDragOver(e, column.id, column.cards.length)}
+      onDrop={readOnly ? undefined : (e) => onDrop(e, column.id, column.cards.length)}
     >
       <div className="flex items-center justify-between px-4 py-4">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -559,20 +614,69 @@ function KanbanColumnComponent({
         </div>
       </div>
 
-      <div className="px-3 pb-4 flex flex-col gap-3 min-h-[120px]">
-        {column.cards.map((card) => (
-          <KanbanCardItem
-            key={card.id}
-            card={card}
-            columnId={column.id}
-            readOnly={readOnly}
-            onEdit={onEditCard}
-            onDelete={onDeleteCard}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            isDragging={dragState.draggingCardId === card.id}
-          />
+      <div className="px-3 pb-4 flex flex-col min-h-[120px]">
+        {column.cards.map((card, index) => (
+          <React.Fragment key={card.id}>
+            <KanbanDropGutter
+              readOnly={readOnly}
+              active={
+                !!dragState.draggingCardId &&
+                overIndex === index &&
+                dragState.overColumnId === column.id
+              }
+              onDragOver={(e) => onDragOver(e, column.id, index)}
+              onDrop={(e) => onDrop(e, column.id, index)}
+            />
+            <div
+              className="relative"
+              onDragOver={
+                readOnly
+                  ? undefined
+                  : (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const middleY = rect.top + rect.height / 2;
+                      const dropIndex = e.clientY < middleY ? index : index + 1;
+                      onDragOver(e, column.id, dropIndex);
+                    }
+              }
+              onDrop={
+                readOnly
+                  ? undefined
+                  : (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const middleY = rect.top + rect.height / 2;
+                      const dropIndex = e.clientY < middleY ? index : index + 1;
+                      onDrop(e, column.id, dropIndex);
+                    }
+              }
+            >
+              <KanbanCardItem
+                card={card}
+                columnId={column.id}
+                readOnly={readOnly}
+                onEdit={onEditCard}
+                onDelete={onDeleteCard}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                isDragging={dragState.draggingCardId === card.id}
+              />
+            </div>
+          </React.Fragment>
         ))}
+        <KanbanDropGutter
+          readOnly={readOnly}
+          active={
+            !!dragState.draggingCardId &&
+            overIndex === column.cards.length &&
+            dragState.overColumnId === column.id
+          }
+          onDragOver={(e) => onDragOver(e, column.id, column.cards.length)}
+          onDrop={(e) => onDrop(e, column.id, column.cards.length)}
+        />
         {column.cards.length === 0 && (
           <div
             className={clsx(
@@ -708,6 +812,7 @@ interface DragState {
   draggingCardId: string | null;
   fromColumnId: string | null;
   overColumnId: string | null;
+  overIndex: number | null;
 }
 
 // ─── Stats Bar ────────────────────────────────────────────────────────────────
@@ -926,7 +1031,12 @@ function KanbanPage() {
   const [colModal, setColModal] = useState<{ mode: 'create' | 'edit'; column?: KanbanColumn } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'card'; cardId: string; columnId: string } | { type: 'column'; columnId: string } | null>(null);
 
-  const [dragState, setDragState] = useState<DragState>({ draggingCardId: null, fromColumnId: null, overColumnId: null });
+  const [dragState, setDragState] = useState<DragState>({
+    draggingCardId: null,
+    fromColumnId: null,
+    overColumnId: null,
+    overIndex: null,
+  });
   const dragRef = useRef(dragState);
   useEffect(() => {
     dragRef.current = dragState;
@@ -948,33 +1058,47 @@ function KanbanPage() {
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
     e.dataTransfer.effectAllowed = 'move';
-    setDragState({ draggingCardId: cardId, fromColumnId: columnId, overColumnId: null });
+    setDragState({ draggingCardId: cardId, fromColumnId: columnId, overColumnId: null, overIndex: null });
   }, []);
 
   const handleDragEnd = useCallback(() => {
-    setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null });
+    setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null, overIndex: null });
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent, columnId: string) => {
+  const handleDragOver = useCallback((e: React.DragEvent, columnId: string, index?: number) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    setDragState((prev) => (prev.overColumnId === columnId ? prev : { ...prev, overColumnId: columnId }));
+    setDragState((prev) =>
+      prev.overColumnId === columnId && prev.overIndex === (index ?? null)
+        ? prev
+        : { ...prev, overColumnId: columnId, overIndex: index ?? null },
+    );
   }, []);
 
   const handleDrop = useCallback(
-    async (e: React.DragEvent, targetColumnId: string) => {
+    async (e: React.DragEvent, targetColumnId: string, targetIndex?: number) => {
       e.preventDefault();
-      const { draggingCardId, fromColumnId } = dragRef.current;
-      setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null });
-      if (!draggingCardId || !fromColumnId || fromColumnId === targetColumnId) return;
+      const { draggingCardId, fromColumnId, overIndex } = dragRef.current;
+      setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null, overIndex: null });
+      if (!draggingCardId || !fromColumnId) return;
 
       const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+      const desiredPosition = targetIndex ?? overIndex ?? undefined;
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
-        moveCardInBoardCache(old, draggingCardId, fromColumnId, targetColumnId),
+        moveCardInBoardCache(
+          old,
+          draggingCardId,
+          fromColumnId,
+          targetColumnId,
+          desiredPosition,
+        ),
       );
 
       try {
-        await updateKanbanCard(draggingCardId, { columnId: targetColumnId });
+        await updateKanbanCard(draggingCardId, {
+          columnId: targetColumnId,
+          position: desiredPosition,
+        });
         await refreshBoard();
         toast.success('Card movido!', { duration: 1500 });
       } catch {

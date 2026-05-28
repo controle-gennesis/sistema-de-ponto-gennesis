@@ -828,38 +828,124 @@ export class KanbanService {
       data.completedTasks ?? existing.completedTasks,
       totalTasks,
     );
+    const targetColumnId = data.columnId ?? existing.columnId;
+    const requestedPosition =
+      data.position != null && Number.isFinite(data.position)
+        ? Math.max(0, Math.trunc(data.position))
+        : undefined;
+    const hasOrderChange =
+      targetColumnId !== existing.columnId || requestedPosition !== undefined;
 
-    if (data.columnId && data.columnId !== existing.columnId) {
-      const maxPos = await prisma.kanbanCard.aggregate({
-        where: { columnId: data.columnId },
-        _max: { position: true },
+    const baseUpdateData = {
+      columnId: data.columnId,
+      title: data.title?.trim(),
+      description: data.description?.trim(),
+      priority: data.priority ? priorityFromClient(data.priority) : undefined,
+      startDate: parseDateInput(data.startDate),
+      endDate: parseDateInput(data.endDate),
+      labels: labelsToJson(data.labels),
+      assigneeUserId: data.assigneeUserId,
+      assigneeName: assigneeName !== undefined ? assigneeName : undefined,
+      totalTasks,
+      completedTasks,
+      checklistEnabled: data.checklistEnabled,
+      attachmentsEnabled: data.attachmentsEnabled,
+      ...(completedAt !== undefined ? { completedAt } : {}),
+      ...(data.workHours !== undefined
+        ? { workHours: data.workHours == null ? null : data.workHours }
+        : {}),
+    };
+
+    if (!hasOrderChange) {
+      const card = await prisma.kanbanCard.update({
+        where: { id },
+        data: baseUpdateData,
+        include: cardInclude,
       });
-      data.position = (maxPos._max.position ?? -1) + 1;
+      return formatCard(card);
     }
 
-    const card = await prisma.kanbanCard.update({
-      where: { id },
-      data: {
-        columnId: data.columnId,
-        title: data.title?.trim(),
-        description: data.description?.trim(),
-        priority: data.priority ? priorityFromClient(data.priority) : undefined,
-        startDate: parseDateInput(data.startDate),
-        endDate: parseDateInput(data.endDate),
-        labels: labelsToJson(data.labels),
-        assigneeUserId: data.assigneeUserId,
-        assigneeName: assigneeName !== undefined ? assigneeName : undefined,
-        totalTasks,
-        completedTasks,
-        checklistEnabled: data.checklistEnabled,
-        attachmentsEnabled: data.attachmentsEnabled,
-        position: data.position,
-        ...(completedAt !== undefined ? { completedAt } : {}),
-        ...(data.workHours !== undefined
-          ? { workHours: data.workHours == null ? null : data.workHours }
-          : {}),
-      },
-      include: cardInclude,
+    const card = await prisma.$transaction(async (tx) => {
+      if (targetColumnId !== existing.columnId) {
+        await tx.kanbanCard.updateMany({
+          where: {
+            columnId: existing.columnId,
+            position: { gt: existing.position },
+          },
+          data: { position: { decrement: 1 } },
+        });
+
+        const targetCount = await tx.kanbanCard.count({
+          where: { columnId: targetColumnId },
+        });
+        const insertAt = Math.min(
+          Math.max(requestedPosition ?? targetCount, 0),
+          targetCount,
+        );
+
+        await tx.kanbanCard.updateMany({
+          where: {
+            columnId: targetColumnId,
+            position: { gte: insertAt },
+          },
+          data: { position: { increment: 1 } },
+        });
+
+        return tx.kanbanCard.update({
+          where: { id },
+          data: {
+            ...baseUpdateData,
+            columnId: targetColumnId,
+            position: insertAt,
+          },
+          include: cardInclude,
+        });
+      }
+
+      const cardsInColumn = await tx.kanbanCard.count({
+        where: {
+          columnId: existing.columnId,
+          id: { not: id },
+        },
+      });
+      const requestedInCurrentColumn = Math.max(
+        requestedPosition ?? existing.position,
+        0,
+      );
+      const normalizedRequested =
+        requestedInCurrentColumn > existing.position
+          ? requestedInCurrentColumn - 1
+          : requestedInCurrentColumn;
+      const insertAt = Math.min(normalizedRequested, cardsInColumn);
+
+      if (insertAt > existing.position) {
+        await tx.kanbanCard.updateMany({
+          where: {
+            columnId: existing.columnId,
+            id: { not: id },
+            position: { gt: existing.position, lte: insertAt },
+          },
+          data: { position: { decrement: 1 } },
+        });
+      } else if (insertAt < existing.position) {
+        await tx.kanbanCard.updateMany({
+          where: {
+            columnId: existing.columnId,
+            id: { not: id },
+            position: { gte: insertAt, lt: existing.position },
+          },
+          data: { position: { increment: 1 } },
+        });
+      }
+
+      return tx.kanbanCard.update({
+        where: { id },
+        data: {
+          ...baseUpdateData,
+          position: insertAt,
+        },
+        include: cardInclude,
+      });
     });
 
     return formatCard(card);
