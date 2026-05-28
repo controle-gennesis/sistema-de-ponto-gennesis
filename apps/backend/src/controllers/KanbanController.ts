@@ -94,12 +94,13 @@ export class KanbanController {
       const userId = requireUserId(req, next);
       if (!userId) return;
       const { id } = req.params;
-      const { title, color, cardLimit } = req.body;
+      const { title, color, cardLimit, position } = req.body;
 
       const column = await kanbanService.updateColumn(userId, id, {
         title: title?.trim(),
         color: color?.trim(),
         cardLimit: cardLimit === undefined ? undefined : cardLimit == null ? null : Number(cardLimit),
+        position: position !== undefined ? Number(position) : undefined,
       });
 
       res.json({ success: true, data: column });

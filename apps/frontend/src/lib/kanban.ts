@@ -151,7 +151,7 @@ export async function createKanbanColumn(payload: {
 
 export async function updateKanbanColumn(
   id: string,
-  payload: { title?: string; color?: string; cardLimit?: number | null },
+  payload: { title?: string; color?: string; cardLimit?: number | null; position?: number },
 ) {
   const res = await api.patch(`/kanban/columns/${id}`, payload);
   return res.data.data as KanbanColumn;

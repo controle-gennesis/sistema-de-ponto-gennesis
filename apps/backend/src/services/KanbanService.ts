@@ -431,6 +431,44 @@ async function seedBoardForDepartment(
 }
 
 const kanbanCardOrderBy = [{ position: 'asc' as const }, { createdAt: 'asc' as const }];
+const kanbanColumnOrderBy = [{ position: 'asc' as const }, { createdAt: 'asc' as const }];
+
+async function applyKanbanBoardColumnOrder(
+  tx: Prisma.TransactionClient,
+  orderedIds: string[],
+) {
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      tx.kanbanColumn.update({
+        where: { id },
+        data: { position: index },
+      }),
+    ),
+  );
+}
+
+async function reorderKanbanColumnInBoard(
+  tx: Prisma.TransactionClient,
+  columnId: string,
+  boardId: string,
+  insertAt: number,
+) {
+  const columns = await tx.kanbanColumn.findMany({
+    where: { boardId },
+    orderBy: kanbanColumnOrderBy,
+    select: { id: true },
+  });
+  const fromIndex = columns.findIndex((col) => col.id === columnId);
+  if (fromIndex < 0) return;
+
+  const next = columns.filter((col) => col.id !== columnId);
+  const clamped = Math.max(0, Math.min(insertAt, next.length));
+  next.splice(clamped, 0, columns[fromIndex]);
+  await applyKanbanBoardColumnOrder(
+    tx,
+    next.map((col) => col.id),
+  );
+}
 
 async function applyKanbanColumnCardOrder(
   tx: Prisma.TransactionClient,
@@ -675,20 +713,51 @@ export class KanbanService {
   async updateColumn(
     userId: string,
     id: string,
-    data: { title?: string; color?: string; cardLimit?: number | null },
+    data: { title?: string; color?: string; cardLimit?: number | null; position?: number },
   ) {
     await this.assertColumnAccess(userId, id);
-    const column = await prisma.kanbanColumn.update({
+
+    const existing = await prisma.kanbanColumn.findUnique({
       where: { id },
-      data: {
-        title: data.title,
-        color: data.color,
-        cardLimit: data.cardLimit,
-      },
+      select: { boardId: true },
+    });
+    if (!existing) throw new Error(KANBAN_FORBIDDEN);
+
+    const hasMeta =
+      data.title !== undefined ||
+      data.color !== undefined ||
+      data.cardLimit !== undefined;
+    const requestedPosition =
+      data.position != null && Number.isFinite(data.position)
+        ? Math.max(0, Math.trunc(data.position))
+        : undefined;
+    const needsReorder = requestedPosition !== undefined;
+
+    if (needsReorder || hasMeta) {
+      await prisma.$transaction(async (tx) => {
+        if (needsReorder) {
+          await reorderKanbanColumnInBoard(tx, id, existing.boardId, requestedPosition!);
+        }
+        if (hasMeta) {
+          await tx.kanbanColumn.update({
+            where: { id },
+            data: {
+              ...(data.title !== undefined ? { title: data.title } : {}),
+              ...(data.color !== undefined ? { color: data.color } : {}),
+              ...(data.cardLimit !== undefined ? { cardLimit: data.cardLimit } : {}),
+            },
+          });
+        }
+      });
+    }
+
+    const column = await prisma.kanbanColumn.findUnique({
+      where: { id },
       include: {
         cards: { orderBy: { position: 'asc' }, include: cardInclude },
       },
     });
+    if (!column) throw new Error(KANBAN_FORBIDDEN);
 
     return {
       id: column.id,
