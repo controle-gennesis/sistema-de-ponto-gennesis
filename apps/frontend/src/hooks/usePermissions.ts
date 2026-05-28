@@ -26,7 +26,8 @@ export function usePermissions() {
   } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
-      const res = await api.get('/auth/me');
+      // Evita resposta 304 para auth/me, que o Axios trata como erro.
+      const res = await api.get('/auth/me', { params: { _ts: Date.now() } });
       return res.data;
     },
     staleTime: 5 * 60 * 1000,

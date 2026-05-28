@@ -177,10 +177,9 @@ export function KanbanCardModal({
   const [draftFiles, setDraftFiles] = useState<KanbanDraftAttachment[]>([]);
   const [draftLinks, setDraftLinks] = useState<KanbanDraftLink[]>([]);
   const mainColumnRef = useRef<HTMLDivElement>(null);
-  const [commentsPanelMaxHeight, setCommentsPanelMaxHeight] = useState<number | undefined>(
-    undefined,
-  );
-
+  const descriptionSectionRef = useRef<HTMLDivElement>(null);
+  const attachmentsSectionRef = useRef<HTMLDivElement>(null);
+  const [commentsPanelHeight, setCommentsPanelHeight] = useState<number | undefined>(undefined);
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
 
@@ -562,22 +561,34 @@ export function KanbanCardModal({
   const taskTotal = isCreate ? draftTotal : (card?.totalTasks ?? 0);
 
   useLayoutEffect(() => {
-    if (!isDetail) {
-      setCommentsPanelMaxHeight(undefined);
+    if (!isDetail || showChecklistPanel) {
+      setCommentsPanelHeight(undefined);
       return;
     }
 
-    const el = mainColumnRef.current;
-    if (!el) return;
+    const mainEl = mainColumnRef.current;
+    const descriptionEl = descriptionSectionRef.current;
+    const attachmentsEl = attachmentsSectionRef.current;
+    const targetEl = hasAttachments ? attachmentsEl : descriptionEl;
+    if (!mainEl || !targetEl) return;
 
     const syncHeight = () => {
       const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
-      setCommentsPanelMaxHeight(isDesktop ? el.offsetHeight : undefined);
+      if (!isDesktop) {
+        setCommentsPanelHeight(undefined);
+        return;
+      }
+
+      const mainRect = mainEl.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+      const measured = Math.round(targetRect.bottom - mainRect.top);
+      setCommentsPanelHeight(Math.max(280, measured));
     };
 
     syncHeight();
     const observer = new ResizeObserver(syncHeight);
-    observer.observe(el);
+    observer.observe(mainEl);
+    observer.observe(targetEl);
     window.addEventListener('resize', syncHeight);
 
     return () => {
@@ -586,18 +597,16 @@ export function KanbanCardModal({
     };
   }, [
     isDetail,
+    showChecklistPanel,
     isLoading,
     card?.id,
     card?.commentsList.length,
-    checklistEnabled,
-    showChecklistPanel,
     labels.length,
     members.length,
     description,
     hasAttachments,
     startDate,
     endDate,
-    taskTotal,
   ]);
 
   const modalTitle =
@@ -762,18 +771,21 @@ export function KanbanCardModal({
         <div
           className={clsx(
             'flex flex-1 min-h-0 flex-col overflow-hidden',
-            isDetail && 'lg:flex-row lg:items-start lg:gap-0',
+            isDetail &&
+              (showChecklistPanel
+                ? 'lg:flex-row lg:min-h-0 lg:items-stretch'
+                : 'lg:flex-row lg:min-h-0 lg:items-start'),
             isCreate && 'gap-0',
             '[&_input:focus]:outline-none [&_input:focus]:ring-0 [&_input:focus-visible]:ring-0',
             '[&_textarea:focus]:outline-none [&_textarea:focus]:ring-0 [&_textarea:focus-visible]:ring-0',
             '[&_button:focus]:outline-none [&_button:focus]:ring-0 [&_button:focus-visible]:ring-0',
           )}
         >
-          {/* Coluna principal — único scroll vertical do conteúdo do card */}
+          {/* Coluna principal — scroll interno */}
           <div
             ref={mainColumnRef}
             className={clsx(
-              'flex flex-col flex-1 min-w-0 min-h-0 max-h-full overflow-y-auto overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]',
+              'flex flex-col flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden space-y-5 pr-1 [scrollbar-gutter:stable]',
               isDetail && 'lg:pr-6',
             )}
           >
@@ -916,7 +928,7 @@ export function KanbanCardModal({
               )}
             </div>
 
-            <div>
+            <div ref={descriptionSectionRef}>
               <label className={kanbanLabel}>Descrição</label>
               <textarea
                 value={description}
@@ -929,16 +941,18 @@ export function KanbanCardModal({
             </div>
 
             {isDetail && hasAttachments ? (
-              <KanbanCardAttachmentsInline
-                attachments={attachmentsList}
-                draftFiles={draftFiles}
-                draftLinks={draftLinks}
-                currentUserId={currentUserId}
-                onDraftFilesChange={setDraftFiles}
-                onDraftLinksChange={setDraftLinks}
-                onUpdated={refreshAll}
-                onAddClick={() => setShowAttachmentsModal(true)}
-              />
+              <div ref={attachmentsSectionRef}>
+                <KanbanCardAttachmentsInline
+                  attachments={attachmentsList}
+                  draftFiles={draftFiles}
+                  draftLinks={draftLinks}
+                  currentUserId={currentUserId}
+                  onDraftFilesChange={setDraftFiles}
+                  onDraftLinksChange={setDraftLinks}
+                  onUpdated={refreshAll}
+                  onAddClick={() => setShowAttachmentsModal(true)}
+                />
+              </div>
             ) : null}
 
             {showChecklistPanel && (
@@ -1102,25 +1116,25 @@ export function KanbanCardModal({
 
           {isDetail && (
           <div
-            className="w-full lg:w-[360px] shrink-0 flex flex-col min-h-0 overflow-hidden border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 lg:pl-6 pt-6 lg:pt-0"
+            className="flex w-full min-h-0 flex-1 flex-col overflow-hidden border-t border-gray-200 pt-5 dark:border-gray-700 lg:w-[360px] lg:shrink-0 lg:flex-none lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0"
             style={
-              commentsPanelMaxHeight != null
-                ? { height: commentsPanelMaxHeight, maxHeight: commentsPanelMaxHeight }
+              commentsPanelHeight != null
+                ? { height: commentsPanelHeight, maxHeight: commentsPanelHeight }
                 : undefined
             }
           >
-            <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 shrink-0">
+            <h4 className="mb-3 shrink-0 text-sm font-semibold text-gray-900 dark:text-gray-100">
               Comentários
             </h4>
 
-            <div className="flex flex-1 flex-col min-h-0">
-                <div className="mb-4 flex flex-1 min-h-0 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
                   {card?.commentsList.length === 0 ? (
-                    <p className="flex flex-1 items-center justify-center text-sm text-gray-400 text-center px-2">
+                    <p className="flex min-h-[8rem] items-center justify-center px-2 text-center text-sm text-gray-400">
                       Nenhum comentário ainda.
                     </p>
                   ) : (
-                    <div className="space-y-4">
+                    <div className="space-y-4 pb-2">
                     {card?.commentsList.map((comment) => {
                       const canDeleteComment = currentUserId === comment.author.id;
                       const commentTimeLabel = formatRelativeTime(comment.createdAt);
@@ -1182,13 +1196,13 @@ export function KanbanCardModal({
                   )}
                 </div>
 
-                <div className="shrink-0 mt-auto">
+                <div className="shrink-0 border-t border-gray-200 pt-3 dark:border-gray-700">
                   <textarea
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
                     placeholder="Escrever um comentário..."
                     rows={2}
-                    className={clsx(kanbanTextarea, 'text-sm mb-2 !min-h-0 py-2')}
+                    className={clsx(kanbanTextarea, 'mb-2 !min-h-0 py-2 text-sm')}
                   />
                   <Button
                     type="button"

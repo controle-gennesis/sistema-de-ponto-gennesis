@@ -371,9 +371,11 @@
   }
 
   /* Bloqueia scroll da página com modal aberto (sem position:fixed no body — quebra portais/dropdowns fixed) */
+  html.modal-open,
   html:has(body.modal-open),
   body.modal-open {
     overflow: hidden !important;
+    overscroll-behavior: none;
   }
 
   /* Raiz para dropdowns em portal (não intercepta cliques quando vazio) */

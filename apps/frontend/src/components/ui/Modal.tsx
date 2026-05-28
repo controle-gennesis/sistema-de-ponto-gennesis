@@ -42,11 +42,13 @@ export const Modal: React.FC<ModalProps> = ({
 
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);
+      document.documentElement.classList.add('modal-open');
       document.body.classList.add('modal-open');
     }
 
     return () => {
       document.removeEventListener('keydown', handleEscape);
+      document.documentElement.classList.remove('modal-open');
       document.body.classList.remove('modal-open');
     };
   }, [isOpen, onClose]);
@@ -62,8 +64,13 @@ export const Modal: React.FC<ModalProps> = ({
   };
 
   const modalContent = (
-    <div className={clsx('fixed inset-0', elevated ? 'z-[1100]' : 'z-[1000]')}>
-      <div className="flex min-h-screen items-center justify-center p-4">
+    <div
+      className={clsx(
+        'fixed inset-0 overflow-hidden overscroll-none',
+        elevated ? 'z-[1100]' : 'z-[1000]',
+      )}
+    >
+      <div className="flex h-full min-h-0 items-center justify-center p-4 overflow-hidden">
         {/* Overlay */}
         <div
           className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
@@ -73,7 +80,8 @@ export const Modal: React.FC<ModalProps> = ({
         {/* Modal */}
         <div
           className={clsx(
-            'relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-h-[calc(100vh-2rem)] flex flex-col',
+            'relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full flex flex-col',
+            'max-h-[calc(100vh-2rem)]',
             contentOverflowVisible && 'overflow-visible',
             sizeClasses[size]
           )}
