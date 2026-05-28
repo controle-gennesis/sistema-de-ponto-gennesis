@@ -1739,7 +1739,7 @@ function KanbanPage() {
                     title="Configurar etiquetas deste setor"
                   >
                     <Tag className="w-4 h-4" />
-                    Etiquetas do setor
+                    Etiquetas
                   </button>
                   <button
                     onClick={() => setColModal({ mode: 'create' })}
