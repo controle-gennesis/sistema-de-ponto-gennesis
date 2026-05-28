@@ -90,6 +90,27 @@ function isOverdue(dateStr: string | null): boolean {
   return new Date(date + 'T23:59:59') < new Date();
 }
 
+function resolveKanbanInsertIndex(
+  columnCards: KanbanCard[],
+  cardId: string,
+  fromColumnId: string,
+  toColumnId: string,
+  rawIndex: number,
+): number {
+  const bounded = Math.max(0, Math.min(rawIndex, columnCards.length));
+  if (fromColumnId !== toColumnId) {
+    const targetWithoutCard = columnCards.filter((card) => card.id !== cardId);
+    return Math.max(0, Math.min(bounded, targetWithoutCard.length));
+  }
+
+  const sourceIndex = columnCards.findIndex((card) => card.id === cardId);
+  if (sourceIndex < 0) return bounded;
+
+  let insertIndex = bounded;
+  if (insertIndex > sourceIndex) insertIndex -= 1;
+  return Math.max(0, Math.min(insertIndex, columnCards.length - 1));
+}
+
 function moveCardInBoardCache(
   board: KanbanBoard | undefined,
   cardId: string,
@@ -109,12 +130,13 @@ function moveCardInBoardCache(
   const movedCard = fromColumn.cards[sourceIndex];
   const fromCards = fromColumn.cards.filter((card) => card.id !== cardId);
 
-  let insertIndex = Math.max(0, Math.min(targetIndex ?? toColumn.cards.length, toColumn.cards.length));
-  if (fromColumnId === toColumnId) {
-    // Ao mover para baixo na mesma coluna, o índice alvo chega com o card ainda presente.
-    if (insertIndex > sourceIndex) insertIndex -= 1;
-    insertIndex = Math.max(0, Math.min(insertIndex, fromCards.length));
-  }
+  const insertIndex = resolveKanbanInsertIndex(
+    fromColumnId === toColumnId ? fromColumn.cards : toColumn.cards,
+    cardId,
+    fromColumnId,
+    toColumnId,
+    targetIndex ?? toColumn.cards.length,
+  );
 
   const toCardsWithoutMoved =
     fromColumnId === toColumnId ? fromCards : toColumn.cards.filter((card) => card.id !== cardId);
@@ -1082,21 +1104,37 @@ function KanbanPage() {
       setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null, overIndex: null });
       if (!draggingCardId || !fromColumnId) return;
 
+      const targetColumn = columns.find((col) => col.id === targetColumnId);
+      if (!targetColumn) return;
+
+      const rawDropIndex = targetIndex ?? overIndex ?? targetColumn.cards.length;
+      const desiredPosition = resolveKanbanInsertIndex(
+        targetColumn.cards,
+        draggingCardId,
+        fromColumnId,
+        targetColumnId,
+        rawDropIndex,
+      );
+
+      const currentIndex = targetColumn.cards.findIndex((card) => card.id === draggingCardId);
+      if (fromColumnId === targetColumnId && currentIndex === desiredPosition) {
+        return;
+      }
+
       const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
-      const desiredPosition = targetIndex ?? overIndex ?? undefined;
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
         moveCardInBoardCache(
           old,
           draggingCardId,
           fromColumnId,
           targetColumnId,
-          desiredPosition,
+          rawDropIndex,
         ),
       );
 
       try {
         await updateKanbanCard(draggingCardId, {
-          columnId: targetColumnId,
+          ...(fromColumnId !== targetColumnId ? { columnId: targetColumnId } : {}),
           position: desiredPosition,
         });
         await refreshBoard();
@@ -1110,7 +1148,7 @@ function KanbanPage() {
         toast.error('Não foi possível mover o card');
       }
     },
-    [queryClient, kanbanBoardQueryKey, refreshBoard],
+    [columns, queryClient, kanbanBoardQueryKey, refreshBoard],
   );
 
   function openCreateCard(columnId: string) {

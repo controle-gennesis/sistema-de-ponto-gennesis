@@ -1,4 +1,4 @@
-import { TaskPriority } from '@prisma/client';
+import { Prisma, TaskPriority } from '@prisma/client';
 import {
   isKanbanHiddenPickerUser,
   KANBAN_LEGACY_DEPARTMENT_KEY,
@@ -428,6 +428,75 @@ async function seedBoardForDepartment(
     },
     include: boardListInclude,
   });
+}
+
+const kanbanCardOrderBy = [{ position: 'asc' as const }, { createdAt: 'asc' as const }];
+
+async function applyKanbanColumnCardOrder(
+  tx: Prisma.TransactionClient,
+  orderedIds: string[],
+) {
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      tx.kanbanCard.update({
+        where: { id },
+        data: { position: index },
+      }),
+    ),
+  );
+}
+
+async function reorderKanbanCardInColumn(
+  tx: Prisma.TransactionClient,
+  cardId: string,
+  columnId: string,
+  insertAt: number,
+) {
+  const cards = await tx.kanbanCard.findMany({
+    where: { columnId },
+    orderBy: kanbanCardOrderBy,
+    select: { id: true },
+  });
+  const fromIndex = cards.findIndex((card) => card.id === cardId);
+  if (fromIndex < 0) return;
+
+  const next = cards.filter((card) => card.id !== cardId);
+  const clamped = Math.max(0, Math.min(insertAt, next.length));
+  next.splice(clamped, 0, cards[fromIndex]);
+  await applyKanbanColumnCardOrder(tx, next.map((card) => card.id));
+}
+
+async function moveKanbanCardToColumn(
+  tx: Prisma.TransactionClient,
+  cardId: string,
+  fromColumnId: string,
+  toColumnId: string,
+  insertAt: number,
+) {
+  const sourceCards = await tx.kanbanCard.findMany({
+    where: { columnId: fromColumnId },
+    orderBy: kanbanCardOrderBy,
+    select: { id: true },
+  });
+  await applyKanbanColumnCardOrder(
+    tx,
+    sourceCards.filter((card) => card.id !== cardId).map((card) => card.id),
+  );
+
+  await tx.kanbanCard.update({
+    where: { id: cardId },
+    data: { columnId: toColumnId },
+  });
+
+  const targetCards = await tx.kanbanCard.findMany({
+    where: { columnId: toColumnId, id: { not: cardId } },
+    orderBy: kanbanCardOrderBy,
+    select: { id: true },
+  });
+  const targetIds = targetCards.map((card) => card.id);
+  const clamped = Math.max(0, Math.min(insertAt, targetIds.length));
+  targetIds.splice(clamped, 0, cardId);
+  await applyKanbanColumnCardOrder(tx, targetIds);
 }
 
 export class KanbanService {
@@ -865,85 +934,18 @@ export class KanbanService {
       return formatCard(card);
     }
 
+    const insertAt = requestedPosition ?? 0;
+
     const card = await prisma.$transaction(async (tx) => {
       if (targetColumnId !== existing.columnId) {
-        await tx.kanbanCard.updateMany({
-          where: {
-            columnId: existing.columnId,
-            position: { gt: existing.position },
-          },
-          data: { position: { decrement: 1 } },
-        });
-
-        const targetCount = await tx.kanbanCard.count({
-          where: { columnId: targetColumnId },
-        });
-        const insertAt = Math.min(
-          Math.max(requestedPosition ?? targetCount, 0),
-          targetCount,
-        );
-
-        await tx.kanbanCard.updateMany({
-          where: {
-            columnId: targetColumnId,
-            position: { gte: insertAt },
-          },
-          data: { position: { increment: 1 } },
-        });
-
-        return tx.kanbanCard.update({
-          where: { id },
-          data: {
-            ...baseUpdateData,
-            columnId: targetColumnId,
-            position: insertAt,
-          },
-          include: cardInclude,
-        });
-      }
-
-      const cardsInColumn = await tx.kanbanCard.count({
-        where: {
-          columnId: existing.columnId,
-          id: { not: id },
-        },
-      });
-      const requestedInCurrentColumn = Math.max(
-        requestedPosition ?? existing.position,
-        0,
-      );
-      const normalizedRequested =
-        requestedInCurrentColumn > existing.position
-          ? requestedInCurrentColumn - 1
-          : requestedInCurrentColumn;
-      const insertAt = Math.min(normalizedRequested, cardsInColumn);
-
-      if (insertAt > existing.position) {
-        await tx.kanbanCard.updateMany({
-          where: {
-            columnId: existing.columnId,
-            id: { not: id },
-            position: { gt: existing.position, lte: insertAt },
-          },
-          data: { position: { decrement: 1 } },
-        });
-      } else if (insertAt < existing.position) {
-        await tx.kanbanCard.updateMany({
-          where: {
-            columnId: existing.columnId,
-            id: { not: id },
-            position: { gte: insertAt, lt: existing.position },
-          },
-          data: { position: { increment: 1 } },
-        });
+        await moveKanbanCardToColumn(tx, id, existing.columnId, targetColumnId, insertAt);
+      } else {
+        await reorderKanbanCardInColumn(tx, id, existing.columnId, insertAt);
       }
 
       return tx.kanbanCard.update({
         where: { id },
-        data: {
-          ...baseUpdateData,
-          position: insertAt,
-        },
+        data: baseUpdateData,
         include: cardInclude,
       });
     });
