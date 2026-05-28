@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -69,6 +69,7 @@ import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import {
   readSelectedModuleId,
   readSidebarCollapsed,
+  SIDEBAR_TRANSITION_CLASS,
   writeSelectedModuleId,
   writeSidebarCollapsed,
 } from '@/lib/sidebarStorage';
@@ -99,8 +100,16 @@ interface SidebarProps {
 
 export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsedState] = useState(() => readSidebarCollapsed());
   const [sidebarHydrated, setSidebarHydrated] = useState(false);
+
+  const setCollapsed = useCallback(
+    (collapsed: boolean) => {
+      setIsCollapsedState(collapsed);
+      onMenuToggle?.(collapsed);
+    },
+    [onMenuToggle]
+  );
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
     () => readSelectedModuleId() ?? 'main'
   );
@@ -757,7 +766,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   if (pathname !== prevPathnameRef.current) {
     prevPathnameRef.current = pathname;
     userPickedModuleRef.current = false;
-    if (activeModuleId && activeModuleId !== selectedModuleId) {
+    if (onHomeRoute || onRailFooterRoute) {
+      if (!isCollapsed) setCollapsed(true);
+      if (isOpen) setIsOpen(false);
+    } else if (activeModuleId && activeModuleId !== selectedModuleId) {
       setSelectedModuleId(activeModuleId);
     }
   }
@@ -780,14 +792,15 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     } else if (!onHomeRoute && onRailFooterRoute && menuItems[0]) {
       setSelectedModuleId(menuItems[0].id);
     }
-    setIsCollapsed(true);
+    setCollapsed(true);
   };
 
-  // Selecionar módulo conforme rota ativa; na home recolhe o painel e não marca módulo
+  // Selecionar módulo conforme rota ativa; na home e nos atalhos do rodapé recolhe o painel
   React.useEffect(() => {
-    if (onHomeRoute) {
-      setIsCollapsed(true);
+    if (onHomeRoute || onRailFooterRoute) {
+      setCollapsed(true);
       setIsOpen(false);
+      userPickedModuleRef.current = false;
       return;
     }
     const activeCategory = menuItems.find((category) =>
@@ -807,18 +820,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const handleSelectModule = (categoryId: string) => {
     const panelOpen = !isCollapsed || isOpen;
     if (panelOpen && displayedModuleId === categoryId) {
-      setIsCollapsed(true);
+      setCollapsed(true);
       setIsOpen(false);
       return;
     }
     userPickedModuleRef.current = true;
     setSelectedModuleId(categoryId);
-    if (isCollapsed) setIsCollapsed(false);
+    if (isCollapsed) setCollapsed(false);
   };
 
   useLayoutEffect(() => {
     const collapsed = readSidebarCollapsed();
-    setIsCollapsed(collapsed);
+    setIsCollapsedState(collapsed);
     onMenuToggle?.(collapsed);
     setSidebarHydrated(true);
   }, [onMenuToggle]);
@@ -828,12 +841,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     if (!sidebarHydrated) return;
     writeSidebarCollapsed(isCollapsed);
   }, [isCollapsed, sidebarHydrated]);
-
-  // Notificar o MainLayout sobre mudanças no estado do menu (onMenuToggle deve ser estável — useCallback no pai)
-  React.useEffect(() => {
-    if (!sidebarHydrated) return;
-    onMenuToggle?.(isCollapsed);
-  }, [isCollapsed, onMenuToggle, sidebarHydrated]);
 
   return (
     <>
@@ -855,7 +862,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
       {/* Dual-tier Sidebar */}
       <div
-        className={`fixed top-0 left-0 flex h-full transform overflow-visible transition-all duration-500 ease-in-out z-[100] ${
+        className={`fixed top-0 left-0 flex h-full transform overflow-visible transition-all ${SIDEBAR_TRANSITION_CLASS} z-[100] ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
@@ -1098,9 +1105,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
         {/* Tier 2 — Painel de páginas do módulo */}
         <div
-          className={`h-full flex-shrink-0 flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-500 ease-in-out overflow-hidden ${
-            tier2Visible ? 'w-72 opacity-100' : 'w-0 opacity-0 pointer-events-none'
-          }`}
+          className={`h-full flex-shrink-0 flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 overflow-hidden ${
+            sidebarHydrated ? `transition-[width,opacity] ${SIDEBAR_TRANSITION_CLASS}` : 'transition-none'
+          } ${tier2Visible ? 'w-72 opacity-100' : 'w-0 opacity-0 pointer-events-none'}`}
         >
           {/* Header do módulo */}
           <div className="p-4 flex-shrink-0">

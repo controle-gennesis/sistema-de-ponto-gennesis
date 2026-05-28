@@ -1,6 +1,13 @@
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 const SIDEBAR_SELECTED_MODULE_KEY = 'sidebar-selected-module-id';
 
+/** Rail (5rem) + painel tier 2 (18rem) */
+export const SIDEBAR_WIDTH_EXPANDED = '23rem';
+/** Apenas o rail */
+export const SIDEBAR_WIDTH_COLLAPSED = '5rem';
+
+export const SIDEBAR_TRANSITION_CLASS = 'duration-500 ease-in-out';
+
 export function readSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
   try {

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useLayoutEffect, useState } from 'react';
-import { readSidebarCollapsed } from '@/lib/sidebarStorage';
+import { readSidebarCollapsed, SIDEBAR_TRANSITION_CLASS } from '@/lib/sidebarStorage';
 import { Sidebar } from './Sidebar';
 import { ChatWidget } from '../chat/ChatWidget';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -22,7 +22,7 @@ interface MainLayoutProps {
 export function MainLayout({ children, userRole, userName, onLogout }: MainLayoutProps) {
   const defaultLogout = useLogout();
   const handleLogout = onLogout ?? defaultLogout;
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => readSidebarCollapsed());
   const [layoutSynced, setLayoutSynced] = useState(false);
   const { user } = usePermissions();
   const nativeCall = useNativeWebRTCCall({ userId: user?.id });
@@ -48,10 +48,10 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
         onMenuToggle={handleMenuToggle}
       />
       
-      {/* Main Content */}
+      {/* Main Content — mesma duração/easing do painel tier 2 da sidebar */}
       <div
         className={`${
-          layoutSynced ? 'transition-all duration-300 ease-in-out' : ''
+          layoutSynced ? `transition-[margin-left] ${SIDEBAR_TRANSITION_CLASS}` : ''
         } ${isCollapsed ? 'lg:ml-20' : 'lg:ml-[23rem]'}`}
       >
         <main className="p-4 lg:p-8">
