@@ -291,6 +291,27 @@ export function normalizeKanbanCardDetail(data: KanbanCardDetail): KanbanCardDet
   };
 }
 
+export const kanbanCardQueryKey = (cardId: string) => ['kanban-card', cardId] as const;
+
+/** Dados do board para exibir a modal antes do fetch completo (checklist, comentários, anexos). */
+export function boardCardToDetailPlaceholder(
+  card: KanbanCard,
+  columnId: string,
+  column?: { title: string; color: string },
+): KanbanCardDetail {
+  return normalizeKanbanCardDetail({
+    ...card,
+    members: card.members ?? [],
+    labels: card.labels ?? [],
+    columnId,
+    columnTitle: column?.title ?? '',
+    columnColor: column?.color ?? '',
+    checklistItems: [],
+    commentsList: [],
+    attachmentsList: [],
+  });
+}
+
 export async function fetchKanbanCard(id: string): Promise<KanbanCardDetail> {
   const res = await api.get(`/kanban/cards/${id}`);
   return normalizeKanbanCardDetail(res.data.data as KanbanCardDetail);

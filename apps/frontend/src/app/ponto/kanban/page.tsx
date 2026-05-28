@@ -31,6 +31,8 @@ import {
   deleteKanbanCard,
   patchCardInBoardCache,
   type KanbanBoardCardChecklistPatch,
+  fetchKanbanCard,
+  kanbanCardQueryKey,
 } from '@/lib/kanban';
 import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG } from '@/components/kanban/kanbanPriority';
@@ -318,6 +320,7 @@ interface KanbanCardItemProps {
   readOnly?: boolean;
   onEdit: (card: KanbanCard, columnId: string) => void;
   onDelete: (cardId: string, columnId: string) => void;
+  onPrefetch?: (cardId: string) => void;
   onDragStart: (e: React.DragEvent, cardId: string, columnId: string) => void;
   onDragEnd: () => void;
   isDragging: boolean;
@@ -329,6 +332,7 @@ function KanbanCardItem({
   readOnly = false,
   onEdit,
   onDelete,
+  onPrefetch,
   onDragStart,
   onDragEnd,
   isDragging,
@@ -371,6 +375,8 @@ function KanbanCardItem({
               }, 150);
             }
       }
+      onMouseEnter={() => onPrefetch?.(card.id)}
+      onFocus={() => onPrefetch?.(card.id)}
       onClick={handleCardClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -530,6 +536,7 @@ interface KanbanColumnProps {
   onAddCard: (columnId: string) => void;
   onEditCard: (card: KanbanCard, columnId: string) => void;
   onDeleteCard: (cardId: string, columnId: string) => void;
+  onPrefetchCard?: (cardId: string) => void;
   onDragStart: (e: React.DragEvent, cardId: string, columnId: string) => void;
   onDragEnd: () => void;
   onDragOver: (e: React.DragEvent, columnId: string, index?: number) => void;
@@ -545,6 +552,7 @@ function KanbanColumnComponent({
   onAddCard,
   onEditCard,
   onDeleteCard,
+  onPrefetchCard,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -682,6 +690,7 @@ function KanbanColumnComponent({
                 readOnly={readOnly}
                 onEdit={onEditCard}
                 onDelete={onDeleteCard}
+                onPrefetch={onPrefetchCard}
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 isDragging={dragState.draggingCardId === card.id}
@@ -1047,7 +1056,13 @@ function KanbanPage() {
 
   const [cardModal, setCardModal] = useState<
     | { mode: 'create'; columnId: string }
-    | { mode: 'detail'; cardId: string; columnId: string }
+    | {
+        mode: 'detail';
+        cardId: string;
+        columnId: string;
+        initialCard: KanbanCard;
+        initialColumn?: { title: string; color: string };
+      }
     | null
   >(null);
   const [colModal, setColModal] = useState<{ mode: 'create' | 'edit'; column?: KanbanColumn } | null>(null);
@@ -1076,6 +1091,17 @@ function KanbanPage() {
       );
     },
     [queryClient, kanbanBoardQueryKey],
+  );
+
+  const prefetchKanbanCard = useCallback(
+    (cardId: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: kanbanCardQueryKey(cardId),
+        queryFn: () => fetchKanbanCard(cardId),
+        staleTime: 60_000,
+      });
+    },
+    [queryClient],
   );
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
@@ -1156,7 +1182,17 @@ function KanbanPage() {
   }
 
   function openEditCard(card: KanbanCard, columnId: string) {
-    setCardModal({ mode: 'detail', cardId: card.id, columnId });
+    prefetchKanbanCard(card.id);
+    const column = columns.find((col) => col.id === columnId);
+    setCardModal({
+      mode: 'detail',
+      cardId: card.id,
+      columnId,
+      initialCard: card,
+      initialColumn: column
+        ? { title: column.title, color: column.color }
+        : undefined,
+    });
   }
 
   function handleDeleteCard(cardId: string, columnId: string) {
@@ -1343,6 +1379,7 @@ function KanbanPage() {
                 onAddCard={openCreateCard}
                 onEditCard={openEditCard}
                 onDeleteCard={handleDeleteCard}
+                onPrefetchCard={prefetchKanbanCard}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 onDragOver={handleDragOver}
@@ -1420,6 +1457,8 @@ function KanbanPage() {
           mode={cardModal.mode}
           cardId={cardModal.mode === 'detail' ? cardModal.cardId : undefined}
           columnId={cardModal.columnId}
+          initialCard={cardModal.mode === 'detail' ? cardModal.initialCard : undefined}
+          initialColumn={cardModal.mode === 'detail' ? cardModal.initialColumn : undefined}
           currentUserId={meUser?.id}
           currentUser={
             meUser

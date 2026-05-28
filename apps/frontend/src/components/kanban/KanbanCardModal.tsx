@@ -20,9 +20,12 @@ import {
   type Priority,
   type KanbanCardLabel,
   type KanbanCardMember,
+  type KanbanCard,
   type KanbanCardDetail,
   type KanbanBoardCardChecklistPatch,
+  boardCardToDetailPlaceholder,
   fetchKanbanCard,
+  kanbanCardQueryKey,
   normalizeKanbanCardDetail,
   createKanbanCard,
   updateKanbanCard,
@@ -126,6 +129,9 @@ export interface KanbanCardModalProps {
   mode: 'create' | 'detail';
   cardId?: string;
   columnId: string;
+  /** Resumo do card no board — exibe a modal na hora enquanto os detalhes carregam. */
+  initialCard?: KanbanCard;
+  initialColumn?: { title: string; color: string };
   currentUserId?: string;
   currentUser?: KanbanCardModalCurrentUser | null;
   canViewAllKanbanBoards?: boolean;
@@ -139,6 +145,8 @@ export function KanbanCardModal({
   mode: initialMode,
   cardId: initialCardId,
   columnId: initialColumnId,
+  initialCard,
+  initialColumn,
   currentUserId,
   currentUser,
   canViewAllKanbanBoards = false,
@@ -183,11 +191,30 @@ export function KanbanCardModal({
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
 
-  const { data: card, isLoading, refetch } = useQuery({
-    queryKey: ['kanban-card', cardId],
+  const cardPlaceholder =
+    initialCard && cardId === initialCard.id
+      ? boardCardToDetailPlaceholder(initialCard, initialColumnId, initialColumn)
+      : undefined;
+
+  const { data: card, isLoading, isFetching, refetch } = useQuery({
+    queryKey: kanbanCardQueryKey(cardId!),
     queryFn: () => fetchKanbanCard(cardId!),
     enabled: isDetail,
+    placeholderData: cardPlaceholder,
+    staleTime: 60_000,
   });
+
+  useLayoutEffect(() => {
+    if (!initialCard || initialCard.id !== cardId) return;
+    setTitle(initialCard.title);
+    setDescription(initialCard.description);
+    setPriority(initialCard.priority);
+    setStartDate(initialCard.startDate ?? '');
+    setEndDate(initialCard.endDate ?? '');
+    setMembers(Array.isArray(initialCard.members) ? initialCard.members : []);
+    setLabels(Array.isArray(initialCard.labels) ? initialCard.labels : []);
+    setChecklistEnabled(initialCard.checklistEnabled ?? false);
+  }, [initialCard, cardId]);
 
   useEffect(() => {
     setOpenMenu(null);
@@ -243,7 +270,7 @@ export function KanbanCardModal({
   const refreshAll = useCallback(async () => {
     if (cardId) {
       await refetch();
-      queryClient.invalidateQueries({ queryKey: ['kanban-card', cardId] });
+      queryClient.invalidateQueries({ queryKey: kanbanCardQueryKey(cardId) });
     }
     onBoardRefresh();
   }, [cardId, onBoardRefresh, queryClient, refetch]);
@@ -251,7 +278,7 @@ export function KanbanCardModal({
   const applyCardDetail = useCallback(
     (detail: KanbanCardDetail) => {
       if (!cardId) return;
-      queryClient.setQueryData(['kanban-card', cardId], normalizeKanbanCardDetail(detail));
+      queryClient.setQueryData(kanbanCardQueryKey(cardId), normalizeKanbanCardDetail(detail));
     },
     [cardId, queryClient],
   );
@@ -413,7 +440,7 @@ export function KanbanCardModal({
       toast.success('Card criado');
       setCardId(newCardId);
       setMode('detail');
-      queryClient.invalidateQueries({ queryKey: ['kanban-card', newCardId] });
+      queryClient.invalidateQueries({ queryKey: kanbanCardQueryKey(newCardId) });
       await onBoardRefresh();
     } catch {
       toast.error('Erro ao criar card');
@@ -725,7 +752,9 @@ export function KanbanCardModal({
                 await saveMeta({ priority: p });
               }}
             />
-            {saving && <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />}
+            {(saving || isFetching) && (
+              <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />
+            )}
           </div>
         ) : saving ? (
           <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />
@@ -763,7 +792,7 @@ export function KanbanCardModal({
             </Button>
           </div>
         </div>
-      ) : isDetail && isLoading ? (
+      ) : isDetail && isLoading && !card ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-red-600" />
         </div>
