@@ -3,6 +3,11 @@ import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { BorderService, BorderData } from './BorderService';
 import { stockShortfallService } from './StockShortfallService';
+import {
+  collectPaymentSlipsForOrderFromMovements,
+  extractOcNumberFromMovementNotes,
+  type StockPaymentSlipParsed
+} from '../utils/stockMovementNotes';
 
 export type BoletoInstallmentPaymentStatus = 'PENDING_BOLETO' | 'AWAITING_PAYMENT' | 'PAID';
 
@@ -76,6 +81,63 @@ function allMultiInstallmentsPaid(
   return true;
 }
 
+function allInstallmentsHaveBoleto(inst: BoletoInstallmentStored[], parcelCount: number): boolean {
+  if (parcelCount <= 1 || inst.length < parcelCount) return false;
+  for (let i = 0; i < parcelCount; i++) {
+    if (!((inst[i]?.boletoUrl || '').trim())) return false;
+  }
+  return true;
+}
+
+function useParallelBoletoPaymentFlow(inst: BoletoInstallmentStored[], parcelCount: number): boolean {
+  return allInstallmentsHaveBoleto(inst, parcelCount);
+}
+
+function allInstallmentsHavePaymentProof(inst: BoletoInstallmentStored[], parcelCount: number): boolean {
+  if (inst.length < parcelCount) return false;
+  for (let i = 0; i < parcelCount; i++) {
+    if (!((inst[i]?.installmentProofUrl || '').trim())) return false;
+  }
+  return true;
+}
+
+/** Coloca parcelas com boleto em AWAITING_PAYMENT (fluxo em lote). */
+function promoteParallelInstallmentsToAwaitingPayment(
+  inst: BoletoInstallmentStored[]
+): BoletoInstallmentStored[] {
+  return inst.map((row) => {
+    const st = rowStatus(row);
+    if (st === 'PAID') return row;
+    if (!((row.boletoUrl || '').trim())) return row;
+    if (st === 'AWAITING_PAYMENT') return row;
+    return { ...row, paymentStatus: 'AWAITING_PAYMENT' as const };
+  });
+}
+
+/** Replica comprovante geral da OC nas parcelas pagas que ainda não têm comprovante por parcela. */
+function spreadOrderPaymentProofToPaidInstallments(
+  inst: BoletoInstallmentStored[],
+  parcelCount: number,
+  paymentProofUrl: string | null | undefined,
+  paymentProofName: string | null | undefined
+): BoletoInstallmentStored[] | null {
+  const url = (paymentProofUrl || '').trim();
+  if (!url || parcelCount <= 1) return null;
+  let changed = false;
+  const next = inst.map((row, i) => {
+    if (i >= parcelCount) return row;
+    if ((row.installmentProofUrl || '').trim()) return row;
+    if (rowStatus(row) !== 'PAID') return row;
+    changed = true;
+    return {
+      ...row,
+      installmentProofUrl: url,
+      installmentProofName: (paymentProofName || '').trim() || null
+    };
+  });
+  return changed ? next : null;
+}
+
 export type NfAttachmentStored = {
   url: string;
   name: string | null;
@@ -137,6 +199,12 @@ async function resolvePaymentProofUrlForOrder(order: {
         const last = inst[meta.paymentParcelCount - 1];
         const u = (last?.installmentProofUrl || '').trim();
         if (u) return u;
+      }
+      if (useParallelBoletoPaymentFlow(inst, meta.paymentParcelCount)) {
+        for (let i = meta.paymentParcelCount - 1; i >= 0; i--) {
+          const u = (inst[i]?.installmentProofUrl || '').trim();
+          if (u) return u;
+        }
       }
     }
   }
@@ -548,6 +616,28 @@ export class PurchaseOrderService {
     const [withPlan] = await enrichOrdersParcelPlans([order]);
     const stockReceipt = await stockShortfallService.getReceiptSummaryForOrderNumber(withPlan.orderNumber);
     return { ...withPlan, stockReceipt };
+    try {
+      await this.syncBoletoInstallmentsFromStockReceipt(order.orderNumber);
+    } catch (err) {
+      console.error('[PurchaseOrder] syncBoletoInstallmentsFromStockReceipt on getById', order.orderNumber, err);
+    }
+    try {
+      await this.normalizeParallelBoletoInstallmentsIfNeeded(id);
+    } catch (err) {
+      console.error('[PurchaseOrder] normalizeParallelBoletoInstallmentsIfNeeded on getById', order.orderNumber, err);
+    }
+    try {
+      await this.syncInstallmentProofsFromOrderPaymentProof(id);
+    } catch (err) {
+      console.error('[PurchaseOrder] syncInstallmentProofsFromOrderPaymentProof on getById', order.orderNumber, err);
+    }
+    const refreshed = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      include: purchaseOrderIncludeDetail
+    });
+    if (!refreshed) return null;
+    const [withPlan] = await enrichOrdersParcelPlans([refreshed]);
+    return withPlan;
   }
 
   async updateStatus(
@@ -644,17 +734,26 @@ export class PurchaseOrderService {
         const [meta] = await enrichOrdersParcelPlans([order]);
         if (meta.paymentParcelCount > 1) {
           const inst = parseStoredInstallments(order.paymentBoletoInstallments);
-          if (!allMultiInstallmentsPaid(inst, meta.paymentParcelCount)) {
+          const parallel = useParallelBoletoPaymentFlow(inst, meta.paymentParcelCount);
+          if (parallel) {
+            if (!allInstallmentsHavePaymentProof(inst, meta.paymentParcelCount)) {
+              throw new Error(
+                'Anexe o comprovante de pagamento em todas as parcelas antes de enviar para validação'
+              );
+            }
+          } else if (!allMultiInstallmentsPaid(inst, meta.paymentParcelCount)) {
             throw new Error(
               'Aguarde o pagamento de todas as parcelas antes de enviar o comprovante para validação'
             );
           }
           if (!proofUrl) {
-            const last = inst[meta.paymentParcelCount - 1];
-            const fromLast = (last?.installmentProofUrl || '').trim();
-            if (fromLast) {
-              proofUrl = fromLast;
-              proofName = ((last?.installmentProofName || '').trim() || null) as string | null;
+            for (let i = meta.paymentParcelCount - 1; i >= 0; i--) {
+              const fromInst = (inst[i]?.installmentProofUrl || '').trim();
+              if (fromInst) {
+                proofUrl = fromInst;
+                proofName = ((inst[i]?.installmentProofName || '').trim() || null) as string | null;
+                break;
+              }
             }
           }
         }
@@ -662,6 +761,15 @@ export class PurchaseOrderService {
 
       if (!proofUrl) {
         throw new Error('Anexe o comprovante de pagamento antes de enviar para validação');
+      }
+
+      const financialEntriesCount = await prisma.financialControlEntry.count({
+        where: { ocNumber: { equals: order.orderNumber, mode: 'insensitive' } },
+      });
+      if (financialEntriesCount === 0) {
+        throw new Error(
+          'Registre o lançamento no Controle Financeiro antes de enviar para validação do comprovante'
+        );
       }
 
       if (!(order.paymentProofUrl || '').trim() && proofUrl) {
@@ -720,18 +828,29 @@ export class PurchaseOrderService {
       ...(fillPaymentProofFromLastInstallment || {})
     };
 
+    if (status === 'PENDING' && userId && (st === 'PENDING_COMPRAS' || st === 'DRAFT')) {
+      data.comprasApprovedBy = userId;
+      data.comprasApprovedAt = new Date();
+    }
+
+    if (status === 'PENDING_DIRETORIA' && userId && st === 'PENDING') {
+      data.gestorApprovedBy = userId;
+      data.gestorApprovedAt = new Date();
+    }
+
     if (status === 'APPROVED' && userId) {
       data.approvedBy = userId;
       data.approvedAt = new Date();
     }
 
-    if (
-      status === 'IN_REVIEW' ||
-      status === 'REJECTED' ||
-      status === 'PENDING' ||
-      status === 'PENDING_DIRETORIA' ||
-      (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW')
-    ) {
+    if (status === 'IN_REVIEW' || (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW')) {
+      data.comprasApprovedBy = null;
+      data.comprasApprovedAt = null;
+      data.gestorApprovedBy = null;
+      data.gestorApprovedAt = null;
+      data.approvedBy = null;
+      data.approvedAt = null;
+    } else if (status === 'REJECTED' || status === 'PENDING' || status === 'PENDING_DIRETORIA') {
       data.approvedBy = null;
       data.approvedAt = null;
     }
@@ -1069,13 +1188,32 @@ export class PurchaseOrderService {
     if (!url) {
       throw new Error('Arquivo do comprovante é obrigatório');
     }
+    const proofName = (data.paymentProofName || '').trim() || null;
+    const updateData: Prisma.PurchaseOrderUpdateInput = {
+      paymentProofUrl: url,
+      paymentProofName: proofName,
+      updatedAt: new Date()
+    };
+    if (order.paymentType === 'BOLETO') {
+      const full = await prisma.purchaseOrder.findUnique({
+        where: { id },
+        select: { paymentCondition: true, paymentBoletoInstallments: true }
+      });
+      if (full) {
+        const [meta] = await enrichOrdersParcelPlans([{ paymentCondition: full.paymentCondition }]);
+        const n = meta.paymentParcelCount;
+        if (n > 1) {
+          const inst = parseStoredInstallments(full.paymentBoletoInstallments);
+          const spread = spreadOrderPaymentProofToPaidInstallments(inst, n, url, proofName);
+          if (spread) {
+            updateData.paymentBoletoInstallments = spread as unknown as Prisma.InputJsonValue;
+          }
+        }
+      }
+    }
     const updated = await prisma.purchaseOrder.update({
       where: { id },
-      data: {
-        paymentProofUrl: url,
-        paymentProofName: (data.paymentProofName || '').trim() || null,
-        updatedAt: new Date()
-      },
+      data: updateData,
       include: purchaseOrderIncludeDetail
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
@@ -1200,15 +1338,12 @@ export class PurchaseOrderService {
       if (inst.length < n) {
         throw new Error('Registre as parcelas (valores e vencimentos) antes de enviar o boleto');
       }
-      if (isLegacyBulkNoExplicitStatus(inst, n)) {
-        inst = inst.map((row, i) => ({
-          ...row,
-          paymentStatus: (i === 0 ? 'AWAITING_PAYMENT' : 'PENDING_BOLETO') as BoletoInstallmentPaymentStatus
-        }));
+      if (isLegacyBulkNoExplicitStatus(inst, n) || allInstallmentsHaveBoleto(inst, n)) {
+        const promoted = promoteParallelInstallmentsToAwaitingPayment(inst);
         const updated = await prisma.purchaseOrder.update({
           where: { id },
           data: {
-            paymentBoletoInstallments: inst as unknown as Prisma.InputJsonValue,
+            paymentBoletoInstallments: promoted as unknown as Prisma.InputJsonValue,
             paymentBoletoUrl: null,
             paymentBoletoName: null,
             paymentBoletoPhaseReleased: true,
@@ -1267,7 +1402,7 @@ export class PurchaseOrderService {
    */
   async attachBoletoInstallmentPaymentProof(
     id: string,
-    data: { paymentProofUrl: string; paymentProofName?: string },
+    data: { paymentProofUrl: string; paymentProofName?: string; installmentIndex?: number },
     _userId?: string
   ) {
     const order = await prisma.purchaseOrder.findUnique({
@@ -1299,22 +1434,62 @@ export class PurchaseOrderService {
       throw new Error('Use o comprovante geral da OC para pagamento em parcela única');
     }
     const inst = parseStoredInstallments(order.paymentBoletoInstallments);
-    const idx = inst.findIndex((r) => rowStatus(r) === 'AWAITING_PAYMENT');
-    if (idx < 0) {
+    const parallel = useParallelBoletoPaymentFlow(inst, n);
+    let idx = -1;
+    if (
+      data.installmentIndex != null &&
+      Number.isInteger(data.installmentIndex) &&
+      data.installmentIndex >= 0 &&
+      data.installmentIndex < n
+    ) {
+      idx = data.installmentIndex;
+    } else if (parallel) {
+      idx = inst.findIndex(
+        (r, j) =>
+          j < n &&
+          (r.boletoUrl || '').trim() &&
+          rowStatus(r) !== 'PAID' &&
+          !(r.installmentProofUrl || '').trim()
+      );
+      if (idx < 0) {
+        idx = inst.findIndex((r, j) => j < n && rowStatus(r) === 'AWAITING_PAYMENT');
+      }
+    } else {
+      idx = inst.findIndex((r) => rowStatus(r) === 'AWAITING_PAYMENT');
+    }
+    if (idx < 0 || idx >= n) {
       throw new Error('Não há parcela aguardando pagamento para anexar comprovante');
+    }
+    const target = inst[idx];
+    if (!((target?.boletoUrl || '').trim())) {
+      throw new Error(`A parcela ${idx + 1} ainda não tem boleto anexado`);
+    }
+    if (!parallel && rowStatus(target) !== 'AWAITING_PAYMENT') {
+      throw new Error('Só é possível anexar comprovante na parcela que está aguardando pagamento');
     }
     const url = (data.paymentProofUrl || '').trim();
     if (!url) {
       throw new Error('Arquivo do comprovante é obrigatório');
     }
     const name = (data.paymentProofName || '').trim() || null;
-    const next = inst.map((row, j) =>
-      j === idx ? { ...row, installmentProofUrl: url, installmentProofName: name } : row
-    );
+    const next = inst.map((row, j) => {
+      if (j !== idx) return row;
+      if (parallel) {
+        return {
+          ...row,
+          installmentProofUrl: url,
+          installmentProofName: name,
+          paymentStatus: 'PAID' as const
+        };
+      }
+      return { ...row, installmentProofUrl: url, installmentProofName: name };
+    });
+    const allPaid = allMultiInstallmentsPaid(next, n);
     const updated = await prisma.purchaseOrder.update({
       where: { id },
       data: {
         paymentBoletoInstallments: next as unknown as Prisma.InputJsonValue,
+        paymentBoletoPhaseReleased: parallel ? true : allPaid,
         updatedAt: new Date()
       },
       include: purchaseOrderIncludeDetail
@@ -1356,6 +1531,11 @@ export class PurchaseOrderService {
       throw new Error('Fluxo por parcela aplica-se apenas a OC com mais de uma parcela na condição de pagamento');
     }
     const inst = parseStoredInstallments(order.paymentBoletoInstallments);
+    if (useParallelBoletoPaymentFlow(inst, n)) {
+      throw new Error(
+        'Todas as parcelas já têm boleto. Anexe o comprovante de cada parcela e envie para validação — não é necessário liberar nova anexação de boleto.'
+      );
+    }
     const idx = inst.findIndex((r) => rowStatus(r) === 'AWAITING_PAYMENT');
     if (idx < 0) {
       throw new Error('Não há parcela aguardando pagamento para liberar a próxima');
@@ -1512,5 +1692,303 @@ export class PurchaseOrderService {
 
     const content = await borderService.generateCNAB400FromBorderData(borderItems);
     return { content, skippedOrderNumbers };
+  }
+
+  /** Status em que parcelas de boleto já existem e podem ser preenchidas a partir do estoque. */
+  private static readonly STOCK_BOLETO_SYNC_STATUSES = new Set([
+    'APPROVED',
+    'PENDING_PROOF_VALIDATION',
+    'PENDING_PROOF_CORRECTION',
+    'PENDING_NF_ATTACHMENT',
+    'SENT',
+    'FINALIZED',
+    'PARTIALLY_RECEIVED',
+    'RECEIVED'
+  ]);
+
+  private async persistBoletoInstallmentsFromStock(
+    orderId: string,
+    base: BoletoInstallmentStored[],
+    parcelCount: number
+  ): Promise<void> {
+    const data: Prisma.PurchaseOrderUpdateInput = {
+      paymentBoletoInstallments: base as unknown as Prisma.InputJsonValue,
+      updatedAt: new Date()
+    };
+    if (parcelCount === 1 && base[0]?.boletoUrl) {
+      data.paymentBoletoUrl = base[0].boletoUrl;
+      data.paymentBoletoName = base[0].boletoName;
+    } else if (parcelCount === 1 && !base[0]?.boletoUrl) {
+      data.paymentBoletoUrl = null;
+      data.paymentBoletoName = null;
+    } else {
+      data.paymentBoletoUrl = null;
+      data.paymentBoletoName = null;
+    }
+    await prisma.purchaseOrder.update({ where: { id: orderId }, data });
+  }
+
+  /**
+   * Com todos os boletos já anexados e fase Pagamento ativa, alinha parcelas pendentes para AWAITING_PAYMENT
+   * (evita devolver OC ao comprador entre parcelas).
+   */
+  async normalizeParallelBoletoInstallmentsIfNeeded(orderId: string): Promise<void> {
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        status: true,
+        paymentType: true,
+        paymentCondition: true,
+        paymentBoletoInstallments: true,
+        paymentBoletoPhaseReleased: true
+      }
+    });
+    if (!order || order.status !== 'APPROVED' || order.paymentType !== 'BOLETO') return;
+    if (!order.paymentBoletoPhaseReleased) return;
+
+    const [meta] = await enrichOrdersParcelPlans([order]);
+    const n = meta.paymentParcelCount;
+    if (n <= 1) return;
+
+    const inst = parseStoredInstallments(order.paymentBoletoInstallments);
+    if (!allInstallmentsHaveBoleto(inst, n)) return;
+
+    const promoted = promoteParallelInstallmentsToAwaitingPayment(inst);
+    const before = JSON.stringify(inst);
+    const after = JSON.stringify(promoted);
+    if (before === after) return;
+
+    await prisma.purchaseOrder.update({
+      where: { id: orderId },
+      data: {
+        paymentBoletoInstallments: promoted as unknown as Prisma.InputJsonValue,
+        paymentBoletoPhaseReleased: true,
+        updatedAt: new Date()
+      }
+    });
+  }
+
+  /**
+   * Quando o comprovante foi anexado só no nível da OC, replica nas parcelas pagas sem comprovante.
+   */
+  async syncInstallmentProofsFromOrderPaymentProof(orderId: string): Promise<void> {
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        paymentType: true,
+        paymentCondition: true,
+        paymentProofUrl: true,
+        paymentProofName: true,
+        paymentBoletoInstallments: true
+      }
+    });
+    if (!order || order.paymentType !== 'BOLETO') return;
+    const proofUrl = (order.paymentProofUrl || '').trim();
+    if (!proofUrl) return;
+
+    const [meta] = await enrichOrdersParcelPlans([order]);
+    const n = meta.paymentParcelCount;
+    if (n <= 1) return;
+
+    const inst = parseStoredInstallments(order.paymentBoletoInstallments);
+    const spread = spreadOrderPaymentProofToPaidInstallments(
+      inst,
+      n,
+      proofUrl,
+      order.paymentProofName
+    );
+    if (!spread) return;
+
+    await prisma.purchaseOrder.update({
+      where: { id: orderId },
+      data: {
+        paymentBoletoInstallments: spread as unknown as Prisma.InputJsonValue,
+        updatedAt: new Date()
+      }
+    });
+  }
+
+  /**
+   * Quando boletos são anexados na entrada de estoque (observações da movimentação),
+   * preenche automaticamente as parcelas da OC (fase Anexar Boleto) que ainda não têm boleto.
+   */
+  async syncBoletoInstallmentsFromStockReceipt(orderNumber: string): Promise<void> {
+    const trimmed = orderNumber.trim();
+    if (!trimmed) return;
+
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { orderNumber: trimmed },
+      select: {
+        id: true,
+        status: true,
+        paymentType: true,
+        paymentCondition: true,
+        orderDate: true,
+        amountToPay: true,
+        paymentBoletoInstallments: true
+      }
+    });
+    if (!order) return;
+    if (order.paymentType !== 'BOLETO') return;
+    if (!PurchaseOrderService.STOCK_BOLETO_SYNC_STATUSES.has(order.status)) return;
+
+    const inMovements = await prisma.stockMovement.findMany({
+      where: { type: 'IN', notes: { contains: trimmed, mode: 'insensitive' } },
+      select: { notes: true },
+      take: 5000,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const slips = collectPaymentSlipsForOrderFromMovements(inMovements, trimmed);
+    if (slips.length === 0) return;
+
+    const [meta] = await enrichOrdersParcelPlans([order]);
+    const parcelCount = meta.paymentParcelCount;
+    const existing = parseStoredInstallments(order.paymentBoletoInstallments);
+    const totalPay =
+      order.amountToPay != null && String(order.amountToPay).trim() !== ''
+        ? Number(order.amountToPay)
+        : 0;
+    const defaultAmountPerParcel =
+      parcelCount > 0 && Number.isFinite(totalPay) ? totalPay / parcelCount : 0;
+
+    const base: BoletoInstallmentStored[] = Array.from({ length: parcelCount }, (_, i) => {
+      const prev = existing[i];
+      const days = meta.paymentParcelDueDays[i] ?? meta.paymentParcelDueDays[0] ?? 30;
+      const dueDate =
+        (prev?.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(prev.dueDate))
+          ? prev.dueDate
+          : ymdAddDays(order.orderDate, days);
+      return {
+        amount:
+          prev && Number.isFinite(prev.amount) && prev.amount >= 0
+            ? prev.amount
+            : defaultAmountPerParcel,
+        dueDate,
+        boletoUrl: prev?.boletoUrl ?? null,
+        boletoName: prev?.boletoName ?? null,
+        paymentStatus: prev ? rowStatus(prev) : 'PENDING_BOLETO',
+        installmentProofUrl: prev?.installmentProofUrl ?? null,
+        installmentProofName: prev?.installmentProofName ?? null
+      };
+    });
+
+    const slipDedupeKey = (slip: StockPaymentSlipParsed) =>
+      `${slip.url}\0${slip.dueDateYmd ?? ''}\0${slip.dueDateLabel}`;
+    const usedSlipKeys = new Set<string>();
+    const assignSlipToParcel = (parcelIndex: number, slip: StockPaymentSlipParsed) => {
+      const row = base[parcelIndex];
+      if (!row) return;
+      if (rowStatus(row) === 'AWAITING_PAYMENT' || rowStatus(row) === 'PAID') return;
+      if ((row.boletoUrl || '').trim()) return;
+      row.boletoUrl = slip.url;
+      row.boletoName = slip.name;
+      if (slip.amount != null && Number.isFinite(slip.amount) && slip.amount >= 0) {
+        row.amount = slip.amount;
+      }
+      if (slip.dueDateYmd && /^\d{4}-\d{2}-\d{2}$/.test(slip.dueDateYmd)) {
+        row.dueDate = slip.dueDateYmd;
+      }
+      row.paymentStatus = 'PENDING_BOLETO';
+      usedSlipKeys.add(slipDedupeKey(slip));
+    };
+
+    const openParcelIndices = base
+      .map((_, i) => i)
+      .filter((i) => {
+        const row = base[i];
+        return (
+          rowStatus(row) === 'PENDING_BOLETO' &&
+          !(row.boletoUrl || '').trim()
+        );
+      });
+
+    if (openParcelIndices.length === 0) return;
+
+    if (slips.length === openParcelIndices.length) {
+      const sortedOpen = [...openParcelIndices].sort(
+        (a, b) => new Date(base[a].dueDate).getTime() - new Date(base[b].dueDate).getTime()
+      );
+      const sortedSlips = [...slips].sort((a, b) => {
+        const ta = a.dueDateYmd ? new Date(a.dueDateYmd).getTime() : 0;
+        const tb = b.dueDateYmd ? new Date(b.dueDateYmd).getTime() : 0;
+        return ta - tb;
+      });
+      sortedOpen.forEach((parcelIdx, k) => assignSlipToParcel(parcelIdx, sortedSlips[k]));
+    } else {
+      for (const slip of slips) {
+        if (usedSlipKeys.has(slipDedupeKey(slip))) continue;
+        let bestIdx = -1;
+        let bestDist = Infinity;
+        for (const i of openParcelIndices) {
+          const row = base[i];
+          if ((row.boletoUrl || '').trim()) continue;
+          const parcelDue = new Date(row.dueDate).getTime();
+          const slipDue = slip.dueDateYmd ? new Date(slip.dueDateYmd).getTime() : parcelDue;
+          const dist = Math.abs(slipDue - parcelDue);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+          }
+        }
+        if (bestIdx >= 0) assignSlipToParcel(bestIdx, slip);
+      }
+    }
+
+    const hasNew = base.some((row, i) => {
+      const prev = existing[i];
+      const prevUrl = (prev?.boletoUrl || '').trim();
+      const nextUrl = (row.boletoUrl || '').trim();
+      return !prevUrl && !!nextUrl;
+    });
+    if (!hasNew) return;
+
+    if (order.status === 'APPROVED') {
+      try {
+        await this.savePaymentBoletoInstallments(
+          order.id,
+          {
+            installments: base.map((row) => ({
+              amount: row.amount,
+              dueDate: row.dueDate,
+              boletoUrl: row.boletoUrl,
+              boletoName: row.boletoName
+            }))
+          },
+          undefined
+        );
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('OC aprovada')) throw err;
+      }
+    }
+
+    await this.persistBoletoInstallmentsFromStock(order.id, base, parcelCount);
+  }
+
+  /** Reprocessa OCs com entradas de estoque que tenham boletos nas observações. */
+  async rebuildBoletoInstallmentsFromAllStockMovements(): Promise<void> {
+    const movements = await prisma.stockMovement.findMany({
+      where: { type: 'IN', notes: { not: null } },
+      select: { notes: true },
+      take: 15000,
+      orderBy: { createdAt: 'desc' }
+    });
+    const ocNumbers = new Set<string>();
+    for (const m of movements) {
+      const oc = extractOcNumberFromMovementNotes(m.notes);
+      if (oc) ocNumbers.add(oc);
+    }
+    for (const orderNumber of ocNumbers) {
+      const slips = collectPaymentSlipsForOrderFromMovements(movements, orderNumber);
+      if (slips.length === 0) continue;
+      try {
+        await this.syncBoletoInstallmentsFromStockReceipt(orderNumber);
+      } catch (err) {
+        console.error('[PurchaseOrder] rebuildBoleto sync', orderNumber, err);
+      }
+    }
   }
 }

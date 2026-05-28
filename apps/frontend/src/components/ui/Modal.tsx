@@ -1,14 +1,30 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { X } from 'lucide-react';
+
+let modalScrollLockCount = 0;
+
+function lockPageScroll() {
+  modalScrollLockCount += 1;
+  document.documentElement.classList.add('modal-open');
+  document.body.classList.add('modal-open');
+}
+
+function unlockPageScroll() {
+  modalScrollLockCount = Math.max(0, modalScrollLockCount - 1);
+  if (modalScrollLockCount === 0) {
+    document.documentElement.classList.remove('modal-open');
+    document.body.classList.remove('modal-open');
+  }
+}
 
 export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: React.ReactNode;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '5xl' | '2xl' | 'full';
   closeOnOverlayClick?: boolean;
   showCloseButton?: boolean;
   headerActions?: React.ReactNode;
@@ -16,6 +32,8 @@ export interface ModalProps {
   contentOverflowVisible?: boolean;
   /** Acima de modais padrão (ex.: etiquetas/datas abertas sobre o card). */
   elevated?: boolean;
+  /** Quando false, o corpo não rola — o filho controla o overflow (ex.: Kanban card). */
+  scrollContent?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -29,22 +47,39 @@ export const Modal: React.FC<ModalProps> = ({
   headerActions,
   contentOverflowVisible = false,
   elevated = false,
+  scrollContent = true,
 }) => {
+  const rootRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
       }
     };
 
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscape);
-      document.body.classList.add('modal-open');
-    }
+    const blockBackgroundScroll = (event: WheelEvent | TouchEvent) => {
+      const root = rootRef.current;
+      if (!root) {
+        event.preventDefault();
+        return;
+      }
+      if (event.target instanceof Node && root.contains(event.target)) return;
+      event.preventDefault();
+    };
+
+    lockPageScroll();
+    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('wheel', blockBackgroundScroll, { passive: false, capture: true });
+    document.addEventListener('touchmove', blockBackgroundScroll, { passive: false, capture: true });
 
     return () => {
       document.removeEventListener('keydown', handleEscape);
-      document.body.classList.remove('modal-open');
+      document.removeEventListener('wheel', blockBackgroundScroll, { capture: true });
+      document.removeEventListener('touchmove', blockBackgroundScroll, { capture: true });
+      unlockPageScroll();
     };
   }, [isOpen, onClose]);
 
@@ -55,22 +90,37 @@ export const Modal: React.FC<ModalProps> = ({
     md: 'max-w-lg',
     lg: 'max-w-2xl',
     xl: 'max-w-4xl',
+    '5xl': 'max-w-5xl',
+    '2xl': 'max-w-6xl',
     full: 'max-w-full mx-4',
   };
 
+  const stopScrollChain = (event: React.WheelEvent | React.TouchEvent) => {
+    event.preventDefault();
+  };
+
   const modalContent = (
-    <div className={clsx('fixed inset-0', elevated ? 'z-[1100]' : 'z-[1000]')}>
-      <div className="flex min-h-screen items-center justify-center p-4">
+    <div
+      ref={rootRef}
+      className={clsx(
+        'fixed inset-0 overflow-hidden overscroll-none',
+        elevated ? 'z-[1100]' : 'z-[1000]',
+      )}
+    >
+      <div className="flex h-full min-h-0 items-center justify-center p-4 overflow-hidden">
         {/* Overlay */}
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+          className="fixed inset-0 bg-black bg-opacity-50 transition-opacity touch-none"
           onClick={closeOnOverlayClick ? onClose : undefined}
+          onWheel={stopScrollChain}
+          onTouchMove={stopScrollChain}
         />
 
         {/* Modal */}
         <div
           className={clsx(
-            'relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-h-[calc(100vh-2rem)] flex flex-col',
+            'relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full flex flex-col',
+            'max-h-[calc(100vh-2rem)]',
             contentOverflowVisible && 'overflow-visible',
             sizeClasses[size]
           )}
@@ -111,7 +161,11 @@ export const Modal: React.FC<ModalProps> = ({
           <div
             className={clsx(
               'p-6 flex-1 min-h-0',
-              contentOverflowVisible ? 'overflow-visible' : 'overflow-y-auto'
+              contentOverflowVisible
+                ? 'overflow-visible'
+                : scrollContent
+                  ? 'overflow-y-auto [scrollbar-gutter:stable]'
+                  : 'overflow-hidden flex flex-col',
             )}
           >
             {children}

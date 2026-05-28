@@ -5,20 +5,26 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
+  Package,
+  Plus,
   ArrowUpCircle,
   ArrowDownCircle,
   ArrowLeftRight,
   History,
   Box,
   Filter,
-  MoreVertical,
+  ChevronDown,
+  ChevronUp,
   RotateCcw,
   Download,
+  Eye,
+  MoreVertical,
   Search,
   X,
   Eye
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -58,6 +64,10 @@ interface GroupedStockBalance {
     costCenter?: { id: string; code: string; name: string } | null;
     balance: number;
   }>;
+interface MaterialBalanceGroup {
+  material: Material;
+  lines: Array<{ costCenter: StockBalance['costCenter']; balance: number }>;
+  totalBalance: number;
 }
 
 interface MovementFormData {
@@ -241,6 +251,7 @@ export default function EstoquePage() {
   const [isUploadingWithdrawalSheet, setIsUploadingWithdrawalSheet] = useState(false);
   const [paymentSlips, setPaymentSlips] = useState<PaymentSlipAttachment[]>([]);
   const [uploadingPaymentSlipId, setUploadingPaymentSlipId] = useState<string | null>(null);
+  const [materialBalanceDetail, setMaterialBalanceDetail] = useState<MaterialBalanceGroup | null>(null);
 
   const [formData, setFormData] = useState<MovementFormData>({
     costCenterId: '',
@@ -400,6 +411,20 @@ export default function EstoquePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stock-balance'] });
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-shortfalls-pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      setFormData({
+        costCenterId: '',
+        type: 'IN',
+        ocNumber: '',
+        movementSplit: '',
+        notes: ''
+      });
+      setInvoiceFile(null);
+      setWithdrawalSheetFile(null);
+      setPaymentSlips([]);
+      setOcMovementItems([]);
+      setActiveTab('balance');
       closeMovementModal();
       toast.success('Movimentação registrada com sucesso!');
     },
@@ -558,6 +583,22 @@ export default function EstoquePage() {
   const paginatedGroupedBalances = groupedBalances.slice(balanceStartIndex, balanceEndIndex);
   const balanceStartItem = balanceTotal === 0 ? 0 : balanceStartIndex + 1;
   const balanceEndItem = Math.min(balanceEndIndex, balanceTotal);
+  const balancesByMaterial = useMemo(() => {
+    const map = new Map<string, MaterialBalanceGroup>();
+    balances.forEach((balance) => {
+      const id = balance.material.id;
+      let group = map.get(id);
+      if (!group) {
+        group = { material: balance.material, lines: [], totalBalance: 0 };
+        map.set(id, group);
+      }
+      group.lines.push({ costCenter: balance.costCenter, balance: balance.balance });
+      group.totalBalance += balance.balance;
+    });
+    return Array.from(map.values()).sort((a, b) =>
+      a.material.name.localeCompare(b.material.name, 'pt-BR', { sensitivity: 'base' })
+    );
+  }, [balances]);
   const movements: StockMovement[] = movementsData?.data || [];
 
   const clearBalanceFilters = () => {
@@ -608,6 +649,14 @@ export default function EstoquePage() {
   const paginatedMovements = filteredMovements.slice(historyStartIndex, historyEndIndex);
   const historyStartItem = historyTotal === 0 ? 0 : historyStartIndex + 1;
   const historyEndItem = Math.min(historyEndIndex, historyTotal);
+
+  const balanceTotal = balances.length;
+  const balanceTotalPages = Math.max(1, Math.ceil(balanceTotal / BALANCE_ITEMS_PER_PAGE));
+  const balanceStartIndex = (balanceCurrentPage - 1) * BALANCE_ITEMS_PER_PAGE;
+  const balanceEndIndex = balanceStartIndex + BALANCE_ITEMS_PER_PAGE;
+  const paginatedBalances = balances.slice(balanceStartIndex, balanceEndIndex);
+  const balanceStartItem = balanceTotal === 0 ? 0 : balanceStartIndex + 1;
+  const balanceEndItem = Math.min(balanceEndIndex, balanceTotal);
 
   useEffect(() => {
     setBalanceCurrentPage(1);

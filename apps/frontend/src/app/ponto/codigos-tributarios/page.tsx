@@ -3,8 +3,11 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Percent, Plus, Edit, Trash2, Search, X, AlertCircle } from 'lucide-react';
+import { Percent, Plus, Search, X, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -172,6 +175,14 @@ export default function CodigosTributariosEspelhoNfPage() {
     );
   }, [bootstrap?.taxCodes, searchTerm]);
 
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen
+  } = useRowActionMenu(rows);
+
   const createMutation = useMutation({
     mutationFn: async (body: TaxCodeApiBody) => {
       const res = await api.post('/espelho-nf/tax-codes', body);
@@ -273,10 +284,10 @@ export default function CodigosTributariosEspelhoNfPage() {
             </p>
           </div>
 
-          <Card>
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex items-start space-x-3">
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
                   <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
                     <Percent className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
@@ -325,54 +336,46 @@ export default function CodigosTributariosEspelhoNfPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className={cadastroListClasses.cardContent}>
               {isError ? (
                 <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
                   <AlertCircle className="h-10 w-10 text-red-500" />
                   <p className="max-w-md text-sm text-gray-700 dark:text-gray-300">{loadError}</p>
                 </div>
+              ) : isLoading ? (
+                <CadastroListLoading message="Carregando códigos..." />
+              ) : rows.length === 0 ? (
+                <CadastroListEmpty
+                  icon={Percent}
+                  title="Nenhum código tributário encontrado"
+                  hint={
+                    searchTerm.trim()
+                      ? 'Tente ajustar a busca'
+                      : 'Cadastre um novo código para começar'
+                  }
+                />
               ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={1}
+                    endItem={rows.length}
+                    total={rows.length}
+                    itemLabel="código tributário"
+                    itemLabelPlural="códigos tributários"
+                  />
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] table-fixed border-collapse">
+                  <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="w-[36%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4">
-                          Nome / Município
-                        </th>
-                        <th className="w-[16%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4">
-                          Alíquota ISS
-                        </th>
-                        <th className="w-[18%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4">
-                          Abate Material
-                        </th>
-                        <th className="w-[20%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4">
-                          Garantia Complementar
-                        </th>
-                        <th className="w-[10%] px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4">
-                          Ações
-                        </th>
+                        <th className={cadastroListClasses.th}>Nome / Município</th>
+                        <th className={cadastroListClasses.th}>Alíquota ISS</th>
+                        <th className={cadastroListClasses.th}>Abate Material</th>
+                        <th className={cadastroListClasses.th}>Garantia Complementar</th>
+                        <th className={cadastroListClasses.thRight}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                      {isLoading ? (
-                        <tr>
-                          <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
-                            <Loading message="Carregando..." />
-                          </td>
-                        </tr>
-                      ) : rows.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
-                            <div className="text-gray-500 dark:text-gray-400">
-                              <p className="font-medium text-gray-700 dark:text-gray-300">
-                                Nenhum código tributário encontrado.
-                              </p>
-                              <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : (
-                        rows.map((t) => (
+                        {rows.map((t) => (
                           <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                             <td className="min-w-0 px-3 py-4 sm:px-6">
                               <span className="block truncate text-sm text-gray-900 dark:text-gray-100">
@@ -396,30 +399,26 @@ export default function CodigosTributariosEspelhoNfPage() {
                                 <span className="text-gray-500">Não</span>
                               )}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-4 text-right sm:px-6">
-                              <button
-                                type="button"
-                                onClick={() => openEdit(t)}
-                                className="rounded-lg p-2 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
-                                title="Editar"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setShowDeleteModal(t.id)}
-                                className="ml-1 rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                                title="Excluir"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </td>
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(t.id)}
+                              onToggle={(e) =>
+                                toggleRowActionMenu(t.id, e.currentTarget as HTMLButtonElement)
+                              }
+                            />
                           </tr>
-                        ))
-                      )}
+                        ))}
                     </tbody>
                   </table>
                 </div>
+                </>
+              )}
+              {rowActionMenu && rowForActionMenu && (
+                <RowActionMenuPortal
+                  menu={rowActionMenu}
+                  onClose={closeRowActionMenu}
+                  onEdit={() => openEdit(rowForActionMenu)}
+                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                />
               )}
             </CardContent>
           </Card>

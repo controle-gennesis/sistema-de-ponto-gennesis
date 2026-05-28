@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Clock, Loader2, Trash2, UserMinus, UserPlus, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 import {
   type KanbanCardMember,
+  type KanbanCardDetail,
   type KanbanChecklistItem,
   updateChecklistItem,
 } from '@/lib/kanban';
@@ -73,18 +76,25 @@ function useFixedPopoverStyle(
   return style;
 }
 
+export type KanbanTaskAssigneeOption = Pick<
+  KanbanCardMember,
+  'userId' | 'name' | 'profilePhotoUrl' | 'avatarColor'
+>;
+
 export interface KanbanChecklistTaskRowProps {
   item: KanbanChecklistItem;
   cardMembers: KanbanCardMember[];
+  currentUser?: KanbanTaskAssigneeOption | null;
   isDeleting?: boolean;
   onToggle: () => void;
   onDelete: () => void;
-  onUpdated: () => void | Promise<void>;
+  onUpdated: (card: KanbanCardDetail) => void | Promise<void>;
 }
 
-export function KanbanChecklistTaskRow({
+function KanbanChecklistTaskRowInner({
   item,
   cardMembers,
+  currentUser,
   isDeleting = false,
   onToggle,
   onDelete,
@@ -92,17 +102,56 @@ export function KanbanChecklistTaskRow({
 }: KanbanChecklistTaskRowProps) {
   const [openMenu, setOpenMenu] = useState<'date' | 'assign' | null>(null);
   const [saving, setSaving] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(item.title);
   const [draftDate, setDraftDate] = useState(() => splitDateTime(item.dueDate).date);
   const rowRef = useRef<HTMLLIElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const dateBtnRef = useRef<HTMLButtonElement>(null);
   const assignBtnRef = useRef<HTMLButtonElement>(null);
   const datePopoverStyle = useFixedPopoverStyle(openMenu === 'date', dateBtnRef, 208, 120);
   const assignPopoverStyle = useFixedPopoverStyle(openMenu === 'assign', assignBtnRef, 224, 160);
 
+  const { data: authMe } = useQuery({
+    queryKey: ['user'],
+    queryFn: async () => {
+      const res = await api.get('/auth/me');
+      return res.data?.data as
+        | { id: string; name: string; profilePhotoUrl?: string | null }
+        | undefined;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const resolvedCurrentUser = useMemo((): KanbanTaskAssigneeOption | null => {
+    if (currentUser?.userId) return currentUser;
+    if (!authMe?.id) return null;
+    return {
+      userId: authMe.id,
+      name: authMe.name,
+      profilePhotoUrl: authMe.profilePhotoUrl ?? null,
+      avatarColor: '',
+    };
+  }, [currentUser, authMe]);
+
+  const assignableMembers = useMemo(() => {
+    if (!resolvedCurrentUser?.userId) return cardMembers;
+    if (cardMembers.some((m) => m.userId === resolvedCurrentUser.userId)) return cardMembers;
+    return [resolvedCurrentUser, ...cardMembers];
+  }, [cardMembers, resolvedCurrentUser]);
+
   useEffect(() => {
     setDraftDate(splitDateTime(item.dueDate).date);
   }, [item.dueDate]);
+
+  useEffect(() => {
+    if (!editingTitle) setDraftTitle(item.title);
+  }, [item.title, editingTitle]);
+
+  useEffect(() => {
+    if (editingTitle) titleInputRef.current?.focus();
+  }, [editingTitle]);
 
   useEffect(() => {
     if (!openMenu) return;
@@ -122,8 +171,8 @@ export function KanbanChecklistTaskRow({
   }) {
     setSaving(true);
     try {
-      await updateChecklistItem(item.id, partial);
-      await onUpdated();
+      const { card: updated } = await updateChecklistItem(item.id, partial);
+      await onUpdated(updated);
       setOpenMenu(null);
     } catch {
       toast.error('Erro ao atualizar tarefa');
@@ -136,36 +185,101 @@ export function KanbanChecklistTaskRow({
     await patch({ dueDate: draftDate || null });
   }
 
+  async function saveTitle() {
+    const trimmed = draftTitle.trim();
+    if (!trimmed) {
+      setDraftTitle(item.title);
+      setEditingTitle(false);
+      return;
+    }
+    if (trimmed === item.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const { card: updated } = await updateChecklistItem(item.id, { title: trimmed });
+      await onUpdated(updated);
+      setEditingTitle(false);
+    } catch {
+      toast.error('Erro ao atualizar tarefa');
+      setDraftTitle(item.title);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelTitleEdit() {
+    setDraftTitle(item.title);
+    setEditingTitle(false);
+  }
+
   const overdue = item.dueDate && !item.isDone && isOverdue(item.dueDate);
+  const titleClass = clsx(
+    'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-5 break-words',
+    item.isDone && 'line-through text-gray-400 dark:text-gray-500',
+  );
+  const titleInputClass = clsx(
+    titleClass,
+    'h-5 bg-transparent border-0 p-0 shadow-none outline-none ring-0',
+    'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
+  );
   const showActions = openMenu !== null;
   const hasMeta = !!(item.dueDate || item.assignee);
 
   return (
     <li
       ref={rowRef}
-      className="group relative flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+      className="group relative flex items-center gap-2 min-h-[2.25rem] rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800"
     >
       <CheckboxIndicator
         checked={item.isDone}
         onChange={onToggle}
         asButton
-        className="mt-0.5 shrink-0"
+        className="shrink-0"
       />
 
-      <span
-        title={item.title}
-        className={clsx(
-          'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-snug break-words',
-          'line-clamp-1 group-hover:line-clamp-none',
-          item.isDone && 'line-through text-gray-400',
-        )}
-      >
-        {item.title}
-      </span>
+      {editingTitle ? (
+        <input
+          ref={titleInputRef}
+          type="text"
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={() => void saveTitle()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void saveTitle();
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelTitleEdit();
+            }
+          }}
+          className={titleInputClass}
+          aria-label="Editar tarefa"
+        />
+      ) : (
+        <span
+          role="button"
+          tabIndex={0}
+          title={item.title}
+          onClick={() => setEditingTitle(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setEditingTitle(true);
+            }
+          }}
+          className={clsx(titleClass, 'cursor-text')}
+        >
+          {item.title}
+        </span>
+      )}
 
       <div
         className={clsx(
-          'relative shrink-0 flex items-center justify-end min-h-7 self-start',
+          'relative shrink-0 flex items-center justify-end min-h-7',
           hasMeta ? 'min-w-[5.5rem]' : 'min-w-[4.5rem]',
         )}
       >
@@ -313,34 +427,41 @@ export function KanbanChecklistTaskRow({
             style={assignPopoverStyle}
             className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1 max-h-48 overflow-y-auto"
           >
-            {cardMembers.length === 0 ? (
+            {assignableMembers.length === 0 ? (
               <p className="text-xs text-gray-500 dark:text-gray-400 px-3 py-3 text-center">
-                Adicione membros ao card para atribuir tarefas.
+                Nenhum usuário disponível para atribuição.
               </p>
             ) : (
               <>
-                {cardMembers.map((m) => (
-                  <button
-                    key={m.userId}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => patch({ assigneeUserId: m.userId })}
-                    className={clsx(
-                      'w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700/60',
-                      item.assigneeUserId === m.userId &&
-                        'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300',
-                    )}
-                  >
-                    <KanbanUserAvatar
-                      name={m.name}
-                      profilePhotoUrl={m.profilePhotoUrl}
-                      colorKey={m.userId}
-                      colorClass={m.avatarColor}
-                      size="sm"
-                    />
-                    <span className="truncate">{m.name}</span>
-                  </button>
-                ))}
+                {assignableMembers.map((m) => {
+                  const isSelf =
+                    resolvedCurrentUser?.userId === m.userId &&
+                    !cardMembers.some((cm) => cm.userId === m.userId);
+                  return (
+                    <button
+                      key={m.userId}
+                      type="button"
+                      disabled={saving}
+                      onClick={() => patch({ assigneeUserId: m.userId })}
+                      className={clsx(
+                        'w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700/60',
+                        item.assigneeUserId === m.userId &&
+                          'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300',
+                      )}
+                    >
+                      <KanbanUserAvatar
+                        name={m.name}
+                        profilePhotoUrl={m.profilePhotoUrl}
+                        colorKey={m.userId}
+                        colorClass={m.avatarColor}
+                        size="sm"
+                      />
+                      <span className="truncate">
+                        {isSelf ? 'Atribuir a mim' : m.name}
+                      </span>
+                    </button>
+                  );
+                })}
                 {item.assignee && (
                   <div className="border-t border-gray-200 dark:border-gray-600 mt-1">
                     <button
@@ -362,3 +483,5 @@ export function KanbanChecklistTaskRow({
     </li>
   );
 }
+
+export const KanbanChecklistTaskRow = React.memo(KanbanChecklistTaskRowInner);

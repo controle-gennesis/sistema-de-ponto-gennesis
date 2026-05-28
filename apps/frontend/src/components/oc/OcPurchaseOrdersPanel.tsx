@@ -15,6 +15,9 @@ import {
   Banknote,
   Receipt,
   Undo2,
+  Wallet,
+  Pencil,
+  ExternalLink,
   Search,
   Filter,
   RotateCcw,
@@ -23,6 +26,7 @@ import {
 } from 'lucide-react';
 import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
 import { buildFormFromPurchaseOrder } from '@/components/financeiro/financialControlEntry';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
@@ -32,6 +36,7 @@ import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { exportPurchaseOrderPdf } from '@/lib/exportPurchaseOrderPdf';
 import { PaymentConditionSelect, buildPaymentConditionLabelMap } from '@/components/oc/PaymentConditionSelect';
 import { BoletoParcelasModal } from '@/components/oc/BoletoParcelasModal';
+import { BoletoParcelasList } from '@/components/oc/BoletoParcelasList';
 import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
@@ -47,9 +52,22 @@ import {
   hasAnyPaymentBoletoAttachment,
   romanParcelLabel,
   rowStatus,
-  installmentStatusLabel
+  installmentStatusLabel,
+  useParallelBoletoPaymentFlow,
+  allInstallmentsHavePaymentProof,
+  financeProofTargetInstallmentIndices,
+  shouldShowOrderLevelPaymentProofInDocuments,
+  isOcInFinancialLaunchPhase,
 } from '@/components/oc/ocPaymentBoleto';
 import { purchaseOrderPhaseLabel } from '@/components/oc/ocStatusLabels';
+import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
+import { FinancialControlEntryFormModal } from '@/components/financeiro/FinancialControlEntryFormModal';
+import {
+  MONTHS_PT,
+  buildInitialFormFromPurchaseOrder,
+  formatCurrency as formatFinancialCurrency,
+  type FinancialControlEntry,
+} from '@/lib/financialControlEntry';
 import { OcFluxTabsNav } from '@/components/oc/OcFluxTabsNav';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 
@@ -65,7 +83,11 @@ export {
   parsePaymentBoletoInstallments,
   hasAnyPaymentBoletoAttachment,
   rowStatus,
-  installmentStatusLabel
+  installmentStatusLabel,
+  useParallelBoletoPaymentFlow,
+  allInstallmentsHavePaymentProof,
+  financeProofTargetInstallmentIndices,
+  shouldShowOrderLevelPaymentProofInDocuments
 } from '@/components/oc/ocPaymentBoleto';
 
 export interface PurchaseOrder {
@@ -144,6 +166,9 @@ export interface PurchaseOrder {
     }>;
   } | null;
   creator?: { id: string; name: string };
+  comprasApprovedBy?: string | null;
+  gestorApprovedBy?: string | null;
+  approvedBy?: string | null;
   items: Array<{
     materialRequestItemId?: string | null;
     quantity: number;
@@ -275,12 +300,19 @@ function orderFreightValue(o: Pick<PurchaseOrder, 'freightAmount' | 'amountToPay
   return 0;
 }
 
+function movementNotesText(notes: unknown): string | null {
+  if (notes == null) return null;
+  if (typeof notes === 'string') return notes;
+  return String(notes);
+}
+
 function parseOcMovementInfoFromNotes(notes?: string | null): { ocNumber: string; split: 'TOTAL' | 'PARCIAL' | '' } | null {
-  if (!notes) return null;
-  const ocMatch = notes.match(/Nº OC:\s*([^\n|]+)/i);
+  const text = movementNotesText(notes);
+  if (!text) return null;
+  const ocMatch = text.match(/Nº OC:\s*([^\n|]+)/i);
   if (!ocMatch?.[1]) return null;
 
-  const rawSplit = notes.match(/Tipo:\s*(TOTAL|PARCIAL)/i)?.[1]?.toUpperCase() ?? '';
+  const rawSplit = text.match(/Tipo:\s*(TOTAL|PARCIAL)/i)?.[1]?.toUpperCase() ?? '';
   const split = rawSplit === 'TOTAL' || rawSplit === 'PARCIAL' ? rawSplit : '';
 
   return {
@@ -324,11 +356,12 @@ function parseAttachmentTagFromLine(
 }
 
 function parseOcAttachmentTagsFromNotes(notes?: string | null): OcMovementAttachmentTag[] {
-  if (!notes) return [];
+  const text = movementNotesText(notes);
+  if (!text) return [];
   const tags: OcMovementAttachmentTag[] = [];
   const detailHint = 'Dados completos nos detalhes da OC';
 
-  const nfMatch = notes.match(/NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  const nfMatch = text.match(/NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
   if (nfMatch?.[1] && nfMatch?.[2]) {
     const url = nfMatch[2].trim();
     tags.push({
@@ -340,7 +373,7 @@ function parseOcAttachmentTagsFromNotes(notes?: string | null): OcMovementAttach
     });
   }
 
-  const withdrawalMatch = notes.match(/Ficha de Retirada:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  const withdrawalMatch = text.match(/Ficha de Retirada:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
   if (withdrawalMatch?.[1] && withdrawalMatch?.[2]) {
     const url = withdrawalMatch[2].trim();
     tags.push({
@@ -352,7 +385,7 @@ function parseOcAttachmentTagsFromNotes(notes?: string | null): OcMovementAttach
     });
   }
 
-  const boletoSection = notes.match(/Boletos:\s*([\s\S]*)/i)?.[1] || '';
+  const boletoSection = text.match(/Boletos:\s*([\s\S]*)/i)?.[1] || '';
   if (boletoSection) {
     const lines = boletoSection
       .split('\n')
@@ -398,19 +431,20 @@ function parseStockMovementAttachmentsFromNotes(notes?: string | null): StockMov
     withdrawalSheet: null,
     paymentSlips: []
   };
-  if (!notes) return bundle;
+  const text = movementNotesText(notes);
+  if (!text) return bundle;
 
-  const nfMatch = notes.match(/NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  const nfMatch = text.match(/NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
   if (nfMatch?.[1] && nfMatch?.[2]) {
     bundle.nf = { name: nfMatch[1].trim(), url: nfMatch[2].trim() };
   }
 
-  const withdrawalMatch = notes.match(/Ficha de Retirada:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
+  const withdrawalMatch = text.match(/Ficha de Retirada:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/i);
   if (withdrawalMatch?.[1] && withdrawalMatch?.[2]) {
     bundle.withdrawalSheet = { name: withdrawalMatch[1].trim(), url: withdrawalMatch[2].trim() };
   }
 
-  const boletoSection = notes.match(/Boletos:\s*([\s\S]*)/i)?.[1] || '';
+  const boletoSection = text.match(/Boletos:\s*([\s\S]*)/i)?.[1] || '';
   if (boletoSection) {
     boletoSection
       .split('\n')
@@ -485,6 +519,8 @@ export type OcPurchaseOrdersPanelProps = {
   searchTerm?: string;
   /** Quando informado, exibe o campo de busca no cabeçalho do card (modo integrado). */
   onSearchChange?: (value: string) => void;
+  /** Busca global no pai — oculta o campo duplicado no card. */
+  hideSearch?: boolean;
   /** Card colado às abas do fluxo (sem borda/sombra superior). */
   flushInCard?: boolean;
   /**
@@ -549,28 +585,65 @@ const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> =
 };
 
 const OC_ACTION_MENU_WIDTH_PX = 224;
-/** Altura estimada do menu (itens variam); usada para abrir acima quando perto do fim da página. */
 const OC_ACTION_MENU_MAX_HEIGHT_PX = 360;
+const OC_ACTION_MENU_GAP_PX = 4;
+const OC_ACTION_MENU_VIEWPORT_PAD_PX = 8;
+const OC_ACTION_MENU_MIN_HEIGHT_PX = 96;
 
-function computeOcActionMenuPosition(rect: DOMRect): { top: number; left: number } {
+type OcActionMenuCoords = {
+  top: number;
+  left: number;
+  maxHeight: number;
+  placement: 'below' | 'above';
+};
+
+function computeOcActionMenuPosition(rect: DOMRect): OcActionMenuCoords {
   let left = rect.right - OC_ACTION_MENU_WIDTH_PX;
-  left = Math.max(8, Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - 8));
+  left = Math.max(
+    OC_ACTION_MENU_VIEWPORT_PAD_PX,
+    Math.min(left, window.innerWidth - OC_ACTION_MENU_WIDTH_PX - OC_ACTION_MENU_VIEWPORT_PAD_PX)
+  );
 
-  const spaceBelow = window.innerHeight - rect.bottom - 8;
-  const spaceAbove = rect.top - 8;
-  const openBelow =
-    spaceBelow >= OC_ACTION_MENU_MAX_HEIGHT_PX || spaceBelow >= spaceAbove;
-  const top = openBelow
-    ? rect.bottom + 4
-    : Math.max(8, rect.top - OC_ACTION_MENU_MAX_HEIGHT_PX - 4);
+  const spaceBelow =
+    window.innerHeight - rect.bottom - OC_ACTION_MENU_GAP_PX - OC_ACTION_MENU_VIEWPORT_PAD_PX;
+  const spaceAbove = rect.top - OC_ACTION_MENU_GAP_PX - OC_ACTION_MENU_VIEWPORT_PAD_PX;
 
-  return { top, left };
+  if (spaceBelow >= OC_ACTION_MENU_MIN_HEIGHT_PX || spaceBelow >= spaceAbove) {
+    return {
+      top: rect.bottom + OC_ACTION_MENU_GAP_PX,
+      left,
+      maxHeight: Math.min(OC_ACTION_MENU_MAX_HEIGHT_PX, Math.max(spaceBelow, OC_ACTION_MENU_MIN_HEIGHT_PX)),
+      placement: 'below'
+    };
+  }
+
+  return {
+    top: rect.top - OC_ACTION_MENU_GAP_PX,
+    left,
+    maxHeight: Math.min(OC_ACTION_MENU_MAX_HEIGHT_PX, Math.max(spaceAbove, OC_ACTION_MENU_MIN_HEIGHT_PX)),
+    placement: 'above'
+  };
 }
 
 const OC_MENU_ITEM_CLASS =
   'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700';
 
 const OC_APPROVAL_FLOW_STATUSES = ['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'] as const;
+
+export type OcApprovalListPhase = 'pending' | 'approved_by_me';
+
+const OC_APPROVAL_TABS: OcTab[] = ['compras', 'gestor', 'diretoria'];
+
+function isOcApprovalTab(tab: OcTab): boolean {
+  return OC_APPROVAL_TABS.includes(tab);
+}
+
+function orderApprovedByUserAtTab(order: PurchaseOrder, tab: OcTab, userId: string): boolean {
+  if (tab === 'compras') return order.comprasApprovedBy === userId;
+  if (tab === 'gestor') return order.gestorApprovedBy === userId;
+  if (tab === 'diretoria') return order.approvedBy === userId;
+  return false;
+}
 
 export function OcStyledCheckbox({
   checked,
@@ -618,8 +691,15 @@ export function OcStyledCheckbox({
   );
 }
 
-function embeddedOcEmptyMessage(tab: OcTab, hasSearch: boolean): string {
+function embeddedOcEmptyMessage(
+  tab: OcTab,
+  hasSearch: boolean,
+  approvalListPhase: OcApprovalListPhase
+): string {
   if (hasSearch) return 'Nenhuma ordem corresponde à busca nesta fase';
+  if (approvalListPhase === 'approved_by_me') {
+    return 'Nenhuma ordem que você tenha aprovado nesta fase.';
+  }
   if (tab === 'FINALIZADAS') return 'Nenhuma OC finalizada com os filtros atuais';
   if (tab === 'ATTACH_BOLETO') return 'Nenhuma OC aguardando anexo de boleto';
   if (tab === 'PROOF_VALIDATION') return 'Nenhuma OC aguardando validação do comprovante';
@@ -629,12 +709,20 @@ function embeddedOcEmptyMessage(tab: OcTab, hasSearch: boolean): string {
   return 'Nenhuma ordem de compra nesta fase';
 }
 
+function approvalTabSubtitle(tab: OcTab, phase: OcApprovalListPhase): string {
+  if (phase === 'approved_by_me') {
+    return 'Ordens que você já aprovou nesta fase';
+  }
+  return EMBEDDED_OC_TAB_META[tab].subtitle;
+}
+
 export function OcPurchaseOrdersPanel({
   embedded = false,
   hideTabs = false,
   activeTab: activeTabProp,
   searchTerm = '',
   onSearchChange,
+  hideSearch = false,
   flushInCard = false,
   gestorCostCenterIds
 }: OcPurchaseOrdersPanelProps) {
@@ -655,6 +743,8 @@ export function OcPurchaseOrdersPanel({
   const showOcApprovalActions = (status: string) =>
     OC_APPROVAL_FLOW_STATUSES.includes(status as (typeof OC_APPROVAL_FLOW_STATUSES)[number]) &&
     canActOnOcApproval(status);
+  const [approvalListPhase, setApprovalListPhase] = useState<OcApprovalListPhase>('pending');
+  const [isApprovalFiltersModalOpen, setIsApprovalFiltersModalOpen] = useState(false);
   const [internalActiveTab, setInternalActiveTab] = useState<OcTab>('compras');
   const activeTab = hideTabs ? (activeTabProp ?? 'compras') : internalActiveTab;
   const setActiveTab = (t: OcTab) => {
@@ -673,9 +763,17 @@ export function OcPurchaseOrdersPanel({
     null
   );
   const [financialEntryOrder, setFinancialEntryOrder] = useState<PurchaseOrder | null>(null);
+  const [ocActionMenu, setOcActionMenu] = useState<
+    ({ orderId: string } & OcActionMenuCoords) | null
+  >(null);
   const [proofFileDraft, setProofFileDraft] = useState<File | null>(null);
+  const [financialEntryModalOpen, setFinancialEntryModalOpen] = useState(false);
+  const [editingFinancialEntry, setEditingFinancialEntry] = useState<FinancialControlEntry | null>(null);
   const [nfFileDraft, setNfFileDraft] = useState<File | null>(null);
   const [installmentProofFileDraft, setInstallmentProofFileDraft] = useState<File | null>(null);
+  const [installmentProofDraftByIdx, setInstallmentProofDraftByIdx] = useState<Record<number, File | null>>(
+    {}
+  );
   const [boletoParcelModalOrder, setBoletoParcelModalOrder] = useState<PurchaseOrder | null>(null);
   const [finalizedPage, setFinalizedPage] = useState(1);
   const [internalSearchTerm, setInternalSearchTerm] = useState('');
@@ -721,6 +819,7 @@ export function OcPurchaseOrdersPanel({
     setProofFileDraft(null);
     setNfFileDraft(null);
     setInstallmentProofFileDraft(null);
+    setInstallmentProofDraftByIdx({});
   }, [selectedOrder?.id]);
 
   const [editOcForm, setEditOcForm] = useState<{
@@ -773,6 +872,7 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     }
   });
+  const currentUserId = userData?.data?.id as string | undefined;
 
   const { data: ordersData, isLoading } = useQuery({
     queryKey: ['purchase-orders', 'list-full'],
@@ -968,7 +1068,15 @@ export function OcPurchaseOrdersPanel({
   });
 
   const attachBoletoInstallmentProofMutation = useMutation({
-    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+    mutationFn: async ({
+      id,
+      file,
+      installmentIndex
+    }: {
+      id: string;
+      file: File;
+      installmentIndex: number;
+    }) => {
       const fd = new FormData();
       fd.append('proof', file);
       const up = await api.post('/purchase-orders/upload-payment-proof', fd);
@@ -977,14 +1085,22 @@ export function OcPurchaseOrdersPanel({
       if (!url) throw new Error('Resposta inválida do upload');
       const res = await api.patch(`/purchase-orders/${id}/payment-boleto-installment-proof`, {
         paymentProofUrl: url,
-        paymentProofName: originalName
+        paymentProofName: originalName,
+        installmentIndex
       });
       return res.data;
     },
-    onSuccess: (resp: { data?: PurchaseOrder }) => {
+    onSuccess: (resp: { data?: PurchaseOrder }, vars) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (vars?.installmentIndex != null) {
+        setInstallmentProofDraftByIdx((prev) => {
+          const next = { ...prev };
+          delete next[vars.installmentIndex];
+          return next;
+        });
+      }
       setInstallmentProofFileDraft(null);
       toast.success('Comprovante desta parcela anexado.');
     },
@@ -1140,6 +1256,23 @@ export function OcPurchaseOrdersPanel({
     [selectedOrderLatestStockMovement]
   );
 
+  const selectedOrderInFinancialLaunchPhase = selectedOrder
+    ? isOcInFinancialLaunchPhase(selectedOrder)
+    : false;
+
+  const { data: financialEntriesByOc = [] } = useQuery({
+    queryKey: ['financial-control-by-oc', selectedOrder?.orderNumber],
+    queryFn: async () => {
+      const res = await api.get(
+        `/financial-control/by-oc/${encodeURIComponent(selectedOrder!.orderNumber)}`
+      );
+      return (res.data?.data || []) as FinancialControlEntry[];
+    },
+    enabled: !!selectedOrder?.orderNumber && selectedOrderInFinancialLaunchPhase,
+  });
+
+  const hasFinancialEntryForOc = financialEntriesByOc.length > 0;
+
   const tabCounts = useMemo(() => computeOcTabCounts(allOrders), [allOrders]);
 
   const { data: paymentConditionRows } = useQuery({
@@ -1155,12 +1288,29 @@ export function OcPurchaseOrdersPanel({
     [paymentConditionRows]
   );
 
+  const showApprovalPhaseFilter = isOcApprovalTab(activeTab);
+
+  useEffect(() => {
+    setApprovalListPhase('pending');
+  }, [activeTab]);
+
+  const showListApprovalActions =
+    approvalListPhase === 'pending' ? showOcApprovalActions : () => false;
+
   const orders = useMemo(() => {
     if (activeTab === 'compras') {
+      if (approvalListPhase === 'approved_by_me' && currentUserId) {
+        return allOrders.filter((o) => orderApprovedByUserAtTab(o, 'compras', currentUserId));
+      }
       return allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT');
     }
     if (activeTab === 'gestor') {
-      let list = allOrders.filter((o) => o.status === 'PENDING');
+      let list: PurchaseOrder[];
+      if (approvalListPhase === 'approved_by_me' && currentUserId) {
+        list = allOrders.filter((o) => orderApprovedByUserAtTab(o, 'gestor', currentUserId));
+      } else {
+        list = allOrders.filter((o) => o.status === 'PENDING');
+      }
       if (gestorCostCenterIds !== undefined) {
         const allowed = new Set(gestorCostCenterIds);
         list = list.filter((o) => {
@@ -1171,6 +1321,9 @@ export function OcPurchaseOrdersPanel({
       return list;
     }
     if (activeTab === 'diretoria') {
+      if (approvalListPhase === 'approved_by_me' && currentUserId) {
+        return allOrders.filter((o) => orderApprovedByUserAtTab(o, 'diretoria', currentUserId));
+      }
       return allOrders.filter((o) => o.status === 'PENDING_DIRETORIA');
     }
     if (activeTab === 'IN_REVIEW') {
@@ -1210,7 +1363,7 @@ export function OcPurchaseOrdersPanel({
       );
     }
     return allOrders;
-  }, [allOrders, activeTab, gestorCostCenterIds]);
+  }, [allOrders, activeTab, gestorCostCenterIds, approvalListPhase, currentUserId]);
 
   const filteredOrdersBySearch = useMemo(() => {
     const normalizedSearchTerm = normalizeOcSearch(searchTerm);
@@ -1300,13 +1453,36 @@ export function OcPurchaseOrdersPanel({
 
   const displayedOrders = activeTab === 'FINALIZADAS' ? finalizedOrders : filteredOrdersBySearch;
 
-  const currentUserId = userData?.data?.id as string | undefined;
   const userEmployee = userData?.data?.employee as
     | { department?: string | null; position?: string | null }
     | undefined;
   const isFinanceOrAdminUser =
     userEmployee?.position?.trim() === 'Administrador' ||
     (userEmployee?.department?.toLowerCase().includes('financeiro') ?? false);
+
+  const canEditBoletoParcels =
+    !!selectedOrder &&
+    selectedOrder.status === 'APPROVED' &&
+    selectedOrder.paymentType === 'BOLETO' &&
+    (selectedOrder.paymentParcelCount ?? 1) > 1 &&
+    selectedOrder.creator?.id === currentUserId;
+
+  /** Editor de parcelas na caixa violeta (evita duplicar com Documentos). */
+  const boletoParcelsEditorInAttachBox =
+    !!selectedOrder &&
+    selectedOrder.status === 'APPROVED' &&
+    selectedOrder.paymentType === 'BOLETO' &&
+    (selectedOrder.paymentParcelCount ?? 1) > 1 &&
+    orderNeedsPaymentBoleto(selectedOrder) &&
+    !canSendCurrentBoletoToPayment(selectedOrder);
+
+  const handleBoletoParcelsSaved = (payload: { data: unknown }) => {
+    queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    const updated = (payload as { data?: PurchaseOrder })?.data;
+    if (updated) {
+      setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+    }
+  };
 
   const formatDate = (d?: string) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-');
   const formatCurrency = (v: number) =>
@@ -1518,10 +1694,13 @@ export function OcPurchaseOrdersPanel({
   const flushInTabsCard = isIntegratedFlux && flushInCard;
   const integratedMeta = isIntegratedFlux ? EMBEDDED_OC_TAB_META[activeTab] : null;
   const integratedListCount = displayedOrders.length;
-  const showToolbarSearch = Boolean(onSearchChange) || activeTab === 'FINALIZADAS';
+  const showToolbarSearch =
+    !hideSearch && (Boolean(onSearchChange) || activeTab === 'FINALIZADAS');
   const showToolbarCnab = activeTab === 'APPROVED';
   const showToolbarFinalizedExtras = activeTab === 'FINALIZADAS';
-  const showHeaderToolbar = showToolbarSearch || showToolbarCnab || showToolbarFinalizedExtras;
+  const showHeaderToolbar =
+    showToolbarSearch || showToolbarCnab || showToolbarFinalizedExtras || showApprovalPhaseFilter;
+  const hasActiveApprovalPhaseFilter = approvalListPhase !== 'pending';
   const orderForActionMenu = ocActionMenu
     ? displayedOrders.find((o) => o.id === ocActionMenu.orderId)
     : undefined;
@@ -1556,6 +1735,24 @@ export function OcPurchaseOrdersPanel({
               </button>
             ) : null}
           </div>
+        )}
+        {showApprovalPhaseFilter && (
+          <button
+            type="button"
+            onClick={() => setIsApprovalFiltersModalOpen(true)}
+            className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+              hasActiveApprovalPhaseFilter
+                ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+            aria-label="Abrir filtro"
+            title={hasActiveApprovalPhaseFilter ? 'Filtro (status ativo)' : 'Filtro'}
+          >
+            <Filter className="h-4 w-4" />
+            {hasActiveApprovalPhaseFilter ? (
+              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+            ) : null}
+          </button>
         )}
         {showToolbarCnab && (
           <button
@@ -1638,7 +1835,9 @@ export function OcPurchaseOrdersPanel({
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       {integratedMeta.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{integratedMeta.subtitle}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {approvalTabSubtitle(activeTab, approvalListPhase)}
+                    </p>
                   </div>
                 </div>
                 {listHeaderToolbar}
@@ -1689,7 +1888,7 @@ export function OcPurchaseOrdersPanel({
                   <div className="text-center py-8">
                     <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
                     <p className="text-gray-500 dark:text-gray-400">
-                      {embeddedOcEmptyMessage(activeTab, !!searchTerm.trim())}
+                      {embeddedOcEmptyMessage(activeTab, !!searchTerm.trim(), approvalListPhase)}
                     </p>
                     {(effectiveSearchTerm.trim() || hasActiveFinalizedFilters) && activeTab === 'FINALIZADAS' ? (
                       <button
@@ -1713,11 +1912,7 @@ export function OcPurchaseOrdersPanel({
                     ) : null}
                   </div>
                 ) : (
-                <div
-                  className={
-                    isIntegratedFlux ? 'overflow-x-auto [scrollbar-gutter:stable]' : undefined
-                  }
-                >
+                <div className={isIntegratedFlux ? 'overflow-x-auto' : undefined}>
                 <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
@@ -1963,30 +2158,51 @@ export function OcPurchaseOrdersPanel({
                                         {Array.from({ length: n }, (_, idx) => {
                                           const row = inst[idx];
                                           const st = rowStatus(row);
+                                          const amt = Number.isFinite(row?.amount) ? row.amount : null;
                                           return (
-                                            <div key={idx} className="text-[11px] leading-tight text-gray-700 dark:text-gray-300">
-                                              <span className="text-gray-500 dark:text-gray-400">{romanParcelLabel(idx)}:</span>{' '}
-                                              {st === 'PAID' ? (
-                                                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                                  {installmentStatusLabel(st)}
-                                                </span>
-                                              ) : st === 'AWAITING_PAYMENT' ? (
-                                                <span className="text-amber-700 dark:text-amber-300 font-medium">
-                                                  {installmentStatusLabel(st)}
-                                                </span>
-                                              ) : (row?.boletoUrl || '').trim() ? (
-                                                <a
-                                                  href={absoluteUploadUrl(row.boletoUrl || '')}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                                                >
-                                                  <Banknote className="w-3.5 h-3.5 shrink-0" />
-                                                  {row.boletoName?.trim() || 'Abrir'}
-                                                </a>
-                                              ) : (
-                                                <span className="text-gray-400 dark:text-gray-500">—</span>
-                                              )}
+                                            <div key={idx} className="text-[11px] leading-tight text-gray-700 dark:text-gray-300 space-y-0.5">
+                                              <div>
+                                                <span className="text-gray-500 dark:text-gray-400 font-medium">
+                                                  {romanParcelLabel(idx)}:
+                                                </span>{' '}
+                                                {st === 'PAID' ? (
+                                                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                                    {installmentStatusLabel(st)}
+                                                  </span>
+                                                ) : st === 'AWAITING_PAYMENT' ? (
+                                                  <span className="text-amber-700 dark:text-amber-300 font-medium">
+                                                    {installmentStatusLabel(st)}
+                                                  </span>
+                                                ) : (row?.boletoUrl || '').trim() ? (
+                                                  <a
+                                                    href={absoluteUploadUrl(row.boletoUrl || '')}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                                                  >
+                                                    <Banknote className="w-3.5 h-3.5 shrink-0" />
+                                                    {row.boletoName?.trim() || 'Abrir'}
+                                                  </a>
+                                                ) : (
+                                                  <span className="text-gray-400 dark:text-gray-500">—</span>
+                                                )}
+                                              </div>
+                                              {amt != null || row?.dueDate ? (
+                                                <div className="pl-3 text-[10px] text-gray-500 dark:text-gray-400">
+                                                  {amt != null ? (
+                                                    <span>
+                                                      {amt.toLocaleString('pt-BR', {
+                                                        style: 'currency',
+                                                        currency: 'BRL'
+                                                      })}
+                                                    </span>
+                                                  ) : null}
+                                                  {amt != null && row?.dueDate ? ' · ' : null}
+                                                  {row?.dueDate
+                                                    ? new Date(`${row.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
+                                                    : null}
+                                                </div>
+                                              ) : null}
                                             </div>
                                           );
                                         })}
@@ -2077,7 +2293,7 @@ export function OcPurchaseOrdersPanel({
                                     )}
                                   </button>
                                 )}
-                                {showOcApprovalActions(o.status) && (
+                                {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
@@ -2087,7 +2303,7 @@ export function OcPurchaseOrdersPanel({
                                     <Check className="w-4 h-4" />
                                   </button>
                                 )}
-                                {showOcApprovalActions(o.status) && (
+                                {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => setCorrectionTarget(o)}
@@ -2097,7 +2313,7 @@ export function OcPurchaseOrdersPanel({
                                     <Wrench className="w-4 h-4" />
                                   </button>
                                 )}
-                                {showOcApprovalActions(o.status) && (
+                                {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -2155,8 +2371,8 @@ export function OcPurchaseOrdersPanel({
                                   const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                                   setOcActionMenu((prev) => {
                                     if (prev?.orderId === o.id) return null;
-                                    const { top, left } = computeOcActionMenuPosition(r);
-                                    return { orderId: o.id, top, left };
+                                    const pos = computeOcActionMenuPosition(r);
+                                    return { orderId: o.id, ...pos };
                                   });
                                 }}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -2854,15 +3070,20 @@ export function OcPurchaseOrdersPanel({
                           <>
                             <p className="text-xs text-gray-600 dark:text-gray-400">
                               Esta OC tem {selectedOrder.paymentParcelCount} parcelas. Informe valor, vencimento e
-                              arquivo por parcela.
+                              arquivo por parcela (edite abaixo ou use o botão para abrir em tela cheia).
                             </p>
+                            <BoletoParcelasList
+                              order={selectedOrder}
+                              editable={canEditBoletoParcels && boletoParcelsEditorInAttachBox}
+                              onSaved={handleBoletoParcelsSaved}
+                            />
                             <button
                               type="button"
                               onClick={() => setBoletoParcelModalOrder(selectedOrder)}
-                              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700"
+                              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-violet-500 text-violet-800 dark:text-violet-200 hover:bg-violet-50 dark:hover:bg-violet-950/40"
                             >
                               <Banknote className="w-4 h-4 shrink-0" />
-                              Abrir parcelas ({selectedOrder.paymentParcelCount})
+                              Abrir em tela cheia ({selectedOrder.paymentParcelCount})
                             </button>
                           </>
                         ) : (
@@ -2934,15 +3155,10 @@ export function OcPurchaseOrdersPanel({
                 <p className="text-sm">
                   <span className="font-medium text-gray-700 dark:text-gray-300">NF anexada na criação da OC:</span>{' '}
                   {selectedOrder.boletoAttachmentUrl ? (
-                    <a
-                      href={absoluteUploadUrl(selectedOrder.boletoAttachmentUrl || '')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      {selectedOrder.boletoAttachmentName || 'Abrir arquivo'}
-                    </a>
+                    <OcAttachmentActions
+                      url={selectedOrder.boletoAttachmentUrl}
+                      fileName={selectedOrder.boletoAttachmentName || 'NF criação OC'}
+                    />
                   ) : (
                     <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
                   )}
@@ -2952,89 +3168,20 @@ export function OcPurchaseOrdersPanel({
                     Boleto (anexo na fase &quot;Anexar Boleto&quot;):
                   </span>
                   {(selectedOrder.paymentParcelCount ?? 1) > 1 ? (
-                    (() => {
-                      const inst = parsePaymentBoletoInstallments(selectedOrder.paymentBoletoInstallments);
-                      const n = selectedOrder.paymentParcelCount ?? 1;
-                      return (
-                        <div className="flex flex-col gap-2 mt-1">
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Histórico por parcela: boleto enviado pelo comprador e comprovante anexado pelo financeiro
-                            (quando houver).
-                          </p>
-                          {Array.from({ length: n }, (_, idx) => {
-                            const row = inst[idx];
-                            const st = rowStatus(row);
-                            const boletoHref = (row?.boletoUrl || '').trim();
-                            const proofHref = (row?.installmentProofUrl || '').trim();
-                            const statusClass =
-                              st === 'PAID'
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : st === 'AWAITING_PAYMENT'
-                                  ? 'text-amber-700 dark:text-amber-300'
-                                  : 'text-gray-600 dark:text-gray-400';
-                            return (
-                              <div
-                                key={idx}
-                                className="rounded-md border border-gray-200/80 dark:border-gray-600/80 bg-white/40 dark:bg-gray-950/30 px-2.5 py-2 space-y-1.5"
-                              >
-                                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                  <span className="font-medium text-gray-800 dark:text-gray-200">
-                                    Parcela {romanParcelLabel(idx)}
-                                  </span>
-                                  <span className={`text-xs font-medium ${statusClass}`}>
-                                    {installmentStatusLabel(st)}
-                                  </span>
-                                </div>
-                                <div className="text-xs sm:text-sm space-y-1 pl-0.5">
-                                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                    <span className="text-gray-500 dark:text-gray-400 shrink-0">Boleto:</span>
-                                    {boletoHref ? (
-                                      <a
-                                        href={absoluteUploadUrl(boletoHref)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                                      >
-                                        <Banknote className="w-3.5 h-3.5 shrink-0" />
-                                        {row?.boletoName?.trim() || 'Abrir boleto'}
-                                      </a>
-                                    ) : (
-                                      <span className="text-gray-400 dark:text-gray-500">Não anexado</span>
-                                    )}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                    <span className="text-gray-500 dark:text-gray-400 shrink-0">Comprovante:</span>
-                                    {proofHref ? (
-                                      <a
-                                        href={absoluteUploadUrl(proofHref)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                                      >
-                                        <Receipt className="w-3.5 h-3.5 shrink-0" />
-                                        {row?.installmentProofName?.trim() || 'Abrir comprovante'}
-                                      </a>
-                                    ) : (
-                                      <span className="text-gray-400 dark:text-gray-500">—</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()
+                    <BoletoParcelasList
+                      className="mt-1"
+                      order={selectedOrder}
+                      showComprovante
+                      editable={canEditBoletoParcels && !boletoParcelsEditorInAttachBox}
+                      hint="Histórico por parcela: valor, vencimento, boleto e comprovante (quando houver)."
+                      onSaved={handleBoletoParcelsSaved}
+                    />
                   ) : selectedOrder.paymentBoletoUrl ? (
-                    <a
-                      href={absoluteUploadUrl(selectedOrder.paymentBoletoUrl || '')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                    >
-                      <Banknote className="w-3.5 h-3.5" />
-                      {selectedOrder.paymentBoletoName || 'Abrir boleto'}
-                    </a>
+                    <OcAttachmentActions
+                      url={selectedOrder.paymentBoletoUrl}
+                      fileName={selectedOrder.paymentBoletoName || 'Boleto pagamento'}
+                      icon={Banknote}
+                    />
                   ) : (
                     <span className="text-gray-500 dark:text-gray-400">Não anexado</span>
                   )}
@@ -3065,20 +3212,16 @@ export function OcPurchaseOrdersPanel({
                       </button>
                     </div>
                   )}
-                {(selectedOrder.paymentProofUrl || '').trim() ? (
-                  <p className="text-sm">
+                {shouldShowOrderLevelPaymentProofInDocuments(selectedOrder) ? (
+                  <p className="text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="font-medium text-gray-700 dark:text-gray-300">
                       Comprovante de pagamento (fase Pagamento):
-                    </span>{' '}
-                    <a
-                      href={absoluteUploadUrl(selectedOrder.paymentProofUrl || '')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                    >
-                      <Receipt className="w-3.5 h-3.5" />
-                      {selectedOrder.paymentProofName || 'Abrir comprovante'}
-                    </a>
+                    </span>
+                    <OcAttachmentActions
+                      url={selectedOrder.paymentProofUrl || ''}
+                      fileName={selectedOrder.paymentProofName || 'Comprovante pagamento'}
+                      icon={Receipt}
+                    />
                   </p>
                 ) : null}
                 {parseOcNfAttachments(selectedOrder.nfAttachments).length > 0 && (
@@ -3088,18 +3231,10 @@ export function OcPurchaseOrdersPanel({
                     </span>
                     <ul className="list-none space-y-1 pl-0">
                       {parseOcNfAttachments(selectedOrder.nfAttachments).map((nf, idx) => (
-                        <li key={`${nf.url}-${idx}`}>
-                          <a
-                            href={absoluteUploadUrl(nf.url)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                          >
-                            <FileText className="w-3.5 h-3.5 shrink-0" />
-                            {nf.name || `NF ${idx + 1}`}
-                          </a>
+                        <li key={`${nf.url}-${idx}`} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <OcAttachmentActions url={nf.url} fileName={nf.name || `NF ${idx + 1}`} />
                           {nf.uploadedAt ? (
-                            <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
                               ({new Date(nf.uploadedAt).toLocaleString('pt-BR')})
                             </span>
                           ) : null}
@@ -3126,15 +3261,10 @@ export function OcPurchaseOrdersPanel({
                       <p>
                         <span className="font-medium text-gray-700 dark:text-gray-300">Nota fiscal:</span>{' '}
                         {selectedOrderStockAttachments.nf ? (
-                          <a
-                            href={absoluteUploadUrl(selectedOrderStockAttachments.nf.url)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                            {selectedOrderStockAttachments.nf.name || 'Abrir arquivo'}
-                          </a>
+                          <OcAttachmentActions
+                            url={selectedOrderStockAttachments.nf.url}
+                            fileName={selectedOrderStockAttachments.nf.name || 'NF estoque'}
+                          />
                         ) : (
                           <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
                         )}
@@ -3142,15 +3272,12 @@ export function OcPurchaseOrdersPanel({
                       <p>
                         <span className="font-medium text-gray-700 dark:text-gray-300">Ficha de retirada:</span>{' '}
                         {selectedOrderStockAttachments.withdrawalSheet ? (
-                          <a
-                            href={absoluteUploadUrl(selectedOrderStockAttachments.withdrawalSheet.url)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                            {selectedOrderStockAttachments.withdrawalSheet.name || 'Abrir arquivo'}
-                          </a>
+                          <OcAttachmentActions
+                            url={selectedOrderStockAttachments.withdrawalSheet.url}
+                            fileName={
+                              selectedOrderStockAttachments.withdrawalSheet.name || 'Ficha de retirada'
+                            }
+                          />
                         ) : (
                           <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
                         )}
@@ -3163,15 +3290,11 @@ export function OcPurchaseOrdersPanel({
                           <div className="mt-1 space-y-1">
                             {selectedOrderStockAttachments.paymentSlips.map((slip, idx) => (
                               <div key={`${slip.url}-${idx}`} className="text-xs sm:text-sm">
-                                <a
-                                  href={absoluteUploadUrl(slip.url)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                                >
-                                  <Banknote className="w-3.5 h-3.5" />
-                                  {slip.name || `Boleto ${idx + 1}`}
-                                </a>
+                                <OcAttachmentActions
+                                  url={slip.url}
+                                  fileName={slip.name || `Boleto estoque ${idx + 1}`}
+                                  icon={Banknote}
+                                />
                                 {(slip.amount || slip.dueDate) && (
                                   <span className="text-gray-600 dark:text-gray-400">
                                     {' '}
@@ -3280,9 +3403,204 @@ export function OcPurchaseOrdersPanel({
                   </p>
                 )}
               </div>
+              {selectedOrderInFinancialLaunchPhase && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/25 px-3 py-3 space-y-3">
+                  <p className="text-xs font-semibold text-amber-900 dark:text-amber-200 uppercase tracking-wide">
+                    Controle Financeiro (obrigatório)
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    Registre o pagamento desta OC no Controle Financeiro antes de enviar para validação do
+                    comprovante. O lançamento aparecerá no módulo{' '}
+                    <Link
+                      href="/ponto/financeiro/controle-financeiro"
+                      className="text-amber-800 dark:text-amber-300 underline inline-flex items-center gap-0.5"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Controle Financeiro
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                    .
+                  </p>
+                  {hasFinancialEntryForOc ? (
+                    <ul className="space-y-2 text-sm">
+                      {financialEntriesByOc.map((entry) => (
+                        <li
+                          key={entry.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-100 dark:border-amber-900/40 bg-white/60 dark:bg-gray-950/30 px-2.5 py-2"
+                        >
+                          <span className="text-gray-800 dark:text-gray-200">
+                            {MONTHS_PT[entry.paymentMonth - 1]}/{entry.paymentYear} —{' '}
+                            {formatFinancialCurrency(entry.finalValue ?? entry.originalValue)} —{' '}
+                            <span className="text-gray-500 dark:text-gray-400">
+                              {entry.supplierName || 'Sem fornecedor'}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFinancialEntry(entry);
+                              setFinancialEntryModalOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-amber-400/60 text-amber-900 dark:text-amber-200 hover:bg-amber-100/80 dark:hover:bg-amber-950/40"
+                          >
+                            <Pencil className="w-3 h-3" />
+                            Editar
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-amber-800 dark:text-amber-300 font-medium">
+                      Nenhum lançamento vinculado a esta OC. Clique no botão abaixo para registrar.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingFinancialEntry(null);
+                        setFinancialEntryModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                    >
+                      <Wallet className="w-4 h-4 shrink-0" />
+                      {hasFinancialEntryForOc
+                        ? 'Novo lançamento no Controle Financeiro'
+                        : 'Registrar lançamento no Controle Financeiro'}
+                    </button>
+                  </div>
+                </div>
+              )}
               {selectedOrder.status === 'APPROVED' &&
                 selectedOrder.paymentType === 'BOLETO' &&
                 selectedOrder.paymentBoletoPhaseReleased &&
+                useParallelBoletoPaymentFlow(selectedOrder) && (
+                  <div className="rounded-lg border border-sky-200 dark:border-sky-900/50 bg-sky-50/60 dark:bg-sky-950/25 px-3 py-3 space-y-3">
+                    <p className="text-xs font-semibold text-sky-900 dark:text-sky-200 uppercase tracking-wide">
+                      Comprovantes por parcela (financeiro)
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Todos os boletos já estão anexados. Anexe o comprovante de pagamento de cada parcela e, em
+                      seguida, envie a OC para validação do comprovante — não é necessário devolver ao comprador
+                      para anexar boleto novamente.
+                    </p>
+                    {(() => {
+                      const n = selectedOrder.paymentParcelCount ?? 1;
+                      const rows = parsePaymentBoletoInstallments(selectedOrder.paymentBoletoInstallments);
+                      const targets = financeProofTargetInstallmentIndices(selectedOrder);
+                      return (
+                        <div className="space-y-3">
+                          {Array.from({ length: n }, (_, idx) => {
+                            if (!targets.includes(idx)) return null;
+                            const row = rows[idx];
+                            const st = rowStatus(row);
+                            const proofUrl =
+                              (row?.installmentProofUrl || '').trim() ||
+                              (st === 'PAID' && (selectedOrder.paymentProofUrl || '').trim()
+                                ? (selectedOrder.paymentProofUrl || '').trim()
+                                : '');
+                            return (
+                              <div
+                                key={idx}
+                                className="rounded-md border border-sky-100 dark:border-sky-900/40 bg-white/50 dark:bg-gray-950/30 px-2.5 py-2 space-y-2"
+                              >
+                                <div className="flex flex-wrap items-baseline gap-2">
+                                  <span className="font-medium text-gray-800 dark:text-gray-200">
+                                    Parcela {romanParcelLabel(idx)}
+                                  </span>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    {installmentStatusLabel(st)}
+                                  </span>
+                                </div>
+                                {proofUrl ? (
+                                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                                    Comprovante:{' '}
+                                    <OcAttachmentActions
+                                      url={proofUrl}
+                                      fileName={
+                                        row?.installmentProofName?.trim() ||
+                                        `Comprovante parcela ${romanParcelLabel(idx)}`
+                                      }
+                                      icon={Receipt}
+                                    />
+                                  </p>
+                                ) : isFinanceOrAdminUser ? (
+                                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                    <input
+                                      type="file"
+                                      accept=".pdf,image/*"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0] ?? null;
+                                        setInstallmentProofDraftByIdx((prev) => ({
+                                          ...prev,
+                                          [idx]: file
+                                        }));
+                                      }}
+                                      className="block w-full text-xs text-gray-600 dark:text-gray-400 file:mr-2 file:py-1.5 file:px-2 file:rounded file:border-0 file:bg-sky-100 file:text-sky-900 dark:file:bg-sky-900/40 dark:file:text-sky-100"
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        !installmentProofDraftByIdx[idx] ||
+                                        attachBoletoInstallmentProofMutation.isPending
+                                      }
+                                      onClick={() => {
+                                        const file = installmentProofDraftByIdx[idx];
+                                        if (!file) return;
+                                        attachBoletoInstallmentProofMutation.mutate({
+                                          id: selectedOrder.id,
+                                          file,
+                                          installmentIndex: idx
+                                        });
+                                      }}
+                                      className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-500 text-white hover:bg-sky-600 disabled:opacity-50"
+                                    >
+                                      {attachBoletoInstallmentProofMutation.isPending
+                                        ? 'Enviando…'
+                                        : 'Anexar comprovante'}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                                    Aguardando comprovante do financeiro.
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                    {isFinanceOrAdminUser && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={
+                            submitProofValidationMutation.isPending ||
+                            !canSubmitBoletoToProofValidation(selectedOrder) ||
+                            !hasFinancialEntryForOc
+                          }
+                          onClick={() => submitProofValidationMutation.mutate(selectedOrder.id)}
+                          className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+                        >
+                          {submitProofValidationMutation.isPending
+                            ? 'Enviando…'
+                            : 'Enviar para Validação Comprovante'}
+                        </button>
+                        {!hasFinancialEntryForOc ? (
+                          <p className="text-xs text-amber-700 dark:text-amber-300">
+                            Registre o lançamento no Controle Financeiro para habilitar o envio à validação.
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                )}
+              {selectedOrder.status === 'APPROVED' &&
+                selectedOrder.paymentType === 'BOLETO' &&
+                selectedOrder.paymentBoletoPhaseReleased &&
+                !useParallelBoletoPaymentFlow(selectedOrder) &&
                 hasAwaitingInstallmentPayment(selectedOrder) && (
                   <div className="rounded-lg border border-sky-200 dark:border-sky-900/50 bg-sky-50/60 dark:bg-sky-950/25 px-3 py-3 space-y-2">
                     <p className="text-xs font-semibold text-sky-900 dark:text-sky-200 uppercase tracking-wide">
@@ -3293,9 +3611,9 @@ export function OcPurchaseOrdersPanel({
                       pagamento desta parcela; só então libere a anexação da próxima (se houver).
                     </p>
                     {(() => {
-                      const awRow = parsePaymentBoletoInstallments(selectedOrder.paymentBoletoInstallments).find(
-                        (r) => rowStatus(r) === 'AWAITING_PAYMENT'
-                      );
+                      const instRows = parsePaymentBoletoInstallments(selectedOrder.paymentBoletoInstallments);
+                      const awaitingIdx = instRows.findIndex((r) => rowStatus(r) === 'AWAITING_PAYMENT');
+                      const awRow = awaitingIdx >= 0 ? instRows[awaitingIdx] : undefined;
                       const proofUrl = (awRow?.installmentProofUrl || '').trim();
                       const proofName = (awRow?.installmentProofName || '').trim();
                       return proofUrl ? (
@@ -3333,9 +3651,15 @@ export function OcPurchaseOrdersPanel({
                         }
                         onClick={() => {
                           if (!selectedOrder || !installmentProofFileDraft) return;
+                          const instRows = parsePaymentBoletoInstallments(
+                            selectedOrder.paymentBoletoInstallments
+                          );
+                          const idx = instRows.findIndex((r) => rowStatus(r) === 'AWAITING_PAYMENT');
+                          if (idx < 0) return;
                           attachBoletoInstallmentProofMutation.mutate({
                             id: selectedOrder.id,
-                            file: installmentProofFileDraft
+                            file: installmentProofFileDraft,
+                            installmentIndex: idx
                           });
                         }}
                         className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-sky-500 text-white hover:bg-sky-600 disabled:opacity-50"
@@ -3369,7 +3693,8 @@ export function OcPurchaseOrdersPanel({
                 )}
               {((selectedOrder.status === 'APPROVED' &&
                 !orderNeedsPaymentBoleto(selectedOrder) &&
-                canAttachComprovanteForBoletoOrder(selectedOrder)) ||
+                canAttachComprovanteForBoletoOrder(selectedOrder) &&
+                !useParallelBoletoPaymentFlow(selectedOrder)) ||
                 selectedOrder.status === 'PENDING_PROOF_CORRECTION') && (
                 <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/25 px-3 py-3 space-y-3">
                   <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-200 uppercase tracking-wide">
@@ -3467,6 +3792,9 @@ export function OcPurchaseOrdersPanel({
                               hasFinancialControlEntry
                             ) ||
                             !canAttachComprovanteForBoletoOrder(selectedOrder)
+                            !canSubmitBoletoToProofValidation(selectedOrder) ||
+                            !canAttachComprovanteForBoletoOrder(selectedOrder) ||
+                            !hasFinancialEntryForOc
                           }
                           onClick={() => submitProofValidationMutation.mutate(selectedOrder.id)}
                           className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
@@ -3477,6 +3805,11 @@ export function OcPurchaseOrdersPanel({
                               ? 'Reenviar para validação do comprovante'
                               : 'Enviar para Validação Comprovante'}
                         </button>
+                        {!hasFinancialEntryForOc ? (
+                          <p className="text-xs text-amber-700 dark:text-amber-300 w-full sm:w-auto">
+                            Registre o lançamento no Controle Financeiro para habilitar o envio à validação.
+                          </p>
+                        ) : null}
                       </div>
                     </>
                   )}
@@ -3609,7 +3942,7 @@ export function OcPurchaseOrdersPanel({
                   Ver mapa de cotação
                 </button>
               )}
-              {showOcApprovalActions(selectedOrder.status) && (
+              {showListApprovalActions(selectedOrder.status) && (
                 <button
                   type="button"
                   onClick={() => approveMutation.mutate({ id: selectedOrder.id, currentStatus: selectedOrder.status })}
@@ -3620,7 +3953,7 @@ export function OcPurchaseOrdersPanel({
                   {approvalLabel(selectedOrder.status)}
                 </button>
               )}
-              {showOcApprovalActions(selectedOrder.status) && (
+              {showListApprovalActions(selectedOrder.status) && (
                 <>
                   <button
                     type="button"
@@ -3677,14 +4010,94 @@ export function OcPurchaseOrdersPanel({
           key={boletoParcelModalOrder.id}
           order={boletoParcelModalOrder}
           onClose={() => setBoletoParcelModalOrder(null)}
-          onSaved={(payload) => {
-            queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-            const updated = (payload as { data?: PurchaseOrder })?.data;
-            if (updated) {
-              setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
-            }
-          }}
+          onSaved={handleBoletoParcelsSaved}
         />
+      )}
+
+      {selectedOrder && financialEntryModalOpen && (
+        <FinancialControlEntryFormModal
+          isOpen={financialEntryModalOpen}
+          onClose={() => {
+            setFinancialEntryModalOpen(false);
+            setEditingFinancialEntry(null);
+          }}
+          initialForm={
+            editingFinancialEntry ? undefined : buildInitialFormFromPurchaseOrder(selectedOrder)
+          }
+          editingEntry={editingFinancialEntry}
+          lockOcNumber={!editingFinancialEntry}
+          title={
+            editingFinancialEntry
+              ? `Editar lançamento — ${selectedOrder.orderNumber}`
+              : `Novo lançamento — ${selectedOrder.orderNumber}`
+          }
+        />
+      )}
+
+      {isApprovalFiltersModalOpen && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setIsApprovalFiltersModalOpen(false)}
+            aria-hidden
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+              <button
+                type="button"
+                onClick={() => setIsApprovalFiltersModalOpen(false)}
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Fechar filtros"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 px-5 py-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Exibir
+                </label>
+                <select
+                  value={approvalListPhase}
+                  onChange={(e) =>
+                    setApprovalListPhase(e.target.value as OcApprovalListPhase)
+                  }
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="pending">Pendentes de aprovação</option>
+                  <option value="approved_by_me">Aprovadas por mim</option>
+                </select>
+              </div>
+              {approvalListPhase === 'approved_by_me' ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Lista as OCs em que você registrou aprovação nesta fase (compras, gestor ou
+                  diretoria), em qualquer status atual do fluxo.
+                </p>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setApprovalListPhase('pending');
+                  setIsApprovalFiltersModalOpen(false);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsApprovalFiltersModalOpen(false)}
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {isFinalizedFiltersModalOpen && (
@@ -3811,8 +4224,13 @@ export function OcPurchaseOrdersPanel({
             <div className="fixed inset-0 z-[1100]" aria-hidden onClick={() => setOcActionMenu(null)} />
             <div
               role="menu"
-              className="fixed z-[1101] w-56 max-h-[min(70vh,360px)] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-              style={{ top: ocActionMenu.top, left: ocActionMenu.left }}
+              className="fixed z-[1101] w-56 overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              style={{
+                top: ocActionMenu.top,
+                left: ocActionMenu.left,
+                maxHeight: ocActionMenu.maxHeight,
+                transform: ocActionMenu.placement === 'above' ? 'translateY(-100%)' : undefined
+              }}
             >
               <button
                 type="button"
@@ -3892,7 +4310,7 @@ export function OcPurchaseOrdersPanel({
                   <span>Validar comprovante</span>
                 </button>
               )}
-              {showOcApprovalActions(orderForActionMenu.status) && (
+              {showListApprovalActions(orderForActionMenu.status) && (
                 <>
                   <button
                     type="button"

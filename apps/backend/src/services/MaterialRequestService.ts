@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import type { EngineeringMaterial } from '@prisma/client';
+import { resolveRmServiceOrderFields } from '../utils/materialRequestServiceOrder';
 
 export interface RmDropdownMaterial {
   id: string;
@@ -15,6 +16,7 @@ export interface CreateMaterialRequestData {
   requestedBy: string;
   costCenterId: string;
   projectId?: string;
+  serviceOrderId?: string;
   serviceOrder?: string;
   obra?: string;
   description?: string;
@@ -38,6 +40,7 @@ export interface UpdateMaterialRequestStatusData {
 export interface UpdateMaterialRequestCorrectionData {
   costCenterId: string;
   projectId?: string;
+  serviceOrderId?: string;
   serviceOrder?: string;
   obra?: string;
   description?: string;
@@ -205,12 +208,12 @@ export class MaterialRequestService {
         ? data.projectId
         : undefined;
 
-    // Ordem de serviço: preferir campo explícito; fallback para projectId quando vier texto livre
-    const serviceOrder =
-      (data.serviceOrder || '').trim() ||
-      (data.projectId && !(data.projectId.length === 25 && data.projectId.startsWith('c'))
-        ? data.projectId.trim()
-        : undefined);
+    const { serviceOrderId, serviceOrder } = await resolveRmServiceOrderFields({
+      costCenterId: data.costCenterId,
+      serviceOrderId: data.serviceOrderId,
+      serviceOrder: data.serviceOrder,
+      projectId: data.projectId
+    });
 
     const obra = (data.obra || '').trim() || undefined;
 
@@ -221,6 +224,7 @@ export class MaterialRequestService {
         requestedBy: data.requestedBy,
         costCenterId: data.costCenterId,
         projectId,
+        serviceOrderId,
         serviceOrder,
         obra,
         description: data.description,
@@ -576,11 +580,12 @@ export class MaterialRequestService {
         ? data.projectId
         : null;
 
-    const serviceOrder =
-      (data.serviceOrder || '').trim() ||
-      (data.projectId && !(data.projectId.length === 25 && data.projectId.startsWith('c'))
-        ? data.projectId.trim()
-        : null);
+    const { serviceOrderId, serviceOrder } = await resolveRmServiceOrderFields({
+      costCenterId: data.costCenterId,
+      serviceOrderId: data.serviceOrderId,
+      serviceOrder: data.serviceOrder,
+      projectId: data.projectId
+    });
 
     const obra = (data.obra || '').trim() || null;
 
@@ -610,6 +615,7 @@ export class MaterialRequestService {
       data: {
         costCenterId: data.costCenterId,
         projectId,
+        serviceOrderId,
         serviceOrder,
         obra,
         description: data.description ?? null,

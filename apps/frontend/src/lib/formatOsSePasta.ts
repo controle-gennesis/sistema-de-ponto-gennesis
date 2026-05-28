@@ -2,6 +2,13 @@
  * Exibe OS/SE com Nº pasta quando existir: "OS 10 - 1".
  * Sem pasta: apenas "OS 10" (prefixo OS se o valor não começar já por OS ou SE).
  */
+/** Exibe rótulo de OS/SE sem duplicar o prefixo (ex.: evita "OS OS 9030"). */
+export function ensureOsSePrefix(label: string | null | undefined): string {
+  const d = (label || '').trim();
+  if (!d) return '';
+  return /^(OS|SE)\s/i.test(d) ? d : `OS ${d}`;
+}
+
 export function formatOsSePasta(
   divSe: string | null | undefined,
   folderNumber: string | null | undefined

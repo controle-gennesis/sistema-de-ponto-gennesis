@@ -82,12 +82,16 @@ export default function FuroEstoquePage() {
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
   const [filtersCategory, setFiltersCategory] = useState('');
   const [filtersMonth, setFiltersMonth] = useState('');
-  const [filtersYear, setFiltersYear] = useState(String(new Date().getFullYear()));
+  const [filtersYear, setFiltersYear] = useState('');
   const [filtersSearch, setFiltersSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ABERTO' | 'RESOLVIDO' | 'ALL'>('ABERTO');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [listCurrentPage, setListCurrentPage] = useState(1);
   const [detail, setDetail] = useState<ShortfallRow | null>(null);
+
+  const isFiltersExpanded =
+    Boolean(filtersCostCenterId || filtersCategory || filtersMonth || filtersYear || filtersSearch) ||
+    statusFilter !== 'ABERTO';
 
   useEffect(() => {
     if (!detail) return;
@@ -147,6 +151,7 @@ export default function FuroEstoquePage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stock-shortfalls'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-shortfalls-pending-count'] });
       setDetail(null);
       toast.success('Furo encerrado como Resolvido.');
     },
@@ -228,6 +233,24 @@ export default function FuroEstoquePage() {
                     </p>
                   </div>
                 </div>
+                <div className="flex items-center space-x-4">
+                  {isFiltersExpanded && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFiltersCostCenterId('');
+                        setFiltersCategory('');
+                        setFiltersMonth('');
+                        setFiltersYear('');
+                        setFiltersSearch('');
+                        setStatusFilter('ABERTO');
+                      }}
+                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                      title="Limpar filtros"
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                    </button>
+                  )}
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                   <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -258,6 +281,7 @@ export default function FuroEstoquePage() {
                   >
                     <Filter className="h-4 w-4" />
                   </button>
+                </div>
                 </div>
               </div>
             </CardHeader>

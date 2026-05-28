@@ -68,6 +68,29 @@ export class KanbanController {
     }
   }
 
+  async updateBoardLabelPresets(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { presets, departmentKey } = req.body;
+      const data = await kanbanService.updateBoardLabelPresets(
+        userId,
+        presets,
+        typeof departmentKey === 'string' ? departmentKey : undefined,
+      );
+      res.json({ success: true, data });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado para este setor') {
+        return next(createError(msg, 404));
+      }
+      if (msg && msg !== KANBAN_FORBIDDEN) {
+        return next(createError(msg, 400));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
   async createColumn(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);
@@ -94,12 +117,13 @@ export class KanbanController {
       const userId = requireUserId(req, next);
       if (!userId) return;
       const { id } = req.params;
-      const { title, color, cardLimit } = req.body;
+      const { title, color, cardLimit, position } = req.body;
 
       const column = await kanbanService.updateColumn(userId, id, {
         title: title?.trim(),
         color: color?.trim(),
         cardLimit: cardLimit === undefined ? undefined : cardLimit == null ? null : Number(cardLimit),
+        position: position !== undefined ? Number(position) : undefined,
       });
 
       res.json({ success: true, data: column });
@@ -189,6 +213,7 @@ export class KanbanController {
         checklistEnabled,
         attachmentsEnabled,
         position,
+        workHours,
       } = req.body;
 
       const card = await kanbanService.updateCard(userId, id, {
@@ -208,6 +233,12 @@ export class KanbanController {
         attachmentsEnabled:
           attachmentsEnabled !== undefined ? Boolean(attachmentsEnabled) : undefined,
         position: position != null ? Number(position) : undefined,
+        workHours:
+          workHours !== undefined
+            ? workHours == null || workHours === ''
+              ? null
+              : Number(workHours)
+            : undefined,
       });
 
       res.json({ success: true, data: card });
@@ -276,6 +307,25 @@ export class KanbanController {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '';
       if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async getCardCost(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const cost = await kanbanService.getCardCost(userId, req.params.id);
+      res.json({ success: true, data: cost });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      if (
+        msg === 'Defina a data de entrega (início e fim) no card para calcular o custo' ||
+        msg === 'A data final deve ser posterior à data inicial'
+      ) {
+        return next(createError(msg, 400));
+      }
       handleKanbanError(error, next);
     }
   }
@@ -376,6 +426,26 @@ export class KanbanController {
       const msg = error instanceof Error ? error.message : '';
       if (msg === 'Card não encontrado') return next(createError(msg, 404));
       if (msg === 'Nenhum arquivo enviado') return next(createError(msg, 400));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async addLinkAttachment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { url, displayName } = req.body as { url?: string; displayName?: string };
+      const card = await kanbanService.addLinkAttachment(userId, req.params.cardId, {
+        url: url ?? '',
+        displayName,
+      });
+      res.status(201).json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      if (msg === 'URL é obrigatória' || msg === 'URL inválida') {
+        return next(createError(msg, 400));
+      }
       handleKanbanError(error, next);
     }
   }

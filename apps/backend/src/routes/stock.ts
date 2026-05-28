@@ -188,6 +188,9 @@ router.delete('/movements/:id', (req, res, next) =>
   stockController.deleteMovement(req, res, next)
 );
 
+router.get('/shortfalls/pending-count', (req, res, next) =>
+  stockShortfallController.countPending(req, res, next)
+);
 router.get('/shortfalls', (req, res, next) => stockShortfallController.list(req, res, next));
 router.patch('/shortfalls/:id/resolve', (req, res, next) =>
   stockShortfallController.resolve(req, res, next)

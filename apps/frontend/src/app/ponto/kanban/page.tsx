@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
+import { KanbanBoardLabelSettings } from '@/components/kanban/KanbanBoardLabelSettings';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import {
@@ -20,18 +21,29 @@ import {
   type Priority,
   type KanbanCard,
   type KanbanColumn,
+  type KanbanBoard,
   type KanbanBoardSummary,
   fetchKanbanBoard,
   fetchKanbanBoards,
+  updateKanbanBoardLabelPresets,
   createKanbanColumn,
   updateKanbanColumn,
   deleteKanbanColumn,
   updateKanbanCard,
   deleteKanbanCard,
+  patchCardInBoardCache,
+  type KanbanBoardCardChecklistPatch,
+  fetchKanbanCard,
+  kanbanCardQueryKey,
 } from '@/lib/kanban';
 import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG } from '@/components/kanban/kanbanPriority';
 import { KanbanPriorityBars } from '@/components/kanban/KanbanPriorityBars';
+import {
+  getKanbanLabelPalette,
+  normalizeKanbanLabels,
+  type KanbanLabelPreset,
+} from '@/components/kanban/kanbanLabels';
 import {
   formatKanbanCardEndDate,
   splitDateTime,
@@ -50,7 +62,6 @@ import {
   Tag,
   Trash2,
   Edit3,
-  GripVertical,
   AlertCircle,
   ChevronDown,
   Clock,
@@ -85,6 +96,227 @@ function isOverdue(dateStr: string | null): boolean {
   const { date } = splitDateTime(dateStr);
   if (!date) return false;
   return new Date(date + 'T23:59:59') < new Date();
+}
+
+function resolveKanbanInsertIndex(
+  columnCards: KanbanCard[],
+  cardId: string,
+  fromColumnId: string,
+  toColumnId: string,
+  rawIndex: number,
+): number {
+  const bounded = Math.max(0, Math.min(rawIndex, columnCards.length));
+  if (fromColumnId !== toColumnId) {
+    const targetWithoutCard = columnCards.filter((card) => card.id !== cardId);
+    return Math.max(0, Math.min(bounded, targetWithoutCard.length));
+  }
+
+  const sourceIndex = columnCards.findIndex((card) => card.id === cardId);
+  if (sourceIndex < 0) return bounded;
+
+  let insertIndex = bounded;
+  if (insertIndex > sourceIndex) insertIndex -= 1;
+  return Math.max(0, Math.min(insertIndex, columnCards.length - 1));
+}
+
+function moveCardInBoardCache(
+  board: KanbanBoard | undefined,
+  cardId: string,
+  fromColumnId: string,
+  toColumnId: string,
+  targetIndex?: number,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  const fromColumn = board.columns.find((col) => col.id === fromColumnId);
+  const toColumn = board.columns.find((col) => col.id === toColumnId);
+  if (!fromColumn || !toColumn) return board;
+
+  const sourceIndex = fromColumn.cards.findIndex((card) => card.id === cardId);
+  if (sourceIndex < 0) return board;
+
+  const movedCard = fromColumn.cards[sourceIndex];
+  const fromCards = fromColumn.cards.filter((card) => card.id !== cardId);
+
+  const insertIndex = resolveKanbanInsertIndex(
+    fromColumnId === toColumnId ? fromColumn.cards : toColumn.cards,
+    cardId,
+    fromColumnId,
+    toColumnId,
+    targetIndex ?? toColumn.cards.length,
+  );
+
+  const toCardsWithoutMoved =
+    fromColumnId === toColumnId ? fromCards : toColumn.cards.filter((card) => card.id !== cardId);
+  const toCards = [
+    ...toCardsWithoutMoved.slice(0, insertIndex),
+    movedCard,
+    ...toCardsWithoutMoved.slice(insertIndex),
+  ];
+
+  return {
+    ...board,
+    columns: board.columns.map((col) => {
+      if (fromColumnId === toColumnId && col.id === fromColumnId) {
+        return { ...col, cards: toCards };
+      }
+      if (col.id === fromColumnId) return { ...col, cards: fromCards };
+      if (col.id === toColumnId) return { ...col, cards: toCards };
+      return col;
+    }),
+  };
+}
+
+const KANBAN_REORDER_MS = 380;
+
+type KanbanReorderIdAttr = 'data-kanban-card-id' | 'data-kanban-column-id';
+type KanbanReorderClass = 'kanban-card-reordering' | 'kanban-column-reordering';
+
+function kanbanPrefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+function captureKanbanReorderRects(
+  container: HTMLElement,
+  idAttribute: KanbanReorderIdAttr,
+): Map<string, DOMRect> {
+  const map = new Map<string, DOMRect>();
+  container.querySelectorAll(`[${idAttribute}]`).forEach((node) => {
+    if (node instanceof HTMLElement) {
+      const id = node.getAttribute(idAttribute);
+      if (id) map.set(id, node.getBoundingClientRect());
+    }
+  });
+  return map;
+}
+
+function animateKanbanReorder(
+  container: HTMLElement,
+  beforeRects: Map<string, DOMRect>,
+  idAttribute: KanbanReorderIdAttr,
+  reorderingClass: KanbanReorderClass,
+): void {
+  if (kanbanPrefersReducedMotion()) return;
+
+  container.querySelectorAll(`[${idAttribute}]`).forEach((node) => {
+    const el = node as HTMLElement;
+    const id = el.getAttribute(idAttribute);
+    if (!id) return;
+
+    const first = beforeRects.get(id);
+    if (!first) return;
+
+    const last = el.getBoundingClientRect();
+    const dx = first.left - last.left;
+    const dy = first.top - last.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+
+    el.classList.add(reorderingClass);
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.style.transition = 'none';
+
+    const cleanup = () => {
+      el.classList.remove(reorderingClass);
+      el.style.transition = '';
+      el.style.transform = '';
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.style.transition = `transform ${KANBAN_REORDER_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+        el.style.transform = '';
+        el.addEventListener('transitionend', cleanup, { once: true });
+        window.setTimeout(cleanup, KANBAN_REORDER_MS + 80);
+      });
+    });
+  });
+}
+
+function scheduleKanbanReorderAnimation(
+  container: HTMLElement | null,
+  beforeRects: Map<string, DOMRect>,
+  idAttribute: KanbanReorderIdAttr,
+  reorderingClass: KanbanReorderClass,
+): void {
+  if (!container || kanbanPrefersReducedMotion()) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      animateKanbanReorder(container, beforeRects, idAttribute, reorderingClass);
+    });
+  });
+}
+
+function resolveColumnInsertIndex(
+  boardColumns: KanbanColumn[],
+  columnId: string,
+  rawIndex: number,
+): number {
+  const bounded = Math.max(0, Math.min(rawIndex, boardColumns.length));
+  const sourceIndex = boardColumns.findIndex((col) => col.id === columnId);
+  if (sourceIndex < 0) return bounded;
+
+  let insertIndex = bounded;
+  if (insertIndex > sourceIndex) insertIndex -= 1;
+  return Math.max(0, Math.min(insertIndex, boardColumns.length - 1));
+}
+
+function setKanbanColumnDragGhost(
+  e: React.DragEvent,
+  ghostRef: React.MutableRefObject<HTMLElement | null>,
+) {
+  const columnEl = e.currentTarget;
+  if (!(columnEl instanceof HTMLElement)) return;
+
+  ghostRef.current?.remove();
+  const ghost = columnEl.cloneNode(true) as HTMLElement;
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.classList.add('kanban-column-drag-ghost');
+  ghost.style.position = 'fixed';
+  ghost.style.top = '-10000px';
+  ghost.style.left = '-10000px';
+  ghost.style.width = `${columnEl.offsetWidth}px`;
+  ghost.style.zIndex = '9999';
+  document.body.appendChild(ghost);
+  ghostRef.current = ghost;
+  e.dataTransfer.setDragImage(ghost, 48, 36);
+}
+
+function shouldStartColumnDrag(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.closest('[data-kanban-card]')) return false;
+  if (target.closest('button')) return false;
+  return true;
+}
+
+function resolveColumnDropIndex(
+  columnIndex: number,
+  clientX: number,
+  rect: DOMRect,
+): number {
+  const before = clientX < rect.left + rect.width / 2;
+  return before ? columnIndex : columnIndex + 1;
+}
+
+function moveColumnInBoardCache(
+  board: KanbanBoard | undefined,
+  columnId: string,
+  rawIndex: number,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  const cols = [...board.columns];
+  const sourceIndex = cols.findIndex((col) => col.id === columnId);
+  if (sourceIndex < 0) return board;
+
+  const insertIndex = resolveColumnInsertIndex(cols, columnId, rawIndex);
+  if (insertIndex === sourceIndex) return board;
+
+  const [moved] = cols.splice(sourceIndex, 1);
+  cols.splice(insertIndex, 0, moved);
+  return { ...board, columns: cols };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -189,7 +421,9 @@ function ProgressRing({ value }: { value: number }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{value}%</span>
+      <span className="min-w-[2.25rem] text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+        {value}%
+      </span>
     </div>
   );
 }
@@ -241,9 +475,11 @@ function CardMemberAvatars({ card }: { card: KanbanCard }) {
 interface KanbanCardItemProps {
   card: KanbanCard;
   columnId: string;
+  labelPresets?: readonly KanbanLabelPreset[];
   readOnly?: boolean;
   onEdit: (card: KanbanCard, columnId: string) => void;
   onDelete: (cardId: string, columnId: string) => void;
+  onPrefetch?: (cardId: string) => void;
   onDragStart: (e: React.DragEvent, cardId: string, columnId: string) => void;
   onDragEnd: () => void;
   isDragging: boolean;
@@ -252,9 +488,11 @@ interface KanbanCardItemProps {
 function KanbanCardItem({
   card,
   columnId,
+  labelPresets,
   readOnly = false,
   onEdit,
   onDelete,
+  onPrefetch,
   onDragStart,
   onDragEnd,
   isDragging,
@@ -278,11 +516,14 @@ function KanbanCardItem({
 
   return (
     <div
+      data-kanban-card
+      data-kanban-card-id={card.id}
       draggable={!readOnly}
       onDragStart={
         readOnly
           ? undefined
           : (e) => {
+              e.stopPropagation();
               suppressClickRef.current = true;
               onDragStart(e, card.id, columnId);
             }
@@ -297,6 +538,8 @@ function KanbanCardItem({
               }, 150);
             }
       }
+      onMouseEnter={() => onPrefetch?.(card.id)}
+      onFocus={() => onPrefetch?.(card.id)}
       onClick={handleCardClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -307,14 +550,35 @@ function KanbanCardItem({
       role="button"
       tabIndex={0}
       className={clsx(
-        'group relative bg-white dark:bg-gray-800 rounded-2xl p-4',
-        'shadow-[0_1px_3px_rgba(0,0,0,0.08)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)]',
-        'transition-all duration-200 cursor-pointer active:cursor-grabbing select-none',
-        isDragging ? 'opacity-50 scale-[0.98]' : '',
+        'group relative overflow-hidden rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
+        'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
+        'transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+        'motion-reduce:transition-none',
+        'active:cursor-grabbing',
+        isDragging
+          ? 'z-10 opacity-50'
+          : [
+              'hover:-translate-y-1.5 hover:scale-[1.015]',
+              'hover:border-gray-200/80 hover:shadow-[0_14px_32px_-10px_rgba(0,0,0,0.14),0_8px_16px_-8px_rgba(0,0,0,0.1)]',
+              'dark:hover:border-gray-600/80 dark:hover:shadow-[0_14px_32px_-10px_rgba(0,0,0,0.5),0_8px_16px_-8px_rgba(0,0,0,0.35)]',
+              'motion-reduce:hover:translate-y-0 motion-reduce:hover:scale-100',
+            ],
       )}
     >
+      <span
+        aria-hidden
+        className={clsx(
+          'pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300',
+          'bg-gradient-to-br from-white/50 via-white/10 to-transparent',
+          'dark:from-white/[0.07] dark:via-transparent',
+          !isDragging && 'group-hover:opacity-100',
+        )}
+      />
       {!readOnly && (
-        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity" ref={menuRef}>
+        <div
+          className="absolute top-3 right-3 z-[2] opacity-0 transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0 translate-y-0.5"
+          ref={menuRef}
+        >
           <button
             onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
             className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -340,9 +604,10 @@ function KanbanCardItem({
         </div>
       )}
 
+      <div className="relative z-[1]">
       {card.labels.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
-          {card.labels.map((l) => (
+          {normalizeKanbanLabels(card.labels, labelPresets).map((l) => (
             <span
               key={`${l.color}-${l.text}`}
               className="h-2 w-10 rounded-sm shrink-0"
@@ -365,12 +630,12 @@ function KanbanCardItem({
 
       <CardMetaRow card={card} />
 
-      <div className="border-t border-gray-100 dark:border-gray-700/80 pt-3 flex items-center justify-between gap-2">
+      <div className="min-h-[2.25rem] border-t border-gray-100 dark:border-gray-700/80 pt-3 flex items-center justify-between gap-2">
         {card.checklistEnabled && card.totalTasks > 0 ? (
           <>
             <ProgressRing value={card.progress} />
-            <span className="flex flex-1 items-center justify-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <ListChecks className="h-3.5 w-3.5" />
+            <span className="flex flex-1 items-center justify-center gap-1.5 text-xs tabular-nums text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              <ListChecks className="h-3.5 w-3.5 shrink-0" />
               {card.completedTasks}/{card.totalTasks} Tasks
             </span>
             <CardMemberAvatars card={card} />
@@ -382,6 +647,79 @@ function KanbanCardItem({
           </>
         )}
       </div>
+      </div>
+    </div>
+  );
+}
+
+function KanbanDropGutter({
+  active,
+  readOnly,
+  onDragOver,
+  onDrop,
+}: {
+  active: boolean;
+  readOnly?: boolean;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+}) {
+  if (readOnly) return <div className="h-0 shrink-0" aria-hidden />;
+
+  return (
+    <div
+      className="relative h-3 shrink-0"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDragOver(e);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDrop(e);
+      }}
+    >
+      <div
+        className={clsx(
+          'pointer-events-none absolute inset-x-3 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-red-500/90 transition-opacity duration-200',
+          active && 'kanban-card-drop-gutter-line opacity-100',
+          !active && 'scale-x-0 opacity-0',
+        )}
+      />
+    </div>
+  );
+}
+
+function KanbanColumnDropGutter({
+  active,
+  onDragOver,
+  onDrop,
+}: {
+  active: boolean;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+}) {
+  return (
+    <div
+      className="relative w-2 shrink-0 self-stretch min-h-[200px] -mx-2.5 z-[2]"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDragOver(e);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDrop(e);
+      }}
+    >
+      <div
+        className={clsx(
+          'pointer-events-none absolute inset-y-6 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-red-500/90 transition-opacity duration-200',
+          active && 'kanban-column-drop-gutter-line opacity-100',
+          !active && 'scale-y-0 opacity-0',
+        )}
+      />
     </div>
   );
 }
@@ -390,11 +728,17 @@ function KanbanCardItem({
 
 interface KanbanColumnProps {
   column: KanbanColumn;
+  labelPresets?: readonly KanbanLabelPreset[];
   dragState: DragState;
+  isColumnDragging?: boolean;
+  isColumnDragActive?: boolean;
   readOnly?: boolean;
   onAddCard: (columnId: string) => void;
   onEditCard: (card: KanbanCard, columnId: string) => void;
   onDeleteCard: (cardId: string, columnId: string) => void;
+  onPrefetchCard?: (cardId: string) => void;
+  onColumnDragStart?: (e: React.DragEvent, columnId: string) => void;
+  onColumnDragEnd?: () => void;
   onDragStart: (e: React.DragEvent, cardId: string, columnId: string) => void;
   onDragEnd: () => void;
   onDragOver: (e: React.DragEvent, columnId: string, index?: number) => void;
@@ -405,11 +749,17 @@ interface KanbanColumnProps {
 
 function KanbanColumnComponent({
   column,
+  labelPresets,
   dragState,
+  isColumnDragging = false,
+  isColumnDragActive = false,
   readOnly = false,
   onAddCard,
   onEditCard,
   onDeleteCard,
+  onPrefetchCard,
+  onColumnDragStart,
+  onColumnDragEnd,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -420,6 +770,13 @@ function KanbanColumnComponent({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const isTarget = dragState.overColumnId === column.id;
+  const overIndex = isTarget ? dragState.overIndex : null;
+  const cardDnDDisabled = readOnly || isColumnDragActive;
+  const isEmptyColumnDropTarget =
+    column.cards.length === 0 &&
+    isTarget &&
+    !!dragState.draggingCardId &&
+    !isColumnDragActive;
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -431,17 +788,39 @@ function KanbanColumnComponent({
 
   return (
     <div
+      data-kanban-column
+      draggable={!!onColumnDragStart}
+      onDragStart={
+        onColumnDragStart
+          ? (e) => {
+              if (!shouldStartColumnDrag(e.target)) {
+                e.preventDefault();
+                return;
+              }
+              onColumnDragStart(e, column.id);
+            }
+          : undefined
+      }
+      onDragEnd={onColumnDragEnd}
       className={clsx(
-        'flex flex-col rounded-2xl w-[340px] flex-shrink-0 transition-all duration-200',
+        'relative flex flex-col rounded-2xl w-[340px] flex-shrink-0',
         'bg-[#F9FAFB] dark:bg-gray-800/60',
-        isTarget && dragState.draggingCardId
-          ? 'ring-2 ring-red-400/70 ring-offset-2 dark:ring-red-500/50 dark:ring-offset-gray-900'
-          : '',
+        'transition-[opacity,box-shadow] duration-200 ease-out motion-reduce:transition-none',
+        onColumnDragStart && 'cursor-grab active:cursor-grabbing [&_[data-kanban-card]]:cursor-pointer',
+        isColumnDragging && 'kanban-column-dragging',
       )}
-      onDragOver={readOnly ? undefined : (e) => onDragOver(e, column.id)}
-      onDrop={readOnly ? undefined : (e) => onDrop(e, column.id)}
+      onDragOver={
+        readOnly || isColumnDragActive
+          ? undefined
+          : (e) => onDragOver(e, column.id, column.cards.length)
+      }
+      onDrop={
+        readOnly || isColumnDragActive
+          ? undefined
+          : (e) => onDrop(e, column.id, column.cards.length)
+      }
     >
-      <div className="flex items-center justify-between px-4 py-4">
+      <div className="flex items-center justify-between px-4 py-4 select-none">
         <div className="flex items-center gap-2.5 min-w-0">
           <span
             className="w-2 h-2 rounded-full flex-shrink-0"
@@ -500,30 +879,92 @@ function KanbanColumnComponent({
         </div>
       </div>
 
-      <div className="px-3 pb-4 flex flex-col gap-3 min-h-[120px]">
-        {column.cards.map((card) => (
-          <KanbanCardItem
-            key={card.id}
-            card={card}
-            columnId={column.id}
-            readOnly={readOnly}
-            onEdit={onEditCard}
-            onDelete={onDeleteCard}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            isDragging={dragState.draggingCardId === card.id}
-          />
+      <div className="px-3 pb-4 flex flex-col min-h-[120px]">
+        {column.cards.map((card, index) => (
+          <React.Fragment key={card.id}>
+            <KanbanDropGutter
+              readOnly={cardDnDDisabled}
+              active={
+                !!dragState.draggingCardId &&
+                overIndex === index &&
+                dragState.overColumnId === column.id
+              }
+              onDragOver={(e) => onDragOver(e, column.id, index)}
+              onDrop={(e) => onDrop(e, column.id, index)}
+            />
+            <div
+              className="relative"
+              onDragOver={
+                cardDnDDisabled
+                  ? undefined
+                  : (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const middleY = rect.top + rect.height / 2;
+                      const dropIndex = e.clientY < middleY ? index : index + 1;
+                      onDragOver(e, column.id, dropIndex);
+                    }
+              }
+              onDrop={
+                cardDnDDisabled
+                  ? undefined
+                  : (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const middleY = rect.top + rect.height / 2;
+                      const dropIndex = e.clientY < middleY ? index : index + 1;
+                      onDrop(e, column.id, dropIndex);
+                    }
+              }
+            >
+              <KanbanCardItem
+                card={card}
+                columnId={column.id}
+                labelPresets={labelPresets}
+                readOnly={readOnly}
+                onEdit={onEditCard}
+                onDelete={onDeleteCard}
+                onPrefetch={onPrefetchCard}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                isDragging={dragState.draggingCardId === card.id}
+              />
+            </div>
+          </React.Fragment>
         ))}
+        {column.cards.length > 0 && (
+          <KanbanDropGutter
+            readOnly={cardDnDDisabled}
+            active={
+              !!dragState.draggingCardId &&
+              overIndex === column.cards.length &&
+              dragState.overColumnId === column.id
+            }
+            onDragOver={(e) => onDragOver(e, column.id, column.cards.length)}
+            onDrop={(e) => onDrop(e, column.id, column.cards.length)}
+          />
+        )}
         {column.cards.length === 0 && (
           <div
             className={clsx(
               'flex flex-col items-center justify-center py-10 rounded-2xl border-2 border-dashed transition-colors',
-              isTarget && dragState.draggingCardId
-                ? 'border-red-400 bg-red-50/60 dark:border-red-500/70 dark:bg-red-950/25'
+              isEmptyColumnDropTarget
+                ? 'border-red-500/90 dark:border-red-400/80'
                 : 'border-gray-200/80 dark:border-gray-600',
             )}
           >
-            <p className="text-xs text-gray-400">Solte o card aqui</p>
+            <p
+              className={clsx(
+                'text-xs transition-colors',
+                isEmptyColumnDropTarget
+                  ? 'text-red-500 dark:text-red-400'
+                  : 'text-gray-400',
+              )}
+            >
+              Solte o card aqui
+            </p>
           </div>
         )}
       </div>
@@ -649,6 +1090,12 @@ interface DragState {
   draggingCardId: string | null;
   fromColumnId: string | null;
   overColumnId: string | null;
+  overIndex: number | null;
+}
+
+interface ColumnDragState {
+  draggingColumnId: string | null;
+  overIndex: number | null;
 }
 
 // ─── Stats Bar ────────────────────────────────────────────────────────────────
@@ -851,7 +1298,6 @@ function KanbanPage() {
     router.push('/auth/login');
   };
 
-  const user = meUser || { name: 'Usuário', role: 'EMPLOYEE' };
   const columns = board?.columns ?? [];
 
   const [search, setSearch] = useState('');
@@ -862,55 +1308,267 @@ function KanbanPage() {
 
   const [cardModal, setCardModal] = useState<
     | { mode: 'create'; columnId: string }
-    | { mode: 'detail'; cardId: string; columnId: string }
+    | {
+        mode: 'detail';
+        cardId: string;
+        columnId: string;
+        initialCard: KanbanCard;
+        initialColumn?: { title: string; color: string };
+      }
     | null
   >(null);
   const [colModal, setColModal] = useState<{ mode: 'create' | 'edit'; column?: KanbanColumn } | null>(null);
+  const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
+  const [savingLabelPresets, setSavingLabelPresets] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'card'; cardId: string; columnId: string } | { type: 'column'; columnId: string } | null>(null);
 
-  const [dragState, setDragState] = useState<DragState>({ draggingCardId: null, fromColumnId: null, overColumnId: null });
+  const boardLabelPresets = getKanbanLabelPalette(board?.labelPresets);
+
+  const [dragState, setDragState] = useState<DragState>({
+    draggingCardId: null,
+    fromColumnId: null,
+    overColumnId: null,
+    overIndex: null,
+  });
+  const [columnDrag, setColumnDrag] = useState<ColumnDragState>({
+    draggingColumnId: null,
+    overIndex: null,
+  });
   const dragRef = useRef(dragState);
+  const columnDragRef = useRef(columnDrag);
+  const columnDropHandledRef = useRef(false);
+  const columnDragIdRef = useRef<string | null>(null);
+  const columnDragOverIndexRef = useRef<number | null>(null);
+  const columnDragGhostRef = useRef<HTMLElement | null>(null);
+  const boardCardsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     dragRef.current = dragState;
   }, [dragState]);
+  useEffect(() => {
+    columnDragRef.current = columnDrag;
+  }, [columnDrag]);
 
-  const refreshBoard = () => queryClient.invalidateQueries({ queryKey: kanbanBoardQueryKey });
+  const refreshBoard = useCallback(
+    () => queryClient.refetchQueries({ queryKey: kanbanBoardQueryKey }),
+    [queryClient, kanbanBoardQueryKey],
+  );
+
+  const patchBoardCard = useCallback(
+    (targetCardId: string, patch: KanbanBoardCardChecklistPatch) => {
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        patchCardInBoardCache(old, targetCardId, patch),
+      );
+    },
+    [queryClient, kanbanBoardQueryKey],
+  );
+
+  const prefetchKanbanCard = useCallback(
+    (cardId: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: kanbanCardQueryKey(cardId),
+        queryFn: () => fetchKanbanCard(cardId),
+        staleTime: 60_000,
+      });
+    },
+    [queryClient],
+  );
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
     e.dataTransfer.effectAllowed = 'move';
-    setDragState({ draggingCardId: cardId, fromColumnId: columnId, overColumnId: null });
+    columnDragIdRef.current = null;
+    columnDragOverIndexRef.current = null;
+    setColumnDrag({ draggingColumnId: null, overIndex: null });
+    setDragState({ draggingCardId: cardId, fromColumnId: columnId, overColumnId: null, overIndex: null });
   }, []);
 
   const handleDragEnd = useCallback(() => {
-    setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null });
+    setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null, overIndex: null });
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent, columnId: string) => {
+  const handleColumnDragStart = useCallback(
+    (e: React.DragEvent, columnId: string) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', columnId);
+      e.stopPropagation();
+      setKanbanColumnDragGhost(e, columnDragGhostRef);
+      columnDropHandledRef.current = false;
+      columnDragIdRef.current = columnId;
+      columnDragOverIndexRef.current = null;
+      setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null, overIndex: null });
+      setColumnDrag({ draggingColumnId: columnId, overIndex: null });
+    },
+    [],
+  );
+
+  const handleColumnDragEnd = useCallback(() => {
+    columnDragGhostRef.current?.remove();
+    columnDragGhostRef.current = null;
+    window.setTimeout(() => {
+      if (!columnDropHandledRef.current) {
+        columnDragIdRef.current = null;
+        columnDragOverIndexRef.current = null;
+        setColumnDrag({ draggingColumnId: null, overIndex: null });
+      }
+      columnDropHandledRef.current = false;
+    }, 0);
+  }, []);
+
+  const handleColumnDragOver = useCallback((e: React.DragEvent, index: number) => {
+    if (!columnDragIdRef.current) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    setDragState((prev) => (prev.overColumnId === columnId ? prev : { ...prev, overColumnId: columnId }));
+    columnDragOverIndexRef.current = index;
+    setColumnDrag((prev) =>
+      prev.overIndex === index ? prev : { ...prev, overIndex: index },
+    );
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent, targetColumnId: string) => {
+  const handleColumnDrop = useCallback(
+    async (e: React.DragEvent, targetIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      columnDropHandledRef.current = true;
+      const draggingColumnId = columnDragIdRef.current;
+      const overIndex = columnDragOverIndexRef.current ?? columnDragRef.current.overIndex;
+      columnDragIdRef.current = null;
+      columnDragOverIndexRef.current = null;
+      setColumnDrag({ draggingColumnId: null, overIndex: null });
+      if (!draggingColumnId) return;
+
+      const rawIndex = targetIndex ?? overIndex ?? columns.length;
+      const desiredPosition = resolveColumnInsertIndex(columns, draggingColumnId, rawIndex);
+      const currentIndex = columns.findIndex((col) => col.id === draggingColumnId);
+      if (currentIndex === desiredPosition) return;
+
+      const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+      const beforeColumnRects = boardCardsRef.current
+        ? captureKanbanReorderRects(boardCardsRef.current, 'data-kanban-column-id')
+        : new Map<string, DOMRect>();
+
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        moveColumnInBoardCache(old, draggingColumnId, rawIndex),
+      );
+      scheduleKanbanReorderAnimation(
+        boardCardsRef.current,
+        beforeColumnRects,
+        'data-kanban-column-id',
+        'kanban-column-reordering',
+      );
+
+      try {
+        await updateKanbanColumn(draggingColumnId, { position: desiredPosition });
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, KANBAN_REORDER_MS + 60);
+        });
+        await refreshBoard();
+        toast.success('Coluna movida!', { duration: 1500 });
+      } catch {
+        if (previousBoard !== undefined) {
+          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+        } else {
+          await refreshBoard();
+        }
+        toast.error('Não foi possível mover a coluna');
+      }
+    },
+    [columns, queryClient, kanbanBoardQueryKey, refreshBoard],
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent, columnId: string, index?: number) => {
+    if (columnDragRef.current.draggingColumnId) return;
     e.preventDefault();
-    const { draggingCardId, fromColumnId } = dragRef.current;
-    setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null });
-    if (!draggingCardId || !fromColumnId || fromColumnId === targetColumnId) return;
-    try {
-      await updateKanbanCard(draggingCardId, { columnId: targetColumnId });
-      await refreshBoard();
-      toast.success('Card movido!', { duration: 1500 });
-    } catch {
-      toast.error('Não foi possível mover o card');
-    }
-  }, [queryClient]);
+    e.dataTransfer.dropEffect = 'move';
+    setDragState((prev) =>
+      prev.overColumnId === columnId && prev.overIndex === (index ?? null)
+        ? prev
+        : { ...prev, overColumnId: columnId, overIndex: index ?? null },
+    );
+  }, []);
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent, targetColumnId: string, targetIndex?: number) => {
+      e.preventDefault();
+      if (columnDragRef.current.draggingColumnId) return;
+      const { draggingCardId, fromColumnId, overIndex } = dragRef.current;
+      setDragState({ draggingCardId: null, fromColumnId: null, overColumnId: null, overIndex: null });
+      if (!draggingCardId || !fromColumnId) return;
+
+      const targetColumn = columns.find((col) => col.id === targetColumnId);
+      if (!targetColumn) return;
+
+      const rawDropIndex = targetIndex ?? overIndex ?? targetColumn.cards.length;
+      const desiredPosition = resolveKanbanInsertIndex(
+        targetColumn.cards,
+        draggingCardId,
+        fromColumnId,
+        targetColumnId,
+        rawDropIndex,
+      );
+
+      const currentIndex = targetColumn.cards.findIndex((card) => card.id === draggingCardId);
+      if (fromColumnId === targetColumnId && currentIndex === desiredPosition) {
+        return;
+      }
+
+      const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+      const beforeRects = boardCardsRef.current
+        ? captureKanbanReorderRects(boardCardsRef.current, 'data-kanban-card-id')
+        : new Map<string, DOMRect>();
+
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        moveCardInBoardCache(
+          old,
+          draggingCardId,
+          fromColumnId,
+          targetColumnId,
+          rawDropIndex,
+        ),
+      );
+      scheduleKanbanReorderAnimation(
+        boardCardsRef.current,
+        beforeRects,
+        'data-kanban-card-id',
+        'kanban-card-reordering',
+      );
+
+      try {
+        await updateKanbanCard(draggingCardId, {
+          ...(fromColumnId !== targetColumnId ? { columnId: targetColumnId } : {}),
+          position: desiredPosition,
+        });
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, KANBAN_REORDER_MS + 60);
+        });
+        await refreshBoard();
+        toast.success('Card movido!', { duration: 1500 });
+      } catch {
+        if (previousBoard !== undefined) {
+          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+        } else {
+          await refreshBoard();
+        }
+        toast.error('Não foi possível mover o card');
+      }
+    },
+    [columns, queryClient, kanbanBoardQueryKey, refreshBoard],
+  );
 
   function openCreateCard(columnId: string) {
     setCardModal({ mode: 'create', columnId });
   }
 
   function openEditCard(card: KanbanCard, columnId: string) {
-    setCardModal({ mode: 'detail', cardId: card.id, columnId });
+    prefetchKanbanCard(card.id);
+    const column = columns.find((col) => col.id === columnId);
+    setCardModal({
+      mode: 'detail',
+      cardId: card.id,
+      columnId,
+      initialCard: card,
+      initialColumn: column
+        ? { title: column.title, color: column.color }
+        : undefined,
+    });
   }
 
   function handleDeleteCard(cardId: string, columnId: string) {
@@ -976,6 +1634,12 @@ function KanbanPage() {
   if (loadingUser || loadingPerms || (showBoardList ? loadingBoardsList : loadingBoard)) {
     return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
   }
+
+  if (!meUser) {
+    return <Loading message="Verificando sessão..." fullScreen size="lg" />;
+  }
+
+  const user = meUser;
 
   if (!showBoardList && boardError) {
     return (
@@ -1067,13 +1731,24 @@ function KanbanPage() {
                 )}
               </button>
               {!boardReadOnly && (
-                <button
-                  onClick={() => setColModal({ mode: 'create' })}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  Nova Coluna
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setLabelSettingsOpen(true)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    title="Configurar etiquetas deste setor"
+                  >
+                    <Tag className="w-4 h-4" />
+                    Etiquetas
+                  </button>
+                  <button
+                    onClick={() => setColModal({ mode: 'create' })}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Nova Coluna
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -1081,24 +1756,98 @@ function KanbanPage() {
 
         {/* ── Board ── */}
         <div className="scrollbar-hide overflow-x-auto pb-4 rounded-2xl bg-[#F3F4F6] dark:bg-gray-900/40 px-4 py-5">
-          <div className="flex gap-5 items-start" style={{ minWidth: 'max-content' }}>
-            {filteredColumns.map((column) => (
-              <KanbanColumnComponent
-                key={column.id}
-                column={column}
-                dragState={dragState}
-                readOnly={boardReadOnly}
-                onAddCard={openCreateCard}
-                onEditCard={openEditCard}
-                onDeleteCard={handleDeleteCard}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                onEditColumn={(col) => setColModal({ mode: 'edit', column: col })}
-                onDeleteColumn={handleDeleteColumn}
-              />
+          <div
+            ref={boardCardsRef}
+            className="flex gap-5 items-start"
+            style={{ minWidth: 'max-content' }}
+            onDragOverCapture={
+              boardReadOnly
+                ? undefined
+                : (e) => {
+                    if (!columnDragIdRef.current) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }
+            }
+          >
+            {filteredColumns.map((column, columnIndex) => (
+              <React.Fragment key={column.id}>
+                {!boardReadOnly &&
+                  columnDrag.draggingColumnId &&
+                  columnDrag.overIndex === columnIndex && (
+                  <KanbanColumnDropGutter
+                    active
+                    onDragOver={(e) => handleColumnDragOver(e, columnIndex)}
+                    onDrop={(e) => handleColumnDrop(e, columnIndex)}
+                  />
+                )}
+                <div
+                  data-kanban-column-id={column.id}
+                  className="kanban-column-slot flex shrink-0"
+                  onDragOverCapture={
+                    boardReadOnly
+                      ? undefined
+                      : (e) => {
+                          if (!columnDragIdRef.current) return;
+                          const target = e.target;
+                          if (!(target instanceof Node) || !e.currentTarget.contains(target)) return;
+                          e.preventDefault();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          handleColumnDragOver(
+                            e,
+                            resolveColumnDropIndex(columnIndex, e.clientX, rect),
+                          );
+                        }
+                  }
+                  onDropCapture={
+                    boardReadOnly
+                      ? undefined
+                      : (e) => {
+                          if (!columnDragIdRef.current) return;
+                          const target = e.target;
+                          if (!(target instanceof Node) || !e.currentTarget.contains(target)) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          void handleColumnDrop(
+                            e,
+                            resolveColumnDropIndex(columnIndex, e.clientX, rect),
+                          );
+                        }
+                  }
+                >
+                  <KanbanColumnComponent
+                    column={column}
+                    labelPresets={boardLabelPresets}
+                    dragState={dragState}
+                    isColumnDragging={columnDrag.draggingColumnId === column.id}
+                    isColumnDragActive={!!columnDrag.draggingColumnId}
+                    readOnly={boardReadOnly}
+                    onAddCard={openCreateCard}
+                    onEditCard={openEditCard}
+                    onDeleteCard={handleDeleteCard}
+                    onPrefetchCard={prefetchKanbanCard}
+                    onColumnDragStart={boardReadOnly ? undefined : handleColumnDragStart}
+                    onColumnDragEnd={handleColumnDragEnd}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    onEditColumn={(col) => setColModal({ mode: 'edit', column: col })}
+                    onDeleteColumn={handleDeleteColumn}
+                  />
+                </div>
+              </React.Fragment>
             ))}
+            {!boardReadOnly &&
+              columnDrag.draggingColumnId &&
+              columnDrag.overIndex === filteredColumns.length && (
+              <KanbanColumnDropGutter
+                active
+                onDragOver={(e) => handleColumnDragOver(e, filteredColumns.length)}
+                onDrop={(e) => handleColumnDrop(e, filteredColumns.length)}
+              />
+            )}
 
             {!boardReadOnly && (
               <button
@@ -1163,14 +1912,69 @@ function KanbanPage() {
         </div>
       </Modal>
 
+      {labelSettingsOpen && board && (
+        <Modal
+          isOpen
+          onClose={() => !savingLabelPresets && setLabelSettingsOpen(false)}
+          size="md"
+          title="Etiquetas do setor"
+          closeOnOverlayClick={!savingLabelPresets}
+        >
+          <KanbanBoardLabelSettings
+            initialPresets={[...boardLabelPresets]}
+            departmentLabel={board.department}
+            saving={savingLabelPresets}
+            onClose={() => setLabelSettingsOpen(false)}
+            onSave={async (presets) => {
+              setSavingLabelPresets(true);
+              try {
+                const updated = await updateKanbanBoardLabelPresets(
+                  presets,
+                  departmentKeyParam ?? undefined,
+                );
+                queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) =>
+                  prev ? { ...prev, labelPresets: updated } : prev,
+                );
+                toast.success('Etiquetas do setor atualizadas');
+              } catch (err: unknown) {
+                const msg =
+                  err && typeof err === 'object' && 'response' in err
+                    ? (err as { response?: { data?: { message?: string } } }).response?.data
+                        ?.message
+                    : null;
+                toast.error(msg || 'Não foi possível salvar as etiquetas');
+                throw err;
+              } finally {
+                setSavingLabelPresets(false);
+              }
+            }}
+          />
+        </Modal>
+      )}
+
       {cardModal && (
         <KanbanCardModal
           mode={cardModal.mode}
           cardId={cardModal.mode === 'detail' ? cardModal.cardId : undefined}
           columnId={cardModal.columnId}
+          initialCard={cardModal.mode === 'detail' ? cardModal.initialCard : undefined}
+          initialColumn={cardModal.mode === 'detail' ? cardModal.initialColumn : undefined}
+          labelPresets={[...boardLabelPresets]}
           currentUserId={meUser?.id}
+          currentUser={
+            meUser
+              ? {
+                  id: meUser.id,
+                  name: meUser.name,
+                  email: meUser.email ?? '',
+                  profilePhotoUrl: meUser.profilePhotoUrl ?? null,
+                }
+              : null
+          }
+          canViewAllKanbanBoards={canViewAllKanbanBoards}
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
+          onBoardCardPatch={patchBoardCard}
         />
       )}
 

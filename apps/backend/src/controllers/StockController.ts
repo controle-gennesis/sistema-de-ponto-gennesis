@@ -2,10 +2,11 @@ import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
-import {
-  extractOcNumberFromMovementNotes,
-  stockShortfallService
-} from '../services/StockShortfallService';
+import { extractOcNumberFromMovementNotes } from '../utils/stockMovementNotes';
+import { stockShortfallService } from '../services/StockShortfallService';
+import { PurchaseOrderService } from '../services/PurchaseOrderService';
+
+const purchaseOrderService = new PurchaseOrderService();
 
 export class StockController {
   /**
@@ -293,9 +294,16 @@ export class StockController {
       if (type === 'IN' && notes) {
         const ocNum = extractOcNumberFromMovementNotes(String(notes));
         if (ocNum) {
-          void stockShortfallService.syncForOrderNumber(ocNum).catch((err) => {
+          try {
+            await stockShortfallService.syncForOrderNumber(ocNum);
+          } catch (err) {
             console.error('[StockShortfall] syncForOrderNumber', ocNum, err);
-          });
+          }
+          try {
+            await purchaseOrderService.syncBoletoInstallmentsFromStockReceipt(ocNum);
+          } catch (err) {
+            console.error('[PurchaseOrder] syncBoletoInstallmentsFromStockReceipt', ocNum, err);
+          }
         }
       }
 
@@ -362,6 +370,26 @@ export class StockController {
       await prisma.stockMovement.delete({
         where: { id }
       });
+
+      if (movement.type === 'IN' && movement.notes) {
+        const ocNum = extractOcNumberFromMovementNotes(movement.notes);
+        if (ocNum) {
+          try {
+            await stockShortfallService.syncForOrderNumber(ocNum);
+          } catch (err) {
+            console.error('[StockShortfall] syncForOrderNumber after delete', ocNum, err);
+          }
+          try {
+            await purchaseOrderService.syncBoletoInstallmentsFromStockReceipt(ocNum);
+          } catch (err) {
+            console.error(
+              '[PurchaseOrder] syncBoletoInstallmentsFromStockReceipt after delete',
+              ocNum,
+              err
+            );
+          }
+        }
+      }
 
       res.json({
         success: true,

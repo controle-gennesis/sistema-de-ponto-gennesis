@@ -1,9 +1,16 @@
-import { TaskPriority } from '@prisma/client';
+import { Prisma, TaskPriority } from '@prisma/client';
 import {
   isKanbanHiddenPickerUser,
   KANBAN_LEGACY_DEPARTMENT_KEY,
   userCanViewAllKanbanBoards,
 } from '../lib/kanbanAccess';
+import {
+  DEFAULT_KANBAN_LABEL_PRESETS,
+  resolveKanbanLabelPresets,
+  validateCardLabelsForBoard,
+  validateKanbanLabelPresetsInput,
+  type KanbanLabelPresetDto,
+} from '../lib/kanbanLabelPresets';
 import { prisma } from '../lib/prisma';
 import { ChatService } from './ChatService';
 
@@ -39,6 +46,80 @@ function avatarColorForKey(key: string): string {
 function calcProgress(completed: number, total: number): number {
   if (total <= 0) return 0;
   return Math.round((completed / total) * 100);
+}
+
+const MONTHLY_WORK_HOURS = 220;
+
+type KanbanWorkWindow = { startHour: number; endHour: number };
+
+/** Seg–qui: 07–12 e 13–17 (1h almoço). Sex: 07–12 e 13–16 (1h almoço). */
+function getKanbanWorkWindowsForWeekday(dayOfWeek: number): KanbanWorkWindow[] {
+  if (dayOfWeek >= 1 && dayOfWeek <= 4) {
+    return [
+      { startHour: 7, endHour: 12 },
+      { startHour: 13, endHour: 17 },
+    ];
+  }
+  if (dayOfWeek === 5) {
+    return [
+      { startHour: 7, endHour: 12 },
+      { startHour: 13, endHour: 16 },
+    ];
+  }
+  return [];
+}
+
+/** Soma horas úteis entre duas datas (fuso local do servidor). */
+export function calculateKanbanBusinessHoursBetween(start: Date, end: Date): number {
+  if (end.getTime() <= start.getTime()) return 0;
+
+  let totalMs = 0;
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const endMs = end.getTime();
+
+  while (cursor.getTime() <= endMs) {
+    const windows = getKanbanWorkWindowsForWeekday(cursor.getDay());
+
+    for (const w of windows) {
+      const workStart = new Date(cursor);
+      workStart.setHours(w.startHour, 0, 0, 0);
+      const workEnd = new Date(cursor);
+      workEnd.setHours(w.endHour, 0, 0, 0);
+
+      const intervalStart = Math.max(start.getTime(), workStart.getTime());
+      const intervalEnd = Math.min(endMs, workEnd.getTime());
+
+      if (intervalEnd > intervalStart) {
+        totalMs += intervalEnd - intervalStart;
+      }
+    }
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return totalMs / (1000 * 60 * 60);
+}
+
+export function isKanbanCompletedColumnTitle(title: string): boolean {
+  const t = title.trim().toLowerCase();
+  return t === 'completed' || t === 'concluído' || t === 'concluido';
+}
+
+export function calculateKanbanHourlyRate(
+  salary: number,
+  dangerPay: number,
+  unhealthyPay: number,
+): number {
+  return (salary + dangerPay + unhealthyPay) / MONTHLY_WORK_HOURS;
+}
+
+function roundHours(h: number): number {
+  return Math.round(h * 100) / 100;
+}
+
+function roundMoney(v: number): number {
+  return Math.round(v * 100) / 100;
 }
 
 function priorityToClient(p: TaskPriority): string {
@@ -141,6 +222,8 @@ function formatCard(card: {
   labels?: unknown;
   createdAt: Date;
   updatedAt?: Date;
+  completedAt?: Date | null;
+  workHours?: { toNumber?: () => number } | number | null;
   assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
   members?: Array<{ user: { id: string; name: string; profilePhotoUrl: string | null } }>;
   _count?: { comments: number; attachments: number };
@@ -175,6 +258,8 @@ function formatCard(card: {
     comments: card._count?.comments ?? 0,
     createdAt: card.createdAt.toISOString(),
     updatedAt: card.updatedAt?.toISOString() ?? card.createdAt.toISOString(),
+    completedAt: card.completedAt?.toISOString() ?? null,
+    workHours: card.workHours != null ? Number(card.workHours) : null,
   };
 }
 
@@ -299,6 +384,7 @@ function formatBoardResponse(
     slug: string;
     departmentKey: string;
     departmentLabel: string;
+    labelPresets?: unknown;
     columns: Array<{
       id: string;
       title: string;
@@ -316,6 +402,7 @@ function formatBoardResponse(
     slug: board.slug,
     department: board.departmentLabel,
     departmentKey: board.departmentKey,
+    labelPresets: resolveKanbanLabelPresets(board.labelPresets),
     canWrite: meta?.canWrite ?? true,
     columns: board.columns.map((col) => ({
       id: col.id,
@@ -339,6 +426,7 @@ async function seedBoardForDepartment(
       slug: slugFromDepartmentKey(departmentKey),
       departmentKey,
       departmentLabel,
+      labelPresets: DEFAULT_KANBAN_LABEL_PRESETS as Prisma.InputJsonValue,
       createdById: createdById ?? null,
       columns: {
         create: [
@@ -350,6 +438,113 @@ async function seedBoardForDepartment(
     },
     include: boardListInclude,
   });
+}
+
+const kanbanCardOrderBy = [{ position: 'asc' as const }, { createdAt: 'asc' as const }];
+const kanbanColumnOrderBy = [{ position: 'asc' as const }, { createdAt: 'asc' as const }];
+
+async function applyKanbanBoardColumnOrder(
+  tx: Prisma.TransactionClient,
+  orderedIds: string[],
+) {
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      tx.kanbanColumn.update({
+        where: { id },
+        data: { position: index },
+      }),
+    ),
+  );
+}
+
+async function reorderKanbanColumnInBoard(
+  tx: Prisma.TransactionClient,
+  columnId: string,
+  boardId: string,
+  insertAt: number,
+) {
+  const columns = await tx.kanbanColumn.findMany({
+    where: { boardId },
+    orderBy: kanbanColumnOrderBy,
+    select: { id: true },
+  });
+  const fromIndex = columns.findIndex((col) => col.id === columnId);
+  if (fromIndex < 0) return;
+
+  const next = columns.filter((col) => col.id !== columnId);
+  const clamped = Math.max(0, Math.min(insertAt, next.length));
+  next.splice(clamped, 0, columns[fromIndex]);
+  await applyKanbanBoardColumnOrder(
+    tx,
+    next.map((col) => col.id),
+  );
+}
+
+async function applyKanbanColumnCardOrder(
+  tx: Prisma.TransactionClient,
+  orderedIds: string[],
+) {
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      tx.kanbanCard.update({
+        where: { id },
+        data: { position: index },
+      }),
+    ),
+  );
+}
+
+async function reorderKanbanCardInColumn(
+  tx: Prisma.TransactionClient,
+  cardId: string,
+  columnId: string,
+  insertAt: number,
+) {
+  const cards = await tx.kanbanCard.findMany({
+    where: { columnId },
+    orderBy: kanbanCardOrderBy,
+    select: { id: true },
+  });
+  const fromIndex = cards.findIndex((card) => card.id === cardId);
+  if (fromIndex < 0) return;
+
+  const next = cards.filter((card) => card.id !== cardId);
+  const clamped = Math.max(0, Math.min(insertAt, next.length));
+  next.splice(clamped, 0, cards[fromIndex]);
+  await applyKanbanColumnCardOrder(tx, next.map((card) => card.id));
+}
+
+async function moveKanbanCardToColumn(
+  tx: Prisma.TransactionClient,
+  cardId: string,
+  fromColumnId: string,
+  toColumnId: string,
+  insertAt: number,
+) {
+  const sourceCards = await tx.kanbanCard.findMany({
+    where: { columnId: fromColumnId },
+    orderBy: kanbanCardOrderBy,
+    select: { id: true },
+  });
+  await applyKanbanColumnCardOrder(
+    tx,
+    sourceCards.filter((card) => card.id !== cardId).map((card) => card.id),
+  );
+
+  await tx.kanbanCard.update({
+    where: { id: cardId },
+    data: { columnId: toColumnId },
+  });
+
+  const targetCards = await tx.kanbanCard.findMany({
+    where: { columnId: toColumnId, id: { not: cardId } },
+    orderBy: kanbanCardOrderBy,
+    select: { id: true },
+  });
+  const targetIds = targetCards.map((card) => card.id);
+  const clamped = Math.max(0, Math.min(insertAt, targetIds.length));
+  targetIds.splice(clamped, 0, cardId);
+  await applyKanbanColumnCardOrder(tx, targetIds);
 }
 
 export class KanbanService {
@@ -481,6 +676,45 @@ export class KanbanService {
     return formatBoardResponse(board, { canWrite });
   }
 
+  async updateBoardLabelPresets(
+    userId: string,
+    presetsInput: unknown,
+    departmentKeyParam?: string,
+  ): Promise<KanbanLabelPresetDto[]> {
+    const { key: ownKey } = await this.getUserDepartment(userId);
+    const targetKey = departmentKeyParam
+      ? normalizeDepartmentKey(departmentKeyParam)
+      : ownKey;
+
+    if (targetKey !== ownKey) {
+      throw new Error(KANBAN_FORBIDDEN);
+    }
+
+    const presets = validateKanbanLabelPresetsInput(presetsInput);
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { departmentKey: targetKey },
+    });
+    if (!board) {
+      throw new Error('Quadro não encontrado para este setor');
+    }
+
+    await prisma.kanbanBoard.update({
+      where: { id: board.id },
+      data: { labelPresets: presets as Prisma.InputJsonValue },
+    });
+
+    return presets;
+  }
+
+  private async getLabelPresetsForColumn(columnId: string): Promise<KanbanLabelPresetDto[]> {
+    const column = await prisma.kanbanColumn.findUnique({
+      where: { id: columnId },
+      include: { board: { select: { labelPresets: true } } },
+    });
+    if (!column) throw new Error('Coluna não encontrada');
+    return resolveKanbanLabelPresets(column.board.labelPresets);
+  }
+
   async createColumn(
     userId: string,
     data: {
@@ -528,20 +762,51 @@ export class KanbanService {
   async updateColumn(
     userId: string,
     id: string,
-    data: { title?: string; color?: string; cardLimit?: number | null },
+    data: { title?: string; color?: string; cardLimit?: number | null; position?: number },
   ) {
     await this.assertColumnAccess(userId, id);
-    const column = await prisma.kanbanColumn.update({
+
+    const existing = await prisma.kanbanColumn.findUnique({
       where: { id },
-      data: {
-        title: data.title,
-        color: data.color,
-        cardLimit: data.cardLimit,
-      },
+      select: { boardId: true },
+    });
+    if (!existing) throw new Error(KANBAN_FORBIDDEN);
+
+    const hasMeta =
+      data.title !== undefined ||
+      data.color !== undefined ||
+      data.cardLimit !== undefined;
+    const requestedPosition =
+      data.position != null && Number.isFinite(data.position)
+        ? Math.max(0, Math.trunc(data.position))
+        : undefined;
+    const needsReorder = requestedPosition !== undefined;
+
+    if (needsReorder || hasMeta) {
+      await prisma.$transaction(async (tx) => {
+        if (needsReorder) {
+          await reorderKanbanColumnInBoard(tx, id, existing.boardId, requestedPosition!);
+        }
+        if (hasMeta) {
+          await tx.kanbanColumn.update({
+            where: { id },
+            data: {
+              ...(data.title !== undefined ? { title: data.title } : {}),
+              ...(data.color !== undefined ? { color: data.color } : {}),
+              ...(data.cardLimit !== undefined ? { cardLimit: data.cardLimit } : {}),
+            },
+          });
+        }
+      });
+    }
+
+    const column = await prisma.kanbanColumn.findUnique({
+      where: { id },
       include: {
         cards: { orderBy: { position: 'asc' }, include: cardInclude },
       },
     });
+    if (!column) throw new Error(KANBAN_FORBIDDEN);
 
     return {
       id: column.id,
@@ -598,6 +863,10 @@ export class KanbanService {
       ),
     ];
 
+    const labelPresets = await this.getLabelPresetsForColumn(data.columnId);
+    const validatedLabels =
+      validateCardLabelsForBoard(data.labels ?? [], labelPresets) ?? [];
+
     const card = await prisma.kanbanCard.create({
       data: {
         columnId: data.columnId,
@@ -606,7 +875,7 @@ export class KanbanService {
         priority: priorityFromClient(data.priority ?? 'medium'),
         startDate: parseDateInput(data.startDate) ?? null,
         endDate: parseDateInput(data.endDate) ?? null,
-        labels: labelsToJson(data.labels ?? []) ?? [],
+        labels: labelsToJson(validatedLabels) ?? [],
         assigneeUserId: memberIds[0] ?? data.assigneeUserId ?? null,
         assigneeName,
         totalTasks: data.totalTasks ?? 0,
@@ -705,6 +974,7 @@ export class KanbanService {
       checklistEnabled?: boolean;
       attachmentsEnabled?: boolean;
       position?: number;
+      workHours?: number | null;
     },
   ) {
     await this.assertCardAccess(userId, id);
@@ -713,6 +983,19 @@ export class KanbanService {
 
     if (data.columnId && data.columnId !== existing.columnId) {
       await this.assertColumnAccess(userId, data.columnId);
+    }
+
+    let completedAt: Date | null | undefined;
+    if (data.columnId && data.columnId !== existing.columnId) {
+      const targetColumn = await prisma.kanbanColumn.findUnique({
+        where: { id: data.columnId },
+        select: { title: true },
+      });
+      if (targetColumn && isKanbanCompletedColumnTitle(targetColumn.title)) {
+        completedAt = new Date();
+      } else {
+        completedAt = null;
+      }
     }
 
     let assigneeName: string | null | undefined = data.assigneeName?.trim();
@@ -736,37 +1019,188 @@ export class KanbanService {
       data.completedTasks ?? existing.completedTasks,
       totalTasks,
     );
+    const targetColumnId = data.columnId ?? existing.columnId;
+    const requestedPosition =
+      data.position != null && Number.isFinite(data.position)
+        ? Math.max(0, Math.trunc(data.position))
+        : undefined;
+    const hasOrderChange =
+      targetColumnId !== existing.columnId || requestedPosition !== undefined;
 
-    if (data.columnId && data.columnId !== existing.columnId) {
-      const maxPos = await prisma.kanbanCard.aggregate({
-        where: { columnId: data.columnId },
-        _max: { position: true },
-      });
-      data.position = (maxPos._max.position ?? -1) + 1;
+    let labelsJson = labelsToJson(data.labels);
+    if (data.labels !== undefined) {
+      const labelColumnId = data.columnId ?? existing.columnId;
+      const labelPresets = await this.getLabelPresetsForColumn(labelColumnId);
+      const validated = validateCardLabelsForBoard(data.labels, labelPresets);
+      labelsJson = labelsToJson(validated);
     }
 
-    const card = await prisma.kanbanCard.update({
-      where: { id },
-      data: {
-        columnId: data.columnId,
-        title: data.title?.trim(),
-        description: data.description?.trim(),
-        priority: data.priority ? priorityFromClient(data.priority) : undefined,
-        startDate: parseDateInput(data.startDate),
-        endDate: parseDateInput(data.endDate),
-        labels: labelsToJson(data.labels),
-        assigneeUserId: data.assigneeUserId,
-        assigneeName: assigneeName !== undefined ? assigneeName : undefined,
-        totalTasks,
-        completedTasks,
-        checklistEnabled: data.checklistEnabled,
-        attachmentsEnabled: data.attachmentsEnabled,
-        position: data.position,
-      },
-      include: cardInclude,
+    const baseUpdateData = {
+      columnId: data.columnId,
+      title: data.title?.trim(),
+      description: data.description?.trim(),
+      priority: data.priority ? priorityFromClient(data.priority) : undefined,
+      startDate: parseDateInput(data.startDate),
+      endDate: parseDateInput(data.endDate),
+      labels: labelsJson,
+      assigneeUserId: data.assigneeUserId,
+      assigneeName: assigneeName !== undefined ? assigneeName : undefined,
+      totalTasks,
+      completedTasks,
+      checklistEnabled: data.checklistEnabled,
+      attachmentsEnabled: data.attachmentsEnabled,
+      ...(completedAt !== undefined ? { completedAt } : {}),
+      ...(data.workHours !== undefined
+        ? { workHours: data.workHours == null ? null : data.workHours }
+        : {}),
+    };
+
+    if (!hasOrderChange) {
+      const card = await prisma.kanbanCard.update({
+        where: { id },
+        data: baseUpdateData,
+        include: cardInclude,
+      });
+      return formatCard(card);
+    }
+
+    const insertAt = requestedPosition ?? 0;
+
+    const card = await prisma.$transaction(async (tx) => {
+      if (targetColumnId !== existing.columnId) {
+        await moveKanbanCardToColumn(tx, id, existing.columnId, targetColumnId, insertAt);
+      } else {
+        await reorderKanbanCardInColumn(tx, id, existing.columnId, insertAt);
+      }
+
+      return tx.kanbanCard.update({
+        where: { id },
+        data: baseUpdateData,
+        include: cardInclude,
+      });
     });
 
     return formatCard(card);
+  }
+
+  async getCardCost(userId: string, cardId: string) {
+    if (!(await userCanViewAllKanbanBoards(userId))) {
+      throw new Error(KANBAN_FORBIDDEN);
+    }
+
+    await this.assertCardAccess(userId, cardId);
+
+    const card = await prisma.kanbanCard.findUnique({
+      where: { id: cardId },
+      include: {
+        column: { select: { title: true } },
+        assignee: { select: { id: true, name: true } },
+        members: { include: { user: { select: { id: true, name: true } } } },
+      },
+    });
+
+    if (!card) throw new Error('Card não encontrado');
+
+    const peopleMeta: Array<{ userId: string; name: string }> = [];
+    if (card.members.length) {
+      for (const m of card.members) {
+        peopleMeta.push({ userId: m.user.id, name: m.user.name });
+      }
+    } else if (card.assignee) {
+      peopleMeta.push({ userId: card.assignee.id, name: card.assignee.name });
+    } else if (card.assigneeName) {
+      peopleMeta.push({ userId: '', name: card.assigneeName });
+    }
+
+    if (!card.startDate || !card.endDate) {
+      throw new Error(
+        'Defina a data de entrega (início e fim) no card para calcular o custo',
+      );
+    }
+
+    const periodStart = card.startDate;
+    const periodEnd = card.endDate;
+
+    if (periodEnd.getTime() <= periodStart.getTime()) {
+      throw new Error('A data final deve ser posterior à data inicial');
+    }
+
+    const hours = roundHours(
+      Math.max(0, calculateKanbanBusinessHoursBetween(periodStart, periodEnd)),
+    );
+
+    const people: Array<{
+      userId: string;
+      name: string;
+      hourlyRate: number | null;
+      cost: number | null;
+      hasEmployeeRecord: boolean;
+    }> = [];
+
+    let totalCost = 0;
+    let hasMissingSalary = false;
+
+    for (const person of peopleMeta) {
+      if (!person.userId) {
+        people.push({
+          userId: '',
+          name: person.name,
+          hourlyRate: null,
+          cost: null,
+          hasEmployeeRecord: false,
+        });
+        hasMissingSalary = true;
+        continue;
+      }
+
+      const employee = await prisma.employee.findUnique({
+        where: { userId: person.userId },
+        select: { salary: true, dangerPay: true, unhealthyPay: true },
+      });
+
+      if (!employee) {
+        people.push({
+          userId: person.userId,
+          name: person.name,
+          hourlyRate: null,
+          cost: null,
+          hasEmployeeRecord: false,
+        });
+        hasMissingSalary = true;
+        continue;
+      }
+
+      const salary = Number(employee.salary);
+      const dangerPay = Number(employee.dangerPay ?? 0);
+      const unhealthyPay = Number(employee.unhealthyPay ?? 0);
+      const hourlyRate = roundMoney(
+        calculateKanbanHourlyRate(salary, dangerPay, unhealthyPay),
+      );
+      const cost = roundMoney(hourlyRate * hours);
+      totalCost += cost;
+
+      people.push({
+        userId: person.userId,
+        name: person.name,
+        hourlyRate,
+        cost,
+        hasEmployeeRecord: true,
+      });
+    }
+
+    if (peopleMeta.length === 0) {
+      hasMissingSalary = true;
+    }
+
+    return {
+      hours,
+      periodStart: periodStart.toISOString(),
+      periodEnd: periodEnd.toISOString(),
+      monthlyWorkHours: MONTHLY_WORK_HOURS,
+      totalCost: roundMoney(totalCost),
+      hasMissingSalary,
+      people,
+    };
   }
 
   async deleteCard(userId: string, id: string) {
@@ -774,11 +1208,10 @@ export class KanbanService {
     await prisma.kanbanCard.delete({ where: { id } });
   }
 
-  async listPickerUsers(requesterId: string) {
+  async listPickerUsers(_requesterId: string) {
     const users = await prisma.user.findMany({
       where: {
         isActive: true,
-        id: { not: requesterId },
       },
       select: {
         id: true,
@@ -988,6 +1421,57 @@ export class KanbanService {
     if (!comment) throw new Error('Comentário não encontrado');
     await this.assertCardAccess(requesterId, comment.cardId);
     await prisma.kanbanCardComment.delete({ where: { id } });
+  }
+
+  static readonly LINK_ATTACHMENT_MIME = 'text/x-kanban-link';
+
+  private normalizeLinkUrl(raw: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) throw new Error('URL é obrigatória');
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    let parsed: URL;
+    try {
+      parsed = new URL(withScheme);
+    } catch {
+      throw new Error('URL inválida');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('URL inválida');
+    }
+    return parsed.href;
+  }
+
+  async addLinkAttachment(
+    requesterId: string,
+    cardId: string,
+    data: { url: string; displayName?: string },
+  ) {
+    await this.assertCardAccess(requesterId, cardId);
+    const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
+    if (!card) throw new Error('Card não encontrado');
+
+    const fileUrl = this.normalizeLinkUrl(data.url);
+    const display = data.displayName?.trim();
+    const fileName = (display || fileUrl).slice(0, 500);
+
+    await prisma.kanbanCardAttachment.create({
+      data: {
+        cardId,
+        userId: requesterId,
+        fileName,
+        fileUrl,
+        fileKey: null,
+        fileSize: 0,
+        mimeType: KanbanService.LINK_ATTACHMENT_MIME,
+      },
+    });
+
+    await prisma.kanbanCard.update({
+      where: { id: cardId },
+      data: { attachmentsEnabled: true },
+    });
+
+    return this.getCardById(requesterId, cardId);
   }
 
   async addAttachments(

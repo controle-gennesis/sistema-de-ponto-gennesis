@@ -1,4 +1,5 @@
 import api from '@/lib/api';
+import type { KanbanLabelPreset } from '@/components/kanban/kanbanLabels';
 
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -35,6 +36,31 @@ export interface KanbanCard {
   attachments: number;
   comments: number;
   createdAt: string;
+  completedAt?: string | null;
+  workHours?: number | null;
+}
+
+export interface KanbanCardCostPerson {
+  userId: string;
+  name: string;
+  hourlyRate: number | null;
+  cost: number | null;
+  hasEmployeeRecord: boolean;
+}
+
+export interface KanbanCardCost {
+  hours: number;
+  periodStart: string;
+  periodEnd: string;
+  monthlyWorkHours: number;
+  totalCost: number;
+  hasMissingSalary: boolean;
+  people: KanbanCardCostPerson[];
+}
+
+export function isKanbanCompletedColumn(title: string): boolean {
+  const t = title.trim().toLowerCase();
+  return t === 'completed' || t === 'concluído' || t === 'concluido';
 }
 
 export interface KanbanColumn {
@@ -52,6 +78,7 @@ export interface KanbanBoard {
   department: string;
   departmentKey: string;
   canWrite?: boolean;
+  labelPresets?: KanbanLabelPreset[];
   columns: KanbanColumn[];
 }
 
@@ -78,6 +105,53 @@ export async function fetchKanbanBoard(departmentKey?: string): Promise<KanbanBo
   return res.data.data;
 }
 
+export async function updateKanbanBoardLabelPresets(
+  presets: KanbanLabelPreset[],
+  departmentKey?: string,
+): Promise<KanbanLabelPreset[]> {
+  const res = await api.patch('/kanban/board/label-presets', {
+    presets,
+    ...(departmentKey ? { departmentKey } : {}),
+  });
+  return res.data.data;
+}
+
+export type KanbanBoardCardChecklistPatch = Pick<
+  KanbanCard,
+  'completedTasks' | 'totalTasks' | 'progress' | 'checklistEnabled'
+>;
+
+/** Atualiza contadores de checklist de um card no cache do board (sem refetch). */
+export function patchCardInBoardCache(
+  board: KanbanBoard | undefined,
+  cardId: string,
+  patch: KanbanBoardCardChecklistPatch,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  let changed = false;
+  const columns = board.columns.map((col) => {
+    let colChanged = false;
+    const cards = col.cards.map((card) => {
+      if (card.id !== cardId) return card;
+      if (
+        card.completedTasks === patch.completedTasks &&
+        card.totalTasks === patch.totalTasks &&
+        card.progress === patch.progress &&
+        card.checklistEnabled === patch.checklistEnabled
+      ) {
+        return card;
+      }
+      colChanged = true;
+      changed = true;
+      return { ...card, ...patch };
+    });
+    return colChanged ? { ...col, cards } : col;
+  });
+
+  return changed ? { ...board, columns } : board;
+}
+
 export async function createKanbanColumn(payload: {
   title: string;
   color: string;
@@ -90,7 +164,7 @@ export async function createKanbanColumn(payload: {
 
 export async function updateKanbanColumn(
   id: string,
-  payload: { title?: string; color?: string; cardLimit?: number | null },
+  payload: { title?: string; color?: string; cardLimit?: number | null; position?: number },
 ) {
   const res = await api.patch(`/kanban/columns/${id}`, payload);
   return res.data.data as KanbanColumn;
@@ -145,10 +219,16 @@ export async function updateKanbanCard(
     checklistEnabled?: boolean;
     attachmentsEnabled?: boolean;
     position?: number;
+    workHours?: number | null;
   },
 ) {
   const res = await api.patch(`/kanban/cards/${id}`, payload);
   return res.data.data as KanbanCard;
+}
+
+export async function fetchKanbanCardCost(cardId: string): Promise<KanbanCardCost> {
+  const res = await api.get(`/kanban/cards/${cardId}/cost`);
+  return res.data.data as KanbanCardCost;
 }
 
 export async function deleteKanbanCard(id: string) {
@@ -171,6 +251,12 @@ export interface KanbanChecklistItem {
   dueDate: string | null;
   assigneeUserId: string | null;
   assignee: KanbanChecklistItemAssignee | null;
+}
+
+export const KANBAN_LINK_MIME_TYPE = 'text/x-kanban-link';
+
+export function isKanbanLinkAttachment(mimeType: string): boolean {
+  return mimeType === KANBAN_LINK_MIME_TYPE;
 }
 
 export interface KanbanCardAttachment {
@@ -205,9 +291,7 @@ export interface KanbanCardDetail extends KanbanCard {
   attachmentsList: KanbanCardAttachment[];
 }
 
-export async function fetchKanbanCard(id: string): Promise<KanbanCardDetail> {
-  const res = await api.get(`/kanban/cards/${id}`);
-  const data = res.data.data as KanbanCardDetail;
+export function normalizeKanbanCardDetail(data: KanbanCardDetail): KanbanCardDetail {
   return {
     ...data,
     attachmentsList: data.attachmentsList ?? [],
@@ -218,6 +302,32 @@ export async function fetchKanbanCard(id: string): Promise<KanbanCardDetail> {
       assignee: item.assignee ?? null,
     })),
   };
+}
+
+export const kanbanCardQueryKey = (cardId: string) => ['kanban-card', cardId] as const;
+
+/** Dados do board para exibir a modal antes do fetch completo (checklist, comentários, anexos). */
+export function boardCardToDetailPlaceholder(
+  card: KanbanCard,
+  columnId: string,
+  column?: { title: string; color: string },
+): KanbanCardDetail {
+  return normalizeKanbanCardDetail({
+    ...card,
+    members: card.members ?? [],
+    labels: card.labels ?? [],
+    columnId,
+    columnTitle: column?.title ?? '',
+    columnColor: column?.color ?? '',
+    checklistItems: [],
+    commentsList: [],
+    attachmentsList: [],
+  });
+}
+
+export async function fetchKanbanCard(id: string): Promise<KanbanCardDetail> {
+  const res = await api.get(`/kanban/cards/${id}`);
+  return normalizeKanbanCardDetail(res.data.data as KanbanCardDetail);
 }
 
 export async function createChecklistItem(cardId: string, title: string) {
@@ -255,6 +365,14 @@ export async function uploadKanbanAttachments(cardId: string, files: File[]) {
   const form = new FormData();
   files.forEach((f) => form.append('attachments', f));
   const res = await api.post(`/kanban/cards/${cardId}/attachments`, form);
+  return res.data.data as KanbanCardDetail;
+}
+
+export async function addKanbanLinkAttachment(
+  cardId: string,
+  payload: { url: string; displayName?: string },
+) {
+  const res = await api.post(`/kanban/cards/${cardId}/attachments/link`, payload);
   return res.data.data as KanbanCardDetail;
 }
 

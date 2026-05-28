@@ -4,6 +4,15 @@ import { stockShortfallService } from '../services/StockShortfallService';
 import { createError } from '../middleware/errorHandler';
 
 export class StockShortfallController {
+  async countPending(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const count = await stockShortfallService.countOpenPending();
+      res.json({ success: true, count });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { status, costCenterId, category, month, year, search, limit } = req.query;

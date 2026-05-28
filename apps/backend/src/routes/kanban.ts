@@ -10,6 +10,9 @@ router.use(authenticate);
 router.get('/boards', (req, res, next) => controller.listBoards(req, res, next));
 router.get('/picker-users', (req, res, next) => controller.listPickerUsers(req, res, next));
 router.get('/board', (req, res, next) => controller.getBoard(req, res, next));
+router.patch('/board/label-presets', (req, res, next) =>
+  controller.updateBoardLabelPresets(req, res, next),
+);
 
 router.post('/columns', (req, res, next) => controller.createColumn(req, res, next));
 router.patch('/columns/:id', (req, res, next) => controller.updateColumn(req, res, next));
@@ -21,6 +24,7 @@ router.delete('/cards/:cardId/members/:userId', (req, res, next) =>
   controller.removeCardMember(req, res, next),
 );
 router.get('/cards/:id', (req, res, next) => controller.getCardById(req, res, next));
+router.get('/cards/:id/cost', (req, res, next) => controller.getCardCost(req, res, next));
 router.patch('/cards/:id', (req, res, next) => controller.updateCard(req, res, next));
 router.delete('/cards/:id', (req, res, next) => controller.deleteCard(req, res, next));
 
@@ -43,6 +47,9 @@ router.post(
   '/cards/:cardId/attachments',
   KanbanController.uploadAttachments(),
   (req, res, next) => controller.addAttachments(req, res, next),
+);
+router.post('/cards/:cardId/attachments/link', (req, res, next) =>
+  controller.addLinkAttachment(req, res, next),
 );
 router.delete('/attachments/:id', (req, res, next) => controller.deleteAttachment(req, res, next));
 

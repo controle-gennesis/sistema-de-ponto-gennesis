@@ -393,13 +393,21 @@ router.patch('/:id/release-payment-boleto-phase', async (req: AuthRequest, res: 
 
 router.patch('/:id/payment-boleto-installment-proof', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { paymentProofUrl, paymentProofName } = req.body as {
+    const { paymentProofUrl, paymentProofName, installmentIndex } = req.body as {
       paymentProofUrl?: string;
       paymentProofName?: string;
+      installmentIndex?: number;
     };
     const order = await service.attachBoletoInstallmentPaymentProof(
       req.params.id,
-      { paymentProofUrl: paymentProofUrl || '', paymentProofName },
+      {
+        paymentProofUrl: paymentProofUrl || '',
+        paymentProofName,
+        installmentIndex:
+          installmentIndex != null && Number.isFinite(Number(installmentIndex))
+            ? Number(installmentIndex)
+            : undefined
+      },
       req.user?.id
     );
     res.json({ success: true, data: order, message: 'Comprovante da parcela anexado com sucesso' });

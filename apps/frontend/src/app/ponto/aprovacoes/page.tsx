@@ -27,6 +27,7 @@ import {
   updateEspelhoApprovalStatus
 } from '@/lib/espelhoNfApproval';
 import { OcApprovalsSection } from './_components/OcApprovalsSection';
+import { FdApprovalsSection } from './_components/FdApprovalsSection';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -590,8 +591,8 @@ export default function AprovacoesPage() {
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Aprovações</h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Solicitações, espelhos fiscais e ordens de compra pendentes de decisão
+            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+              Solicitações, espelhos fiscais, fichas de demanda e ordens de compra pendentes de decisão
             </p>
           </div>
 
@@ -924,6 +925,8 @@ export default function AprovacoesPage() {
             </CardContent>
           </Card>
           )}
+
+          {canApproveDp && <FdApprovalsSection />}
 
           {canApproveOc && <OcApprovalsSection />}
 

@@ -1,6 +1,13 @@
 import { Prisma, StockShortfallStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
+import {
+  collectPaymentSlipsForOrderFromMovements,
+  extractOcNumberFromMovementNotes,
+  movementNotesMatchOc
+} from '../utils/stockMovementNotes';
+
+export { extractOcNumberFromMovementNotes } from '../utils/stockMovementNotes';
 
 function normalizeMaterialName(value: string): string {
   return value
@@ -11,20 +18,30 @@ function normalizeMaterialName(value: string): string {
     .toLowerCase();
 }
 
-export function extractOcNumberFromMovementNotes(notes: string | null | undefined): string | null {
-  if (!notes) return null;
-  const m = notes.match(/Nº OC:\s*([^\n|]+)/i);
-  return m?.[1]?.trim() || null;
-}
+type ConstructionMaterialRef = {
+  id: string;
+  name: string;
+  unit: string | null;
+  category: string | null;
+};
 
-function movementNotesMatchOc(notes: string | null | undefined, orderNumber: string): boolean {
-  if (!notes || !orderNumber) return false;
-  const needle = `Nº OC: ${orderNumber}`;
-  return notes.includes(needle) || notes.toLowerCase().includes(`nº oc: ${orderNumber.toLowerCase()}`);
-}
-
-function movementIsPartialIn(notes: string | null | undefined): boolean {
-  return !!notes && /Tipo:\s*PARCIAL/i.test(notes);
+function resolveConstructionMaterialForEngineering(
+  eng: { id: string; name: string | null; description: string; sinapiCode: string },
+  cmByNormName: Map<string, ConstructionMaterialRef>,
+  cmById: Map<string, ConstructionMaterialRef>
+): ConstructionMaterialRef | null {
+  const sinapi = (eng.sinapiCode || '').trim();
+  if (sinapi.startsWith('CM-')) {
+    const cm = cmById.get(sinapi.slice(3));
+    if (cm) return cm;
+  }
+  for (const key of [eng.name || '', eng.description || '']) {
+    const norm = normalizeMaterialName(key);
+    if (!norm) continue;
+    const cm = cmByNormName.get(norm);
+    if (cm) return cm;
+  }
+  return null;
 }
 
 function parseMovementSplitFromNotes(notes: string | null | undefined): 'TOTAL' | 'PARCIAL' | '' {
@@ -55,6 +72,48 @@ export type StockReceiptSummary = {
 };
 
 export class StockShortfallService {
+  private lastRebuildAt = 0;
+  private static readonly REBUILD_THROTTLE_MS = 30_000;
+
+  /**
+   * Recalcula furos a partir de todas as entradas de estoque já vinculadas a OC.
+   * Garante que o módulo Furo de Estoque reflita movimentações anteriores à feature.
+   */
+  async rebuildFromExistingMovements(): Promise<void> {
+    const movements = await prisma.stockMovement.findMany({
+      where: {
+        type: 'IN',
+        notes: { not: null }
+      },
+      select: { notes: true },
+      take: 15000,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const ocNumbers = new Set<string>();
+    for (const m of movements) {
+      const oc = extractOcNumberFromMovementNotes(m.notes);
+      if (oc) ocNumbers.add(oc);
+    }
+
+    let poService: import('./PurchaseOrderService').PurchaseOrderService | null = null;
+    for (const orderNumber of ocNumbers) {
+      await this.syncForOrderNumber(orderNumber);
+      const slips = collectPaymentSlipsForOrderFromMovements(movements, orderNumber);
+      if (slips.length > 0) {
+        try {
+          if (!poService) {
+            const { PurchaseOrderService } = await import('./PurchaseOrderService');
+            poService = new PurchaseOrderService();
+          }
+          await poService.syncBoletoInstallmentsFromStockReceipt(orderNumber);
+        } catch (err) {
+          console.error('[StockShortfall] syncBoletoInstallmentsFromStockReceipt', orderNumber, err);
+        }
+      }
+    }
+  }
+
   /**
    * Recalcula furos da OC após entrada de estoque vinculada à OC.
    * Só mantém registros quando já houve pelo menos um recebimento PARCIAL.
@@ -98,9 +157,8 @@ export class StockShortfallService {
     });
 
     const forOc = inMovements.filter((m) => movementNotesMatchOc(m.notes, trimmed));
-    const hasPartial = forOc.some((m) => movementIsPartialIn(m.notes));
 
-    if (!hasPartial) {
+    if (forOc.length === 0) {
       await prisma.stockShortfall.deleteMany({ where: { purchaseOrderId: po.id } });
       return;
     }
@@ -117,14 +175,17 @@ export class StockShortfallService {
       where: { isActive: true },
       select: { id: true, name: true, unit: true, category: true }
     });
-    const cmByNormName = new Map<string, { id: string; name: string; unit: string | null; category: string | null }>();
+    const cmByNormName = new Map<string, ConstructionMaterialRef>();
+    const cmById = new Map<string, ConstructionMaterialRef>();
     for (const cm of constructionMaterials) {
-      cmByNormName.set(normalizeMaterialName(cm.name), {
+      const ref: ConstructionMaterialRef = {
         id: cm.id,
         name: cm.name,
         unit: cm.unit,
         category: cm.category
-      });
+      };
+      cmById.set(cm.id, ref);
+      cmByNormName.set(normalizeMaterialName(cm.name), ref);
     }
 
     const lines: Array<{
@@ -138,10 +199,11 @@ export class StockShortfallService {
 
     for (const item of po.items) {
       const eng = item.material;
-      const label = (eng?.name || eng?.description || '').trim();
-      if (!label) continue;
-      const cm = cmByNormName.get(normalizeMaterialName(label));
+      if (!eng) continue;
+      const cm = resolveConstructionMaterialForEngineering(eng, cmByNormName, cmById);
       if (!cm) continue;
+      const label = (eng.name || eng.description || cm.name || '').trim();
+      if (!label) continue;
       const ordered = Number(item.quantity);
       if (!Number.isFinite(ordered) || ordered <= 0) continue;
       const received = sumByConstructionMaterial.get(cm.id) || 0;
@@ -154,6 +216,12 @@ export class StockShortfallService {
         received,
         gap
       });
+    }
+
+    const hasOpenGap = lines.some((l) => l.gap > 0);
+    if (!hasOpenGap) {
+      await prisma.stockShortfall.deleteMany({ where: { purchaseOrderId: po.id } });
+      return;
     }
 
     const existing = await prisma.stockShortfall.findMany({ where: { purchaseOrderId: po.id } });
@@ -331,6 +399,16 @@ export class StockShortfallService {
     );
 
     return { hasReceipts: true, lines, batches };
+  /** Quantidade de furos abertos (com recálculo leve e limitado por throttle). */
+  async countOpenPending(): Promise<number> {
+    const now = Date.now();
+    if (now - this.lastRebuildAt > StockShortfallService.REBUILD_THROTTLE_MS) {
+      await this.rebuildFromExistingMovements();
+      this.lastRebuildAt = now;
+    }
+    return prisma.stockShortfall.count({
+      where: { status: StockShortfallStatus.ABERTO }
+    });
   }
 
   async list(params: {
@@ -341,7 +419,13 @@ export class StockShortfallService {
     year?: number;
     search?: string;
     limit?: number;
+    skipRebuild?: boolean;
   }) {
+    if (!params.skipRebuild) {
+      await this.rebuildFromExistingMovements();
+      this.lastRebuildAt = Date.now();
+    }
+
     const limit = Math.min(params.limit ?? 200, 500);
     const where: Prisma.StockShortfallWhereInput = {};
 

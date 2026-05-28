@@ -177,6 +177,20 @@ export class FinancialControlController {
     }
   }
 
+  async getByOcNumber(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const ocNumber = String(req.params.ocNumber || '').trim();
+      if (!ocNumber) throw createError('Número da OC é obrigatório', 400);
+      const entries = await prisma.financialControlEntry.findMany({
+        where: { ocNumber: { equals: ocNumber, mode: 'insensitive' } },
+        orderBy: [{ paymentYear: 'desc' }, { paymentMonth: 'desc' }, { createdAt: 'desc' }],
+      });
+      res.json({ success: true, data: entries });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

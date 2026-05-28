@@ -54,7 +54,7 @@ const itemAttachmentUpload = multer({
 router.use(authenticate);
 
 // Endpoint auxiliar para listar materiais da RM (deve vir antes de /:id)
-// Somente Materiais de Construção (cadastro em /ponto/materiais-construcao); cada um tem espelho em EngineeringMaterial (sinapiCode CM-*)
+// Somente Materiais e Serviços (cadastro em /ponto/materiais-construcao); cada um tem espelho em EngineeringMaterial (sinapiCode CM-*)
 router.get('/materials', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const data = await materialRequestService.listConstructionMaterialsForRmDropdown();
@@ -140,7 +140,8 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       throw createError('Usuário não autenticado', 401);
     }
 
-    const { costCenterId, projectId, serviceOrder, obra, description, priority, items } = req.body;
+    const { costCenterId, projectId, serviceOrderId, serviceOrder, obra, description, priority, items } =
+      req.body;
 
     if (!costCenterId || !items || !Array.isArray(items) || items.length === 0) {
       throw createError('Centro de custo e itens são obrigatórios', 400);
@@ -150,6 +151,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       requestedBy: req.user.id,
       costCenterId,
       projectId,
+      serviceOrderId,
       serviceOrder,
       obra,
       description,
@@ -200,7 +202,8 @@ router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction)
   try {
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const { id } = req.params;
-    const { costCenterId, projectId, serviceOrder, obra, description, priority, items, submitForApproval } = req.body;
+    const { costCenterId, projectId, serviceOrderId, serviceOrder, obra, description, priority, items, submitForApproval } =
+      req.body;
 
     if (!costCenterId || !items || !Array.isArray(items) || items.length === 0) {
       throw createError('Centro de custo e itens são obrigatórios', 400);
@@ -209,6 +212,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction)
     const request = await materialRequestService.updateMaterialRequestInCorrection(id, req.user.id, {
       costCenterId,
       projectId,
+      serviceOrderId,
       serviceOrder,
       obra,
       description,

@@ -28,6 +28,8 @@ export interface KanbanMemberPickerModalProps {
   onSelect: (user: KanbanPickerUser) => void | Promise<void>;
   excludeUserIds?: string[];
   currentUserId?: string;
+  /** Usuário logado — exibido como "Atribuir a mim" quando ainda não está no card. */
+  currentUser?: KanbanPickerUser | null;
   elevated?: boolean;
 }
 
@@ -71,25 +73,34 @@ export function KanbanMemberPickerModal({
   onSelect,
   excludeUserIds = [],
   currentUserId,
+  currentUser,
   elevated = true,
 }: KanbanMemberPickerModalProps) {
   const [search, setSearch] = useState('');
 
   const { data: users = [], isLoading, isError } = useQuery({
-    queryKey: ['kanban-member-picker-users'],
+    queryKey: ['kanban-member-picker-users', 'include-self'],
     queryFn: fetchKanbanPickerUsers,
     enabled: isOpen,
     staleTime: 60_000,
   });
 
+  const showSelfOption =
+    !!currentUser &&
+    !excludeUserIds.includes(currentUser.id) &&
+    (!search.trim() ||
+      currentUser.name.toLowerCase().includes(search.trim().toLowerCase()) ||
+      currentUser.email.toLowerCase().includes(search.trim().toLowerCase()));
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users.filter((u) => {
+      if (currentUser && u.id === currentUser.id) return false;
       if (excludeUserIds.includes(u.id)) return false;
       if (!q) return true;
       return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
     });
-  }, [users, search, excludeUserIds]);
+  }, [users, search, excludeUserIds, currentUser]);
 
   async function handleSelect(user: KanbanPickerUser) {
     await onSelect(user);
@@ -129,10 +140,45 @@ export function KanbanMemberPickerModal({
             Não foi possível carregar os usuários.
           </p>
         )}
-        {!isLoading && !isError && filtered.length === 0 && (
+        {!isLoading && !isError && !showSelfOption && filtered.length === 0 && (
           <p className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
             {search.trim() ? 'Nenhum usuário encontrado.' : 'Nenhum usuário disponível.'}
           </p>
+        )}
+        {!isLoading && !isError && showSelfOption && currentUser && (
+          <button
+            type="button"
+            onClick={() => handleSelect(currentUser)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/40 transition-colors text-left mb-1"
+          >
+            <div
+              className={clsx(
+                'w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0 overflow-hidden',
+                resolveApiMediaUrl(currentUser.profilePhotoUrl ?? null)
+                  ? ''
+                  : resolveKanbanAvatarBg(null, currentUser.id),
+              )}
+            >
+              {resolveApiMediaUrl(currentUser.profilePhotoUrl ?? null) ? (
+                <img
+                  src={resolveApiMediaUrl(currentUser.profilePhotoUrl ?? null)!}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                getKanbanInitials(currentUser.name)
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-red-800 dark:text-red-200 truncate">
+                Atribuir a mim
+              </p>
+              <p className="text-xs text-red-600/80 dark:text-red-300/80 truncate">
+                {currentUser.name}
+              </p>
+            </div>
+          </button>
         )}
         {!isLoading &&
           !isError &&
@@ -143,7 +189,7 @@ export function KanbanMemberPickerModal({
 
       {currentUserId && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
-          Selecione um colaborador para atribuir ao card.
+          Selecione você ou outro colaborador para atribuir ao card.
         </p>
       )}
     </Modal>

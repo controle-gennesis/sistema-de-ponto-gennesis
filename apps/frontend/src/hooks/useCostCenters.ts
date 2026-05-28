@@ -36,11 +36,19 @@ export function useCostCenters() {
     value: cc.name || String(cc.code || '')
   }));
 
+  const seenLabels = new Set<string>();
+  const uniqueCostCenters = formattedCostCenters.filter((cc) => {
+    const label = cc.label || cc.name || String(cc.code || '');
+    if (seenLabels.has(label)) return false;
+    seenLabels.add(label);
+    return true;
+  });
+
   return {
-    costCenters: formattedCostCenters,
+    costCenters: uniqueCostCenters,
     isLoading,
     error,
-    costCentersList: formattedCostCenters.map(cc => cc.label || cc.name || '')
+    costCentersList: uniqueCostCenters.map((cc) => cc.label || cc.name || '')
   };
 }
 

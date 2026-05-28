@@ -1,10 +1,23 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ClipboardList, Edit, Trash2, Search, X, AlertCircle, Filter } from 'lucide-react';
+import {
+  ClipboardList,
+  Edit,
+  Trash2,
+  Search,
+  X,
+  AlertCircle,
+  Filter,
+  MoreVertical,
+} from 'lucide-react';
+
+const ROW_ACTION_MENU_WIDTH_PX = 224;
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -297,8 +310,15 @@ function Input({
 }
 
 export default function AndamentoDaOsPage() {
+  return (
+    <ProtectedRoute route="/ponto/andamento-da-os">
+      <AndamentoDaOsPageContent />
+    </ProtectedRoute>
+  );
+}
+
+function AndamentoDaOsPageContent() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [filterContractId, setFilterContractId] = useState('');
@@ -311,6 +331,31 @@ export default function AndamentoDaOsPage() {
   const [editing, setEditing] = useState<Pleito | null>(null);
   const [form, setForm] = useState(emptyForm());
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [rowActionMenu, setRowActionMenu] = useState<{
+    pleitoId: string;
+    top: number;
+    left: number;
+  } | null>(null);
+
+  const hasActiveOsFilters = Boolean(
+    filterContractId ||
+      filterMonth ||
+      filterYear ||
+      filterLot.trim() ||
+      filterBudgetStatus ||
+      filterPendingBilling
+  );
+
+  const clearOsFilters = () => {
+    setFilterContractId('');
+    setFilterMonth('');
+    setFilterYear('');
+    setFilterLot('');
+    setFilterBudgetStatus('');
+    setFilterPendingBilling('');
+    setCurrentPage(1);
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -334,7 +379,7 @@ export default function AndamentoDaOsPage() {
     }
   });
 
-  const { data: listData, isLoading: loadingList } = useQuery({
+  const { data: listData, isLoading: loadingList, refetch: refetchList } = useQuery({
     queryKey: [
       'pleitos',
       searchTerm,
@@ -366,8 +411,8 @@ export default function AndamentoDaOsPage() {
 
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: unknown }) => api.patch(`/pleitos/${id}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pleitos'] });
+    onSuccess: async () => {
+      await refetchList();
       setShowForm(false);
       setEditing(null);
       setForm(emptyForm());
@@ -379,8 +424,8 @@ export default function AndamentoDaOsPage() {
   const deleteMut = useMutation({
     mutationFn: (id: string) =>
       api.delete(`/pleitos/${id}`, { params: { excluirOrdemServico: true } }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pleitos'] });
+    onSuccess: async () => {
+      await refetchList();
       setDeleteId(null);
       toast.success('Excluído!');
     },
@@ -390,6 +435,11 @@ export default function AndamentoDaOsPage() {
   const rows = (listData?.data || []) as Pleito[];
   const pagination = listData?.pagination || { page: 1, limit: 20, total: 0, totalPages: 1 };
   const contractsForFilter = (contractsListData?.data || []) as Array<{ id: string; name: string; number: string }>;
+  const itemsPerPage = 20;
+  const totalFiltered = pagination.total;
+  const totalPages = Math.max(1, pagination.totalPages);
+  const startItem = totalFiltered === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
+  const endItem = totalFiltered === 0 ? 0 : Math.min(currentPage * itemsPerPage, totalFiltered);
 
   const openEdit = (p: Pleito) => {
     setEditing(p);
@@ -412,164 +462,276 @@ export default function AndamentoDaOsPage() {
   };
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+  const isListEmpty = !loadingList && pagination.total === 0;
+  const pleitoForActionMenu = rowActionMenu
+    ? rows.find((r) => r.id === rowActionMenu.pleitoId) ?? null
+    : null;
 
-  if (loadingUser) return <Loading message="Carregando..." fullScreen size="lg" />;
+  useEffect(() => {
+    if (!rowActionMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRowActionMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [rowActionMenu]);
+
+  useEffect(() => {
+    if (rowActionMenu && !rows.some((r) => r.id === rowActionMenu.pleitoId)) {
+      setRowActionMenu(null);
+    }
+  }, [rowActionMenu, rows]);
+
+  if (loadingUser) {
+    return <Loading message="Carregando..." fullScreen size="lg" />;
+  }
 
   return (
-    <ProtectedRoute route="/ponto/andamento-da-os">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center justify-center gap-2">
-              <ClipboardList className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
               Ordem de Serviço
             </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
               Acompanhamento e controle das ordens de serviço
             </p>
           </div>
 
-          <Card>
-            <CardHeader className="border-b-0 space-y-4">
-              <div className="relative max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Modal
+            isOpen={isFiltersModalOpen}
+            onClose={() => setIsFiltersModalOpen(false)}
+            title="Filtros"
+            size="lg"
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Contrato
+                </label>
+                <select
+                  value={filterContractId}
+                  onChange={(e) => {
+                    setFilterContractId(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="">Todos</option>
+                  {contractsForFilter.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.number ? `${c.number} — ${c.name}` : c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Mês de criação
+                </label>
+                <select
+                  value={filterMonth}
+                  onChange={(e) => {
+                    setFilterMonth(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="">Todos</option>
+                  {MESES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Ano de criação
+                </label>
+                <select
+                  value={filterYear}
+                  onChange={(e) => {
+                    setFilterYear(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="">Todos</option>
+                  {ANOS_FILTRO.map((y) => (
+                    <option key={y} value={String(y)}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Lote
+                </label>
                 <input
                   type="text"
-                  placeholder="Buscar descrição, pasta, nota, local, contrato..."
-                  value={searchTerm}
+                  value={filterLot}
                   onChange={(e) => {
-                    setSearchTerm(e.target.value);
+                    setFilterLot(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  placeholder="Contém..."
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                 />
               </div>
-              <div className="flex flex-wrap items-end gap-2 gap-y-3">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mr-1">
-                  <Filter className="w-3.5 h-3.5 shrink-0" />
-                  Filtros
-                </div>
-                <div className="min-w-[160px] flex-1 sm:flex-initial">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Contrato</label>
-                  <select
-                    value={filterContractId}
-                    onChange={(e) => {
-                      setFilterContractId(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Todos</option>
-                    {contractsForFilter.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.number ? `${c.number} — ${c.name}` : c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="w-[120px]">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Mês</label>
-                  <select
-                    value={filterMonth}
-                    onChange={(e) => {
-                      setFilterMonth(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Todos</option>
-                    {MESES.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="w-[100px]">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Ano</label>
-                  <select
-                    value={filterYear}
-                    onChange={(e) => {
-                      setFilterYear(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Todos</option>
-                    {ANOS_FILTRO.map((y) => (
-                      <option key={y} value={String(y)}>
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="min-w-[100px] flex-1 sm:flex-initial sm:max-w-[140px]">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Lote</label>
-                  <input
-                    type="text"
-                    value={filterLot}
-                    onChange={(e) => {
-                      setFilterLot(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    placeholder="Contém..."
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                </div>
-                <div className="min-w-[150px] flex-1 sm:flex-initial">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Status orçamento</label>
-                  <select
-                    value={filterBudgetStatus}
-                    onChange={(e) => {
-                      setFilterBudgetStatus(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Todos</option>
-                    {STATUS_ORCAMENTO_OPCOES.map((op) => (
-                      <option key={op} value={op}>
-                        {op}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="min-w-[160px] flex-1 sm:flex-initial">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Pendente faturamento</label>
-                  <select
-                    value={filterPendingBilling}
-                    onChange={(e) => {
-                      setFilterPendingBilling((e.target.value as 'sim' | 'nao' | '') || '');
-                      setCurrentPage(1);
-                    }}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Todos</option>
-                    <option value="sim">Com valor pendente</option>
-                    <option value="nao">Sem pendência</option>
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFilterContractId('');
-                    setFilterMonth('');
-                    setFilterYear('');
-                    setFilterLot('');
-                    setFilterBudgetStatus('');
-                    setFilterPendingBilling('');
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status orçamento
+                </label>
+                <select
+                  value={filterBudgetStatus}
+                  onChange={(e) => {
+                    setFilterBudgetStatus(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                 >
-                  Limpar filtros
-                </button>
+                  <option value="">Todos</option>
+                  {STATUS_ORCAMENTO_OPCOES.map((op) => (
+                    <option key={op} value={op}>
+                      {op}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Pendente faturamento
+                </label>
+                <select
+                  value={filterPendingBilling}
+                  onChange={(e) => {
+                    setFilterPendingBilling((e.target.value as 'sim' | 'nao' | '') || '');
+                    setCurrentPage(1);
+                  }}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="">Todos</option>
+                  <option value="sim">Com valor pendente</option>
+                  <option value="nao">Sem pendência</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-6 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={clearOsFilters}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(false)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </Modal>
+
+          <Card className="w-full">
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <ClipboardList className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Ordens de serviço
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Acompanhamento e controle das ordens de serviço
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar descrição, pasta, nota, local, contrato..."
+                      value={searchTerm}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {searchTerm ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm('');
+                          setCurrentPage(1);
+                        }}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsFiltersModalOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveOsFilters
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtros"
+                    title={hasActiveOsFilters ? 'Filtros ativos' : 'Filtros'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActiveOsFilters ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent>
+              {loadingList ? (
+                <div className="py-8 text-center">
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="loading-spinner h-6 w-6" />
+                    <span className="text-gray-600 dark:text-gray-400">
+                      Carregando ordens de serviço...
+                    </span>
+                  </div>
+                </div>
+              ) : isListEmpty ? (
+                <div className="py-8 text-center">
+                  <ClipboardList className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
+                  <p className="text-gray-600 dark:text-gray-400">Nenhuma ordem de serviço encontrada</p>
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
+                    {searchTerm.trim() || hasActiveOsFilters
+                      ? 'Tente ajustar a busca ou os filtros'
+                      : 'As ordens de serviço são cadastradas no módulo de Contratos'}
+                  </p>
+                </div>
+              ) : (
+              <>
+                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                  <span>
+                    Mostrando {startItem} a {endItem} de {totalFiltered}{' '}
+                    {totalFiltered === 1 ? 'ordem de serviço' : 'ordens de serviço'}
+                  </span>
+                  <span>
+                    Página {currentPage} de {totalPages}
+                  </span>
+                </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[2950px]">
-                  <thead className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80">
+                <table className="w-full min-w-[2950px] text-sm">
+                  <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       {[
                         'Contrato',
@@ -597,33 +759,20 @@ export default function AndamentoDaOsPage() {
                         'Feedback Relatorios',
                         'Engenheiro',
                         'Encarregado',
-                        'Ações'
+                        'Ação'
                       ].map((h) => (
                         <th
                           key={h}
-                          className="px-2 py-2 text-left font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap"
+                          className="whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6"
                         >
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {loadingList ? (
-                      <tr>
-                        <td colSpan={26} className="px-4 py-8 text-center text-gray-500">
-                          Carregando...
-                        </td>
-                      </tr>
-                    ) : rows.length === 0 ? (
-                      <tr>
-                        <td colSpan={26} className="px-4 py-8 text-center text-gray-500">
-                          Nenhum registro encontrado com os filtros atuais.
-                        </td>
-                      </tr>
-                    ) : (
-                      rows.map((p) => (
-                        <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                  <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                      {rows.map((p) => (
+                        <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                           <td className="px-2 py-2 max-w-[200px] truncate" title={p.updatedContract ? `${p.updatedContract.number} ${p.updatedContract.name}` : ''}>
                             {p.updatedContract ? (
                               <span className="text-gray-900 dark:text-gray-100">
@@ -670,52 +819,123 @@ export default function AndamentoDaOsPage() {
                           <td className="px-2 py-2 max-w-[120px] truncate">{p.reportsBilling || '-'}</td>
                           <td className="px-2 py-2 max-w-[100px] truncate">{p.engineer || '-'}</td>
                           <td className="px-2 py-2 max-w-[100px] truncate">{p.supervisor || '-'}</td>
-                          <td className="px-2 py-2 whitespace-nowrap">
-                            <div className="flex gap-1">
+                          <td className="px-3 py-4 text-right sm:px-6">
+                            <div className="flex justify-end">
                               <button
                                 type="button"
-                                onClick={() => openEdit(p)}
-                                className="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                  setRowActionMenu((prev) => {
+                                    if (prev?.pleitoId === p.id) return null;
+                                    let left = r.right - ROW_ACTION_MENU_WIDTH_PX;
+                                    left = Math.max(
+                                      8,
+                                      Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8)
+                                    );
+                                    return { pleitoId: p.id, top: r.bottom + 4, left };
+                                  });
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                aria-label="Menu de ações"
+                                aria-expanded={rowActionMenu?.pleitoId === p.id}
+                                aria-haspopup="menu"
                               >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDeleteId(p.id)}
-                                className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                              >
-                                <Trash2 className="w-4 h-4" />
+                                <MoreVertical className="h-4 w-4" />
                               </button>
                             </div>
                           </td>
                         </tr>
-                      ))
-                    )}
+                      ))}
                   </tbody>
                 </table>
               </div>
-              {pagination.totalPages > 1 && (
-                <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-400">
-                    Página {pagination.page} de {pagination.totalPages} ({pagination.total} registros)
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      disabled={currentPage <= 1}
-                      onClick={() => setCurrentPage((p) => p - 1)}
-                      className="px-3 py-1 border rounded disabled:opacity-50"
-                    >
-                      Anterior
-                    </button>
-                    <button
-                      disabled={currentPage >= pagination.totalPages}
-                      onClick={() => setCurrentPage((p) => p + 1)}
-                      className="px-3 py-1 border rounded disabled:opacity-50"
-                    >
-                      Próxima
-                    </button>
-                  </div>
+
+              {totalPages > 1 && (
+                <div className="mt-6 flex items-center justify-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                  >
+                    Anterior
+                  </button>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const pageNumber = i + 1;
+                    const isActive = pageNumber === currentPage;
+                    return (
+                      <button
+                        key={pageNumber}
+                        type="button"
+                        onClick={() => setCurrentPage(pageNumber)}
+                        className={`rounded-md px-3 py-2 text-sm font-medium ${
+                          isActive
+                            ? 'bg-red-600 text-white'
+                            : 'border border-gray-300 bg-white text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
+                        }`}
+                      >
+                        {pageNumber}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                  >
+                    Próxima
+                  </button>
                 </div>
+              )}
+
+              {rowActionMenu &&
+                pleitoForActionMenu &&
+                typeof document !== 'undefined' &&
+                createPortal(
+                  <>
+                    <div
+                      className="fixed inset-0 z-[200]"
+                      aria-hidden
+                      onClick={() => setRowActionMenu(null)}
+                    />
+                    <div
+                      role="menu"
+                      className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                      style={{ top: rowActionMenu.top, left: rowActionMenu.left }}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowActionMenu(null);
+                          openEdit(pleitoForActionMenu);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowActionMenu(null);
+                          setDeleteId(pleitoForActionMenu.id);
+                        }}
+                        className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                        <span>Excluir</span>
+                      </button>
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </>
               )}
             </CardContent>
           </Card>
@@ -955,6 +1175,5 @@ export default function AndamentoDaOsPage() {
           </div>
         )}
       </MainLayout>
-    </ProtectedRoute>
   );
 }

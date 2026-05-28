@@ -3,8 +3,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Building2, Plus, Edit, Trash2, Search, X, Check, AlertCircle, Upload, Download, CheckCircle, FileSpreadsheet, Loader2, Filter } from 'lucide-react';
+import { Building2, Plus, Search, X, Check, AlertCircle, Upload, Download, CheckCircle, FileSpreadsheet, Loader2, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange
+} from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -217,6 +225,20 @@ export default function CentrosCustoPage() {
     });
   }, [costCenters, stateFilter]);
 
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen
+  } = useRowActionMenu(filteredCostCenters);
+
+  const listRange = getCadastroListRange(
+    currentPage,
+    pagination.limit,
+    pagination.total
+  );
+
   if (loadingUser) {
     return (
       <Loading 
@@ -317,10 +339,10 @@ export default function CentrosCustoPage() {
           </Modal>
 
           {/* Lista de centros de custo */}
-          <Card>
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex items-start space-x-3">
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
                   <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
                     <Building2 className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
@@ -393,64 +415,53 @@ export default function CentrosCustoPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className={cadastroListClasses.cardContent}>
+              {loadingCostCenters ? (
+                <CadastroListLoading message="Carregando centros de custo..." />
+              ) : pagination.total === 0 ? (
+                <CadastroListEmpty
+                  icon={Building2}
+                  title="Nenhum centro de custo encontrado"
+                  hint={
+                    searchTerm.trim() || hasActiveCostCenterFilters
+                      ? 'Tente ajustar a busca ou os filtros'
+                      : 'Cadastre um novo centro de custo para começar'
+                  }
+                />
+              ) : (
+              <>
+                <CadastroListSummary
+                  startItem={listRange.startItem}
+                  endItem={listRange.endItem}
+                  total={pagination.total}
+                  itemLabel="centro de custo"
+                  itemLabelPlural="centros de custo"
+                  currentPage={currentPage}
+                  totalPages={listRange.totalPages}
+                />
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] table-fixed border-collapse">
+                <table className={cadastroListClasses.table}>
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
-                      <th
-                        scope="col"
-                        className="w-[12%] min-w-[88px] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
+                      <th scope="col" className={cadastroListClasses.th}>
                         Código
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[38%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
+                      <th scope="col" className={cadastroListClasses.th}>
                         Nome
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[22%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
+                      <th scope="col" className={cadastroListClasses.th}>
                         Polo
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[14%] px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
+                      <th scope="col" className={cadastroListClasses.thCenter}>
                         Status
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[14%] min-w-[104px] px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
-                        Ações
+                      <th scope="col" className={cadastroListClasses.thRight}>
+                        Ação
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                    {loadingCostCenters ? (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="loading-spinner h-6 w-6" />
-                            <span className="text-gray-600 dark:text-gray-400">Carregando centros de custo...</span>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : filteredCostCenters.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
-                          <div className="text-gray-500 dark:text-gray-400">
-                            <p className="font-medium text-gray-700 dark:text-gray-300">Nenhum centro de custo encontrado.</p>
-                            <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredCostCenters.map((cc: CostCenter) => (
+                      {filteredCostCenters.map((cc: CostCenter) => (
                         <tr key={cc.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                             <span className="text-sm text-gray-900 dark:text-gray-100 font-mono">{cc.code}</span>
@@ -470,41 +481,30 @@ export default function CentrosCustoPage() {
                               {cc.isActive ? 'Ativo' : 'Inativo'}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => handleEdit(cc)}
-                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                title="Editar"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => setShowDeleteModal(cc.id)}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+                          <RowActionMenuCell
+                            isOpen={isRowMenuOpen(cc.id)}
+                            onToggle={(e) =>
+                              toggleRowActionMenu(cc.id, e.currentTarget as HTMLButtonElement)
+                            }
+                          />
                         </tr>
-                      ))
-                    )}
+                      ))}
                   </tbody>
                 </table>
               </div>
+
+              {rowActionMenu && rowForActionMenu && (
+                <RowActionMenuPortal
+                  menu={rowActionMenu}
+                  onClose={closeRowActionMenu}
+                  onEdit={() => handleEdit(rowForActionMenu)}
+                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                />
+              )}
               
               {/* Paginação */}
               {pagination.totalPages > 1 && (
-                <div className="px-4 sm:px-6 py-4 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                      <span>
-                        Mostrando {((pagination.page - 1) * pagination.limit) + 1} a {Math.min(pagination.page * pagination.limit, pagination.total)} de {pagination.total} centros de custo
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
+                <div className={cadastroListClasses.pagination}>
                       <button
                         onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                         disabled={currentPage === 1}
@@ -550,9 +550,9 @@ export default function CentrosCustoPage() {
                       >
                         Próxima
                       </button>
-                    </div>
-                  </div>
                 </div>
+              )}
+              </>
               )}
             </CardContent>
           </Card>

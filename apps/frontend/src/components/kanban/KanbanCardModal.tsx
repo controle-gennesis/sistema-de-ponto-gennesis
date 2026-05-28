@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Loader2,
@@ -20,7 +20,13 @@ import {
   type Priority,
   type KanbanCardLabel,
   type KanbanCardMember,
+  type KanbanCard,
+  type KanbanCardDetail,
+  type KanbanBoardCardChecklistPatch,
+  boardCardToDetailPlaceholder,
   fetchKanbanCard,
+  kanbanCardQueryKey,
+  normalizeKanbanCardDetail,
   createKanbanCard,
   updateKanbanCard,
   addKanbanCardMember,
@@ -29,9 +35,11 @@ import {
   updateChecklistItem,
   deleteChecklistItem,
   uploadKanbanAttachments,
+  addKanbanLinkAttachment,
   createKanbanComment,
   deleteKanbanComment,
 } from '@/lib/kanban';
+import { KanbanCardCostModal } from './KanbanCardCostModal';
 import {
   kanbanLabel,
   kanbanInput,
@@ -41,15 +49,19 @@ import { KanbanPriorityPicker } from './KanbanPriorityPicker';
 import { KanbanCardActionButton } from './KanbanCardActionButton';
 import { KanbanCardDatesPanel } from './KanbanCardDatesPopover';
 import { KanbanCardLabelsPanel, KanbanLabelChips } from './KanbanCardLabelsPopover';
+import type { KanbanLabelPreset } from './kanbanLabels';
 import { KanbanMemberPickerModal, type KanbanPickerUser } from './KanbanMemberPickerModal';
 import { KanbanMemberChip } from './KanbanMemberChip';
 import {
   KanbanAttachmentsModal,
   type KanbanDraftAttachment,
+  type KanbanDraftLink,
 } from './KanbanAttachmentsModal';
+import { KanbanCardAttachmentsInline } from './KanbanCardAttachmentsInline';
 import { KanbanChecklistTaskRow } from './KanbanChecklistTaskRow';
 import { formatKanbanDateRange } from './kanbanDateTime';
-import { getKanbanInitials, kanbanAvatarColorForKey } from './kanbanAvatar';
+import { kanbanAvatarColorForKey } from './kanbanAvatar';
+import { KanbanUserAvatar } from './KanbanUserAvatar';
 
 type OpenMenu = 'labels' | 'dates' | null;
 
@@ -107,22 +119,43 @@ function formatRelativeTimeLong(iso: string): string {
   });
 }
 
+export interface KanbanCardModalCurrentUser {
+  id: string;
+  name: string;
+  email?: string;
+  profilePhotoUrl?: string | null;
+}
+
 export interface KanbanCardModalProps {
   mode: 'create' | 'detail';
   cardId?: string;
   columnId: string;
+  /** Resumo do card no board — exibe a modal na hora enquanto os detalhes carregam. */
+  initialCard?: KanbanCard;
+  initialColumn?: { title: string; color: string };
   currentUserId?: string;
+  currentUser?: KanbanCardModalCurrentUser | null;
+  canViewAllKanbanBoards?: boolean;
+  labelPresets?: KanbanLabelPreset[];
   onClose: () => void;
   onBoardRefresh: () => void;
+  /** Atualiza só o card no board (contadores de checklist) sem refetch da página. */
+  onBoardCardPatch?: (cardId: string, patch: KanbanBoardCardChecklistPatch) => void;
 }
 
 export function KanbanCardModal({
   mode: initialMode,
   cardId: initialCardId,
   columnId: initialColumnId,
+  initialCard,
+  initialColumn,
   currentUserId,
+  currentUser,
+  canViewAllKanbanBoards = false,
+  labelPresets,
   onClose,
   onBoardRefresh,
+  onBoardCardPatch,
 }: KanbanCardModalProps) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'create' | 'detail'>(initialMode);
@@ -141,6 +174,7 @@ export function KanbanCardModal({
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [checklistEnabled, setChecklistEnabled] = useState(false);
   const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
+  const [showCostModal, setShowCostModal] = useState(false);
 
   const [newTask, setNewTask] = useState('');
   const [commentText, setCommentText] = useState('');
@@ -150,21 +184,46 @@ export function KanbanCardModal({
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [postingComment, setPostingComment] = useState(false);
   const [draftTasks, setDraftTasks] = useState<DraftChecklistTask[]>([]);
+  const [editingDraftTaskId, setEditingDraftTaskId] = useState<string | null>(null);
   const [draftFiles, setDraftFiles] = useState<KanbanDraftAttachment[]>([]);
-
+  const [draftLinks, setDraftLinks] = useState<KanbanDraftLink[]>([]);
+  const mainColumnRef = useRef<HTMLDivElement>(null);
+  const descriptionSectionRef = useRef<HTMLDivElement>(null);
+  const attachmentsSectionRef = useRef<HTMLDivElement>(null);
+  const [commentsPanelHeight, setCommentsPanelHeight] = useState<number | undefined>(undefined);
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
 
-  const { data: card, isLoading, refetch } = useQuery({
-    queryKey: ['kanban-card', cardId],
+  const cardPlaceholder =
+    initialCard && cardId === initialCard.id
+      ? boardCardToDetailPlaceholder(initialCard, initialColumnId, initialColumn)
+      : undefined;
+
+  const { data: card, isLoading, isFetching, refetch } = useQuery({
+    queryKey: kanbanCardQueryKey(cardId!),
     queryFn: () => fetchKanbanCard(cardId!),
     enabled: isDetail,
+    placeholderData: cardPlaceholder,
+    staleTime: 60_000,
   });
+
+  useLayoutEffect(() => {
+    if (!initialCard || initialCard.id !== cardId) return;
+    setTitle(initialCard.title);
+    setDescription(initialCard.description);
+    setPriority(initialCard.priority);
+    setStartDate(initialCard.startDate ?? '');
+    setEndDate(initialCard.endDate ?? '');
+    setMembers(Array.isArray(initialCard.members) ? initialCard.members : []);
+    setLabels(Array.isArray(initialCard.labels) ? initialCard.labels : []);
+    setChecklistEnabled(initialCard.checklistEnabled ?? false);
+  }, [initialCard, cardId]);
 
   useEffect(() => {
     setOpenMenu(null);
     setChecklistEnabled(false);
     setShowAttachmentsModal(false);
+    setShowCostModal(false);
     if (initialMode === 'create' && !initialCardId) {
       setDraftTasks([]);
       setDraftFiles([]);
@@ -173,24 +232,101 @@ export function KanbanCardModal({
 
   useEffect(() => {
     if (!card || card.id !== cardId) return;
-    setTitle(card.title);
-    setDescription(card.description);
-    setPriority(card.priority);
-    setStartDate(card.startDate ?? '');
-    setEndDate(card.endDate ?? '');
-    setMembers(Array.isArray(card.members) ? card.members : []);
-    setChecklistEnabled(card.checklistEnabled ?? false);
-    setColumnId(card.columnId);
-    setLabels(Array.isArray(card.labels) ? card.labels : []);
+    setTitle((prev) => (prev === card.title ? prev : card.title));
+    setDescription((prev) => (prev === card.description ? prev : card.description));
+    setPriority((prev) => (prev === card.priority ? prev : card.priority));
+    setStartDate((prev) => {
+      const next = card.startDate ?? '';
+      return prev === next ? prev : next;
+    });
+    setEndDate((prev) => {
+      const next = card.endDate ?? '';
+      return prev === next ? prev : next;
+    });
+    setMembers((prev) => {
+      const next = Array.isArray(card.members) ? card.members : [];
+      if (
+        prev.length === next.length &&
+        prev.every((m, i) => m.userId === next[i]?.userId)
+      ) {
+        return prev;
+      }
+      return next;
+    });
+    setChecklistEnabled((prev) => {
+      const next = card.checklistEnabled ?? false;
+      return prev === next ? prev : next;
+    });
+    setColumnId((prev) => (prev === card.columnId ? prev : card.columnId));
+    setLabels((prev) => {
+      const next = Array.isArray(card.labels) ? card.labels : [];
+      if (
+        prev.length === next.length &&
+        prev.every((l, i) => l.color === next[i]?.color && l.text === next[i]?.text)
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, [card, cardId]);
 
   const refreshAll = useCallback(async () => {
     if (cardId) {
       await refetch();
-      queryClient.invalidateQueries({ queryKey: ['kanban-card', cardId] });
+      queryClient.invalidateQueries({ queryKey: kanbanCardQueryKey(cardId) });
     }
     onBoardRefresh();
   }, [cardId, onBoardRefresh, queryClient, refetch]);
+
+  const applyCardDetail = useCallback(
+    (detail: KanbanCardDetail) => {
+      if (!cardId) return;
+      queryClient.setQueryData(kanbanCardQueryKey(cardId), normalizeKanbanCardDetail(detail));
+    },
+    [cardId, queryClient],
+  );
+
+  const patchBoardCard = useCallback(
+    (detail: KanbanCardDetail) => {
+      if (!onBoardCardPatch) return;
+      onBoardCardPatch(detail.id, {
+        completedTasks: detail.completedTasks,
+        totalTasks: detail.totalTasks,
+        progress: detail.progress,
+        checklistEnabled: detail.checklistEnabled,
+      });
+    },
+    [onBoardCardPatch],
+  );
+
+  const syncChecklistFromApi = useCallback(
+    (detail: KanbanCardDetail) => {
+      applyCardDetail(detail);
+      patchBoardCard(detail);
+    },
+    [applyCardDetail, patchBoardCard],
+  );
+
+  function buildOptimisticChecklistToggle(
+    current: KanbanCardDetail,
+    itemId: string,
+    nextDone: boolean,
+  ): KanbanCardDetail {
+    const checklistItems = current.checklistItems.map((item) =>
+      item.id === itemId ? { ...item, isDone: nextDone } : item,
+    );
+    const completedTasks = Math.max(
+      0,
+      Math.min(current.totalTasks, current.completedTasks + (nextDone ? 1 : -1)),
+    );
+    const totalTasks = current.totalTasks;
+    return {
+      ...current,
+      checklistItems,
+      completedTasks,
+      progress: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+    };
+  }
 
   async function saveMeta(
     partial?: Partial<{
@@ -223,6 +359,15 @@ export function KanbanCardModal({
       setSaving(false);
     }
   }
+
+  const pickerCurrentUser: KanbanPickerUser | null = currentUser
+    ? {
+        id: currentUser.id,
+        name: currentUser.name,
+        email: currentUser.email ?? '',
+        profilePhotoUrl: currentUser.profilePhotoUrl ?? null,
+      }
+    : null;
 
   async function assignMember(user: KanbanPickerUser) {
     if (members.some((m) => m.userId === user.id)) return;
@@ -274,11 +419,32 @@ export function KanbanCardModal({
         title: title.trim(),
       });
 
+      const newCardId = created.id;
+      if (draftFiles.length > 0) {
+        await uploadKanbanAttachments(
+          newCardId,
+          draftFiles.map((d) => d.file),
+        );
+        setDraftFiles([]);
+      }
+      if (draftLinks.length > 0) {
+        for (const link of draftLinks) {
+          await addKanbanLinkAttachment(newCardId, {
+            url: link.url,
+            displayName:
+              link.displayName.trim() && link.displayName !== link.url
+                ? link.displayName
+                : undefined,
+          });
+        }
+        setDraftLinks([]);
+      }
+
       toast.success('Card criado');
-      await onBoardRefresh();
-      setCardId(created.id);
+      setCardId(newCardId);
       setMode('detail');
-      queryClient.invalidateQueries({ queryKey: ['kanban-card', created.id] });
+      queryClient.invalidateQueries({ queryKey: kanbanCardQueryKey(newCardId) });
+      await onBoardRefresh();
     } catch {
       toast.error('Erro ao criar card');
     } finally {
@@ -299,9 +465,9 @@ export function KanbanCardModal({
     if (!cardId) return;
     setAddingTask(true);
     createChecklistItem(cardId, newTask.trim())
-      .then(async () => {
+      .then(({ card: updated }) => {
         setNewTask('');
-        await refreshAll();
+        syncChecklistFromApi(updated);
       })
       .catch(() => toast.error('Erro ao adicionar tarefa'))
       .finally(() => setAddingTask(false));
@@ -315,29 +481,69 @@ export function KanbanCardModal({
 
   function deleteDraftTask(taskId: string) {
     setDraftTasks((prev) => prev.filter((t) => t.id !== taskId));
+    if (editingDraftTaskId === taskId) setEditingDraftTaskId(null);
+  }
+
+  function renameDraftTask(taskId: string, title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setDraftTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, title: trimmed } : t)),
+    );
+    setEditingDraftTaskId(null);
   }
 
   async function toggleTask(itemId: string, isDone: boolean) {
+    if (!card || !cardId) return;
+    const nextDone = !isDone;
+    const previous = card;
+    const optimistic = buildOptimisticChecklistToggle(card, itemId, nextDone);
+    applyCardDetail(optimistic);
+    patchBoardCard(optimistic);
     try {
-      await updateChecklistItem(itemId, { isDone: !isDone });
-      await refreshAll();
+      const { card: updated } = await updateChecklistItem(itemId, { isDone: nextDone });
+      syncChecklistFromApi(updated);
     } catch {
+      applyCardDetail(previous);
+      patchBoardCard(previous);
       toast.error('Erro ao atualizar tarefa');
     }
   }
 
   async function handleDeleteTask(itemId: string) {
-    if (deletingTaskId) return;
+    if (deletingTaskId || !card || !cardId) return;
+    const removed = card.checklistItems.find((i) => i.id === itemId);
+    if (!removed) return;
+
+    const previous = card;
     setDeletingTaskId(itemId);
+    const checklistItems = card.checklistItems.filter((i) => i.id !== itemId);
+    const totalTasks = Math.max(0, card.totalTasks - 1);
+    const completedTasks = Math.max(
+      0,
+      removed.isDone ? card.completedTasks - 1 : card.completedTasks,
+    );
+    const optimistic = {
+      ...card,
+      checklistItems,
+      totalTasks,
+      completedTasks,
+      progress: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      checklistEnabled: totalTasks > 0 ? card.checklistEnabled : false,
+    };
+    applyCardDetail(optimistic);
+    patchBoardCard(optimistic);
+
     try {
       await deleteChecklistItem(itemId);
-      await refreshAll();
+      syncChecklistFromApi(await fetchKanbanCard(cardId));
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) {
-        await refreshAll();
         return;
       }
+      applyCardDetail(previous);
+      patchBoardCard(previous);
       toast.error('Erro ao remover tarefa');
     } finally {
       setDeletingTaskId(null);
@@ -363,8 +569,10 @@ export function KanbanCardModal({
   const visibleDraftTasks = hideDone ? draftTasks.filter((t) => !t.isDone) : draftTasks;
   const hasLabels = labels.length > 0;
   const hasDates = !!(startDate || endDate);
+  const showCostButton = isDetail && !!cardId && canViewAllKanbanBoards;
+  const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
-    (isDetail && (card?.attachments ?? 0) > 0) || (isCreate && draftFiles.length > 0);
+    attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
   const showChecklistPanel = checklistEnabled && isDetail;
   const draftTotal = draftTasks.length;
   const draftCompleted = draftTasks.filter((t) => t.isDone).length;
@@ -381,6 +589,55 @@ export function KanbanCardModal({
       ? `${card.completedTasks}/${card.totalTasks}`
       : '0/0';
   const taskTotal = isCreate ? draftTotal : (card?.totalTasks ?? 0);
+
+  useLayoutEffect(() => {
+    if (!isDetail || showChecklistPanel) {
+      setCommentsPanelHeight(undefined);
+      return;
+    }
+
+    const mainEl = mainColumnRef.current;
+    const descriptionEl = descriptionSectionRef.current;
+    const attachmentsEl = attachmentsSectionRef.current;
+    const targetEl = hasAttachments ? attachmentsEl : descriptionEl;
+    if (!mainEl || !targetEl) return;
+
+    const syncHeight = () => {
+      const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+      if (!isDesktop) {
+        setCommentsPanelHeight(undefined);
+        return;
+      }
+
+      const mainRect = mainEl.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+      const measured = Math.round(targetRect.bottom - mainRect.top);
+      setCommentsPanelHeight(Math.max(280, measured));
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(mainEl);
+    observer.observe(targetEl);
+    window.addEventListener('resize', syncHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncHeight);
+    };
+  }, [
+    isDetail,
+    showChecklistPanel,
+    isLoading,
+    card?.id,
+    card?.commentsList.length,
+    labels.length,
+    members.length,
+    description,
+    hasAttachments,
+    startDate,
+    endDate,
+  ]);
 
   const modalTitle =
     mode === 'create' ? (
@@ -409,6 +666,7 @@ export function KanbanCardModal({
         >
           <KanbanCardLabelsPanel
             labels={labels}
+            labelPresets={labelPresets}
             onClose={() => setOpenMenu(null)}
             saving={saving}
             onSave={async (next) => {
@@ -448,6 +706,7 @@ export function KanbanCardModal({
         onClose={() => setShowMemberPicker(false)}
         excludeUserIds={members.map((m) => m.userId)}
         currentUserId={currentUserId}
+        currentUser={pickerCurrentUser}
         onSelect={assignMember}
       />
 
@@ -460,10 +719,21 @@ export function KanbanCardModal({
           attachments={card?.attachmentsList ?? []}
           draftFiles={draftFiles}
           onDraftFilesChange={setDraftFiles}
+          draftLinks={draftLinks}
+          onDraftLinksChange={setDraftLinks}
           currentUserId={currentUserId}
           onUpdated={refreshAll}
         />
       )}
+
+      {showCostButton ? (
+        <KanbanCardCostModal
+          isOpen={showCostModal}
+          elevated
+          onClose={() => setShowCostModal(false)}
+          cardId={cardId!}
+        />
+      ) : null}
     </>
   );
 
@@ -472,7 +742,8 @@ export function KanbanCardModal({
     <Modal
       isOpen
       onClose={onClose}
-      size={isCreate ? 'sm' : 'xl'}
+      size={isCreate ? 'sm' : '5xl'}
+      scrollContent={!isDetail}
       title={modalTitle}
       headerActions={
         isDetail ? (
@@ -485,7 +756,9 @@ export function KanbanCardModal({
                 await saveMeta({ priority: p });
               }}
             />
-            {saving && <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />}
+            {(saving || isFetching) && (
+              <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />
+            )}
           </div>
         ) : saving ? (
           <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />
@@ -523,75 +796,96 @@ export function KanbanCardModal({
             </Button>
           </div>
         </div>
-      ) : isDetail && isLoading ? (
+      ) : isDetail && isLoading && !card ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-red-600" />
         </div>
       ) : (
         <div
           className={clsx(
-            'flex flex-col min-h-0 max-h-[calc(100dvh-11rem)]',
-            isDetail && 'lg:flex-row lg:gap-0',
+            'flex flex-1 min-h-0 flex-col overflow-hidden',
+            isDetail &&
+              (showChecklistPanel
+                ? 'lg:flex-row lg:min-h-0 lg:items-stretch'
+                : 'lg:flex-row lg:min-h-0 lg:items-start'),
             isCreate && 'gap-0',
             '[&_input:focus]:outline-none [&_input:focus]:ring-0 [&_input:focus-visible]:ring-0',
             '[&_textarea:focus]:outline-none [&_textarea:focus]:ring-0 [&_textarea:focus-visible]:ring-0',
             '[&_button:focus]:outline-none [&_button:focus]:ring-0 [&_button:focus-visible]:ring-0',
           )}
         >
-          {/* Coluna principal */}
+          {/* Coluna principal — scroll na borda direita; padding só no conteúdo (folga antes dos comentários) */}
           <div
-            className={clsx(
-              'flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden',
-              isDetail && 'lg:pr-6',
-            )}
+            ref={mainColumnRef}
+            className="flex flex-1 min-w-0 min-h-0 flex-col overflow-y-auto overflow-x-hidden"
           >
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-5 pr-1">
-            {/* Botões de ação */}
-            <div className="flex flex-wrap gap-2">
-              <KanbanCardActionButton
-                icon={<Tag className="w-4 h-4" />}
-                active={hasLabels}
-                onClick={() => setOpenMenu((m) => (m === 'labels' ? null : 'labels'))}
-              >
-                Etiquetas
-              </KanbanCardActionButton>
-              <KanbanCardActionButton
-                icon={<Clock className="w-4 h-4" />}
-                active={hasDates}
-                onClick={() => setOpenMenu((m) => (m === 'dates' ? null : 'dates'))}
-              >
-                Datas
-              </KanbanCardActionButton>
-              <KanbanCardActionButton
-                icon={<ListChecks className="w-4 h-4" />}
-                active={checklistEnabled}
-                onClick={async () => {
-                  const next = !checklistEnabled;
-                  setChecklistEnabled(next);
-                  setSaving(true);
-                  try {
-                    await updateKanbanCard(cardId!, { checklistEnabled: next });
-                    await refreshAll();
-                  } catch {
-                    setChecklistEnabled(!next);
-                    toast.error('Erro ao atualizar checklist');
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-              >
-                Checklist
-              </KanbanCardActionButton>
-              <KanbanCardActionButton
-                icon={<Paperclip className="w-4 h-4" />}
-                active={hasAttachments}
-                onClick={() => setShowAttachmentsModal(true)}
-              >
-                Anexos
-              </KanbanCardActionButton>
-            </div>
+            <div
+              className={clsx(
+                'flex flex-col gap-5 min-h-0',
+                isDetail && 'pr-6',
+              )}
+            >
+              <div className="flex flex-nowrap items-center gap-2 min-w-0">
+                <KanbanCardActionButton
+                  icon={<Tag className="w-4 h-4" />}
+                  active={hasLabels}
+                  onClick={() => setOpenMenu((m) => (m === 'labels' ? null : 'labels'))}
+                  className="shrink-0"
+                >
+                  Etiquetas
+                </KanbanCardActionButton>
+                <KanbanCardActionButton
+                  icon={<Clock className="w-4 h-4" />}
+                  active={hasDates}
+                  onClick={() => setOpenMenu((m) => (m === 'dates' ? null : 'dates'))}
+                  className="shrink-0"
+                >
+                  Datas
+                </KanbanCardActionButton>
+                <KanbanCardActionButton
+                  icon={<ListChecks className="w-4 h-4" />}
+                  active={checklistEnabled}
+                  className="shrink-0"
+                  onClick={async () => {
+                    const next = !checklistEnabled;
+                    setChecklistEnabled(next);
+                    setSaving(true);
+                    try {
+                      await updateKanbanCard(cardId!, { checklistEnabled: next });
+                      await refreshAll();
+                    } catch {
+                      setChecklistEnabled(!next);
+                      toast.error('Erro ao atualizar checklist');
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
+                  Checklist
+                </KanbanCardActionButton>
+                <KanbanCardActionButton
+                  icon={<Paperclip className="w-4 h-4" />}
+                  active={hasAttachments}
+                  onClick={() => setShowAttachmentsModal(true)}
+                  className="shrink-0"
+                >
+                  Anexos
+                </KanbanCardActionButton>
+                {showCostButton ? (
+                  <KanbanCardActionButton
+                    active={showCostModal}
+                    onClick={() => setShowCostModal(true)}
+                    className="shrink-0 min-w-[2.75rem] justify-center"
+                    title="Custos"
+                  >
+                    $
+                  </KanbanCardActionButton>
+                ) : null}
+              </div>
 
-            {labels.length > 0 && <KanbanLabelChips labels={labels} />}
+              {labels.length > 0 && (
+                <KanbanLabelChips labels={labels} labelPresets={labelPresets} />
+              )}
 
             <div className="space-y-4">
               {/* Membros */}
@@ -612,6 +906,18 @@ export function KanbanCardModal({
                       onRemove={() => removeMember(member.userId)}
                     />
                   ))}
+                  {pickerCurrentUser &&
+                    !members.some((m) => m.userId === pickerCurrentUser.id) && (
+                      <button
+                        type="button"
+                        onClick={() => assignMember(pickerCurrentUser)}
+                        disabled={saving}
+                        className="h-10 rounded-full border-2 border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 shrink-0"
+                        title="Atribuir card a mim"
+                      >
+                        Atribuir a mim
+                      </button>
+                    )}
                   <button
                     type="button"
                     onClick={() => setShowMemberPicker(true)}
@@ -652,10 +958,10 @@ export function KanbanCardModal({
                       <div
                         className={clsx(
                           kanbanInput,
-                          'mt-2 !w-auto h-10 box-border inline-flex items-center justify-center px-3 bg-gray-100 dark:bg-gray-700/70 border-gray-300 dark:border-gray-600 cursor-default pointer-events-none whitespace-nowrap',
+                          'mt-2 !w-auto min-w-[9.5rem] h-10 box-border inline-flex items-center justify-center px-3 bg-gray-100 dark:bg-gray-700/70 border-gray-300 dark:border-gray-600 cursor-default pointer-events-none whitespace-nowrap',
                         )}
                       >
-                        <span className="text-sm text-gray-600 dark:text-gray-300">
+                        <span className="text-sm text-gray-600 dark:text-gray-300 tabular-nums">
                           {formatRelativeTimeLong(card.updatedAt)}
                         </span>
                       </div>
@@ -665,7 +971,7 @@ export function KanbanCardModal({
               )}
             </div>
 
-            <div>
+            <div ref={descriptionSectionRef}>
               <label className={kanbanLabel}>Descrição</label>
               <textarea
                 value={description}
@@ -677,6 +983,21 @@ export function KanbanCardModal({
               />
             </div>
 
+            {isDetail && hasAttachments ? (
+              <div ref={attachmentsSectionRef}>
+                <KanbanCardAttachmentsInline
+                  attachments={attachmentsList}
+                  draftFiles={draftFiles}
+                  draftLinks={draftLinks}
+                  currentUserId={currentUserId}
+                  onDraftFilesChange={setDraftFiles}
+                  onDraftLinksChange={setDraftLinks}
+                  onUpdated={refreshAll}
+                  onAddClick={() => setShowAttachmentsModal(true)}
+                />
+              </div>
+            ) : null}
+
             {showChecklistPanel && (
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 p-4 flex flex-col gap-3 min-w-0">
               <div className="flex items-center justify-between gap-2 shrink-0">
@@ -684,7 +1005,7 @@ export function KanbanCardModal({
                   <ListChecks className="w-4 h-4 text-red-600" />
                   <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Tarefas</h4>
                   {taskTotal > 0 && (
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
                       {taskCountLabel} · {progress}%
                     </span>
                   )}
@@ -702,36 +1023,73 @@ export function KanbanCardModal({
               </div>
 
               {taskTotal > 0 && (
-                <div className="h-0.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div className="relative h-px w-full overflow-hidden rounded-full bg-gray-200/80 dark:bg-gray-700/80">
                   <div
-                    className="h-full bg-red-600 rounded-full transition-all duration-300"
+                    className="absolute inset-y-0 left-0 bg-red-600 transition-[width] duration-200"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
               )}
 
               {(isCreate ? visibleDraftTasks.length > 0 : visibleTasks.length > 0) && (
-                <ul className="max-h-[min(220px,28vh)] overflow-y-auto overflow-x-hidden overscroll-contain space-y-1 -mx-0.5 px-0.5 scrollbar-hide">
+                <ul className="space-y-1 -mx-0.5 px-0.5">
                   {isCreate
-                    ? visibleDraftTasks.map((task) => (
+                    ? visibleDraftTasks.map((task) => {
+                        const draftTitleClass = clsx(
+                          'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-5 break-words',
+                          task.isDone && 'line-through text-gray-400',
+                        );
+                        const isEditingDraft = editingDraftTaskId === task.id;
+                        return (
                         <li
                           key={task.id}
-                          className="group flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+                          className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white dark:hover:bg-gray-800 transition-colors"
                         >
                           <CheckboxIndicator
                             checked={task.isDone}
                             onChange={() => toggleDraftTask(task.id)}
                             asButton
-                            className="mt-0.5 shrink-0"
+                            className="shrink-0"
                           />
-                          <span
-                            className={clsx(
-                              'flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-200 leading-snug break-words',
-                              task.isDone && 'line-through text-gray-400',
-                            )}
-                          >
-                            {task.title}
-                          </span>
+                          {isEditingDraft ? (
+                            <input
+                              type="text"
+                              defaultValue={task.title}
+                              autoFocus
+                              onBlur={(e) => renameDraftTask(task.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  renameDraftTask(task.id, e.currentTarget.value);
+                                }
+                                if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  setEditingDraftTaskId(null);
+                                }
+                              }}
+                              className={clsx(
+                                draftTitleClass,
+                                'h-5 bg-transparent border-0 p-0 shadow-none outline-none ring-0',
+                                'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
+                              )}
+                              aria-label="Editar tarefa"
+                            />
+                          ) : (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setEditingDraftTaskId(task.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setEditingDraftTaskId(task.id);
+                                }
+                              }}
+                              className={clsx(draftTitleClass, 'cursor-text')}
+                            >
+                              {task.title}
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => deleteDraftTask(task.id)}
@@ -741,16 +1099,27 @@ export function KanbanCardModal({
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </li>
-                      ))
+                        );
+                      })
                     : visibleTasks.map((item) => (
                         <KanbanChecklistTaskRow
                           key={item.id}
                           item={item}
                           cardMembers={members}
+                          currentUser={
+                            currentUser
+                              ? {
+                                  userId: currentUser.id,
+                                  name: currentUser.name,
+                                  profilePhotoUrl: currentUser.profilePhotoUrl ?? null,
+                                  avatarColor: '',
+                                }
+                              : null
+                          }
                           isDeleting={deletingTaskId === item.id}
                           onToggle={() => toggleTask(item.id, item.isDone)}
                           onDelete={() => handleDeleteTask(item.id)}
-                          onUpdated={refreshAll}
+                          onUpdated={syncChecklistFromApi}
                         />
                       ))}
                 </ul>
@@ -787,77 +1156,97 @@ export function KanbanCardModal({
             )}
 
             </div>
-
           </div>
 
           {isDetail && (
-          <div className="w-full lg:w-[280px] shrink-0 flex flex-col min-h-0 max-h-[calc(100dvh-11rem)] border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 lg:pl-6 pt-6 lg:pt-0">
-            <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 shrink-0">
+          <div
+            className="flex w-full min-h-0 flex-1 flex-col overflow-hidden border-t border-gray-200 pt-5 dark:border-gray-700 lg:w-[360px] lg:shrink-0 lg:flex-none lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0"
+            style={
+              commentsPanelHeight != null
+                ? { height: commentsPanelHeight, maxHeight: commentsPanelHeight }
+                : undefined
+            }
+          >
+            <h4 className="mb-3 shrink-0 text-sm font-semibold text-gray-900 dark:text-gray-100">
               Comentários
             </h4>
 
-              <>
-                <div className="mb-4 space-y-4 overflow-x-hidden lg:max-h-[min(280px,35vh)] lg:overflow-y-auto">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
                   {card?.commentsList.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-6">
+                    <p className="flex min-h-[8rem] items-center justify-center px-2 text-center text-sm text-gray-400">
                       Nenhum comentário ainda.
                     </p>
                   ) : (
-                    card?.commentsList.map((comment) => (
+                    <div className="space-y-4 pb-2">
+                    {card?.commentsList.map((comment) => {
+                      const canDeleteComment = currentUserId === comment.author.id;
+                      const commentTimeLabel = formatRelativeTime(comment.createdAt);
+                      return (
                       <div
                         key={comment.id}
-                        className="group flex gap-2.5 rounded-lg px-1.5 py-1 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
+                        className="group/comment flex items-start gap-2.5 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/40"
                       >
-                        <div
-                          className={clsx(
-                            'w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 self-center',
-                            comment.author.avatarColor,
-                          )}
-                        >
-                          {getKanbanInitials(comment.author.name)}
-                        </div>
-                        <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
-                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-tight">
-                            {comment.author.name}
-                          </span>
-                          <p className="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words leading-snug">
+                        <KanbanUserAvatar
+                          name={comment.author.name}
+                          profilePhotoUrl={comment.author.profilePhotoUrl}
+                          colorKey={comment.author.id}
+                          colorClass={comment.author.avatarColor}
+                          size="sm"
+                          className="!h-8 !w-8 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight text-gray-900 dark:text-gray-100">
+                              {comment.author.name}
+                            </span>
+                            <div className="relative flex h-6 min-w-[3.25rem] shrink-0 items-center justify-end">
+                              <span
+                                className={clsx(
+                                  'text-[10px] leading-none whitespace-nowrap text-gray-400 transition-opacity duration-150',
+                                  canDeleteComment &&
+                                    'group-hover/comment:invisible group-hover/comment:opacity-0',
+                                )}
+                              >
+                                {commentTimeLabel}
+                              </span>
+                              {canDeleteComment && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await deleteKanbanComment(comment.id);
+                                      await refreshAll();
+                                    } catch {
+                                      toast.error('Erro ao excluir comentário');
+                                    }
+                                  }}
+                                  className="absolute inset-0 flex items-center justify-end rounded-md text-gray-400 opacity-0 invisible transition-all duration-150 hover:text-red-600 group-hover/comment:visible group-hover/comment:opacity-100"
+                                  title="Excluir comentário"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <p className="mt-1 text-sm leading-snug text-gray-600 break-words whitespace-pre-wrap dark:text-gray-300">
                             {comment.content}
                           </p>
                         </div>
-                        <div className="flex flex-col items-end justify-center gap-1 shrink-0 self-center min-w-[2rem]">
-                          <span className="text-[10px] text-gray-400 leading-none">
-                            {formatRelativeTime(comment.createdAt)}
-                          </span>
-                          {currentUserId === comment.author.id && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await deleteKanbanComment(comment.id);
-                                  await refreshAll();
-                                } catch {
-                                  toast.error('Erro ao excluir comentário');
-                                }
-                              }}
-                              className="p-1 rounded-md text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
-                              title="Excluir comentário"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
                       </div>
-                    ))
+                    );
+                    })}
+                    </div>
                   )}
                 </div>
 
-                <div className="shrink-0 mt-auto">
+                <div className="shrink-0 border-t border-gray-200 pt-3 dark:border-gray-700">
                   <textarea
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
                     placeholder="Escrever um comentário..."
                     rows={2}
-                    className={clsx(kanbanTextarea, 'text-sm mb-2 !min-h-0 py-2')}
+                    className={clsx(kanbanTextarea, 'mb-2 !min-h-0 py-2 text-sm')}
                   />
                   <Button
                     type="button"
@@ -871,7 +1260,7 @@ export function KanbanCardModal({
                     Comentar
                   </Button>
                 </div>
-              </>
+            </div>
           </div>
           )}
         </div>

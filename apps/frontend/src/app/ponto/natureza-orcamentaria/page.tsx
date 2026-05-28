@@ -3,7 +3,10 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Upload, Search, X, Edit, Trash2, Download, BookPlus, FileSpreadsheet, CheckCircle, Loader2 } from 'lucide-react';
+import { Plus, Upload, Search, X, Download, BookPlus, FileSpreadsheet, CheckCircle, Loader2 } from 'lucide-react';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -230,6 +233,15 @@ export default function NaturezaOrcamentariaPage() {
   };
 
   const items: BudgetNature[] = listData?.data || [];
+
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen
+  } = useRowActionMenu(items);
+
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
   if (loadingUser) return <Loading message="Carregando..." fullScreen size="lg" />;
@@ -243,91 +255,102 @@ export default function NaturezaOrcamentariaPage() {
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Cadastre as naturezas orçamentárias</p>
           </div>
 
-          <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <BookPlus className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <BookPlus className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0">
+                  <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Naturezas</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">{items.length} cadastrado(s)</p>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <div className="relative flex-1 sm:flex-initial sm:min-w-[200px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
                       placeholder="Buscar por código ou natureza..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                   </div>
                   <button
+                    type="button"
                     onClick={() => setIsImportOpen(true)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
                   >
-                    <Upload className="w-4 h-4" />
-                    Importar
+                    <Upload className="h-4 w-4 shrink-0" />
+                    <span>Importar</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => { setShowForm(true); setEditingItem(null); setFormData({ code: '', name: '' }); }}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
-                    <Plus className="w-4 h-4" />
-                    Cadastrar
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova Natureza</span>
                   </button>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className={cadastroListClasses.cardContent}>
               {isLoading ? (
-                <div className="px-6 py-12 text-center">
-                  <Loading message="Carregando..." />
-                </div>
+                <CadastroListLoading message="Carregando naturezas..." />
+              ) : items.length === 0 ? (
+                <CadastroListEmpty
+                  icon={BookPlus}
+                  title="Nenhuma natureza orçamentária encontrada"
+                  hint={
+                    searchTerm.trim()
+                      ? 'Tente ajustar a busca'
+                      : 'Cadastre uma nova natureza para começar'
+                  }
+                />
               ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={1}
+                    endItem={items.length}
+                    total={items.length}
+                    itemLabel="natureza orçamentária"
+                    itemLabelPlural="naturezas orçamentárias"
+                  />
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="px-3 sm:px-6 py-4 text-left align-middle text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Código</th>
-                        <th className="px-3 sm:px-6 py-4 text-left align-middle text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Natureza Orçamentária</th>
-                        <th className="px-3 sm:px-6 py-4 text-right align-middle text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ações</th>
+                        <th className={cadastroListClasses.th}>Natureza Orçamentária</th>
+                        <th className={cadastroListClasses.thRight}>Ação</th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {items.map((it) => (
                         <tr key={it.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                          <td className="px-3 sm:px-6 py-4 align-middle text-sm font-mono text-gray-900 dark:text-gray-100">{it.code || '-'}</td>
-                          <td className="px-3 sm:px-6 py-4 align-middle text-sm text-gray-900 dark:text-gray-100">{it.name}</td>
-                          <td className="px-3 sm:px-6 py-4 align-middle text-right">
-                            <button onClick={() => handleEdit(it)} className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors" title="Editar">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => setShowDeleteId(it.id)} className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors ml-1" title="Excluir">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900 dark:text-gray-100 sm:px-6">{it.name}</td>
+                          <RowActionMenuCell
+                            isOpen={isRowMenuOpen(it.id)}
+                            onToggle={(e) =>
+                              toggleRowActionMenu(it.id, e.currentTarget as HTMLButtonElement)
+                            }
+                          />
                         </tr>
                       ))}
-                      {items.length === 0 && (
-                        <tr>
-                          <td colSpan={3} className="px-3 py-10 text-center sm:px-6">
-                            <div className="text-gray-500 dark:text-gray-400">
-                              <p className="font-medium text-gray-700 dark:text-gray-300">
-                                Nenhuma natureza orçamentária encontrada.
-                              </p>
-                              <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
+                </>
+              )}
+              {rowActionMenu && rowForActionMenu && (
+                <RowActionMenuPortal
+                  menu={rowActionMenu}
+                  onClose={closeRowActionMenu}
+                  onEdit={() => handleEdit(rowForActionMenu)}
+                  onDelete={() => setShowDeleteId(rowForActionMenu.id)}
+                />
               )}
             </CardContent>
           </Card>

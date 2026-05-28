@@ -4,6 +4,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createPortal } from 'react-dom';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
@@ -48,6 +49,7 @@ import {
   DraftingCompass,
   Database,
   ClipboardList,
+  ClipboardCheck,
   CreditCard,
   HardDrive,
   SquareKanban,
@@ -62,7 +64,14 @@ import {
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
-import { readSidebarCollapsed, writeSidebarCollapsed } from '@/lib/sidebarStorage';
+import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
+import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
+import {
+  readSelectedModuleId,
+  readSidebarCollapsed,
+  writeSelectedModuleId,
+  writeSidebarCollapsed,
+} from '@/lib/sidebarStorage';
 
 const pk = pathToModuleKey;
 import { useTheme } from '@/context/ThemeContext';
@@ -92,11 +101,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [sidebarHydrated, setSidebarHydrated] = useState(false);
-  const [selectedModuleId, setSelectedModuleId] = useState<string>('main');
+  const [selectedModuleId, setSelectedModuleId] = useState<string>(
+    () => readSelectedModuleId() ?? 'main'
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const tier2Visible = !isCollapsed || isOpen;
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
+  /** true quando o usuário clicou num módulo no rail sem mudar de rota */
+  const userPickedModuleRef = useRef(false);
+  const prevPathnameRef = useRef(pathname);
   const router = useRouter();
   const {
     permissions,
@@ -138,12 +152,42 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   
   // Verificar se é administrador
   const isAdministrator = userPosition === 'Administrador';
-  
+  const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
+  const canSeeFuroEstoque =
+    isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque'));
+
+  const { data: pendingFuroCount = 0 } = useQuery({
+    queryKey: ['stock-shortfalls-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/stock/shortfalls/pending-count');
+      const n = Number(res.data?.count ?? res.data?.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeFuroEstoque && !isLoading,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000
+  });
+
+  const { counts: fdNotificationCounts } = useFdNotificationCounts();
+
+  const navBadgeCountForHref = (href: string): number => {
+    if (href === '/ponto/aprovacoes') return fdNotificationCounts.pendingManager;
+    if (href === '/ponto/fds-aprovadas') return fdNotificationCounts.pendingPurchase;
+    if (href === '/ponto/furo-estoque') return pendingFuroCount;
+    return 0;
+  };
+
+  const moduleBadgeCountForId = (categoryId: string): number => {
+    if (categoryId === 'main') return fdNotificationCounts.pendingManager;
+    if (categoryId === 'suprimentos') {
+      return fdNotificationCounts.pendingPurchase + pendingFuroCount;
+    }
+    return 0;
+  };
+
   // Verificar se o funcionário precisa bater ponto
   const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
-  
-  // Verificar se é do departamento Compras
-  const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
   
   // Verificar se é do departamento Financeiro
   const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
@@ -387,6 +431,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro'))
           },
           {
+            name: 'Pagamento da Folha',
+            href: '/ponto/financeiro',
+            icon: DollarSign,
+            description: 'Borderô em PDF e remessa CNAB400 da folha',
+            permission: isAdministrator || can(pk('/ponto/financeiro'))
+          },
+        ]
+      },
+      {
+        id: 'metricas',
+        name: 'Métricas',
+        icon: BarChart3,
+        items: [
+          {
             name: 'Extrato de Caixa',
             href: '/ponto/financeiro/analise-extrato',
             icon: BarChart3,
@@ -394,11 +452,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           },
           {
-            name: 'Pagamento da Folha',
-            href: '/ponto/financeiro',
-            icon: DollarSign,
-            description: 'Borderô em PDF e remessa CNAB400 da folha',
-            permission: isAdministrator || can(pk('/ponto/financeiro'))
+            name: 'Controle Geral de Contratos',
+            href: '/ponto/contratos/controle-geral',
+            icon: LayoutDashboard,
+            description: 'Visão consolidada de todos os contratos',
+            permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
           },
         ]
       },
@@ -415,13 +473,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || can(pk('/ponto/contratos'))
           },
           {
-            name: 'Controle Geral de Contratos',
-            href: '/ponto/contratos/controle-geral',
-            icon: LayoutDashboard,
-            description: 'Visão consolidada de todos os contratos',
-            permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
-          },
-          {
             name: 'Ordem de Serviço',
             href: '/ponto/andamento-da-os',
             icon: ClipboardList,
@@ -434,6 +485,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileCheck,
             description: 'Visualizar todos os pleitos com valor pleiteado',
             permission: isAdministrator || can(pk('/ponto/pleitos-gerados'))
+          },
+          {
+            name: 'Fichas de Demanda',
+            href: '/ponto/aprovacao-fds',
+            icon: ClipboardCheck,
+            description: 'Cadastro e gestão das fichas de demanda',
+            permission: isAdministrator || can(pk('/ponto/aprovacao-fds'))
           }
         ]
       },
@@ -533,6 +591,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Realizar entradas e saídas de ajuste no estoque',
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/ajuste-estoque'))
           },
+          {
+            name: "FD's Aprovadas",
+            href: '/ponto/fds-aprovadas',
+            icon: ClipboardCheck,
+            description: "FD's aprovadas — status de compras",
+            permission:
+              isAdministrator || isDepartmentCompras || can(pk('/ponto/fds-aprovadas'))
+          },
         ]
       },
       {
@@ -548,10 +614,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/centros-custo'))
           },
           {
-            name: 'Materiais de Construção',
+            name: 'Materiais e Serviços',
             href: '/ponto/materiais-construcao',
             icon: Package,
-            description: 'Gerenciar materiais de construção civil',
+            description: 'Gerenciar cadastro de materiais e serviços',
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/materiais-construcao'))
           },
           {
@@ -680,8 +746,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     return pathname === href;
   };
 
-  const selectedModule = menuItems.find((c) => c.id === selectedModuleId) ?? menuItems[0];
-
   const activeModuleId = menuItems.find((category) =>
     category.items.some((item) => item.permission && isActive(item.href))
   )?.id;
@@ -689,12 +753,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const onRailFooterRoute = isRailFooterRoute(pathname);
   const onHomeRoute = isHomeRoute(pathname);
 
-  /** Rail: painel aberto → módulo clicado; recolhido → rota ativa; na home recolhida → nenhum (só logo) */
-  const railModuleActiveId: string | null = tier2Visible
+  // Ao mudar de rota, prioriza o módulo da URL (evita flash em "Principal" após remount do layout)
+  if (pathname !== prevPathnameRef.current) {
+    prevPathnameRef.current = pathname;
+    userPickedModuleRef.current = false;
+    if (activeModuleId && activeModuleId !== selectedModuleId) {
+      setSelectedModuleId(activeModuleId);
+    }
+  }
+
+  const displayedModuleId = userPickedModuleRef.current
     ? selectedModuleId
-    : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : selectedModuleId);
+    : (activeModuleId ?? selectedModuleId);
+
+  const selectedModule = menuItems.find((c) => c.id === displayedModuleId) ?? menuItems[0];
+
+  /** Rail: painel aberto → módulo exibido; recolhido → rota ativa; na home recolhida → nenhum (só logo) */
+  const railModuleActiveId: string | null = tier2Visible
+    ? displayedModuleId
+    : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : displayedModuleId);
 
   const handleCollapseSidebar = () => {
+    userPickedModuleRef.current = false;
     if (activeModuleId) {
       setSelectedModuleId(activeModuleId);
     } else if (!onHomeRoute && onRailFooterRoute && menuItems[0]) {
@@ -720,13 +800,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     }
   }, [pathname, menuItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  React.useEffect(() => {
+    writeSelectedModuleId(selectedModuleId);
+  }, [selectedModuleId]);
+
   const handleSelectModule = (categoryId: string) => {
     const panelOpen = !isCollapsed || isOpen;
-    if (panelOpen && selectedModuleId === categoryId) {
+    if (panelOpen && displayedModuleId === categoryId) {
       setIsCollapsed(true);
       setIsOpen(false);
       return;
     }
+    userPickedModuleRef.current = true;
     setSelectedModuleId(categoryId);
     if (isCollapsed) setIsCollapsed(false);
   };
@@ -770,13 +855,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
       {/* Dual-tier Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-full flex transform transition-all duration-500 ease-in-out z-[100] ${
+        className={`fixed top-0 left-0 flex h-full transform overflow-visible transition-all duration-500 ease-in-out z-[100] ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
         {/* Tier 1 — Rail de módulos */}
-        <div className="w-20 flex-shrink-0 h-full flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800">
-          <div className="p-5 flex flex-col items-center">
+        <div className="w-20 flex-shrink-0 h-full flex flex-col overflow-visible bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800">
+          <div className="relative z-0 isolate flex flex-col items-center p-5 pb-3">
             <Link
               href="/ponto/home"
               className={`w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-all hover:scale-105 ${
@@ -792,7 +877,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             </Link>
           </div>
 
-          <nav className="flex-1 overflow-y-auto overflow-x-hidden pb-4 px-2 space-y-3">
+          <nav className="relative z-30 flex-1 overflow-x-visible overflow-y-auto px-2 pb-4 pt-3 space-y-3">
             {menuItems.map((category) => {
               const CategoryIcon = category.icon;
               const isRailActive = category.id === railModuleActiveId;
@@ -804,12 +889,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
               if (isSingleItem && singleItem) {
                 const active = isActive(singleItem.href);
                 const SingleItemIcon = singleItem.icon || CategoryIcon;
+                const singleBadge = navBadgeCountForHref(singleItem.href);
                 return (
-                  <div key={category.id} className="flex justify-center">
+                  <div key={category.id} className="relative flex justify-center overflow-visible">
                     <Link
                       href={singleItem.href}
                       onClick={() => setIsOpen(false)}
-                      className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                      className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
                         active
                           ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                           : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
@@ -817,17 +903,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       title={singleItem.name}
                     >
                       <SingleItemIcon className="w-5 h-5" />
+                      <NotificationCountBadge count={singleBadge} rail />
                     </Link>
                   </div>
                 );
               }
 
+              const moduleBadge = moduleBadgeCountForId(category.id);
               return (
-                <div key={category.id} className="flex justify-center">
+                <div key={category.id} className="relative flex justify-center overflow-visible">
                   <button
                     type="button"
                     onClick={() => handleSelectModule(category.id)}
-                    className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                    className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
                       isRailActive
                         ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
@@ -837,6 +925,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     aria-current={isRailActive ? 'true' : undefined}
                   >
                     <CategoryIcon className="w-5 h-5" />
+                    <NotificationCountBadge count={moduleBadge} rail />
                   </button>
                 </div>
               );
@@ -851,18 +940,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 onClick={() => setIsOpen(false)}
                 title="Chat"
                 aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
-                className={`relative w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
                   isFooterShortcutActive('/ponto/conversas')
                     ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
                 <MessagesSquare className="w-5 h-5" strokeWidth={2} />
-                {chatUnreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-0.5 rounded-md bg-red-600 text-white text-[10px] font-bold inline-flex items-center justify-center leading-none shadow-sm ring-2 ring-white dark:ring-gray-900 animate-chat-unread-badge">
-                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                  </span>
-                )}
+                <NotificationCountBadge count={chatUnreadCount} rail />
               </Link>
               <Link
                 href="/ponto/kanban"
@@ -1077,6 +1162,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                       {filteredItems.map((item) => {
                         const ItemIcon = item.icon;
                         const active = isActive(item.href);
+                        const badgeCount = navBadgeCountForHref(item.href);
                         return (
                           <Link
                             key={item.href}
@@ -1093,7 +1179,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                                 active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
                               }`}
                             />
-                            <span className="text-sm font-medium truncate">{item.name}</span>
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                            <NotificationCountBadge count={badgeCount} />
                           </Link>
                         );
                       })}
@@ -1107,6 +1194,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                 .map((item) => {
                   const ItemIcon = item.icon;
                   const active = isActive(item.href);
+                  const badgeCount = navBadgeCountForHref(item.href);
                   return (
                     <Link
                       key={item.href}
@@ -1123,7 +1211,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                           active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
                         }`}
                       />
-                      <span className="text-sm font-medium truncate">{item.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                      <NotificationCountBadge count={badgeCount} />
                     </Link>
                   );
                 })

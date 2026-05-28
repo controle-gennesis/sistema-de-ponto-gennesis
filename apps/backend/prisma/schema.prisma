@@ -51,8 +51,10 @@ model User {
   materialRequestsRejected   MaterialRequest[]      @relation("MaterialRequestRejecter")
   chatGPTConversations      ChatGPTConversation[]
   passwordResetTokens PasswordResetToken[]
-  purchaseOrdersCreated     PurchaseOrder[]        @relation("PurchaseOrderCreator")
-  purchaseOrdersApproved    PurchaseOrder[]        @relation("PurchaseOrderApprover")
+  purchaseOrdersCreated          PurchaseOrder[] @relation("PurchaseOrderCreator")
+  purchaseOrdersApproved         PurchaseOrder[] @relation("PurchaseOrderApprover")
+  purchaseOrdersComprasApproved  PurchaseOrder[] @relation("PurchaseOrderComprasApprover")
+  purchaseOrdersGestorApproved   PurchaseOrder[] @relation("PurchaseOrderGestorApprover")
   quoteMapsCreated          QuoteMap[]             @relation("QuoteMapCreator")
   userPermissions           UserPermission[]       @relation("UserPermissionUser")
   updatedPermissions        UserPermission[]       @relation("UserPermissionUpdatedBy")
@@ -69,12 +71,17 @@ model User {
   messageFavorites         MessageFavorite[]
   chatUserPrivacy          ChatUserPrivacy[]
   messageHiddenForUser     MessageHiddenForUser[]
+  extratoCaixaFiltrosSalvos ExtratoCaixaFiltroSalvo[]
   kanbanBoardsCreated      KanbanBoard[]          @relation("KanbanBoardCreator")
   kanbanCardsAssigned      KanbanCard[]           @relation("KanbanCardAssignee")
   kanbanCardMemberships    KanbanCardMember[]     @relation("KanbanCardMemberUser")
   kanbanCardComments       KanbanCardComment[]    @relation("KanbanCardCommentAuthor")
   kanbanCardAttachments    KanbanCardAttachment[] @relation("KanbanCardAttachmentUploader")
   kanbanChecklistAssigned  KanbanChecklistItem[]  @relation("KanbanChecklistAssignee")
+  demandSheetApprovalsCreated       DemandSheetApproval[] @relation("DemandSheetApprovalCreator")
+  demandSheetApprovalsAsSolicitante DemandSheetApproval[] @relation("DemandSheetApprovalSolicitante")
+  demandSheetApprovalsManagerApproved DemandSheetApproval[] @relation("DemandSheetApprovalManager")
+  demandSheetApprovalsPurchaseStatusUpdated DemandSheetApproval[] @relation("DemandSheetApprovalPurchaseStatusUpdater")
 
   @@map("users")
 }
@@ -1127,10 +1134,73 @@ model Contract {
   weeklyProductions ContractWeeklyProduction[]
   userPermissions   UserContractPermission[]
   dpApprovalUsers   UserDpApprovalContract[]
+  demandSheetApprovals DemandSheetApproval[]
 
   @@index([costCenterId])
   @@index([number])
   @@map("contracts")
+}
+
+enum DemandSheetApprovalStatus {
+  WAITING_MANAGER
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// Status de compras/suprimentos após aprovação do gestor (um único valor por FD).
+enum DemandSheetPurchaseStatus {
+  WAREHOUSE_DF
+  WAREHOUSE_GO
+  FULLY_FULFILLED_BY_STOCK
+  PARTIALLY_FULFILLED_BY_STOCK
+  PURCHASE_REQUEST
+  SUPPLIES
+  FINISHED
+}
+
+/// Ficha de demanda (FD) — fluxo de aprovação pelo gestor do contrato (mesmo escopo das solicitações DP).
+model DemandSheetApproval {
+  id                      String                      @id @default(cuid())
+  numMovRm                String
+  idMovRm                 String
+  codigoPedido            String
+  solicitanteId           String
+  contratoId              String
+  obra                    String
+  codFichaDemanda         String
+  faturamentoEstimado     Decimal                     @db.Decimal(15, 2)
+  custoEstimado           Decimal                     @db.Decimal(15, 2)
+  observacao              String
+  dataHora                DateTime
+  polo                    String
+  anexos                  Json                        @default("[]")
+  status                  DemandSheetApprovalStatus   @default(WAITING_MANAGER)
+  createdBy               String
+  managerApprovedBy       String?
+  managerApprovedAt       DateTime?
+  managerApprovalComment  String?
+  managerRejectionReason  String?
+  managerRejectionComment String?
+  purchaseStatus          DemandSheetPurchaseStatus?
+  purchaseStatusUpdatedBy String?
+  purchaseStatusUpdatedAt DateTime?
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+
+  solicitante            User     @relation("DemandSheetApprovalSolicitante", fields: [solicitanteId], references: [id], onDelete: Restrict)
+  contrato               Contract @relation(fields: [contratoId], references: [id], onDelete: Restrict)
+  creator                User     @relation("DemandSheetApprovalCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  managerApprover        User?    @relation("DemandSheetApprovalManager", fields: [managerApprovedBy], references: [id], onDelete: SetNull)
+  purchaseStatusUpdater  User?    @relation("DemandSheetApprovalPurchaseStatusUpdater", fields: [purchaseStatusUpdatedBy], references: [id], onDelete: SetNull)
+
+  @@index([contratoId])
+  @@index([solicitanteId])
+  @@index([createdBy])
+  @@index([status])
+  @@index([purchaseStatus])
+  @@index([codFichaDemanda])
+  @@map("demand_sheet_approvals")
 }
 
 // Aditivos do contrato (permite múltiplos lançamentos com data de efeito)
@@ -1554,8 +1624,12 @@ model PurchaseOrder {
   amountToPay                Decimal?            @db.Decimal(15, 2) // Itens + frete (recalculado ao salvar itens/frete)
   notes                      String?
   createdBy                  String // Usuário que criou
-  approvedBy                 String? // Usuário que aprovou
+  approvedBy                 String? // Usuário que aprovou (diretoria — status APPROVED)
   approvedAt                 DateTime?
+  comprasApprovedBy          String?
+  comprasApprovedAt          DateTime?
+  gestorApprovedBy           String?
+  gestorApprovedAt           DateTime?
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
 
@@ -1564,6 +1638,8 @@ model PurchaseOrder {
   supplier        Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   creator         User                @relation("PurchaseOrderCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   approver        User?               @relation("PurchaseOrderApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  comprasApprover User?               @relation("PurchaseOrderComprasApprover", fields: [comprasApprovedBy], references: [id], onDelete: SetNull)
+  gestorApprover  User?               @relation("PurchaseOrderGestorApprover", fields: [gestorApprovedBy], references: [id], onDelete: SetNull)
   items           PurchaseOrderItem[]
   stockShortfalls StockShortfall[]
 
@@ -1745,6 +1821,8 @@ model BudgetNature {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  constructionMaterials ConstructionMaterial[]
+
   @@index([code])
   @@index([isActive])
   @@map("budget_natures")
@@ -1828,13 +1906,17 @@ model PriceHistory {
 // Modelo de Material de Construção Civil
 model ConstructionMaterial {
   id               String   @id @default(cuid())
-  name             String // Nome do material
-  description      String? // Descrição do material
-  category         String? // Categoria (Elétrica, Hidráulica, etc.)
+  code             String? // Código do produto
+  name             String // Nome do produto
+  productType      String? // Tipo do produto
+  description      String? // Descrição do produto
+  category         String? // Legado (categoria antiga)
   dimensions       String? // Dimensões do material
   productImageUrl  String? // URL da imagem do produto
   productImageName String? // Nome original do arquivo da imagem
   unit             String // Unidade de medida (kg, m, m², un, etc.)
+  budgetNatureId   String?
+  budgetNature     BudgetNature? @relation(fields: [budgetNatureId], references: [id], onDelete: SetNull)
   isActive         Boolean  @default(true) // Se está ativo
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -1842,7 +1924,9 @@ model ConstructionMaterial {
   stockMovements  StockMovement[]
   stockShortfalls StockShortfall[]
 
+  @@index([code])
   @@index([name])
+  @@index([budgetNatureId])
   @@index([isActive])
   @@map("construction_materials")
 }
@@ -2219,6 +2303,43 @@ model FinancialControlEntry {
   @@map("financial_control_entries")
 }
 
+/// Ajustes manuais permanentes no extrato de caixa (correções fora do TOTVS RM).
+model ExtratoCaixaAjuste {
+  id               String    @id @default(cuid())
+  dataCompensacao  DateTime  @db.Date
+  codCCusto        String    @default("")
+  ccusto           String    @default("")
+  codNatFinanceira String    @default("")
+  natureza         String    @default("")
+  codFilial        Int?
+  fornecedor       String    @default("")
+  valor            Decimal   @db.Decimal(18, 2)
+  observacao       String?
+  createdById      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([dataCompensacao])
+  @@index([codFilial])
+  @@map("extrato_caixa_ajustes")
+}
+
+/// Presets de filtro do extrato de caixa (por usuário).
+model ExtratoCaixaFiltroSalvo {
+  id        String   @id @default(cuid())
+  userId    String
+  nome      String
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, nome])
+  @@index([userId])
+  @@map("extrato_caixa_filtros_salvos")
+}
+
 // ─── Tasks (Kanban) ───────────────────────────────────────────────────────────
 
 enum TaskPriority {
@@ -2234,6 +2355,8 @@ model KanbanBoard {
   slug            String   @unique
   departmentKey   String   @unique @map("department_key")
   departmentLabel String   @map("department_label")
+  /// Paleta de etiquetas do setor: [{ color, name }]
+  labelPresets    Json     @default("[]") @map("label_presets")
   createdById     String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -2277,6 +2400,8 @@ model KanbanCard {
   attachmentsEnabled  Boolean      @default(false)
   labels              Json         @default("[]")
   position       Int          @default(0)
+  completedAt    DateTime?
+  workHours      Decimal?     @db.Decimal(8, 2)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
