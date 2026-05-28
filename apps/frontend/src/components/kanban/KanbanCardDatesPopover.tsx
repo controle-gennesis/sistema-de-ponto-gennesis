@@ -74,6 +74,9 @@ export function KanbanCardDatesPanel({
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const monthLabel = viewDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const todayYmd = toYmd(new Date());
+  const viewingTodayMonth =
+    year === new Date().getFullYear() && month === new Date().getMonth();
   const rangeMode = useStart && useEnd;
 
   const firstDay = new Date(year, month, 1);
@@ -96,7 +99,8 @@ export function KanbanCardDatesPanel({
     const isEnd = !!e && ymd === e;
     const inRange =
       !!s && !!e && s !== e && compareYmd(ymd, s) > 0 && compareYmd(ymd, e) < 0;
-    return { isStart, isEnd, inRange };
+    const isToday = ymd === todayYmd;
+    return { isStart, isEnd, inRange, isToday };
   }
 
   function pickDay(day: number) {
@@ -164,9 +168,20 @@ export function KanbanCardDatesPanel({
               <ChevronLeft className="w-4 h-4" />
             </button>
           </div>
-          <span className="text-sm font-medium text-gray-800 dark:text-gray-200 capitalize">
-            {monthLabel}
-          </span>
+          <div className="flex flex-col items-center gap-0.5 min-w-0">
+            <span className="text-sm font-medium text-gray-800 dark:text-gray-200 capitalize">
+              {monthLabel}
+            </span>
+            {!viewingTodayMonth && (
+              <button
+                type="button"
+                onClick={() => setViewDate(new Date())}
+                className="text-[11px] font-medium text-red-600 dark:text-red-400 hover:underline"
+              >
+                Ir para hoje
+              </button>
+            )}
+          </div>
           <div className="flex gap-0.5">
             <button
               type="button"
@@ -202,7 +217,7 @@ export function KanbanCardDatesPanel({
           {cells.map((day, i) => {
             if (day === null) return <span key={`e-${i}`} />;
 
-            const { isStart, isEnd, inRange } = getDayVisual(day);
+            const { isStart, isEnd, inRange, isToday } = getDayVisual(day);
             const isEndpoint = isStart || isEnd;
 
             return (
@@ -210,16 +225,27 @@ export function KanbanCardDatesPanel({
                 key={day}
                 type="button"
                 onClick={() => pickDay(day)}
+                aria-current={isToday ? 'date' : undefined}
+                title={isToday ? 'Hoje' : undefined}
                 className={clsx(
                   'h-8 text-sm rounded-md transition-colors flex items-center justify-center',
                   isEndpoint &&
                     'bg-red-600 dark:bg-red-500 text-white font-semibold',
+                  isToday &&
+                    !isEndpoint &&
+                    'font-semibold text-red-600 dark:text-red-400',
                   inRange &&
                     !isEndpoint &&
+                    !isToday &&
                     'bg-red-100/90 dark:bg-red-950/45 text-red-800 dark:text-red-200',
                   !isEndpoint &&
                     !inRange &&
+                    !isToday &&
                     'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/80',
+                  !isEndpoint &&
+                    !inRange &&
+                    isToday &&
+                    'hover:bg-gray-100 dark:hover:bg-gray-700/80',
                 )}
               >
                 {day}
