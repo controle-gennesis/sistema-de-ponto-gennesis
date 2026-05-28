@@ -49,6 +49,7 @@ import { KanbanPriorityPicker } from './KanbanPriorityPicker';
 import { KanbanCardActionButton } from './KanbanCardActionButton';
 import { KanbanCardDatesPanel } from './KanbanCardDatesPopover';
 import { KanbanCardLabelsPanel, KanbanLabelChips } from './KanbanCardLabelsPopover';
+import type { KanbanLabelPreset } from './kanbanLabels';
 import { KanbanMemberPickerModal, type KanbanPickerUser } from './KanbanMemberPickerModal';
 import { KanbanMemberChip } from './KanbanMemberChip';
 import {
@@ -135,6 +136,7 @@ export interface KanbanCardModalProps {
   currentUserId?: string;
   currentUser?: KanbanCardModalCurrentUser | null;
   canViewAllKanbanBoards?: boolean;
+  labelPresets?: KanbanLabelPreset[];
   onClose: () => void;
   onBoardRefresh: () => void;
   /** Atualiza só o card no board (contadores de checklist) sem refetch da página. */
@@ -150,6 +152,7 @@ export function KanbanCardModal({
   currentUserId,
   currentUser,
   canViewAllKanbanBoards = false,
+  labelPresets,
   onClose,
   onBoardRefresh,
   onBoardCardPatch,
@@ -663,6 +666,7 @@ export function KanbanCardModal({
         >
           <KanbanCardLabelsPanel
             labels={labels}
+            labelPresets={labelPresets}
             onClose={() => setOpenMenu(null)}
             saving={saving}
             onSave={async (next) => {
@@ -879,7 +883,9 @@ export function KanbanCardModal({
                 ) : null}
               </div>
 
-              {labels.length > 0 && <KanbanLabelChips labels={labels} />}
+              {labels.length > 0 && (
+                <KanbanLabelChips labels={labels} labelPresets={labelPresets} />
+              )}
 
             <div className="space-y-4">
               {/* Membros */}

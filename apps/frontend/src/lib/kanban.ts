@@ -1,4 +1,5 @@
 import api from '@/lib/api';
+import type { KanbanLabelPreset } from '@/components/kanban/kanbanLabels';
 
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -77,6 +78,7 @@ export interface KanbanBoard {
   department: string;
   departmentKey: string;
   canWrite?: boolean;
+  labelPresets?: KanbanLabelPreset[];
   columns: KanbanColumn[];
 }
 
@@ -99,6 +101,17 @@ export async function fetchKanbanBoards(): Promise<KanbanBoardSummary[]> {
 export async function fetchKanbanBoard(departmentKey?: string): Promise<KanbanBoard> {
   const res = await api.get('/kanban/board', {
     params: departmentKey ? { departmentKey } : undefined,
+  });
+  return res.data.data;
+}
+
+export async function updateKanbanBoardLabelPresets(
+  presets: KanbanLabelPreset[],
+  departmentKey?: string,
+): Promise<KanbanLabelPreset[]> {
+  const res = await api.patch('/kanban/board/label-presets', {
+    presets,
+    ...(departmentKey ? { departmentKey } : {}),
   });
   return res.data.data;
 }

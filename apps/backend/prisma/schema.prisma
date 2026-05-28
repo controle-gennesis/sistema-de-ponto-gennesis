@@ -2347,6 +2347,8 @@ model KanbanBoard {
   slug            String   @unique
   departmentKey   String   @unique @map("department_key")
   departmentLabel String   @map("department_label")
+  /// Paleta de etiquetas do setor: [{ color, name }]
+  labelPresets    Json     @default("[]") @map("label_presets")
   createdById     String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

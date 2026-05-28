@@ -68,6 +68,29 @@ export class KanbanController {
     }
   }
 
+  async updateBoardLabelPresets(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { presets, departmentKey } = req.body;
+      const data = await kanbanService.updateBoardLabelPresets(
+        userId,
+        presets,
+        typeof departmentKey === 'string' ? departmentKey : undefined,
+      );
+      res.json({ success: true, data });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado para este setor') {
+        return next(createError(msg, 404));
+      }
+      if (msg && msg !== KANBAN_FORBIDDEN) {
+        return next(createError(msg, 400));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
   async createColumn(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

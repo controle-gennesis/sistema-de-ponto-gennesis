@@ -3,17 +3,17 @@
 import React, { useState } from 'react';
 import { Check } from 'lucide-react';
 import { clsx } from 'clsx';
-import { kanbanInput, kanbanLabel } from './kanbanFormStyles';
 import {
-  KANBAN_LABEL_PALETTE,
-  isKanbanEditableLabelColor,
+  getKanbanLabelPalette,
   normalizeKanbanLabels,
   type KanbanCardLabel,
+  type KanbanLabelPreset,
   labelKey,
 } from './kanbanLabels';
 
 export interface KanbanCardLabelsPanelProps {
   labels: KanbanCardLabel[];
+  labelPresets?: readonly KanbanLabelPreset[];
   onClose: () => void;
   onSave: (labels: KanbanCardLabel[]) => void | Promise<void>;
   saving?: boolean;
@@ -22,41 +22,27 @@ export interface KanbanCardLabelsPanelProps {
 /** Conteúdo do painel de etiquetas (usar dentro de Modal). */
 export function KanbanCardLabelsPanel({
   labels: initialLabels,
+  labelPresets,
   onClose,
   onSave,
   saving,
 }: KanbanCardLabelsPanelProps) {
-  const [labels, setLabels] = useState<KanbanCardLabel[]>(() => normalizeKanbanLabels(initialLabels));
-  const [customEditText, setCustomEditText] = useState(() => {
-    const custom = initialLabels.find((l) => isKanbanEditableLabelColor(l.color));
-    return custom?.text.trim() ?? '';
-  });
+  const palette = getKanbanLabelPalette(labelPresets);
+  const [labels, setLabels] = useState<KanbanCardLabel[]>(() =>
+    normalizeKanbanLabels(initialLabels, palette),
+  );
 
-  function toggleColor(preset: (typeof KANBAN_LABEL_PALETTE)[number]) {
+  function toggleColor(preset: KanbanLabelPreset) {
     const existing = labels.find((l) => l.color === preset.color);
     if (existing) {
       setLabels((prev) => prev.filter((l) => l.color !== preset.color));
-    } else if (preset.editable) {
-      const text = customEditText.trim();
-      setLabels((prev) => [...prev, { color: preset.color, text }]);
     } else {
       setLabels((prev) => [...prev, { color: preset.color, text: preset.name }]);
     }
   }
 
-  function updateCustomLabelText(text: string) {
-    setCustomEditText(text);
-    setLabels((prev) =>
-      prev.map((l) => (isKanbanEditableLabelColor(l.color) ? { ...l, text: text.trim() } : l)),
-    );
-  }
-
-  const customLabelOn = labels.some((l) => isKanbanEditableLabelColor(l.color));
-
   async function handleSave() {
-    const normalized = normalizeKanbanLabels(labels).filter(
-      (l) => !isKanbanEditableLabelColor(l.color) || l.text.length > 0,
-    );
+    const normalized = normalizeKanbanLabels(labels, palette);
     await Promise.resolve(onSave(normalized));
     onClose();
   }
@@ -68,12 +54,8 @@ export function KanbanCardLabelsPanel({
       </p>
 
       <div className="space-y-2 mb-3">
-        {KANBAN_LABEL_PALETTE.map((preset) => {
+        {palette.map((preset) => {
           const isOn = labels.some((l) => l.color === preset.color);
-          const displayName =
-            preset.editable && isOn
-              ? customEditText.trim() || 'Editavel (digite o nome)'
-              : preset.name;
 
           return (
             <button
@@ -83,7 +65,7 @@ export function KanbanCardLabelsPanel({
               className="w-full flex items-center gap-2 group"
             >
               <span className="text-xs text-gray-600 dark:text-gray-400 min-w-[9.5rem] text-left truncate shrink-0">
-                {displayName}
+                {preset.name}
               </span>
               <span
                 className={clsx(
@@ -99,20 +81,6 @@ export function KanbanCardLabelsPanel({
         })}
       </div>
 
-      {customLabelOn && (
-        <div className="mb-3 pt-2 border-t border-gray-200 dark:border-gray-700">
-          <label className={kanbanLabel}>Nome da etiqueta editável</label>
-          <input
-            type="text"
-            value={customEditText}
-            onChange={(e) => updateCustomLabelText(e.target.value)}
-            className={kanbanInput}
-            placeholder="Ex: Urgente, Revisão…"
-            autoFocus
-          />
-        </div>
-      )}
-
       <div className="flex gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
         <button
           type="button"
@@ -123,7 +91,7 @@ export function KanbanCardLabelsPanel({
         </button>
         <button
           type="button"
-          disabled={saving || (customLabelOn && !customEditText.trim())}
+          disabled={saving}
           onClick={() => void handleSave()}
           className="flex-1 px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
         >
@@ -134,10 +102,15 @@ export function KanbanCardLabelsPanel({
   );
 }
 
-export function KanbanLabelChips({ labels }: { labels: KanbanCardLabel[] }) {
-  const normalized = normalizeKanbanLabels(labels).filter(
-    (l) => !isKanbanEditableLabelColor(l.color) || l.text.length > 0,
-  );
+export function KanbanLabelChips({
+  labels,
+  labelPresets,
+}: {
+  labels: KanbanCardLabel[];
+  labelPresets?: readonly KanbanLabelPreset[];
+}) {
+  const palette = getKanbanLabelPalette(labelPresets);
+  const normalized = normalizeKanbanLabels(labels, palette);
   if (normalized.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1.5">

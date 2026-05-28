@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
+import { KanbanBoardLabelSettings } from '@/components/kanban/KanbanBoardLabelSettings';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import {
@@ -24,6 +25,7 @@ import {
   type KanbanBoardSummary,
   fetchKanbanBoard,
   fetchKanbanBoards,
+  updateKanbanBoardLabelPresets,
   createKanbanColumn,
   updateKanbanColumn,
   deleteKanbanColumn,
@@ -38,8 +40,9 @@ import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG } from '@/components/kanban/kanbanPriority';
 import { KanbanPriorityBars } from '@/components/kanban/KanbanPriorityBars';
 import {
-  isKanbanEditableLabelColor,
+  getKanbanLabelPalette,
   normalizeKanbanLabels,
+  type KanbanLabelPreset,
 } from '@/components/kanban/kanbanLabels';
 import {
   formatKanbanCardEndDate,
@@ -472,6 +475,7 @@ function CardMemberAvatars({ card }: { card: KanbanCard }) {
 interface KanbanCardItemProps {
   card: KanbanCard;
   columnId: string;
+  labelPresets?: readonly KanbanLabelPreset[];
   readOnly?: boolean;
   onEdit: (card: KanbanCard, columnId: string) => void;
   onDelete: (cardId: string, columnId: string) => void;
@@ -484,6 +488,7 @@ interface KanbanCardItemProps {
 function KanbanCardItem({
   card,
   columnId,
+  labelPresets,
   readOnly = false,
   onEdit,
   onDelete,
@@ -602,9 +607,7 @@ function KanbanCardItem({
       <div className="relative z-[1]">
       {card.labels.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
-          {normalizeKanbanLabels(card.labels)
-            .filter((l) => !isKanbanEditableLabelColor(l.color) || l.text.trim())
-            .map((l) => (
+          {normalizeKanbanLabels(card.labels, labelPresets).map((l) => (
             <span
               key={`${l.color}-${l.text}`}
               className="h-2 w-10 rounded-sm shrink-0"
@@ -725,6 +728,7 @@ function KanbanColumnDropGutter({
 
 interface KanbanColumnProps {
   column: KanbanColumn;
+  labelPresets?: readonly KanbanLabelPreset[];
   dragState: DragState;
   isColumnDragging?: boolean;
   isColumnDragActive?: boolean;
@@ -745,6 +749,7 @@ interface KanbanColumnProps {
 
 function KanbanColumnComponent({
   column,
+  labelPresets,
   dragState,
   isColumnDragging = false,
   isColumnDragActive = false,
@@ -917,6 +922,7 @@ function KanbanColumnComponent({
               <KanbanCardItem
                 card={card}
                 columnId={column.id}
+                labelPresets={labelPresets}
                 readOnly={readOnly}
                 onEdit={onEditCard}
                 onDelete={onDeleteCard}
@@ -1312,7 +1318,11 @@ function KanbanPage() {
     | null
   >(null);
   const [colModal, setColModal] = useState<{ mode: 'create' | 'edit'; column?: KanbanColumn } | null>(null);
+  const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
+  const [savingLabelPresets, setSavingLabelPresets] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'card'; cardId: string; columnId: string } | { type: 'column'; columnId: string } | null>(null);
+
+  const boardLabelPresets = getKanbanLabelPalette(board?.labelPresets);
 
   const [dragState, setDragState] = useState<DragState>({
     draggingCardId: null,
@@ -1721,13 +1731,24 @@ function KanbanPage() {
                 )}
               </button>
               {!boardReadOnly && (
-                <button
-                  onClick={() => setColModal({ mode: 'create' })}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  Nova Coluna
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setLabelSettingsOpen(true)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    title="Configurar etiquetas deste setor"
+                  >
+                    <Tag className="w-4 h-4" />
+                    Etiquetas do setor
+                  </button>
+                  <button
+                    onClick={() => setColModal({ mode: 'create' })}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Nova Coluna
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -1797,6 +1818,7 @@ function KanbanPage() {
                 >
                   <KanbanColumnComponent
                     column={column}
+                    labelPresets={boardLabelPresets}
                     dragState={dragState}
                     isColumnDragging={columnDrag.draggingColumnId === column.id}
                     isColumnDragActive={!!columnDrag.draggingColumnId}
@@ -1890,6 +1912,46 @@ function KanbanPage() {
         </div>
       </Modal>
 
+      {labelSettingsOpen && board && (
+        <Modal
+          isOpen
+          onClose={() => !savingLabelPresets && setLabelSettingsOpen(false)}
+          size="md"
+          title="Etiquetas do setor"
+          closeOnOverlayClick={!savingLabelPresets}
+        >
+          <KanbanBoardLabelSettings
+            initialPresets={[...boardLabelPresets]}
+            departmentLabel={board.department}
+            saving={savingLabelPresets}
+            onClose={() => setLabelSettingsOpen(false)}
+            onSave={async (presets) => {
+              setSavingLabelPresets(true);
+              try {
+                const updated = await updateKanbanBoardLabelPresets(
+                  presets,
+                  departmentKeyParam ?? undefined,
+                );
+                queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) =>
+                  prev ? { ...prev, labelPresets: updated } : prev,
+                );
+                toast.success('Etiquetas do setor atualizadas');
+              } catch (err: unknown) {
+                const msg =
+                  err && typeof err === 'object' && 'response' in err
+                    ? (err as { response?: { data?: { message?: string } } }).response?.data
+                        ?.message
+                    : null;
+                toast.error(msg || 'Não foi possível salvar as etiquetas');
+                throw err;
+              } finally {
+                setSavingLabelPresets(false);
+              }
+            }}
+          />
+        </Modal>
+      )}
+
       {cardModal && (
         <KanbanCardModal
           mode={cardModal.mode}
@@ -1897,6 +1959,7 @@ function KanbanPage() {
           columnId={cardModal.columnId}
           initialCard={cardModal.mode === 'detail' ? cardModal.initialCard : undefined}
           initialColumn={cardModal.mode === 'detail' ? cardModal.initialColumn : undefined}
+          labelPresets={[...boardLabelPresets]}
           currentUserId={meUser?.id}
           currentUser={
             meUser

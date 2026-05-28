@@ -10,6 +10,9 @@ router.use(authenticate);
 router.get('/boards', (req, res, next) => controller.listBoards(req, res, next));
 router.get('/picker-users', (req, res, next) => controller.listPickerUsers(req, res, next));
 router.get('/board', (req, res, next) => controller.getBoard(req, res, next));
+router.patch('/board/label-presets', (req, res, next) =>
+  controller.updateBoardLabelPresets(req, res, next),
+);
 
 router.post('/columns', (req, res, next) => controller.createColumn(req, res, next));
 router.patch('/columns/:id', (req, res, next) => controller.updateColumn(req, res, next));

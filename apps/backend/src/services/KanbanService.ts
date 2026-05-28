@@ -4,6 +4,13 @@ import {
   KANBAN_LEGACY_DEPARTMENT_KEY,
   userCanViewAllKanbanBoards,
 } from '../lib/kanbanAccess';
+import {
+  DEFAULT_KANBAN_LABEL_PRESETS,
+  resolveKanbanLabelPresets,
+  validateCardLabelsForBoard,
+  validateKanbanLabelPresetsInput,
+  type KanbanLabelPresetDto,
+} from '../lib/kanbanLabelPresets';
 import { prisma } from '../lib/prisma';
 import { ChatService } from './ChatService';
 
@@ -377,6 +384,7 @@ function formatBoardResponse(
     slug: string;
     departmentKey: string;
     departmentLabel: string;
+    labelPresets?: unknown;
     columns: Array<{
       id: string;
       title: string;
@@ -394,6 +402,7 @@ function formatBoardResponse(
     slug: board.slug,
     department: board.departmentLabel,
     departmentKey: board.departmentKey,
+    labelPresets: resolveKanbanLabelPresets(board.labelPresets),
     canWrite: meta?.canWrite ?? true,
     columns: board.columns.map((col) => ({
       id: col.id,
@@ -417,6 +426,7 @@ async function seedBoardForDepartment(
       slug: slugFromDepartmentKey(departmentKey),
       departmentKey,
       departmentLabel,
+      labelPresets: DEFAULT_KANBAN_LABEL_PRESETS as Prisma.InputJsonValue,
       createdById: createdById ?? null,
       columns: {
         create: [
@@ -666,6 +676,45 @@ export class KanbanService {
     return formatBoardResponse(board, { canWrite });
   }
 
+  async updateBoardLabelPresets(
+    userId: string,
+    presetsInput: unknown,
+    departmentKeyParam?: string,
+  ): Promise<KanbanLabelPresetDto[]> {
+    const { key: ownKey } = await this.getUserDepartment(userId);
+    const targetKey = departmentKeyParam
+      ? normalizeDepartmentKey(departmentKeyParam)
+      : ownKey;
+
+    if (targetKey !== ownKey) {
+      throw new Error(KANBAN_FORBIDDEN);
+    }
+
+    const presets = validateKanbanLabelPresetsInput(presetsInput);
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { departmentKey: targetKey },
+    });
+    if (!board) {
+      throw new Error('Quadro não encontrado para este setor');
+    }
+
+    await prisma.kanbanBoard.update({
+      where: { id: board.id },
+      data: { labelPresets: presets as Prisma.InputJsonValue },
+    });
+
+    return presets;
+  }
+
+  private async getLabelPresetsForColumn(columnId: string): Promise<KanbanLabelPresetDto[]> {
+    const column = await prisma.kanbanColumn.findUnique({
+      where: { id: columnId },
+      include: { board: { select: { labelPresets: true } } },
+    });
+    if (!column) throw new Error('Coluna não encontrada');
+    return resolveKanbanLabelPresets(column.board.labelPresets);
+  }
+
   async createColumn(
     userId: string,
     data: {
@@ -814,6 +863,10 @@ export class KanbanService {
       ),
     ];
 
+    const labelPresets = await this.getLabelPresetsForColumn(data.columnId);
+    const validatedLabels =
+      validateCardLabelsForBoard(data.labels ?? [], labelPresets) ?? [];
+
     const card = await prisma.kanbanCard.create({
       data: {
         columnId: data.columnId,
@@ -822,7 +875,7 @@ export class KanbanService {
         priority: priorityFromClient(data.priority ?? 'medium'),
         startDate: parseDateInput(data.startDate) ?? null,
         endDate: parseDateInput(data.endDate) ?? null,
-        labels: labelsToJson(data.labels ?? []) ?? [],
+        labels: labelsToJson(validatedLabels) ?? [],
         assigneeUserId: memberIds[0] ?? data.assigneeUserId ?? null,
         assigneeName,
         totalTasks: data.totalTasks ?? 0,
@@ -974,6 +1027,14 @@ export class KanbanService {
     const hasOrderChange =
       targetColumnId !== existing.columnId || requestedPosition !== undefined;
 
+    let labelsJson = labelsToJson(data.labels);
+    if (data.labels !== undefined) {
+      const labelColumnId = data.columnId ?? existing.columnId;
+      const labelPresets = await this.getLabelPresetsForColumn(labelColumnId);
+      const validated = validateCardLabelsForBoard(data.labels, labelPresets);
+      labelsJson = labelsToJson(validated);
+    }
+
     const baseUpdateData = {
       columnId: data.columnId,
       title: data.title?.trim(),
@@ -981,7 +1042,7 @@ export class KanbanService {
       priority: data.priority ? priorityFromClient(data.priority) : undefined,
       startDate: parseDateInput(data.startDate),
       endDate: parseDateInput(data.endDate),
-      labels: labelsToJson(data.labels),
+      labels: labelsJson,
       assigneeUserId: data.assigneeUserId,
       assigneeName: assigneeName !== undefined ? assigneeName : undefined,
       totalTasks,
