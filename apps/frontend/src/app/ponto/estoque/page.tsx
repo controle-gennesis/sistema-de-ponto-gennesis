@@ -15,7 +15,8 @@ import {
   RotateCcw,
   Download,
   Search,
-  X
+  X,
+  Eye
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -49,6 +50,14 @@ interface StockBalance {
   material: Material;
   costCenter?: { id: string; code: string; name: string } | null;
   balance: number;
+}
+
+interface GroupedStockBalance {
+  material: Material;
+  lines: Array<{
+    costCenter?: { id: string; code: string; name: string } | null;
+    balance: number;
+  }>;
 }
 
 interface MovementFormData {
@@ -220,6 +229,7 @@ export default function EstoquePage() {
   const [balanceCurrentPage, setBalanceCurrentPage] = useState(1);
   const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
   const [historyDetail, setHistoryDetail] = useState<StockMovement | null>(null);
+  const [balanceDetail, setBalanceDetail] = useState<GroupedStockBalance | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const BALANCE_ITEMS_PER_PAGE = 12;
   const HISTORY_ITEMS_PER_PAGE = 12;
@@ -516,11 +526,36 @@ export default function EstoquePage() {
     ? costCentersData 
     : [];
   const balances: StockBalance[] = balanceData?.data || [];
-  const balanceTotal = balances.length;
+  const groupedBalances = useMemo(() => {
+    const byMaterial = new Map<string, GroupedStockBalance>();
+    for (const row of balances) {
+      const existing = byMaterial.get(row.material.id);
+      if (existing) {
+        existing.lines.push({ costCenter: row.costCenter, balance: row.balance });
+      } else {
+        byMaterial.set(row.material.id, {
+          material: row.material,
+          lines: [{ costCenter: row.costCenter, balance: row.balance }]
+        });
+      }
+    }
+    return Array.from(byMaterial.values())
+      .map((group) => ({
+        ...group,
+        lines: [...group.lines].sort((a, b) =>
+          (a.costCenter?.name || 'Não informado').localeCompare(
+            b.costCenter?.name || 'Não informado',
+            'pt-BR'
+          )
+        )
+      }))
+      .sort((a, b) => a.material.name.localeCompare(b.material.name, 'pt-BR'));
+  }, [balances]);
+  const balanceTotal = groupedBalances.length;
   const balanceTotalPages = Math.max(1, Math.ceil(balanceTotal / BALANCE_ITEMS_PER_PAGE));
   const balanceStartIndex = (balanceCurrentPage - 1) * BALANCE_ITEMS_PER_PAGE;
   const balanceEndIndex = balanceStartIndex + BALANCE_ITEMS_PER_PAGE;
-  const paginatedBalances = balances.slice(balanceStartIndex, balanceEndIndex);
+  const paginatedGroupedBalances = groupedBalances.slice(balanceStartIndex, balanceEndIndex);
   const balanceStartItem = balanceTotal === 0 ? 0 : balanceStartIndex + 1;
   const balanceEndItem = Math.min(balanceEndIndex, balanceTotal);
   const movements: StockMovement[] = movementsData?.data || [];
@@ -602,6 +637,15 @@ export default function EstoquePage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [historyDetail]);
+
+  useEffect(() => {
+    if (!balanceDetail) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setBalanceDetail(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [balanceDetail]);
 
   useEffect(() => {
     if (!isMovementModalOpen) return;
@@ -733,7 +777,7 @@ export default function EstoquePage() {
         exportRows.map((row) => ({
           Material: row.material,
           Categoria: row.categoria,
-          'Centro de Custo': row.centroDeCusto,
+          Contrato: row.centroDeCusto,
           Quantidade: row.quantidade,
           'Unidade de Medida': row.unidadeDeMedida
         }))
@@ -760,7 +804,7 @@ export default function EstoquePage() {
       doc.setFontSize(9);
       doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 40, 58);
 
-      const headers = ['Material', 'Categoria', 'Centro de Custo', 'Quantidade', 'Unidade de Medida'];
+      const headers = ['Material', 'Categoria', 'Contrato', 'Quantidade', 'Unidade de Medida'];
       const xPositions = [40, 230, 360, 620, 700];
       let y = 90;
 
@@ -950,7 +994,7 @@ export default function EstoquePage() {
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Saldo Atual</h3>
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Consulte materiais e quantidades em estoque por centro de custo
+                        Consulte materiais e quantidades em estoque por contrato
                       </p>
                     </div>
                   </div>
@@ -1018,7 +1062,7 @@ export default function EstoquePage() {
                   <div className="text-center py-8">
                     <p className="text-gray-600 dark:text-gray-400">Carregando saldo...</p>
                   </div>
-                ) : balances.length === 0 ? (
+                ) : groupedBalances.length === 0 ? (
                   <div className="text-center py-8">
                     <Box className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
                     <p className="text-gray-600 dark:text-gray-400">Nenhum material em estoque</p>
@@ -1040,17 +1084,17 @@ export default function EstoquePage() {
                       <table className="w-full text-sm">
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
+                            <th className="w-36 px-3 sm:px-4 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Detalhes
+                            </th>
                             <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Material
                             </th>
                             <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Categoria
                             </th>
-                            <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Centro de Custo
-                            </th>
                             <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Quantidade
+                              Quantidade total
                             </th>
                             <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Unidade
@@ -1058,28 +1102,42 @@ export default function EstoquePage() {
                           </tr>
                         </thead>
                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                          {paginatedBalances.map((b) => (
+                          {paginatedGroupedBalances.map((group) => {
+                            const totalBalance = group.lines.reduce((sum, line) => sum + line.balance, 0);
+                            const costCenterCount = group.lines.length;
+                            return (
                             <tr
-                              key={`${b.material.id}-${b.costCenter?.id || 'sem-cc'}`}
+                              key={group.material.id}
                               className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                             >
+                              <td className="px-3 sm:px-4 py-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setBalanceDetail(group)}
+                                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700/60 dark:hover:text-gray-200"
+                                  title="Ver saldo por contrato"
+                                >
+                                  <Eye className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                  <span className="whitespace-nowrap">
+                                    {costCenterCount === 1 ? '1 contrato' : `${costCenterCount} contratos`}
+                                  </span>
+                                </button>
+                              </td>
                               <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {b.material.name}
+                                {group.material.name}
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
-                                {b.material.category || '—'}
-                              </td>
-                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
-                                {b.costCenter?.name || 'Não informado'}
+                                {group.material.category || '—'}
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
-                                {b.balance.toLocaleString('pt-BR')}
+                                {totalBalance.toLocaleString('pt-BR')}
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
-                                {b.material.unit}
+                                {group.material.unit}
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1129,7 +1187,7 @@ export default function EstoquePage() {
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Centro de Custo
+                            Contrato
                           </label>
                           <select
                             value={filtersCostCenterId}
@@ -1279,7 +1337,7 @@ export default function EstoquePage() {
                               Quantidade
                             </th>
                             <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              Centro de Custo
+                              Contrato
                             </th>
                             <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               Registrado por
@@ -1393,7 +1451,7 @@ export default function EstoquePage() {
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Centro de Custo
+                            Contrato
                           </label>
                           <select
                             value={filtersCostCenterId}
@@ -1483,6 +1541,103 @@ export default function EstoquePage() {
             </Card>
           )}
 
+          {balanceDetail && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/40"
+                onClick={() => setBalanceDetail(null)}
+                aria-hidden
+              />
+              <div
+                className="relative z-10 w-full max-w-lg max-h-[min(90vh,32rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="balance-detail-modal-title"
+              >
+                <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+                  <h2
+                    id="balance-detail-modal-title"
+                    className="text-base font-semibold text-gray-900 dark:text-gray-100 pr-2"
+                  >
+                    Saldo por contrato
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setBalanceDetail(null)}
+                    className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    aria-label="Fechar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-4 space-y-4">
+                  <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Material</span>
+                      <span className="font-medium text-gray-900 dark:text-gray-100">
+                        {balanceDetail.material.name}
+                      </span>
+                    </p>
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Categoria</span>
+                      <span className="text-gray-800 dark:text-gray-200">
+                        {balanceDetail.material.category || '—'}
+                      </span>
+                    </p>
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Quantidade total</span>
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">
+                        {balanceDetail.lines
+                          .reduce((sum, line) => sum + line.balance, 0)
+                          .toLocaleString('pt-BR')}
+                      </span>
+                    </p>
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Unidade de medida</span>
+                      <span className="text-gray-800 dark:text-gray-200">{balanceDetail.material.unit}</span>
+                    </p>
+                    <p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Contratos</span>
+                      <span className="text-gray-800 dark:text-gray-200">{balanceDetail.lines.length}</span>
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/80">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            Contrato
+                          </th>
+                          <th className="px-4 py-2.5 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            Quantidade
+                          </th>
+                          <th className="px-4 py-2.5 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            Unidade de medida
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        {balanceDetail.lines.map((line, index) => (
+                          <tr key={line.costCenter?.id || `sem-cc-${index}`}>
+                            <td className="px-4 py-2.5 text-gray-800 dark:text-gray-200">
+                              {line.costCenter?.name || 'Não informado'}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-gray-900 dark:text-gray-100">
+                              {line.balance.toLocaleString('pt-BR')}
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-gray-700 dark:text-gray-300">
+                              {balanceDetail.material.unit}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {historyDetail && (
             <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
               <div
@@ -1519,12 +1674,12 @@ export default function EstoquePage() {
                   </p>
                   {historyDetail.costCenter && (
                     <p>
-                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Centro de custo</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 block">Contrato</span>
                       <span>{historyDetail.costCenter.name || historyDetail.costCenter.code}</span>
                     </p>
                   )}
                   <p>
-                    <span className="text-xs text-gray-500 dark:text-gray-400 block">Saldo atual (CC)</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block">Saldo atual (contrato)</span>
                     <span>
                       {(() => {
                         const key = `${historyDetail.material.id}:${historyDetail.costCenter?.id || 'no-cost-center'}`;
@@ -1642,7 +1797,7 @@ export default function EstoquePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Centro de Custo
+                              Contrato
                   </label>
                   <select
                     value={formData.costCenterId}
@@ -1651,10 +1806,10 @@ export default function EstoquePage() {
                     required
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
                   >
-                    <option value="">Selecione um centro de custo</option>
-                    {loadingCostCenters && <option disabled>Carregando centros de custo...</option>}
+                    <option value="">Selecione um contrato</option>
+                    {loadingCostCenters && <option disabled>Carregando contratos...</option>}
                     {!loadingCostCenters && costCenters.length === 0 && (
-                      <option disabled>Nenhum centro de custo cadastrado</option>
+                      <option disabled>Nenhum contrato cadastrado</option>
                     )}
                     {costCenters.map((cc: { id: string; code: string; name: string }) => (
                       <option key={cc.id} value={cc.id}>
@@ -1664,7 +1819,7 @@ export default function EstoquePage() {
                   </select>
                   {!loadingCostCenters && costCenters.length === 0 && (
                     <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
-                      ⚠️ Não há centros de custo cadastrados.{' '}
+                      ⚠️ Não há contratos cadastrados.{' '}
                       <Link href="/ponto/centros-de-custo" className="underline hover:text-yellow-700">
                         Cadastre aqui
                       </Link>

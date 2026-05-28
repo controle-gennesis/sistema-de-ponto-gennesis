@@ -27,6 +27,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
 import api from '@/lib/api';
 
 type FinancialControlStatus =
@@ -250,7 +251,6 @@ export default function ControleFinanceiroPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<FinancialControlEntry | null>(null);
-  const [form, setForm] = useState<EntryFormState>(() => buildInitialForm(now.getMonth() + 1, currentYear));
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -378,36 +378,6 @@ export default function ControleFinanceiroPage() {
     return Array.from(setYears).sort((a, b) => b - a);
   }, [entries, currentYear]);
 
-  const createMutation = useMutation({
-    mutationFn: async (payload: any) => {
-      const res = await api.post('/financial-control', payload);
-      return res.data;
-    },
-    onSuccess: () => {
-      toast.success('Lançamento criado com sucesso');
-      queryClient.invalidateQueries({ queryKey: ['financial-control'] });
-      closeModal();
-    },
-    onError: (err: any) => {
-      toast.error(err?.response?.data?.message || 'Erro ao criar lançamento');
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
-      const res = await api.patch(`/financial-control/${id}`, payload);
-      return res.data;
-    },
-    onSuccess: () => {
-      toast.success('Lançamento atualizado');
-      queryClient.invalidateQueries({ queryKey: ['financial-control'] });
-      closeModal();
-    },
-    onError: (err: any) => {
-      toast.error(err?.response?.data?.message || 'Erro ao atualizar lançamento');
-    },
-  });
-
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await api.delete(`/financial-control/${id}`);
@@ -471,16 +441,12 @@ export default function ControleFinanceiroPage() {
   };
 
   const openCreateModal = () => {
-    const month = filters.month || now.getMonth() + 1;
-    const year = filters.year || currentYear;
     setEditingEntry(null);
-    setForm(buildInitialForm(month, year));
     setIsModalOpen(true);
   };
 
   const openEditModal = (entry: FinancialControlEntry) => {
     setEditingEntry(entry);
-    setForm(entryToForm(entry));
     setIsModalOpen(true);
   };
 
@@ -489,41 +455,11 @@ export default function ControleFinanceiroPage() {
     setEditingEntry(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const computedRemainingDays = calcRemainingDays(form.dueDate, form.paidDate);
-    const payload = {
-      paymentMonth: form.paymentMonth,
-      paymentYear: form.paymentYear,
-      status: form.status,
-      osCode: form.osCode || null,
-      supplierName: form.supplierName || null,
-      parcelNumber: form.parcelNumber || null,
-      emissionDate: form.emissionDate || null,
-      boleto: form.boleto || null,
-      dueDate: form.dueDate || null,
-      originalValue: parseCurrencyInput(form.originalValue),
-      ocNumber: form.ocNumber || null,
-      finalValue: parseCurrencyInput(form.finalValue),
-      paidDate: form.paidDate || null,
-      remainingDays: computedRemainingDays,
-      receivedNote: form.receivedNote || null,
-      notes: form.notes || null,
-    };
-    if (editingEntry) {
-      updateMutation.mutate({ id: editingEntry.id, payload });
-    } else {
-      createMutation.mutate(payload);
-    }
-  };
-
   const handleDelete = (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este lançamento?')) return;
     setDeletingId(id);
     deleteMutation.mutate(id);
   };
-
-  const isSaving = createMutation.isPending || updateMutation.isPending;
 
   return (
     <ProtectedRoute route="/ponto/financeiro/controle-financeiro">
@@ -778,230 +714,13 @@ export default function ControleFinanceiroPage() {
           )}
         </div>
 
-        {/* Modal de criar/editar */}
-        <Modal
+        <FinancialControlEntryModal
           isOpen={isModalOpen}
           onClose={closeModal}
-          title={editingEntry ? 'Editar Lançamento' : 'Novo Lançamento'}
-          size="xl"
-        >
-          <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
-            {/* Truque para impedir o Chrome de oferecer autocomplete de cartão/pagamento */}
-            <input type="text" name="prevent-autofill" autoComplete="off" className="hidden" tabIndex={-1} />
-
-            {/* Período de Pagamento */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Mês <span className="text-red-500">*</span>
-                </label>
-                <select
-                  required
-                  value={form.paymentMonth}
-                  onChange={(e) => setForm({ ...form, paymentMonth: parseInt(e.target.value, 10) })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                >
-                  {MONTHS_PT.map((label, idx) => (
-                    <option key={idx} value={idx + 1}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Ano <span className="text-red-500">*</span>
-                </label>
-                <input
-                  required
-                  type="number"
-                  min={2000}
-                  max={2100}
-                  value={form.paymentYear}
-                  onChange={(e) => setForm({ ...form, paymentYear: parseInt(e.target.value, 10) })}
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Status
-                </label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value as FinancialControlStatus })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                >
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Identificação */}
-            <div className="grid grid-cols-1 sm:grid-cols-6 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  O.S.
-                </label>
-                <input
-                  type="text"
-                  value={form.osCode}
-                  onChange={(e) => setForm({ ...form, osCode: e.target.value })}
-                  placeholder="Ex.: ADM, IMP-20/SC-01"
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-              <div className="sm:col-span-4">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Nome do Fornecedor
-                </label>
-                <input
-                  type="text"
-                  value={form.supplierName}
-                  onChange={(e) => setForm({ ...form, supplierName: e.target.value })}
-                  placeholder="Ex.: POTENCIAL SEGURADORA"
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Número da Parcela
-                </label>
-                <input
-                  type="text"
-                  value={form.parcelNumber}
-                  onChange={(e) => setForm({ ...form, parcelNumber: e.target.value })}
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  O.C.
-                </label>
-                <input
-                  type="text"
-                  value={form.ocNumber}
-                  onChange={(e) => setForm({ ...form, ocNumber: e.target.value })}
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-              <div className="sm:col-span-2 flex items-end">
-                <div className="w-full">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Boleto
-                  </label>
-                  <BoletoToggle
-                    value={form.boleto}
-                    onChange={(v) => setForm({ ...form, boleto: v })}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Datas */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Data de Emissão
-                </label>
-                <input
-                  type="date"
-                  value={form.emissionDate}
-                  onChange={(e) => setForm({ ...form, emissionDate: e.target.value })}
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Data de Vencimento
-                </label>
-                <input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Data de Pagamento
-                </label>
-                <input
-                  type="date"
-                  value={form.paidDate}
-                  onChange={(e) => setForm({ ...form, paidDate: e.target.value })}
-                  autoComplete="off"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-            </div>
-
-            {/* Valores */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Valor Original
-                </label>
-                <CurrencyInput
-                  value={form.originalValue}
-                  onChange={(v) => setForm({ ...form, originalValue: v })}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Valor Final
-                </label>
-                <CurrencyInput
-                  value={form.finalValue}
-                  onChange={(v) => setForm({ ...form, finalValue: v })}
-                />
-              </div>
-            </div>
-
-            {/* Observação */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Observação
-              </label>
-              <textarea
-                value={form.receivedNote}
-                onChange={(e) => setForm({ ...form, receivedNote: e.target.value })}
-                placeholder="Ex.: PAGO TED, PAGO PIX, CANCELADO"
-                rows={3}
-                autoComplete="off"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white resize-y"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-              >
-                {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {editingEntry ? 'Salvar alterações' : 'Criar lançamento'}
-              </button>
-            </div>
-          </form>
-        </Modal>
+          editingEntry={editingEntry}
+          defaultPaymentMonth={filters.month || now.getMonth() + 1}
+          defaultPaymentYear={filters.year || currentYear}
+        />
 
         {/* Modal de Filtros */}
         <Modal

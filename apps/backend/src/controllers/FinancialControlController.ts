@@ -135,6 +135,23 @@ export class FinancialControlController {
     }
   }
 
+  /** Verifica se existe lançamento no controle financeiro vinculado ao número da OC. */
+  async hasEntryForOc(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const orderNumber = decodeURIComponent(String(req.params.orderNumber || '')).trim();
+      if (!orderNumber) {
+        res.json({ success: true, data: { hasEntry: false } });
+        return;
+      }
+      const count = await prisma.financialControlEntry.count({
+        where: { ocNumber: { equals: orderNumber, mode: 'insensitive' } }
+      });
+      res.json({ success: true, data: { hasEntry: count > 0 } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getMonths(_req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const grouped = await prisma.financialControlEntry.groupBy({

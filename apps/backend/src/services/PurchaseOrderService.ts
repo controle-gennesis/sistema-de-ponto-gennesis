@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { BorderService, BorderData } from './BorderService';
+import { stockShortfallService } from './StockShortfallService';
 
 export type BoletoInstallmentPaymentStatus = 'PENDING_BOLETO' | 'AWAITING_PAYMENT' | 'PAID';
 
@@ -545,7 +546,8 @@ export class PurchaseOrderService {
     });
     if (!order) return null;
     const [withPlan] = await enrichOrdersParcelPlans([order]);
-    return withPlan;
+    const stockReceipt = await stockShortfallService.getReceiptSummaryForOrderNumber(withPlan.orderNumber);
+    return { ...withPlan, stockReceipt };
   }
 
   async updateStatus(
@@ -614,6 +616,14 @@ export class PurchaseOrderService {
       if (st !== 'APPROVED' && st !== 'PENDING_PROOF_CORRECTION') {
         throw new Error(
           'Apenas OC na fase Pagamento ou em correção do comprovante pode ser enviada para validação do comprovante'
+        );
+      }
+      const fcCount = await prisma.financialControlEntry.count({
+        where: { ocNumber: { equals: order.orderNumber.trim(), mode: 'insensitive' } }
+      });
+      if (fcCount === 0) {
+        throw new Error(
+          'Registre o lançamento desta OC no Controle Financeiro antes de enviar o comprovante para validação'
         );
       }
       if (st === 'PENDING_PROOF_CORRECTION') {

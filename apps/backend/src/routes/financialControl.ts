@@ -9,6 +9,7 @@ const controller = new FinancialControlController();
 router.use(authenticate);
 
 router.get('/months', (req, res, next) => controller.getMonths(req, res, next));
+router.get('/check-by-oc/:orderNumber', (req, res, next) => controller.hasEntryForOc(req, res, next));
 router.get('/', (req, res, next) => controller.getAll(req, res, next));
 router.get('/:id', (req, res, next) => controller.getById(req, res, next));
 router.post('/', (req, res, next) => controller.create(req, res, next));

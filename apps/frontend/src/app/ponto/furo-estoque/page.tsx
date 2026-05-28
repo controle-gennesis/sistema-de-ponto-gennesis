@@ -309,6 +309,9 @@ export default function FuroEstoquePage() {
                           <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Falta
                           </th>
+                          <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Unidade de medida
+                          </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Situação
                           </th>
@@ -342,10 +345,10 @@ export default function FuroEstoquePage() {
                               {num(row.receivedQty).toLocaleString('pt-BR')}
                             </td>
                             <td className="px-3 sm:px-6 py-3 text-sm text-right font-semibold text-red-600 dark:text-red-400 whitespace-nowrap">
-                              {num(row.gapQty).toLocaleString('pt-BR')}{' '}
-                              <span className="font-normal text-gray-500 dark:text-gray-400">
-                                {row.unit || row.constructionMaterial.unit}
-                              </span>
+                              {num(row.gapQty).toLocaleString('pt-BR')}
+                            </td>
+                            <td className="px-3 sm:px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                              {row.unit || row.constructionMaterial.unit || '—'}
                             </td>
                             <td className="px-3 sm:px-6 py-3 text-center">
                               <span
@@ -578,7 +581,7 @@ export default function FuroEstoquePage() {
                       <span className="text-xs text-gray-500 dark:text-gray-400 block">Categoria</span>
                       <span>{detail.constructionMaterial.category || '—'}</span>
                     </p>
-                    <div className="grid grid-cols-3 gap-2 pt-1">
+                    <div className="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-4">
                       <div>
                         <span className="text-xs text-gray-500 dark:text-gray-400 block">Pedido</span>
                         <span className="font-semibold">{num(detail.orderedQty).toLocaleString('pt-BR')}</span>
@@ -592,6 +595,10 @@ export default function FuroEstoquePage() {
                         <span className="font-semibold text-red-600 dark:text-red-400">
                           {num(detail.gapQty).toLocaleString('pt-BR')}
                         </span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-500 dark:text-gray-400 block">Unidade de medida</span>
+                        <span>{detail.unit || detail.constructionMaterial.unit || '—'}</span>
                       </div>
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
