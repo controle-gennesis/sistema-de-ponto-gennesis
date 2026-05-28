@@ -1,40 +1,145 @@
+import { Prisma } from '@prisma/client';
 import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 
-export class ConstructionMaterialController {
-  private buildMaterialData(body: any) {
-    const {
-      name,
-      sinapiCode,
-      description,
-      unit,
-      isActive,
-      category,
-      dimensions,
-      productImageUrl,
-      productImageName
-    } = body;
+const materialInclude = {
+  budgetNature: {
+    select: { id: true, code: true, name: true }
+  }
+} as const;
 
-    const descTrim = description?.trim() || '';
-    const materialName =
-      ((name || sinapiCode)?.trim() || (descTrim ? descTrim.slice(0, 255) : '')).toUpperCase();
+export class ConstructionMaterialController {
+  private mapMaterial(material: any) {
+    return {
+      ...material,
+      sinapiCode: material.code || material.name
+    };
+  }
+
+  private normalizeText(value: unknown): string | null {
+    if (value === undefined || value === null) return null;
+    const trimmed = String(value).trim();
+    return trimmed || null;
+  }
+
+  private normalizeProductType(value: unknown): 'Produto' | 'Serviço' | null {
+    const raw = this.normalizeText(value);
+    if (!raw) return null;
+    const lower = raw.toLowerCase();
+    if (lower === 'produto' || lower === 'product') return 'Produto';
+    if (lower === 'serviço' || lower === 'servico' || lower === 'service') return 'Serviço';
+    throw createError('Tipo do produto deve ser Produto ou Serviço', 400);
+  }
+
+  private resolveProductType(body: any): 'Produto' | 'Serviço' | null {
+    const candidates = [
+      body.productType,
+      body.tipoDoProduto,
+      body.tipo_produto,
+      body.category
+    ];
+    for (const candidate of candidates) {
+      const text = this.normalizeText(candidate);
+      if (!text) continue;
+      return this.normalizeProductType(text);
+    }
+    return null;
+  }
+
+  private async resolveBudgetNatureId(
+    input: {
+      budgetNatureId?: string | null;
+      budgetNatureCode?: string | null;
+      naturezaOrcamentaria?: string | null;
+    },
+    options?: { lenient?: boolean }
+  ): Promise<string | null> {
+    const id = this.normalizeText(input.budgetNatureId);
+    if (id) {
+      const byId = await prisma.budgetNature.findUnique({ where: { id } });
+      if (!byId) throw createError('Natureza orçamentária não encontrada', 400);
+      return byId.id;
+    }
+
+    const code = this.normalizeText(input.budgetNatureCode);
+    if (code) {
+      const byCode = await prisma.budgetNature.findUnique({ where: { code } });
+      if (!byCode) throw createError(`Natureza orçamentária com código "${code}" não encontrada`, 400);
+      return byCode.id;
+    }
+
+    const label = this.normalizeText(input.naturezaOrcamentaria);
+    if (!label || /^sem natureza$/i.test(label)) return null;
+
+    const byCode = await prisma.budgetNature.findUnique({ where: { code: label } });
+    if (byCode) return byCode.id;
+
+    const byName = await prisma.budgetNature.findFirst({
+      where: { name: { equals: label, mode: 'insensitive' } }
+    });
+    if (byName) return byName.id;
+
+    const byNameContains = await prisma.budgetNature.findFirst({
+      where: { name: { contains: label, mode: 'insensitive' } }
+    });
+    if (byNameContains) return byNameContains.id;
+
+    const codeNameMatch = label.match(/^([^-–]+)\s*[-–]\s*(.+)$/);
+    if (codeNameMatch) {
+      const parsedCode = codeNameMatch[1].trim();
+      const parsedName = codeNameMatch[2].trim();
+      const byParsedCode = parsedCode
+        ? await prisma.budgetNature.findUnique({ where: { code: parsedCode } })
+        : null;
+      if (byParsedCode) return byParsedCode.id;
+      const byParsedName = await prisma.budgetNature.findFirst({
+        where: { name: { equals: parsedName, mode: 'insensitive' } }
+      });
+      if (byParsedName) return byParsedName.id;
+    }
+
+    if (options?.lenient) return null;
+
+    throw createError(`Natureza orçamentária "${label}" não encontrada`, 400);
+  }
+
+  private buildMaterialData(body: any) {
+    const code =
+      this.normalizeMaterialCode(body.code) ||
+      this.normalizeMaterialCode(body.sinapiCode) ||
+      this.normalizeMaterialCode(body.codigo);
+    const name =
+      this.normalizeText(body.name) ||
+      this.normalizeText(body.nome);
+    const productType = this.resolveProductType(body);
+    const description =
+      this.normalizeText(body.description) ||
+      this.normalizeText(body.descricao) ||
+      this.normalizeText(body.descricaoDoProduto);
+    const unit =
+      this.normalizeText(body.unit) ||
+      this.normalizeText(body.unidade) ||
+      this.normalizeText(body.unidadeDeMedida);
 
     return {
-      materialName,
-      descTrim,
-      unitTrim: unit?.trim(),
-      fullData: {
-        name: materialName,
-        description: descTrim,
-        unit: unit?.trim(),
-        category: category?.trim() || null,
-        dimensions: dimensions?.trim() || null,
-        productImageUrl: productImageUrl?.trim() || null,
-        productImageName: productImageName?.trim() || null,
-        isActive: isActive !== undefined ? Boolean(isActive) : true
-      } as any
+      code,
+      name,
+      productType,
+      description,
+      unit,
+      budgetNatureId: this.normalizeText(body.budgetNatureId),
+      budgetNatureCode:
+        this.normalizeText(body.budgetNatureCode) ||
+        this.normalizeText(body.naturezaOrcamentariaCode),
+      naturezaOrcamentaria:
+        this.normalizeText(body.naturezaOrcamentaria) ||
+        this.normalizeText(body.budgetNatureName),
+      isActive: body.isActive !== undefined ? Boolean(body.isActive) : true,
+      dimensions: this.normalizeText(body.dimensions),
+      productImageUrl: this.normalizeText(body.productImageUrl),
+      productImageName: this.normalizeText(body.productImageName)
     };
   }
 
@@ -44,51 +149,165 @@ export class ConstructionMaterialController {
     return error.name === 'PrismaClientValidationError' && /Unknown argument|Argument .+ is missing/i.test(msg);
   }
 
-  /**
-   * Listar todos os materiais de construção
-   */
+  private normalizeMaterialCode(value: unknown): string | null {
+    const raw = this.normalizeText(value);
+    if (!raw) return null;
+    if (/^\d+$/.test(raw)) return String(parseInt(raw, 10));
+    const matMatch = raw.match(/^MAT-(\d+)$/i);
+    if (matMatch) return String(parseInt(matMatch[1], 10));
+    return raw;
+  }
+
+  private parseNumericCodeValue(code: string): number | null {
+    const trimmed = code.trim();
+    if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+    const matMatch = trimmed.match(/^MAT-(\d+)$/i);
+    if (matMatch) return parseInt(matMatch[1], 10);
+    return null;
+  }
+
+  /** Reserva N códigos numéricos sequenciais em uma única consulta. */
+  private async reserveMaterialCodes(count: number): Promise<string[]> {
+    if (count <= 0) return [];
+
+    const result = await prisma.$queryRaw<Array<{ max: number | null }>>`
+      SELECT MAX(
+        CASE
+          WHEN code ~ '^[0-9]+$' THEN CAST(code AS INTEGER)
+          WHEN code ~* '^MAT-[0-9]+$' THEN CAST(SUBSTRING(code FROM 5) AS INTEGER)
+        END
+      ) AS max
+      FROM construction_materials
+    `;
+
+    let start = Number(result[0]?.max ?? 0);
+    const codes: string[] = [];
+    for (let i = 0; i < count; i++) {
+      start += 1;
+      codes.push(String(start));
+    }
+    return codes;
+  }
+
+  /** Gera código sequencial numérico: 1, 2, 3, ... */
+  private async generateNextMaterialCode(): Promise<string> {
+    const [code] = await this.reserveMaterialCodes(1);
+    if (!code) throw createError('Não foi possível gerar o código do material', 500);
+    return code;
+  }
+
+  private buildMaterialsWhereSql(search?: string, isActive?: string): Prisma.Sql {
+    const parts: Prisma.Sql[] = [Prisma.sql`TRUE`];
+
+    if (search) {
+      const term = `%${search}%`;
+      parts.push(Prisma.sql`(
+        cm.code ILIKE ${term}
+        OR cm.name ILIKE ${term}
+        OR cm.description ILIKE ${term}
+        OR cm.unit ILIKE ${term}
+        OR cm."productType" ILIKE ${term}
+        OR cm.category ILIKE ${term}
+        OR bn.name ILIKE ${term}
+        OR bn.code ILIKE ${term}
+      )`);
+    }
+
+    if (isActive !== undefined) {
+      parts.push(Prisma.sql`cm."isActive" = ${isActive === 'true'}`);
+    }
+
+    return Prisma.join(parts, ' AND ');
+  }
+
+  private async syncEngineeringMaterial(material: {
+    id: string;
+    name: string;
+    description: string | null;
+    unit: string;
+    isActive: boolean;
+  }) {
+    const sinapiCode = `CM-${material.id}`;
+    const engName = material.name;
+    const engDescription = material.description || material.name;
+
+    const existing = await prisma.engineeringMaterial.findUnique({
+      where: { sinapiCode }
+    });
+
+    if (existing) {
+      await prisma.engineeringMaterial.update({
+        where: { sinapiCode },
+        data: {
+          name: engName,
+          description: engDescription,
+          unit: material.unit,
+          isActive: material.isActive
+        }
+      });
+      return;
+    }
+
+    await prisma.engineeringMaterial.create({
+      data: {
+        sinapiCode,
+        name: engName,
+        description: engDescription,
+        unit: material.unit,
+        isActive: material.isActive
+      }
+    });
+  }
+
   async getAllMaterials(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { search, isActive, page = 1, limit = 20 } = req.query;
 
-      const where: any = {};
-
-      if (search) {
-        where.OR = [
-          { name: { contains: search as string, mode: 'insensitive' } },
-          { description: { contains: search as string, mode: 'insensitive' } },
-          { unit: { contains: search as string, mode: 'insensitive' } },
-          { category: { contains: search as string, mode: 'insensitive' } }
-        ];
-      }
-
-      if (isActive !== undefined) {
-        where.isActive = isActive === 'true';
-      }
-
-      // Limitar o máximo de registros por página
       const limitNum = Math.min(Number(limit), 100);
       const skip = (Number(page) - 1) * limitNum;
+      const searchTerm = search ? String(search) : undefined;
+      const activeFilter = isActive !== undefined ? String(isActive) : undefined;
+      const whereSql = this.buildMaterialsWhereSql(searchTerm, activeFilter);
 
-      const [materials, total] = await Promise.all([
-        prisma.constructionMaterial.findMany({
-          where,
-          skip,
-          take: limitNum,
-          orderBy: { name: 'asc' }
-        }),
-        prisma.constructionMaterial.count({ where })
+      const [idRows, countRows] = await Promise.all([
+        prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT cm.id
+          FROM construction_materials cm
+          LEFT JOIN budget_natures bn ON bn.id = cm."budgetNatureId"
+          WHERE ${whereSql}
+          ORDER BY
+            CASE WHEN cm.code ~ '^[0-9]+$' THEN 0 ELSE 1 END,
+            CASE WHEN cm.code ~ '^[0-9]+$' THEN CAST(cm.code AS INTEGER) END ASC NULLS LAST,
+            cm.code ASC NULLS LAST,
+            cm.name ASC
+          LIMIT ${limitNum} OFFSET ${skip}
+        `,
+        prisma.$queryRaw<Array<{ count: bigint }>>`
+          SELECT COUNT(*)::bigint AS count
+          FROM construction_materials cm
+          LEFT JOIN budget_natures bn ON bn.id = cm."budgetNatureId"
+          WHERE ${whereSql}
+        `
       ]);
 
-      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
-      const mappedMaterials = materials.map(m => ({
-        ...m,
-        sinapiCode: m.name
-      }));
+      const total = Number(countRows[0]?.count ?? 0);
+      const ids = idRows.map((row) => row.id);
+
+      let materials: Awaited<ReturnType<typeof prisma.constructionMaterial.findMany>> = [];
+      if (ids.length > 0) {
+        const rows = await prisma.constructionMaterial.findMany({
+          where: { id: { in: ids } },
+          include: materialInclude
+        });
+        const byId = new Map(rows.map((material) => [material.id, material]));
+        materials = ids
+          .map((id) => byId.get(id))
+          .filter((material): material is NonNullable<typeof material> => !!material);
+      }
 
       res.json({
         success: true,
-        data: mappedMaterials,
+        data: materials.map((m) => this.mapMaterial(m)),
         pagination: {
           page: Number(page),
           limit: limitNum,
@@ -101,67 +320,70 @@ export class ConstructionMaterialController {
     }
   }
 
-  /**
-   * Obter material por ID
-   */
   async getMaterialById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
 
       const material = await prisma.constructionMaterial.findUnique({
-        where: { id }
+        where: { id },
+        include: materialInclude
       });
 
       if (!material) {
         throw createError('Material não encontrado', 404);
       }
 
-      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
-      const mappedMaterial = {
-        ...material,
-        sinapiCode: material.name
-      };
-
       res.json({
         success: true,
-        data: mappedMaterial
+        data: this.mapMaterial(material)
       });
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * Criar novo material
-   */
   async createMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      console.log('📦 Dados recebidos para criar material:', req.body);
-      
-      const { materialName, descTrim, unitTrim, fullData } = this.buildMaterialData(req.body);
+      const parsed = this.buildMaterialData(req.body);
 
-      // Validar campos obrigatórios
-      if (!materialName) {
-        throw createError('Descrição é obrigatória', 400);
+      if (!parsed.name) {
+        throw createError('Nome é obrigatório', 400);
       }
 
-      if (!unitTrim) {
+      if (!parsed.unit) {
         throw createError('Unidade de medida é obrigatória', 400);
       }
 
-      if (!descTrim) {
-        throw createError('Descrição é obrigatória', 400);
+      if (!parsed.productType) {
+        throw createError('Tipo do produto é obrigatório (Produto ou Serviço)', 400);
       }
 
-      console.log('✅ Validação passou. Criando material com:', fullData);
+      const displayName = parsed.name;
+      const productCode = await this.generateNextMaterialCode();
+
+      const budgetNatureId = await this.resolveBudgetNatureId(parsed);
+
+      const fullData = {
+        code: productCode,
+        name: displayName,
+        productType: parsed.productType,
+        description: parsed.description,
+        unit: parsed.unit!,
+        budgetNatureId,
+        category: parsed.productType,
+        dimensions: parsed.dimensions,
+        productImageUrl: parsed.productImageUrl,
+        productImageName: parsed.productImageName,
+        isActive: parsed.isActive
+      };
 
       let material: any;
       try {
         material = await prisma.constructionMaterial.create({
-          data: fullData
+          data: fullData,
+          include: materialInclude
         });
       } catch (error: any) {
-        // Fallback: se o banco/cliente ainda não tiver as novas colunas, salva os campos legados.
         if (!this.isUnknownFieldPrismaError(error)) throw error;
 
         material = await prisma.constructionMaterial.create({
@@ -169,84 +391,37 @@ export class ConstructionMaterialController {
             name: fullData.name,
             description: fullData.description,
             unit: fullData.unit,
+            category: fullData.productType,
             isActive: fullData.isActive
           }
         });
       }
 
-      // Criar correspondente em EngineeringMaterial para aparecer em Solicitar Materiais
       try {
-        await prisma.engineeringMaterial.create({
-          data: {
-            sinapiCode: `CM-${material.id}`,
-            name: material.name,
-            description: material.description || material.name,
-            unit: material.unit,
-            isActive: material.isActive
-          }
-        });
+        await this.syncEngineeringMaterial(material);
       } catch (engErr) {
         console.warn('Aviso: material criado mas falha ao sincronizar com EngineeringMaterial:', engErr);
       }
 
-      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
-      const mappedMaterial = {
-        ...material,
-        sinapiCode: material.name
-      };
-
       res.status(201).json({
         success: true,
-        data: mappedMaterial,
+        data: this.mapMaterial(material),
         message: 'Material criado com sucesso'
       });
     } catch (error: any) {
-      console.error('❌ Erro ao criar material:', error);
-      
-      // Se for erro do Prisma, logar mais detalhes
-      if (error.code) {
-        console.error('Código do erro Prisma:', error.code);
-        console.error('Mensagem do erro Prisma:', error.meta);
-      }
-      
-      // Se já for um erro criado com createError, passar adiante
-      if (error.statusCode) {
-        return next(error);
-      }
-      
-      // Se for erro de validação do Prisma
-      if (error.name === 'PrismaClientValidationError') {
-        return next(createError('Dados inválidos fornecidos. Verifique os campos obrigatórios.', 400));
-      }
-      
-      // Se for erro de chave única (material já existe)
+      if (error.statusCode) return next(error);
       if (error.code === 'P2002') {
-        return next(createError('Já existe um material com este nome', 409));
+        return next(createError('Já existe um material com este código', 409));
       }
-      
       next(error);
     }
   }
 
-  /**
-   * Atualizar material
-   */
   async updateMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const {
-        name,
-        sinapiCode,
-        description,
-        unit,
-        isActive,
-        category,
-        dimensions,
-        productImageUrl,
-        productImageName
-      } = req.body;
+      const parsed = this.buildMaterialData(req.body);
 
-      // Verificar se o material existe
       const existing = await prisma.constructionMaterial.findUnique({
         where: { id }
       });
@@ -255,37 +430,48 @@ export class ConstructionMaterialController {
         throw createError('Material não encontrado', 404);
       }
 
-      const materialName = (name || sinapiCode)?.trim().toUpperCase();
+      let budgetNatureId: string | null | undefined;
+      if (req.body.budgetNatureId === '' || req.body.budgetNatureId === null) {
+        budgetNatureId = null;
+      } else if (
+        parsed.budgetNatureId ||
+        parsed.budgetNatureCode ||
+        parsed.naturezaOrcamentaria
+      ) {
+        budgetNatureId = await this.resolveBudgetNatureId(parsed);
+      }
 
       const updateData: any = {
-        ...(materialName && { name: materialName }),
-        ...(description !== undefined && {
-          description: typeof description === 'string' ? description.trim() : description
+        ...(parsed.name && { name: parsed.name }),
+        ...(parsed.productType !== null && {
+          productType: parsed.productType,
+          category: parsed.productType
         }),
-        ...(unit && { unit }),
-        ...(category !== undefined && { category: category?.trim() || null }),
-        ...(dimensions !== undefined && { dimensions: dimensions?.trim() || null }),
-        ...(productImageUrl !== undefined && { productImageUrl: productImageUrl?.trim() || null }),
-        ...(productImageName !== undefined && { productImageName: productImageName?.trim() || null }),
-        ...(isActive !== undefined && { isActive })
+        ...(parsed.description !== null && { description: parsed.description }),
+        ...(parsed.unit && { unit: parsed.unit }),
+        ...(budgetNatureId !== undefined && { budgetNatureId }),
+        ...(parsed.dimensions !== null && { dimensions: parsed.dimensions }),
+        ...(parsed.productImageUrl !== null && { productImageUrl: parsed.productImageUrl }),
+        ...(parsed.productImageName !== null && { productImageName: parsed.productImageName }),
+        ...(req.body.isActive !== undefined && { isActive: Boolean(req.body.isActive) })
       };
+
       let material: any;
       try {
         material = await prisma.constructionMaterial.update({
           where: { id },
-          data: updateData
+          data: updateData,
+          include: materialInclude
         });
       } catch (error: any) {
-        // Fallback para ambientes sem as novas colunas.
         if (!this.isUnknownFieldPrismaError(error)) throw error;
 
         const fallbackData: any = {
-          ...(materialName && { name: materialName }),
-          ...(description !== undefined && {
-            description: typeof description === 'string' ? description.trim() : description
-          }),
-          ...(unit && { unit }),
-          ...(isActive !== undefined && { isActive })
+          ...(parsed.name && { name: parsed.name }),
+          ...(parsed.description !== null && { description: parsed.description }),
+          ...(parsed.unit && { unit: parsed.unit }),
+          ...(parsed.productType !== null && { category: parsed.productType }),
+          ...(req.body.isActive !== undefined && { isActive: Boolean(req.body.isActive) })
         };
 
         material = await prisma.constructionMaterial.update({
@@ -294,15 +480,15 @@ export class ConstructionMaterialController {
         });
       }
 
-      // Mapear 'name' para 'sinapiCode' para compatibilidade com o frontend
-      const mappedMaterial = {
-        ...material,
-        sinapiCode: material.name
-      };
+      try {
+        await this.syncEngineeringMaterial(material);
+      } catch (engErr) {
+        console.warn('Aviso: falha ao sincronizar EngineeringMaterial:', engErr);
+      }
 
       res.json({
         success: true,
-        data: mappedMaterial,
+        data: this.mapMaterial(material),
         message: 'Material atualizado com sucesso'
       });
     } catch (error) {
@@ -310,14 +496,10 @@ export class ConstructionMaterialController {
     }
   }
 
-  /**
-   * Deletar material
-   */
   async deleteMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
 
-      // Verificar se o material existe
       const existing = await prisma.constructionMaterial.findUnique({
         where: { id }
       });
@@ -338,5 +520,90 @@ export class ConstructionMaterialController {
       next(error);
     }
   }
-}
 
+  async importMaterials(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { materials } = req.body;
+
+      if (!Array.isArray(materials) || materials.length === 0) {
+        throw createError('Envie um array "materials" com ao menos um item', 400);
+      }
+
+      let created = 0;
+      const errors: { index: number; message: string }[] = [];
+      const reservedCodes = await this.reserveMaterialCodes(materials.length);
+
+      for (let i = 0; i < materials.length; i++) {
+        const row = materials[i];
+        try {
+          const parsed = this.buildMaterialData(row);
+
+          if (!parsed.unit) {
+            errors.push({ index: i, message: 'Unidade de medida é obrigatória' });
+            continue;
+          }
+
+          if (!parsed.name) {
+            errors.push({ index: i, message: 'Nome é obrigatório' });
+            continue;
+          }
+
+          if (!parsed.productType) {
+            errors.push({ index: i, message: 'Tipo do produto é obrigatório (Produto ou Serviço)' });
+            continue;
+          }
+
+          const displayName = parsed.name;
+          const productCode = reservedCodes[i];
+
+          const budgetNatureId = await this.resolveBudgetNatureId(parsed, { lenient: true });
+
+          const fullData = {
+            code: productCode,
+            name: displayName,
+            productType: parsed.productType,
+            description: parsed.description,
+            unit: parsed.unit!,
+            budgetNatureId,
+            category: parsed.productType,
+            isActive: parsed.isActive
+          };
+
+          try {
+            await prisma.constructionMaterial.create({ data: fullData });
+          } catch (error: any) {
+            if (!this.isUnknownFieldPrismaError(error)) throw error;
+            await prisma.constructionMaterial.create({
+              data: {
+                name: fullData.name,
+                description: fullData.description,
+                unit: fullData.unit,
+                category: fullData.productType,
+                isActive: fullData.isActive
+              }
+            });
+          }
+
+          created += 1;
+        } catch (err: any) {
+          errors.push({
+            index: i,
+            message: err?.message || 'Erro ao importar linha'
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          created,
+          failed: errors.length,
+          errors
+        },
+        message: `Importação concluída: ${created} criado(s), ${errors.length} erro(s)`
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+}

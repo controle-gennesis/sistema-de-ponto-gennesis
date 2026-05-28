@@ -107,7 +107,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/fds-aprovadas'), name: "FD's Aprovadas", href: '/ponto/fds-aprovadas', category: 'Suprimentos' },
   // Cadastros
   { key: pathToModuleKey('/ponto/centros-custo'), name: 'Centros de Custo', href: '/ponto/centros-custo', category: 'Cadastros' },
-  { key: pathToModuleKey('/ponto/materiais-construcao'), name: 'Materiais de Construção', href: '/ponto/materiais-construcao', category: 'Cadastros' },
+  { key: pathToModuleKey('/ponto/materiais-construcao'), name: 'Materiais e Serviços', href: '/ponto/materiais-construcao', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/fornecedores'), name: 'Fornecedores', href: '/ponto/fornecedores', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/condicoes-pagamento'), name: 'Condições de Pagamento', href: '/ponto/condicoes-pagamento', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/natureza-orcamentaria'), name: 'Natureza Orçamentária', href: '/ponto/natureza-orcamentaria', category: 'Cadastros' },

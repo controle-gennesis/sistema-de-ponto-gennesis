@@ -354,7 +354,7 @@ function RmMaterialAutocomplete({
         ) : filteredMaterials.length === 0 ? (
           <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
             {materials.length === 0
-              ? 'Nenhum material ativo em Materiais de Construção.'
+              ? 'Nenhum material ativo em Materiais e Serviços.'
               : 'Nenhum material encontrado para esta busca.'}
           </p>
         ) : (
@@ -491,7 +491,7 @@ function SolicitarMateriaisPage() {
     setEditFormData((prev) => ({ ...prev, serviceOrderId: '', serviceOrder: '' }));
   };
 
-  // Materiais de Construção ativos (espelhados para a RM)
+  // Materiais e Serviços ativos (espelhados para a RM)
   const {
     data: materialsData,
     isLoading: loadingMaterials,

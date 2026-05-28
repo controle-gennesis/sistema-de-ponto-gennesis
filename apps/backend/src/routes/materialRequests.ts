@@ -54,7 +54,7 @@ const itemAttachmentUpload = multer({
 router.use(authenticate);
 
 // Endpoint auxiliar para listar materiais da RM (deve vir antes de /:id)
-// Somente Materiais de Construção (cadastro em /ponto/materiais-construcao); cada um tem espelho em EngineeringMaterial (sinapiCode CM-*)
+// Somente Materiais e Serviços (cadastro em /ponto/materiais-construcao); cada um tem espelho em EngineeringMaterial (sinapiCode CM-*)
 router.get('/materials', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const data = await materialRequestService.listConstructionMaterialsForRmDropdown();

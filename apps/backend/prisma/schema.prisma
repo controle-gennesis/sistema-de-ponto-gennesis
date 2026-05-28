@@ -1821,6 +1821,8 @@ model BudgetNature {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  constructionMaterials ConstructionMaterial[]
+
   @@index([code])
   @@index([isActive])
   @@map("budget_natures")
@@ -1904,13 +1906,17 @@ model PriceHistory {
 // Modelo de Material de Construção Civil
 model ConstructionMaterial {
   id               String   @id @default(cuid())
-  name             String // Nome do material
-  description      String? // Descrição do material
-  category         String? // Categoria (Elétrica, Hidráulica, etc.)
+  code             String? // Código do produto
+  name             String // Nome do produto
+  productType      String? // Tipo do produto
+  description      String? // Descrição do produto
+  category         String? // Legado (categoria antiga)
   dimensions       String? // Dimensões do material
   productImageUrl  String? // URL da imagem do produto
   productImageName String? // Nome original do arquivo da imagem
   unit             String // Unidade de medida (kg, m, m², un, etc.)
+  budgetNatureId   String?
+  budgetNature     BudgetNature? @relation(fields: [budgetNatureId], references: [id], onDelete: SetNull)
   isActive         Boolean  @default(true) // Se está ativo
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -1918,7 +1924,9 @@ model ConstructionMaterial {
   stockMovements  StockMovement[]
   stockShortfalls StockShortfall[]
 
+  @@index([code])
   @@index([name])
+  @@index([budgetNatureId])
   @@index([isActive])
   @@map("construction_materials")
 }

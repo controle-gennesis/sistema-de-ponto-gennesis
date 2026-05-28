@@ -1,14 +1,15 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CreditCard, Plus, Edit, Trash2, Search, X, MoreVertical } from 'lucide-react';
-
-const ROW_ACTION_MENU_WIDTH_PX = 224;
-const ITEMS_PER_PAGE = 20;
+import { CreditCard, Plus, Search, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+
+const ITEMS_PER_PAGE = 20;
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -26,11 +27,6 @@ export default function CondicoesPagamentoPage() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowActionMenu, setRowActionMenu] = useState<{
-    rowId: string;
-    top: number;
-    left: number;
-  } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<PaymentConditionRow | null>(null);
   const [formLabel, setFormLabel] = useState('');
@@ -87,9 +83,14 @@ export default function CondicoesPagamentoPage() {
   const endItem = Math.min(endIndex, totalFiltered);
   const isListEmpty = !isLoading && totalFiltered === 0;
 
-  const rowForActionMenu = rowActionMenu
-    ? filtered.find((r) => r.id === rowActionMenu.rowId) ?? null
-    : null;
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen,
+    setRowActionMenu
+  } = useRowActionMenu(filtered);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -100,21 +101,6 @@ export default function CondicoesPagamentoPage() {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
-
-  useEffect(() => {
-    if (!rowActionMenu) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setRowActionMenu(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [rowActionMenu]);
-
-  useEffect(() => {
-    if (rowActionMenu && !filtered.some((r) => r.id === rowActionMenu.rowId)) {
-      setRowActionMenu(null);
-    }
-  }, [rowActionMenu, filtered]);
 
   const modalOpen = showForm || deleteId != null;
 
@@ -239,10 +225,10 @@ export default function CondicoesPagamentoPage() {
             </p>
           </div>
 
-          <Card className="w-full">
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center space-x-3">
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
                   <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
                     <CreditCard className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
@@ -255,7 +241,7 @@ export default function CondicoesPagamentoPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                <div className={cadastroListClasses.cardToolbar}>
                   <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
@@ -291,61 +277,42 @@ export default function CondicoesPagamentoPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className={cadastroListClasses.cardContent}>
               {isLoading ? (
-                <div className="py-8 text-center">
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="loading-spinner h-6 w-6" />
-                    <span className="text-gray-600 dark:text-gray-400">Carregando condições...</span>
-                  </div>
-                </div>
+                <CadastroListLoading message="Carregando condições..." />
               ) : isListEmpty ? (
-                <div className="py-8 text-center">
-                  <CreditCard className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
-                  <p className="text-gray-600 dark:text-gray-400">Nenhuma condição de pagamento encontrada</p>
-                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
-                    {searchTerm.trim() ? 'Tente ajustar a busca' : 'Cadastre uma nova condição para começar'}
-                  </p>
-                </div>
+                <CadastroListEmpty
+                  icon={CreditCard}
+                  title="Nenhuma condição de pagamento encontrada"
+                  hint={
+                    searchTerm.trim()
+                      ? 'Tente ajustar a busca'
+                      : 'Cadastre uma nova condição para começar'
+                  }
+                />
               ) : (
               <>
-                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                  <span>
-                    Mostrando {startItem} a {endItem} de {totalFiltered}{' '}
-                    {totalFiltered === 1 ? 'condição' : 'condições'}
-                  </span>
-                  <span>
-                    Página {currentPage} de {totalPages}
-                  </span>
-                </div>
+                <CadastroListSummary
+                  startItem={startItem}
+                  endItem={endItem}
+                  total={totalFiltered}
+                  itemLabel="condição"
+                  itemLabelPlural="condições"
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                />
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Nome
-                        </th>
-                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Parcelas / prazos
-                        </th>
-                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Código
-                        </th>
-                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Tipo
-                        </th>
-                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Ordem
-                        </th>
-                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Ativo
-                        </th>
-                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Sistema
-                        </th>
-                        <th className="px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                          Ação
-                        </th>
+                        <th className={cadastroListClasses.th}>Nome</th>
+                        <th className={cadastroListClasses.th}>Parcelas / prazos</th>
+                        <th className={cadastroListClasses.th}>Código</th>
+                        <th className={cadastroListClasses.th}>Tipo</th>
+                        <th className={cadastroListClasses.th}>Ordem</th>
+                        <th className={cadastroListClasses.thCenter}>Ativo</th>
+                        <th className={cadastroListClasses.thCenter}>Sistema</th>
+                        <th className={cadastroListClasses.thRight}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -373,32 +340,12 @@ export default function CondicoesPagamentoPage() {
                           <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                             {r.isSystem ? 'Sim' : 'Não'}
                           </td>
-                          <td className="px-3 py-4 text-right sm:px-6">
-                            <div className="flex justify-end">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                  setRowActionMenu((prev) => {
-                                    if (prev?.rowId === r.id) return null;
-                                    let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
-                                    left = Math.max(
-                                      8,
-                                      Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8)
-                                    );
-                                    return { rowId: r.id, top: rect.bottom + 4, left };
-                                  });
-                                }}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                                aria-label="Menu de ações"
-                                aria-expanded={rowActionMenu?.rowId === r.id}
-                                aria-haspopup="menu"
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
+                          <RowActionMenuCell
+                            isOpen={isRowMenuOpen(r.id)}
+                            onToggle={(e) =>
+                              toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                            }
+                          />
                         </tr>
                       ))}
                     </tbody>
@@ -406,7 +353,7 @@ export default function CondicoesPagamentoPage() {
                 </div>
 
                 {totalPages > 1 && (
-                  <div className="mt-6 flex items-center justify-center space-x-2">
+                  <div className={cadastroListClasses.pagination}>
                     <button
                       type="button"
                       onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -444,70 +391,22 @@ export default function CondicoesPagamentoPage() {
                   </div>
                 )}
 
-                {rowActionMenu &&
-                  rowForActionMenu &&
-                  typeof document !== 'undefined' &&
-                  createPortal(
-                    <>
-                      <div
-                        className="fixed inset-0 z-[1050]"
-                        aria-hidden
-                        onClick={() => setRowActionMenu(null)}
-                      />
-                      <div
-                        role="menu"
-                        className="fixed z-[1051] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                        style={{ top: rowActionMenu.top, left: rowActionMenu.left }}
-                      >
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRowActionMenu(null);
-                            openEdit(rowForActionMenu);
-                          }}
-                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                          <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                          <span>Editar</span>
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRowActionMenu(null);
-                            if (rowForActionMenu.isSystem) {
-                              toast.error('Condição padrão do sistema não pode ser excluída.');
-                              return;
-                            }
-                            setDeleteId(rowForActionMenu.id);
-                          }}
-                          className={`flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
-                            rowForActionMenu.isSystem
-                              ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-                              : 'text-gray-700 dark:text-gray-300'
-                          }`}
-                          title={
-                            rowForActionMenu.isSystem
-                              ? 'Condição do sistema não pode ser excluída'
-                              : 'Excluir condição'
-                          }
-                        >
-                          <Trash2
-                            className={`h-4 w-4 shrink-0 ${
-                              rowForActionMenu.isSystem
-                                ? 'text-gray-400 dark:text-gray-500'
-                                : 'text-red-600 dark:text-red-400'
-                            }`}
-                          />
-                          <span>Excluir</span>
-                        </button>
-                      </div>
-                    </>,
-                    document.body
-                  )}
+                {rowActionMenu && rowForActionMenu && (
+                  <RowActionMenuPortal
+                    menu={rowActionMenu}
+                    onClose={closeRowActionMenu}
+                    onEdit={() => openEdit(rowForActionMenu)}
+                    onDelete={() => {
+                      if (rowForActionMenu.isSystem) {
+                        toast.error('Condição padrão do sistema não pode ser excluída.');
+                        return;
+                      }
+                      setDeleteId(rowForActionMenu.id);
+                    }}
+                    deleteDisabled={rowForActionMenu.isSystem}
+                    deleteDisabledTitle="Condição do sistema não pode ser excluída"
+                  />
+                )}
               </>
               )}
             </CardContent>

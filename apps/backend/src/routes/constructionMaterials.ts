@@ -59,6 +59,11 @@ router.post('/upload-image', (req, res, next) => {
   }
 });
 
+// Importar materiais em lote (JSON)
+router.post('/import', (req, res, next) =>
+  constructionMaterialController.importMaterials(req, res, next)
+);
+
 // Listar todos os materiais
 router.get('/', (req, res, next) => 
   constructionMaterialController.getAllMaterials(req, res, next)

@@ -3,96 +3,371 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Package, Plus, Edit, Trash2, Search, X, Check, AlertCircle, Upload, Download, Filter } from 'lucide-react';
+import {
+  Package,
+  Plus,
+  Search,
+  X,
+  Check,
+  AlertCircle,
+  Upload,
+  Download,
+  Filter,
+  FileSpreadsheet,
+  CheckCircle
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange
+} from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
+import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
+
+type ProductTypeKind = 'Produto' | 'Serviço' | '';
+
+type MaterialFormState = {
+  name: string;
+  productType: ProductTypeKind;
+  description: string;
+  unit: string;
+  budgetNatureId: string;
+  isActive: boolean;
+};
+
+const PRODUCT_TYPES = ['Produto', 'Serviço'] as const;
+
+function normalizeProductType(value?: string | null): ProductTypeKind {
+  const v = (value || '').trim().toLowerCase();
+  if (v === 'produto' || v === 'product') return 'Produto';
+  if (v === 'serviço' || v === 'servico' || v === 'service') return 'Serviço';
+  return '';
+}
+
+function normalizeHeaderKey(header: string): string {
+  return header
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function pickRowValue(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const val = row[key];
+    if (val !== null && val !== undefined && String(val).trim() !== '') {
+      return String(val).trim();
+    }
+  }
+  const normalized = new Map(
+    Object.entries(row).map(([k, v]) => [normalizeHeaderKey(k), v])
+  );
+  for (const key of keys) {
+    const val = normalized.get(normalizeHeaderKey(key));
+    if (val !== null && val !== undefined && String(val).trim() !== '') {
+      return String(val).trim();
+    }
+  }
+  return '';
+}
+
+/** Busca valor quando o cabeçalho da planilha varia (ex.: "Nome Fantasia", "Unidade de Controle"). */
+function pickRowValueByPatterns(
+  row: Record<string, unknown>,
+  explicitKeys: string[],
+  headerPatterns: RegExp[]
+): string {
+  const direct = pickRowValue(row, ...explicitKeys);
+  if (direct) return direct;
+
+  for (const [header, value] of Object.entries(row)) {
+    if (value === null || value === undefined || String(value).trim() === '') continue;
+    const normalizedHeader = normalizeHeaderKey(header);
+    if (headerPatterns.some((pattern) => pattern.test(normalizedHeader))) {
+      return String(value).trim();
+    }
+  }
+  return '';
+}
+
+function analyzeImportRow(
+  row: Record<string, unknown>,
+  lineNumber: number
+): {
+  material: Record<string, unknown> | null;
+  skipReasons: string[];
+  preview: string;
+} {
+  const isEmptyRow = Object.values(row).every(
+    (value) => value === null || value === undefined || String(value).trim() === ''
+  );
+  if (isEmptyRow) {
+    return { material: null, skipReasons: ['Linha vazia'], preview: `Linha ${lineNumber}` };
+  }
+
+  const name = pickRowValueByPatterns(
+    row,
+    ['Nome', 'Name', 'nome', 'name', 'Nome Fantasia', 'Nome fantasia'],
+    [/^nome(\s|$)/, /^name$/]
+  );
+  const productTypeRaw = pickRowValueByPatterns(
+    row,
+    [
+      'Tipo do Produto',
+      'Tipo do produto',
+      'Tipo',
+      'tipo',
+      'productType',
+      'Categoria',
+      'categoria'
+    ],
+    [/^tipo(\s|$)/, /^tipodoproduto/, /^categoria$/]
+  );
+  const productType = normalizeProductType(productTypeRaw);
+  const description = pickRowValueByPatterns(
+    row,
+    [
+      'Descrição do Produto',
+      'Descricao do Produto',
+      'Descrição',
+      'Descricao',
+      'description',
+      'descricao'
+    ],
+    [/^descricao/, /^description$/]
+  );
+  const unit = pickRowValueByPatterns(
+    row,
+    [
+      'Unidade de Medida',
+      'Unidade de Controle',
+      'Unidade',
+      'unit',
+      'unidade',
+      'unidade de medida',
+      'unidade de controle'
+    ],
+    [/^unidade(\s|$)/, /^unit$/]
+  );
+  let naturezaOrcamentaria = pickRowValueByPatterns(
+    row,
+    [
+      'Natureza Orçamentária',
+      'Natureza Orcamentaria',
+      'Natureza',
+      'naturezaOrcamentaria',
+      'natureza orcamentaria'
+    ],
+    [/^natureza(\s|$)/]
+  );
+  if (/^sem natureza$/i.test(naturezaOrcamentaria)) {
+    naturezaOrcamentaria = '';
+  }
+  const ativoRaw = pickRowValue(row, 'Ativo', 'ativo', 'isActive');
+
+  const skipReasons: string[] = [];
+  if (!name) skipReasons.push('Nome em branco');
+  if (!unit) skipReasons.push('Unidade em branco');
+  if (!productType) {
+    if (productTypeRaw) {
+      skipReasons.push(`Tipo inválido: "${productTypeRaw}" (use Produto ou Serviço)`);
+    } else {
+      skipReasons.push('Tipo do Produto em branco');
+    }
+  }
+
+  const preview = name || productTypeRaw || description || `Linha ${lineNumber}`;
+
+  if (skipReasons.length > 0) {
+    return { material: null, skipReasons, preview };
+  }
+
+  return {
+    material: {
+      name,
+      productType,
+      description: description || undefined,
+      unit,
+      naturezaOrcamentaria: naturezaOrcamentaria || undefined,
+      isActive:
+        ativoRaw === ''
+          ? true
+          : ['true', '1', 'sim', 's', 'ativo', 'yes'].includes(ativoRaw.toLowerCase())
+    },
+    skipReasons: [],
+    preview
+  };
+}
+
+function mapRowToImportMaterial(row: Record<string, unknown>): Record<string, unknown> | null {
+  return analyzeImportRow(row, 0).material;
+}
+
+type ImportParseReport = {
+  materials: Record<string, unknown>[];
+  skipped: Array<{ line: number; reasons: string[]; preview: string }>;
+  totalRows: number;
+};
+
+function buildImportParseReport(rows: Record<string, unknown>[]): ImportParseReport {
+  const materials: Record<string, unknown>[] = [];
+  const skipped: ImportParseReport['skipped'] = [];
+
+  rows.forEach((row, index) => {
+    const lineNumber = index + 2;
+    const result = analyzeImportRow(row, lineNumber);
+    if (result.material) {
+      materials.push(result.material);
+    } else {
+      skipped.push({
+        line: lineNumber,
+        reasons: result.skipReasons,
+        preview: result.preview
+      });
+    }
+  });
+
+  return { materials, skipped, totalRows: rows.length };
+}
+
+function parseCsvMaterials(text: string): Record<string, unknown>[] {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+
+  const delimiter = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
+  const headers = lines[0].split(delimiter).map((h) => normalizeHeaderKey(h));
+
+  const materials: Record<string, unknown>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(delimiter).map((v) => v.trim().replace(/^"|"$/g, ''));
+    const row: Record<string, unknown> = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] ?? '';
+    });
+    const material = mapRowToImportMaterial(row);
+    if (material) materials.push(material);
+  }
+  return materials;
+}
+
+async function parseMaterialsFromFile(file: File): Promise<ImportParseReport> {
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
+  if (ext === 'xlsx' || ext === 'xls') {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return { materials: [], skipped: [], totalRows: 0 };
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+      defval: null
+    });
+    return buildImportParseReport(rows);
+  }
+
+  if (ext === 'csv') {
+    const materials = parseCsvMaterials(await file.text());
+    return {
+      materials,
+      skipped: [],
+      totalRows: materials.length
+    };
+  }
+
+  if (ext === 'json') {
+    const parsed = JSON.parse(await file.text());
+    if (!Array.isArray(parsed)) {
+      throw new Error('O JSON deve ser um array de materiais');
+    }
+    return buildImportParseReport(parsed);
+  }
+
+  throw new Error('Formato não suportado. Use planilha Excel (.xlsx, .xls), CSV ou JSON.');
+}
+
+interface BudgetNatureOption {
+  id: string;
+  code?: string | null;
+  name: string;
+}
 
 interface ConstructionMaterial {
   id: string;
+  code?: string | null;
   name: string;
   sinapiCode?: string;
-  description: string;
+  productType?: string | null;
+  description?: string | null;
   unit: string;
+  budgetNatureId?: string | null;
+  budgetNature?: BudgetNatureOption | null;
   category?: string;
-  dimensions?: string;
-  productImageUrl?: string;
-  productImageName?: string;
-  medianPrice?: number | string;
-  state?: string;
-  referenceMonth?: number;
-  referenceYear?: number;
-  categoryId?: string;
-  costCenterId?: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+function formatBudgetNatureLabel(bn?: BudgetNatureOption | null): string {
+  if (!bn) return '-';
+  return bn.name;
+}
+
+/** Unidades mais usadas em materiais e serviços de construção. */
+const DEFAULT_MATERIAL_UNITS = [
+  'un',
+  'pç',
+  'pc',
+  'cx',
+  'sc',
+  'rl',
+  'kg',
+  'g',
+  't',
+  'm',
+  'm²',
+  'm³',
+  'cm',
+  'mm',
+  'L',
+  'ml',
+  'h',
+  'dia',
+  'mês',
+  'vb',
+  '%',
+  'gl',
+  'lt',
+  'serviço'
+];
+
+const UNIT_OTHER_VALUE = '__other__';
+
+const IMPORT_FILE_ID = 'materiais-import-file';
+const IMPORT_BATCH_SIZE = 100;
+const EXPORT_PAGE_SIZE = 100;
+const IMPORT_REQUEST_TIMEOUT_MS = 120_000;
+
+const IMPORT_COLUMNS = [
+  { name: 'Nome / Nome Fantasia', required: true },
+  { name: 'Tipo do Produto', required: true, hint: 'Produto ou Serviço' },
+  { name: 'Descrição do Produto', required: false },
+  { name: 'Unidade de Medida / Unidade de Controle', required: true },
+  { name: 'Natureza Orçamentária', required: false, hint: 'Sem Natureza = vazio' },
+  { name: 'Ativo', required: false, hint: 'Sim / Não' }
+] as const;
+
 export default function MateriaisConstrucaoPage() {
   const CUSTOM_UNITS_STORAGE_KEY = 'construction-material-custom-units';
-
-  const siUnits = [
-    'm',
-    'kg',
-    's',
-    'A',
-    'K',
-    'mol',
-    'cd',
-    'm²',
-    'm³',
-    'm/s',
-    'm/s²',
-    'kg/m³',
-    'N',
-    'Pa',
-    'J',
-    'W',
-    'Hz',
-    'C',
-    'V',
-    'Ω',
-    'S',
-    'F',
-    'H',
-    'Wb',
-    'T',
-    'lm',
-    'lx',
-    'Bq',
-    'Gy',
-    'Sv',
-    'kat'
-  ];
-
-  const materialCategories = [
-    'ACABAMENTO',
-    'ADMINISTRATIVO',
-    'ALVENARIA',
-    'COBERTURA',
-    'COMUNICAÇÃO VISUAL',
-    'ELÉTRICA',
-    'EPI',
-    'FERRAMENTAS',
-    'GASES MEDICINAIS',
-    'HIDRÁULICA',
-    'IMPERMEABILIZAÇÃO',
-    'INCÊNDIO',
-    'MARCENARIA',
-    'MARMORARIA',
-    'MATERIAL DE EXPEDIENTE',
-    'PAISAGISMO',
-    'PINTURA',
-    'REFRIGERAÇÃO',
-    'SERRALHERIA',
-    'TELECOMUNICAÇÕES',
-    'VIDRAÇARIA'
-  ];
 
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -101,25 +376,38 @@ export default function MateriaisConstrucaoPage() {
   const [itemsPerPage, setItemsPerPage] = useState(20);
   const [showForm, setShowForm] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<ConstructionMaterial | null>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<MaterialFormState>({
     name: '',
+    productType: '',
     description: '',
-    category: '',
-    dimensions: '',
-    productImageUrl: '',
-    productImageName: '',
     unit: '',
-    medianPrice: '',
-    state: '',
-    referenceMonth: '',
-    referenceYear: '',
-    categoryId: '',
-    costCenterId: '',
+    budgetNatureId: '',
     isActive: true
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importData, setImportData] = useState('');
+  const [importFileName, setImportFileName] = useState('');
+  const [importRowCount, setImportRowCount] = useState(0);
+  const [importTotalRows, setImportTotalRows] = useState(0);
+  const [importSkippedRows, setImportSkippedRows] = useState<
+    Array<{ line: number; reasons: string[]; preview: string }>
+  >([]);
+  const [importBackendErrors, setImportBackendErrors] = useState<
+    Array<{ index: number; message: string }>
+  >([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    batch: number;
+    totalBatches: number;
+    processed: number;
+    total: number;
+    created: number;
+    failed: number;
+  } | null>(null);
+  const [isImportDragging, setIsImportDragging] = useState(false);
+  const [showImportJson, setShowImportJson] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   /** 'all' | 'true' | 'false' — alinhado à API de listagem. */
   const [materialActiveFilter, setMaterialActiveFilter] = useState<string>('all');
@@ -142,6 +430,18 @@ export default function MateriaisConstrucaoPage() {
   });
 
   const hasActiveMaterialFilters = materialActiveFilter !== 'all';
+
+  const { data: budgetNaturesData } = useQuery({
+    queryKey: ['budget-natures-for-materials'],
+    queryFn: async () => {
+      const res = await api.get('/budget-natures', {
+        params: { limit: 500, isActive: true }
+      });
+      return res.data;
+    }
+  });
+
+  const budgetNatureOptions: BudgetNatureOption[] = budgetNaturesData?.data || [];
 
   // Buscar materiais
   const { data: materialsData, isLoading: loadingMaterials } = useQuery({
@@ -180,9 +480,9 @@ export default function MateriaisConstrucaoPage() {
       .map((material: ConstructionMaterial) => material.unit?.trim())
       .filter((unit: string) => Boolean(unit));
 
-    return Array.from(new Set([...siUnits, ...customUnits, ...unitsFromMaterials]))
+    return Array.from(new Set([...DEFAULT_MATERIAL_UNITS, ...customUnits, ...unitsFromMaterials]))
       .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
-  }, [siUnits, customUnits, materialsData?.data]);
+  }, [customUnits, materialsData?.data]);
 
   const rememberCustomUnit = (unit: string) => {
     const normalized = unit.trim();
@@ -252,40 +552,109 @@ export default function MateriaisConstrucaoPage() {
     }
   });
 
-  // Importar materiais
-  const importMutation = useMutation({
-    mutationFn: async (materials: any[]) => {
-      const res = await api.post('/construction-materials/import', { materials });
-      return res.data;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
-      queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
-      setShowImportModal(false);
-      setImportData('');
-      alert(`Importação concluída: ${data.data.created} materiais criados`);
-    },
-    onError: (error: any) => {
+  const handleImport = async () => {
+    try {
+      const materials = JSON.parse(importData);
+      if (!Array.isArray(materials) || materials.length === 0) {
+        toast.error('Formato inválido. Deve ser um array de materiais.');
+        return;
+      }
+
+      const totalBatches = Math.ceil(materials.length / IMPORT_BATCH_SIZE);
+      setIsImporting(true);
+      setImportProgress({
+        batch: 0,
+        totalBatches,
+        processed: 0,
+        total: materials.length,
+        created: 0,
+        failed: 0
+      });
+      setImportBackendErrors([]);
+
+      let totalCreated = 0;
+      let totalFailed = 0;
+      const allErrors: Array<{ index: number; message: string }> = [];
+
+      for (let offset = 0; offset < materials.length; offset += IMPORT_BATCH_SIZE) {
+        const batchIndex = Math.floor(offset / IMPORT_BATCH_SIZE) + 1;
+        const batch = materials.slice(offset, offset + IMPORT_BATCH_SIZE);
+
+        setImportProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                batch: batchIndex,
+                processed: offset
+              }
+            : null
+        );
+
+        const res = await api.post(
+          '/construction-materials/import',
+          { materials: batch },
+          { timeout: IMPORT_REQUEST_TIMEOUT_MS }
+        );
+
+        const batchCreated = res.data?.data?.created ?? 0;
+        const batchFailed = res.data?.data?.failed ?? 0;
+        const batchErrors: Array<{ index: number; message: string }> =
+          res.data?.data?.errors ?? [];
+
+        totalCreated += batchCreated;
+        totalFailed += batchFailed;
+        allErrors.push(
+          ...batchErrors.map((err) => ({
+            index: err.index + offset,
+            message: err.message
+          }))
+        );
+
+        setImportProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                batch: batchIndex,
+                processed: Math.min(offset + batch.length, materials.length),
+                created: totalCreated,
+                failed: totalFailed
+              }
+            : null
+        );
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      await queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
+
+      if (totalFailed > 0) {
+        setImportBackendErrors(allErrors.slice(0, 100));
+        toast.error(
+          `Importação: ${totalCreated} criado(s), ${totalFailed} com erro — veja o relatório`
+        );
+      } else {
+        closeImportModal();
+        toast.success(`Importação concluída: ${totalCreated} cadastro(s) criado(s)`);
+      }
+    } catch (error: any) {
       console.error('Erro ao importar materiais:', error);
-      alert('Erro ao importar materiais: ' + (error.response?.data?.message || error.message));
+      const message =
+        error.code === 'ECONNABORTED'
+          ? 'Tempo esgotado. Tente novamente — a importação foi dividida em lotes menores.'
+          : error.response?.data?.message || error.message || 'Erro ao importar materiais';
+      toast.error(message);
+    } finally {
+      setIsImporting(false);
+      setImportProgress(null);
     }
-  });
+  };
 
   const resetForm = () => {
     setFormData({
       name: '',
+      productType: '',
       description: '',
-      category: '',
-      dimensions: '',
-      productImageUrl: '',
-      productImageName: '',
       unit: '',
-      medianPrice: '',
-      state: '',
-      referenceMonth: '',
-      referenceYear: '',
-      categoryId: '',
-      costCenterId: '',
+      budgetNatureId: '',
       isActive: true
     });
     setEditingMaterial(null);
@@ -295,18 +664,10 @@ export default function MateriaisConstrucaoPage() {
     setEditingMaterial(material);
     setFormData({
       name: material.name || '',
+      productType: normalizeProductType(material.productType || material.category),
       description: material.description || '',
-      category: material.category || '',
-      dimensions: material.dimensions || '',
-      productImageUrl: material.productImageUrl || '',
-      productImageName: material.productImageName || '',
       unit: material.unit,
-      medianPrice: material.medianPrice?.toString() || '',
-      state: material.state || '',
-      referenceMonth: material.referenceMonth?.toString() || '',
-      referenceYear: material.referenceYear?.toString() || '',
-      categoryId: material.categoryId || '',
-      costCenterId: material.costCenterId || '',
+      budgetNatureId: material.budgetNatureId || '',
       isActive: material.isActive
     });
     setShowForm(true);
@@ -314,62 +675,36 @@ export default function MateriaisConstrucaoPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validação básica
-    if (!formData.name.trim() || !formData.unit.trim()) {
-      toast.error('Por favor, preencha nome do material e unidade de medida');
+
+    const name = formData.name.trim();
+    const unit = formData.unit.trim();
+
+    if (!name) {
+      toast.error('Preencha o nome do produto');
       return;
     }
 
-    const name = formData.name.trim().toUpperCase().slice(0, 255);
-    const unit = formData.unit.trim();
-    const materialDescription = formData.description.trim();
+    if (!unit) {
+      toast.error('Preencha a unidade de medida');
+      return;
+    }
 
-    // Limpar dados: remover campos vazios e manter apenas os necessários
-    const dataToSend: any = {
+    if (!formData.productType) {
+      toast.error('Selecione Produto ou Serviço');
+      return;
+    }
+
+    const dataToSend: Record<string, unknown> = {
       name,
-      description: materialDescription || name,
+      productType: formData.productType,
+      description: formData.description.trim() || undefined,
       unit,
+      budgetNatureId: formData.budgetNatureId || null,
       isActive: formData.isActive
     };
 
-    if (formData.category && formData.category.trim()) {
-      dataToSend.category = formData.category.trim();
-    }
-    if (formData.dimensions && formData.dimensions.trim()) {
-      dataToSend.dimensions = formData.dimensions.trim();
-    }
-    if (formData.productImageUrl && formData.productImageUrl.trim()) {
-      dataToSend.productImageUrl = formData.productImageUrl.trim();
-    }
-    if (formData.productImageName && formData.productImageName.trim()) {
-      dataToSend.productImageName = formData.productImageName.trim();
-    }
-    
-    // Adicionar campos opcionais apenas se tiverem valor
-    if (formData.medianPrice && formData.medianPrice.toString().trim()) {
-      dataToSend.medianPrice = parseFloat(formData.medianPrice.toString()) || undefined;
-    }
-    if (formData.state && formData.state.trim()) {
-      dataToSend.state = formData.state.trim();
-    }
-    if (formData.referenceMonth && formData.referenceMonth.toString().trim()) {
-      dataToSend.referenceMonth = parseInt(formData.referenceMonth.toString()) || undefined;
-    }
-    if (formData.referenceYear && formData.referenceYear.toString().trim()) {
-      dataToSend.referenceYear = parseInt(formData.referenceYear.toString()) || undefined;
-    }
-    if (formData.categoryId && formData.categoryId.trim()) {
-      dataToSend.categoryId = formData.categoryId.trim();
-    }
-    if (formData.costCenterId && formData.costCenterId.trim()) {
-      dataToSend.costCenterId = formData.costCenterId.trim();
-    }
-    
-    console.log('Enviando dados:', dataToSend);
-
     rememberCustomUnit(unit);
-    
+
     if (editingMaterial) {
       updateMutation.mutate({ id: editingMaterial.id, data: dataToSend });
     } else {
@@ -381,100 +716,171 @@ export default function MateriaisConstrucaoPage() {
     deleteMutation.mutate(id);
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const downloadImportTemplate = () => {
+    const headers = [
+      'Nome Fantasia',
+      'Tipo do Produto',
+      'Descrição do Produto',
+      'Unidade de Controle',
+      'Natureza Orçamentária',
+      'Ativo'
+    ];
+    const exampleRow = [
+      'Cimento Portland',
+      'Produto',
+      'CP II 50kg',
+      'UN',
+      'Materiais',
+      'Sim'
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, exampleRow]);
+    ws['!cols'] = [
+      { wch: 36 },
+      { wch: 16 },
+      { wch: 40 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 8 }
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Materiais');
+    XLSX.writeFile(wb, 'modelo-importacao-materiais-servicos.xlsx');
+  };
+
+  const closeImportModal = () => {
+    setShowImportModal(false);
+    setImportData('');
+    setImportFileName('');
+    setImportRowCount(0);
+    setImportTotalRows(0);
+    setImportSkippedRows([]);
+    setImportBackendErrors([]);
+    setIsImporting(false);
+    setImportProgress(null);
+    setIsImportDragging(false);
+    setShowImportJson(false);
+  };
+
+  const processImportFile = async (file: File) => {
+    const report = await parseMaterialsFromFile(file);
+    if (report.materials.length === 0) {
+      toast.error(
+        report.skipped.length > 0
+          ? `Nenhuma linha válida. ${report.skipped.length} linha(s) ignorada(s) — veja o relatório.`
+          : 'Nenhum registro válido na planilha.'
+      );
+      setImportSkippedRows(report.skipped);
+      setImportTotalRows(report.totalRows);
+      setImportRowCount(0);
+      setImportData('');
+      setImportFileName(file.name);
+      return;
+    }
+    setImportData(JSON.stringify(report.materials, null, 2));
+    setImportFileName(file.name);
+    setImportRowCount(report.materials.length);
+    setImportTotalRows(report.totalRows);
+    setImportSkippedRows(report.skipped);
+    setImportBackendErrors([]);
+    const skippedMsg =
+      report.skipped.length > 0 ? `, ${report.skipped.length} ignorada(s)` : '';
+    toast.success(
+      `${report.materials.length} registro(s) prontos${skippedMsg} (de ${report.totalRows} linhas)`
+    );
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      try {
-        let materials: any[] = [];
-
-        if (file.name.endsWith('.json')) {
-          materials = JSON.parse(text);
-        } else if (file.name.endsWith('.csv')) {
-          const lines = text.split('\n').filter(line => line.trim());
-          const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-          
-          for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(',').map(v => v.trim());
-            const material: any = {};
-            headers.forEach((header, index) => {
-              if (header === 'nome' || header === 'name') {
-                material.name = values[index];
-              } else if (header === 'codigo' || header === 'code' || header === 'sinapicode') {
-                material.sinapiCode = values[index];
-              } else if (header === 'descrição' || header === 'description' || header === 'descricao') {
-                material.description = values[index];
-              } else if (header === 'unidade' || header === 'unit') {
-                material.unit = values[index];
-              } else if (header === 'ativo' || header === 'isactive' || header === 'is_active') {
-                material.isActive = values[index]?.toLowerCase() === 'true' || values[index] === '1';
-              }
-            });
-            if (material.description && material.unit) {
-              const desc = String(material.description).trim();
-              const nameFromLegacy =
-                (material.name || material.sinapiCode || desc).toString().trim().slice(0, 255);
-              materials.push({
-                ...material,
-                name: nameFromLegacy,
-                description: desc
-              });
-            }
-          }
-        }
-
-        if (materials.length > 0) {
-          setImportData(JSON.stringify(materials, null, 2));
-          setShowImportModal(true);
-        } else {
-          alert('Nenhum material válido encontrado no arquivo');
-        }
-      } catch (error) {
-        alert('Erro ao processar arquivo: ' + (error as Error).message);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const handleProductImageUpload = async (file: File) => {
-    const payload = new FormData();
-    payload.append('file', file);
-
-    const res = await api.post('/construction-materials/upload-image', payload, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    });
-
-    return res.data?.data as { url: string; originalName: string };
-  };
-
-  const handleImport = () => {
     try {
-      const materials = JSON.parse(importData);
-      if (Array.isArray(materials) && materials.length > 0) {
-        importMutation.mutate(materials);
-      } else {
-        alert('Formato inválido. Deve ser um array de materiais.');
-      }
+      await processImportFile(file);
     } catch (error) {
-      alert('Erro ao processar dados: ' + (error as Error).message);
+      toast.error('Erro ao processar arquivo: ' + (error as Error).message);
+    } finally {
+      event.target.value = '';
     }
   };
 
-  const handleExport = () => {
-    const materials = materialsData?.data || [];
-    const json = JSON.stringify(materials, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `materiais-construcao-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleImportDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsImportDragging(false);
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    if (!/\.(xlsx|xls|csv|json)$/i.test(file.name)) {
+      toast.error('Formato não suportado. Use .xlsx, .xls, .csv ou .json');
+      return;
+    }
+    try {
+      await processImportFile(file);
+    } catch (error) {
+      toast.error('Erro ao processar arquivo: ' + (error as Error).message);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      setIsExporting(true);
+
+      const allRows: ConstructionMaterial[] = [];
+      let page = 1;
+      let totalPages = 1;
+
+      while (page <= totalPages) {
+        const res = await api.get('/construction-materials', {
+          params: {
+            search: searchTerm || undefined,
+            isActive: materialActiveFilter !== 'all' ? materialActiveFilter : undefined,
+            page,
+            limit: EXPORT_PAGE_SIZE
+          },
+          timeout: 120_000
+        });
+
+        const batch: ConstructionMaterial[] = res.data?.data ?? [];
+        allRows.push(...batch);
+        totalPages = res.data?.pagination?.totalPages ?? 1;
+        page += 1;
+      }
+
+      if (allRows.length === 0) {
+        toast.error('Nenhum cadastro para exportar.');
+        return;
+      }
+
+      const headers = ['Código', 'Nome', 'Tipo', 'Descrição', 'UN'];
+      const sheetRows = allRows.map((material) => [
+        material.code || material.sinapiCode || '',
+        material.name || '',
+        normalizeProductType(material.productType || material.category) ||
+          material.productType ||
+          material.category ||
+          '',
+        material.description || '',
+        material.unit || ''
+      ]);
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...sheetRows]);
+      ws['!cols'] = [
+        { wch: 10 },
+        { wch: 42 },
+        { wch: 12 },
+        { wch: 48 },
+        { wch: 8 }
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, 'Materiais e Serviços');
+      XLSX.writeFile(
+        wb,
+        `materiais-e-servicos-${new Date().toISOString().split('T')[0]}.xlsx`
+      );
+      toast.success(`${allRows.length} cadastro(s) exportado(s) em Excel`);
+    } catch (error) {
+      console.error('Erro ao exportar materiais:', error);
+      toast.error('Erro ao exportar para Excel');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const materials = materialsData?.data || [];
@@ -494,6 +900,20 @@ export default function MateriaisConstrucaoPage() {
   const filteredMaterials = useMemo(() => {
     return materials;
   }, [materials]);
+
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen
+  } = useRowActionMenu<ConstructionMaterial>(filteredMaterials);
+
+  const listRange = getCadastroListRange(
+    currentPage,
+    pagination.limit,
+    pagination.total
+  );
 
   const user = userData?.data || {
     name: 'Usuário',
@@ -521,10 +941,10 @@ export default function MateriaisConstrucaoPage() {
           {/* Header */}
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Materiais de Construção
+              Materiais e Serviços
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Gerencie os materiais de construção civil
+              Gerencie o cadastro de materiais e serviços
             </p>
           </div>
 
@@ -540,9 +960,8 @@ export default function MateriaisConstrucaoPage() {
             onSubmit={handleSubmit}
             createMutation={createMutation}
             updateMutation={updateMutation}
-            materialCategories={materialCategories}
             unitOptions={unitOptions}
-            handleProductImageUpload={handleProductImageUpload}
+            budgetNatureOptions={budgetNatureOptions}
           />
 
           <Modal
@@ -554,21 +973,18 @@ export default function MateriaisConstrucaoPage() {
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Status na listagem
+                  Status
                 </label>
                 <select
                   value={materialActiveFilter}
                   onChange={(e) => setMaterialActiveFilter(e.target.value)}
                   className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                 >
-                  <option value="all">Todos (ativos e inativos)</option>
-                  <option value="true">Somente ativos</option>
-                  <option value="false">Somente inativos</option>
+                  <option value="all">Todos</option>
+                  <option value="true">Ativos</option>
+                  <option value="false">Inativos</option>
                 </select>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                A busca por texto fica na barra acima. Aqui você restringe por situação do cadastro.
-              </p>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
@@ -589,31 +1005,31 @@ export default function MateriaisConstrucaoPage() {
           </Modal>
 
           {/* Lista de materiais */}
-          <Card>
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex items-start space-x-3">
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
                   <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
                     <Package className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Materiais de Construção
+                      Materiais e Serviços
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {pagination.total}{' '}
-                      {pagination.total === 1 ? 'material cadastrado' : 'materiais cadastrados'}
+                      {pagination.total === 1 ? 'cadastro' : 'cadastros'}
                     </p>
                   </div>
                 </div>
-                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 lg:justify-end">
-                  <div className="relative min-w-[240px] flex-1 lg:w-[280px] lg:flex-none">
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Pesquisar material..."
+                      placeholder="Pesquisar..."
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                     {searchTerm ? (
@@ -645,17 +1061,22 @@ export default function MateriaisConstrucaoPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleExport}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                    onClick={() => void handleExport()}
+                    disabled={isExporting || loadingMaterials}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
                   >
                     <Download className="h-4 w-4 shrink-0" />
-                    <span>Exportar</span>
+                    <span>{isExporting ? 'Exportando...' : 'Exportar'}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setShowImportModal(true);
                       setImportData('');
+                      setImportFileName('');
+                      setImportRowCount(0);
+                      setIsImportDragging(false);
+                      setShowImportJson(false);
                     }}
                     className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
                   >
@@ -671,94 +1092,99 @@ export default function MateriaisConstrucaoPage() {
                     className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
-                    <span>Novo Material</span>
+                    <span>Novo cadastro</span>
                   </button>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className={cadastroListClasses.cardContent}>
+              {loadingMaterials ? (
+                <CadastroListLoading message="Carregando cadastros..." />
+              ) : pagination.total === 0 ? (
+                <CadastroListEmpty
+                  icon={Package}
+                  title="Nenhum material ou serviço encontrado"
+                  hint={
+                    searchTerm.trim() || hasActiveMaterialFilters
+                      ? 'Tente ajustar a busca ou os filtros'
+                      : 'Cadastre um novo item para começar'
+                  }
+                />
+              ) : (
+              <>
+                <CadastroListSummary
+                  startItem={listRange.startItem}
+                  endItem={listRange.endItem}
+                  total={pagination.total}
+                  itemLabel="cadastro"
+                  itemLabelPlural="cadastros"
+                  currentPage={currentPage}
+                  totalPages={listRange.totalPages}
+                />
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] table-fixed border-collapse">
+                <table className={cadastroListClasses.table}>
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
-                      <th
-                        scope="col"
-                        className="w-[40%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
-                        Nome do Material
+                      <th scope="col" className={cadastroListClasses.thCenter}>
+                        Código
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[22%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
-                        Categoria
+                      <th scope="col" className={cadastroListClasses.th}>
+                        Nome
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[14%] px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
-                        Unidade
+                      <th scope="col" className={cadastroListClasses.thCenter}>
+                        Tipo
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[12%] px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
+                      <th scope="col" className={cadastroListClasses.th}>
+                        Descrição
+                      </th>
+                      <th scope="col" className={cadastroListClasses.thCenter}>
+                        UN
+                      </th>
+                      <th scope="col" className={cadastroListClasses.thCenter}>
                         Status
                       </th>
-                      <th
-                        scope="col"
-                        className="w-[12%] min-w-[100px] px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 sm:py-4"
-                      >
-                        Ações
+                      <th scope="col" className={cadastroListClasses.thRight}>
+                        Ação
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                    {loadingMaterials ? (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="loading-spinner h-6 w-6" />
-                            <span className="text-gray-600 dark:text-gray-400">Carregando materiais...</span>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : filteredMaterials.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-10 text-center sm:px-6">
-                          <div className="text-gray-500 dark:text-gray-400">
-                            <p className="font-medium text-gray-700 dark:text-gray-300">Nenhum material encontrado.</p>
-                            <p className="mt-1 text-sm">Tente ajustar a busca ou os filtros.</p>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredMaterials.map((material: ConstructionMaterial) => (
+                      {filteredMaterials.map((material: ConstructionMaterial) => (
                         <tr
                           key={material.id}
                           className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
-                          <td className="min-w-0 px-3 py-4 sm:px-6">
-                            <div className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                              {material.name || '-'}
-                            </div>
-                            <span className="block truncate text-sm text-gray-600 dark:text-gray-400">
-                              {material.description || 'Sem descrição'}
-                            </span>
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
                             <span className="text-sm text-gray-900 dark:text-gray-100">
-                              {material.category || '-'}
+                              {material.code || material.sinapiCode || '-'}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                          <td className="min-w-0 px-3 py-4 sm:px-6">
+                            <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {material.name || '-'}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
+                            <span className="text-sm text-gray-900 dark:text-gray-100">
+                              {normalizeProductType(material.productType || material.category) ||
+                                material.productType ||
+                                material.category ||
+                                '-'}
+                            </span>
+                          </td>
+                          <td className="min-w-0 max-w-xs px-3 py-4 sm:px-6">
+                            <span className="block truncate text-sm text-gray-600 dark:text-gray-400">
+                              {material.description || '-'}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
                             <span className="text-sm text-gray-900 dark:text-gray-100">
                               {material.unit}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
                             <span
-                              className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${
+                              className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-xs font-medium ${
                                 material.isActive
                                   ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                                   : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
@@ -767,41 +1193,30 @@ export default function MateriaisConstrucaoPage() {
                               {material.isActive ? 'Ativo' : 'Inativo'}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                onClick={() => handleEdit(material)}
-                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                title="Editar"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => setShowDeleteModal(material.id)}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+                          <RowActionMenuCell
+                            isOpen={isRowMenuOpen(material.id)}
+                            onToggle={(e) =>
+                              toggleRowActionMenu(material.id, e.currentTarget as HTMLButtonElement)
+                            }
+                          />
                         </tr>
-                      ))
-                    )}
+                      ))}
                   </tbody>
                 </table>
               </div>
+
+              {rowActionMenu && rowForActionMenu && (
+                <RowActionMenuPortal
+                  menu={rowActionMenu}
+                  onClose={closeRowActionMenu}
+                  onEdit={() => handleEdit(rowForActionMenu)}
+                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                />
+              )}
               
               {/* Paginação */}
               {pagination.totalPages > 1 && (
-                <div className="px-4 sm:px-6 py-4 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                      <span>
-                        Mostrando {((pagination.page - 1) * pagination.limit) + 1} a {Math.min(pagination.page * pagination.limit, pagination.total)} de {pagination.total} materiais
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
+                <div className={cadastroListClasses.pagination}>
                       <button
                         onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                         disabled={currentPage === 1}
@@ -847,9 +1262,9 @@ export default function MateriaisConstrucaoPage() {
                       >
                         Próxima
                       </button>
-                    </div>
-                  </div>
                 </div>
+              )}
+              </>
               )}
             </CardContent>
           </Card>
@@ -888,84 +1303,339 @@ export default function MateriaisConstrucaoPage() {
           </div>
         )}
 
-        {/* Modal de importação */}
-        {showImportModal && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => {
-              setShowImportModal(false);
-              setImportData('');
-            }} />
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center space-x-2">
-                  <Upload className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Importar Materiais
-                  </h3>
+        <Modal
+          isOpen={showImportModal}
+          onClose={() => {
+            if (!isImporting) closeImportModal();
+          }}
+          title="Importar cadastros"
+          size="xl"
+        >
+          <div className="space-y-6">
+            {isImporting && importProgress ? (
+              <div className="py-8 space-y-5">
+                <p className="text-center text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Importando cadastros…
+                </p>
+                <div className="w-full space-y-2">
+                  <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                    <span>
+                      Lote {importProgress.batch} de {importProgress.totalBatches}
+                    </span>
+                    <span className="tabular-nums font-semibold text-gray-800 dark:text-gray-100">
+                      {importProgress.processed} / {importProgress.total}{' '}
+                      <span className="font-normal text-gray-500 dark:text-gray-400">
+                        (
+                        {Math.round(
+                          (importProgress.processed / importProgress.total) * 100
+                        )}
+                        %)
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-3 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                    <div
+                      className="h-full rounded-full bg-red-600 transition-all duration-150 ease-out"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (importProgress.processed / importProgress.total) * 100
+                        )}%`
+                      }}
+                    />
+                  </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setImportData('');
-                  }}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+                  <span>{importProgress.created} criado(s)</span>
+                  {importProgress.failed > 0 ? (
+                    <span className="text-amber-700 dark:text-amber-400">
+                      {importProgress.failed} com erro
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-center text-xs text-gray-500 dark:text-gray-400">
+                  Aguarde, não feche esta página.
+                </p>
               </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Carregar arquivo (CSV ou JSON)
-                  </label>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv,.json"
-                    onChange={handleFileUpload}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Formato CSV: descrição,unidade,ativo (com cabeçalho na primeira linha; colunas nome/código são opcionais)
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Formato JSON: Array de objetos com campos: description, unit, isActive (name opcional)
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Ou cole os dados JSON aqui:
-                  </label>
-                  <textarea
-                    value={importData}
-                    onChange={(e) => setImportData(e.target.value)}
-                    rows={10}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono text-sm"
-                    placeholder='[{"description": "Cimento Portland", "unit": "kg", "isActive": true}]'
-                  />
-                </div>
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => {
-                      setShowImportModal(false);
-                      setImportData('');
-                    }}
-                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={handleImport}
-                    disabled={!importData.trim() || importMutation.isPending}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
-                  >
-                    {importMutation.isPending ? 'Importando...' : 'Importar'}
-                  </button>
-                </div>
+            ) : (
+              <>
+            <div className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  Modelo de planilha
+                </p>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  Baixe o Excel com as colunas corretas, preencha e envie abaixo.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadImportTemplate}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                <Download className="h-4 w-4" />
+                Baixar modelo
+              </button>
+            </div>
+
+            <div>
+              <label className="mb-3 block text-sm font-semibold text-gray-900 dark:text-gray-100">
+                <span className="flex items-center gap-2">
+                  <FileSpreadsheet className="h-5 w-5 text-red-600 dark:text-red-400" />
+                  Sua planilha
+                </span>
+              </label>
+
+              <input
+                ref={fileInputRef}
+                id={IMPORT_FILE_ID}
+                type="file"
+                accept=".xlsx,.xls,.csv,.json"
+                onChange={handleFileUpload}
+                className="sr-only"
+              />
+
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsImportDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setIsImportDragging(false);
+                }}
+                onDrop={handleImportDrop}
+                className={`relative rounded-xl border-2 border-dashed p-8 text-center transition-all duration-200 ${
+                  importFileName && importRowCount > 0
+                    ? 'border-green-500 bg-green-50/80 dark:border-green-600 dark:bg-green-950/25'
+                    : isImportDragging
+                      ? 'border-red-500 bg-red-50/80 dark:border-red-500 dark:bg-red-950/20'
+                      : 'border-gray-300 bg-gray-50/50 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-800/40 dark:hover:border-gray-500'
+                }`}
+              >
+                {importFileName && importRowCount > 0 ? (
+                  <div className="space-y-3">
+                    <div className="flex justify-center">
+                      <div className="rounded-full bg-green-100 p-3 dark:bg-green-900/40">
+                        <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {importFileName}
+                      </p>
+                      <p className="mt-1 text-sm text-green-700 dark:text-green-400">
+                        {importRowCount} registro(s) prontos para importar
+                        {importTotalRows > 0 ? (
+                          <span className="text-gray-600 dark:text-gray-400">
+                            {' '}
+                            (de {importTotalRows} linhas na planilha)
+                          </span>
+                        ) : null}
+                      </p>
+                      {importSkippedRows.length > 0 ? (
+                        <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
+                          {importSkippedRows.length} linha(s) ignorada(s) — veja o relatório abaixo
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFileName('');
+                        setImportRowCount(0);
+                        setImportTotalRows(0);
+                        setImportSkippedRows([]);
+                        setImportBackendErrors([]);
+                        setImportData('');
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      className="text-xs font-medium text-red-600 underline-offset-2 hover:underline dark:text-red-400"
+                    >
+                      Escolher outro arquivo
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex justify-center">
+                      <div
+                        className={`rounded-full p-4 transition-colors ${
+                          isImportDragging
+                            ? 'bg-red-100 dark:bg-red-900/40'
+                            : 'bg-gray-100 dark:bg-gray-700'
+                        }`}
+                      >
+                        <Upload
+                          className={`h-10 w-10 ${
+                            isImportDragging
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-gray-400 dark:text-gray-500'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {isImportDragging
+                          ? 'Solte o arquivo aqui'
+                          : 'Arraste e solte sua planilha aqui'}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">ou</p>
+                    </div>
+                    <label
+                      htmlFor={IMPORT_FILE_ID}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-red-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+                    >
+                      <FileSpreadsheet className="h-4 w-4" />
+                      Escolher arquivo
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      .xlsx, .xls, .csv ou .json
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
+
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+              <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  Colunas da planilha
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  A primeira linha deve ser o cabeçalho. O código é gerado automaticamente (1, 2, 3…).
+                </p>
+              </div>
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                {IMPORT_COLUMNS.map((col) => (
+                  <li
+                    key={col.name}
+                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm"
+                  >
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      {col.name}
+                      {col.required ? (
+                        <span className="ml-1 text-red-600 dark:text-red-400">*</span>
+                      ) : null}
+                    </span>
+                    {'hint' in col && col.hint ? (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">{col.hint}</span>
+                    ) : (
+                      <span className="text-xs text-gray-400 dark:text-gray-500">
+                        {col.required ? 'Obrigatório' : 'Opcional'}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {(importSkippedRows.length > 0 || importBackendErrors.length > 0) && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/20">
+                <div className="border-b border-amber-200 px-4 py-3 dark:border-amber-900/50">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                    Relatório de diferenças
+                  </p>
+                  <p className="mt-0.5 text-xs text-amber-800/80 dark:text-amber-300/80">
+                    Linhas que não entraram no cadastro e o motivo
+                  </p>
+                </div>
+                <div className="max-h-48 overflow-y-auto p-4">
+                  {importSkippedRows.length > 0 ? (
+                    <ul className="space-y-2 text-sm">
+                      {importSkippedRows.map((item) => (
+                        <li
+                          key={`skip-${item.line}`}
+                          className="rounded-lg border border-amber-200/80 bg-white/70 px-3 py-2 dark:border-amber-900/40 dark:bg-gray-900/40"
+                        >
+                          <span className="font-medium text-gray-900 dark:text-gray-100">
+                            Linha {item.line}
+                          </span>
+                          {item.preview ? (
+                            <span className="text-gray-600 dark:text-gray-400"> — {item.preview}</span>
+                          ) : null}
+                          <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                            {item.reasons.join(' · ')}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {importBackendErrors.length > 0 ? (
+                    <ul className={`space-y-2 text-sm ${importSkippedRows.length > 0 ? 'mt-4' : ''}`}>
+                      {importBackendErrors.map((item) => (
+                        <li
+                          key={`err-${item.index}`}
+                          className="rounded-lg border border-red-200/80 bg-white/70 px-3 py-2 dark:border-red-900/40 dark:bg-gray-900/40"
+                        >
+                          <span className="font-medium text-gray-900 dark:text-gray-100">
+                            Registro {item.index + 1}
+                          </span>
+                          <p className="mt-1 text-xs text-red-700 dark:text-red-300">{item.message}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setShowImportJson((v) => !v)}
+                className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800/60"
+              >
+                <span>Avançado: editar JSON</span>
+                <span className="text-xs text-gray-400">{showImportJson ? 'Ocultar' : 'Mostrar'}</span>
+              </button>
+              {showImportJson ? (
+                <div className="border-t border-gray-200 p-4 dark:border-gray-700">
+                  <textarea
+                    value={importData}
+                    onChange={(e) => {
+                      setImportData(e.target.value);
+                      try {
+                        const parsed = JSON.parse(e.target.value);
+                        setImportRowCount(Array.isArray(parsed) ? parsed.length : 0);
+                      } catch {
+                        setImportRowCount(0);
+                      }
+                    }}
+                    rows={8}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    placeholder='[{"name": "Cimento", "productType": "Produto", "unit": "sc"}]'
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-gray-200 pt-4 dark:border-gray-700 sm:flex-row sm:justify-end sm:gap-3">
+              <button
+                type="button"
+                onClick={closeImportModal}
+                disabled={isImporting}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleImport()}
+                disabled={!importData.trim() || isImporting}
+                className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isImporting
+                  ? 'Importando...'
+                  : importRowCount > 0
+                    ? `Importar ${importRowCount} registro(s)`
+                    : 'Importar'}
+              </button>
+            </div>
+              </>
+            )}
           </div>
-        )}
+        </Modal>
       </MainLayout>
     </ProtectedRoute>
   );
@@ -981,53 +1651,36 @@ function MaterialFormModal({
   onSubmit,
   createMutation,
   updateMutation,
-  materialCategories,
   unitOptions,
-  handleProductImageUpload
+  budgetNatureOptions
 }: {
   isOpen: boolean;
   onClose: () => void;
   editingMaterial: ConstructionMaterial | null;
-  formData: {
-    name: string;
-    description: string;
-    category: string;
-    dimensions: string;
-    productImageUrl: string;
-    productImageName: string;
-    unit: string;
-    medianPrice: string;
-    state: string;
-    referenceMonth: string;
-    referenceYear: string;
-    categoryId: string;
-    costCenterId: string;
-    isActive: boolean;
-  };
-  setFormData: React.Dispatch<React.SetStateAction<{
-    name: string;
-    description: string;
-    category: string;
-    dimensions: string;
-    productImageUrl: string;
-    productImageName: string;
-    unit: string;
-    medianPrice: string;
-    state: string;
-    referenceMonth: string;
-    referenceYear: string;
-    categoryId: string;
-    costCenterId: string;
-    isActive: boolean;
-  }>>;
+  formData: MaterialFormState;
+  setFormData: React.Dispatch<React.SetStateAction<MaterialFormState>>;
   onSubmit: (e: React.FormEvent) => void;
   createMutation: any;
   updateMutation: any;
-  materialCategories: string[];
   unitOptions: string[];
-  handleProductImageUpload: (file: File) => Promise<{ url: string; originalName: string }>;
+  budgetNatureOptions: BudgetNatureOption[];
 }) {
+  const [useCustomUnit, setUseCustomUnit] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const unit = formData.unit.trim();
+    if (!unit) {
+      setUseCustomUnit(false);
+      return;
+    }
+    setUseCustomUnit(!unitOptions.includes(unit));
+  }, [isOpen, editingMaterial?.id, formData.unit, unitOptions]);
+
   if (!isOpen) return null;
+
+  const selectFieldClass =
+    'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black bg-opacity-50">
@@ -1035,7 +1688,7 @@ function MaterialFormModal({
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            {editingMaterial ? 'Editar Material' : 'Cadastrar Material'}
+            {editingMaterial ? 'Editar cadastro' : 'Novo cadastro'}
           </h3>
           <button
             onClick={onClose}
@@ -1048,142 +1701,115 @@ function MaterialFormModal({
 
         <div className="p-6">
           <form onSubmit={onSubmit} className="space-y-4">
+            {editingMaterial ? (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-600 dark:bg-gray-900/40">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Código</p>
+                <p className="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {editingMaterial.code || editingMaterial.sinapiCode || '—'}
+                </p>
+              </div>
+            ) : null}
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Nome do Material *
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Nome *
               </label>
               <input
                 type="text"
                 required
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value.toUpperCase() })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Ex: Cimento Portland CP-II"
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                placeholder="Ex: Cimento Portland"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Descrição do Material
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Tipo do Produto *
+              </label>
+              <div className="flex gap-2">
+                {PRODUCT_TYPES.map((tipo) => (
+                  <ButtonSeg
+                    key={tipo}
+                    active={formData.productType === tipo}
+                    onClick={() => setFormData({ ...formData, productType: tipo })}
+                    label={tipo}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Descrição do Produto
               </label>
               <textarea
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 rows={3}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Detalhes adicionais do material..."
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                placeholder="Detalhes do produto ou serviço..."
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Categoria
-                </label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="">Selecione uma categoria</option>
-                  {materialCategories.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Dimensões
-                </label>
-                <input
-                  type="text"
-                  value={formData.dimensions}
-                  onChange={(e) => setFormData({ ...formData, dimensions: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="Ex: 2,00m x 1,00m x 0,05m"
-                />
-              </div>
-            </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Unidade de Medida *
               </label>
-              <input
-                type="text"
-                required
-                list="material-unit-options"
-                value={formData.unit}
-                onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Digite para buscar ou cadastrar (ex: kg, m², un, rolo)"
-              />
-              <datalist id="material-unit-options">
+              <select
+                required={!useCustomUnit}
+                value={useCustomUnit ? UNIT_OTHER_VALUE : formData.unit}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === UNIT_OTHER_VALUE) {
+                    setUseCustomUnit(true);
+                    setFormData({ ...formData, unit: '' });
+                    return;
+                  }
+                  setUseCustomUnit(false);
+                  setFormData({ ...formData, unit: value });
+                }}
+                className={selectFieldClass}
+              >
+                <option value="">Selecione a unidade</option>
                 {unitOptions.map((unit) => (
-                  <option key={unit} value={unit} />
+                  <option key={unit} value={unit}>
+                    {unit}
+                  </option>
                 ))}
-              </datalist>
+                <option value={UNIT_OTHER_VALUE}>Outra (informar manualmente)</option>
+              </select>
+              {useCustomUnit ? (
+                <input
+                  type="text"
+                  required
+                  value={formData.unit}
+                  onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                  className={`${selectFieldClass} mt-2`}
+                  placeholder="Digite a unidade (ex: ton, m³/h)"
+                />
+              ) : null}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Imagem do Produto
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Natureza Orçamentária
               </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-
-                  try {
-                    const uploaded = await handleProductImageUpload(file);
-                    setFormData({
-                      ...formData,
-                      productImageUrl: uploaded.url,
-                      productImageName: uploaded.originalName
-                    });
-                    toast.success('Imagem enviada com sucesso!');
-                  } catch (error: any) {
-                    const message =
-                      error?.response?.data?.message || error?.message || 'Erro ao enviar imagem';
-                    toast.error(message);
-                  } finally {
-                    e.target.value = '';
-                  }
-                }}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-              {formData.productImageName && (
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                    {formData.productImageName}
-                  </span>
-                  <button
-                    type="button"
-                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
-                    onClick={() =>
-                      setFormData({
-                        ...formData,
-                        productImageUrl: '',
-                        productImageName: ''
-                      })
-                    }
-                  >
-                    Remover
-                  </button>
-                </div>
-              )}
-              {formData.productImageUrl && (
-                <img
-                  src={formData.productImageUrl}
-                  alt={formData.productImageName || 'Imagem do produto'}
-                  className="mt-3 h-24 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
-                />
-              )}
+              <select
+                value={formData.budgetNatureId}
+                onChange={(e) =>
+                  setFormData({ ...formData, budgetNatureId: e.target.value })
+                }
+                className={selectFieldClass}
+              >
+                <option value="">Selecione (opcional)</option>
+                {budgetNatureOptions.map((bn) => (
+                  <option key={bn.id} value={bn.id}>
+                    {formatBudgetNatureLabel(bn)}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="flex items-center">

@@ -614,10 +614,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/centros-custo'))
           },
           {
-            name: 'Materiais de Construção',
+            name: 'Materiais e Serviços',
             href: '/ponto/materiais-construcao',
             icon: Package,
-            description: 'Gerenciar materiais de construção civil',
+            description: 'Gerenciar cadastro de materiais e serviços',
             permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/materiais-construcao'))
           },
           {
