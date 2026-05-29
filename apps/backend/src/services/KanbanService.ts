@@ -1234,7 +1234,13 @@ export class KanbanService {
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, isActive: true, employee: { select: { position: true } } },
+      select: {
+        id: true,
+        isActive: true,
+        name: true,
+        email: true,
+        employee: { select: { position: true } },
+      },
     });
     if (!user?.isActive || isKanbanHiddenPickerUser(user)) {
       throw new Error('Usuário não encontrado');

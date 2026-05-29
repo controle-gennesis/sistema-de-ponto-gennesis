@@ -5,6 +5,24 @@ import { X } from 'lucide-react';
 
 let modalScrollLockCount = 0;
 
+/** Pilha de modais abertos — o último é o que recebe scroll (ex.: picker sobre o card). */
+const modalRootStack: HTMLElement[] = [];
+
+function registerModalRoot(root: HTMLElement) {
+  modalRootStack.push(root);
+}
+
+function unregisterModalRoot(root: HTMLElement) {
+  const idx = modalRootStack.lastIndexOf(root);
+  if (idx >= 0) modalRootStack.splice(idx, 1);
+}
+
+function isEventInTopModal(target: EventTarget | null): boolean {
+  if (!(target instanceof Node)) return false;
+  const top = modalRootStack[modalRootStack.length - 1];
+  return !!top && top.contains(target);
+}
+
 function lockPageScroll() {
   modalScrollLockCount += 1;
   document.documentElement.classList.add('modal-open');
@@ -54,6 +72,9 @@ export const Modal: React.FC<ModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
+    const root = rootRef.current;
+    if (root) registerModalRoot(root);
+
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
@@ -61,12 +82,7 @@ export const Modal: React.FC<ModalProps> = ({
     };
 
     const blockBackgroundScroll = (event: WheelEvent | TouchEvent) => {
-      const root = rootRef.current;
-      if (!root) {
-        event.preventDefault();
-        return;
-      }
-      if (event.target instanceof Node && root.contains(event.target)) return;
+      if (isEventInTopModal(event.target)) return;
       event.preventDefault();
     };
 
@@ -76,6 +92,7 @@ export const Modal: React.FC<ModalProps> = ({
     document.addEventListener('touchmove', blockBackgroundScroll, { passive: false, capture: true });
 
     return () => {
+      if (root) unregisterModalRoot(root);
       document.removeEventListener('keydown', handleEscape);
       document.removeEventListener('wheel', blockBackgroundScroll, { capture: true });
       document.removeEventListener('touchmove', blockBackgroundScroll, { capture: true });
