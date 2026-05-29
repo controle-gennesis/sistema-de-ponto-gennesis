@@ -35,18 +35,30 @@ export function KanbanMemberChip({
       onMouseLeave={() => onHover(false)}
       onClick={onRemove}
       className={clsx(
-        'w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors overflow-hidden',
-        isHovering ? 'bg-red-500/15 hover:bg-red-500/25' : photo ? '' : bg,
+        'relative w-10 h-10 rounded-full flex items-center justify-center shrink-0 overflow-hidden',
+        !photo && bg,
       )}
       title={isHovering ? 'Remover membro' : name}
     >
-      {isHovering ? (
-        <Trash2 className="w-4 h-4 text-red-600 dark:text-red-500" />
-      ) : photo ? (
-        <img src={photo} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+      {photo ? (
+        <img
+          src={photo}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          referrerPolicy="no-referrer"
+        />
       ) : (
         <span className="text-xs font-bold text-white">{getKanbanInitials(name)}</span>
       )}
+      <span
+        className={clsx(
+          'absolute inset-0 flex items-center justify-center bg-black/45 transition-opacity duration-150',
+          isHovering ? 'opacity-100' : 'opacity-0 pointer-events-none',
+        )}
+        aria-hidden={!isHovering}
+      >
+        <Trash2 className="h-4 w-4 text-white drop-shadow-md" />
+      </span>
     </button>
   );
 }
