@@ -90,14 +90,33 @@ function displayReportsBilling(value: string | null | undefined): string {
   return value || '-';
 }
 
+function parseBudgetToNumberSafe(v: string | null | undefined): number {
+  if (!v) return 0;
+  const s = String(v).replace(/[R$\s]/g, '').trim();
+  if (!s) return 0;
+  if (s.includes(',')) {
+    const cleaned = s.replace(/\./g, '').replace(',', '.');
+    const n = parseFloat(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function isPleitoHistorico(p: ContractPleito): boolean {
+  return (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER;
+}
+
+function isPleitoGerado100(p: ContractPleito): boolean {
   const marker = (p.reportsBilling || '').trim();
-  return marker === PLEITO_HISTORY_MARKER || marker === PLEITO_HISTORY_MARKER_GERADO_100;
+  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return true;
+  const orc = parseBudgetToNumberSafe(p.budget);
+  const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
+  return orc > 0 && br >= orc - 0.01;
 }
 
 function getHistoricoEtiqueta(p: ContractPleito): string | null {
-  const marker = (p.reportsBilling || '').trim();
-  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return HISTORICO_ETIQUETA_GERADO_100;
+  if (isPleitoGerado100(p)) return HISTORICO_ETIQUETA_GERADO_100;
   return null;
 }
 
@@ -438,7 +457,9 @@ export default function AndamentoListPage() {
             budgetAmount4: source.budgetAmount4,
             pv: source.pv,
             ipi: source.ipi,
-            reportsBilling: generatedByPleitear100 ? PLEITO_HISTORY_MARKER_GERADO_100 : PLEITO_HISTORY_MARKER,
+            reportsBilling: generatedByPleitear100
+              ? source.reportsBilling?.trim() || null
+              : PLEITO_HISTORY_MARKER,
             engineer: source.engineer,
             supervisor: source.supervisor
           });
