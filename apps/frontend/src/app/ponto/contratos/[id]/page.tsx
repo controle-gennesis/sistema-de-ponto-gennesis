@@ -2314,20 +2314,36 @@ export default function ContractDetailPage() {
   }, [generatedPleitos, histYearFilter, histMonthFilter, histOsFilter, histPastaFilter, histDescricaoFilter, histEtiquetaFilter]);
 
   const [isSavingHistoricoPleitos, setIsSavingHistoricoPleitos] = useState(false);
-  useEffect(() => {
-    if (!showHistoricoPleitosModal) return;
+  const historicoDraftsInitRef = useRef(false);
+
+  const buildHistoricoDraftsFromPleitos = (pleitos: ContractPleito[]) => {
     const nextDrafts: Record<string, { billingStatus: 'pago' | 'nao-pago'; invoiceNumber: string }> = {};
-    generatedPleitos.forEach((p) => {
+    pleitos.forEach((p) => {
       nextDrafts[p.id] = {
         billingStatus: (p.billingStatus || '').toLowerCase() === 'pago' ? 'pago' : 'nao-pago',
-        invoiceNumber: p.invoiceNumber || ''
+        invoiceNumber: p.invoiceNumber || '',
       };
     });
-    setHistoricoDrafts(nextDrafts);
+    return nextDrafts;
+  };
+
+  const invalidateHistoricoAndBillings = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
+    await queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
+  };
+
+  useEffect(() => {
+    if (!showHistoricoPleitosModal) {
+      historicoDraftsInitRef.current = false;
+      return;
+    }
+    if (historicoDraftsInitRef.current || loadingPleitos) return;
+    historicoDraftsInitRef.current = true;
+    setHistoricoDrafts(buildHistoricoDraftsFromPleitos(generatedPleitos));
     setSelectedHistoricoPleitos(new Set());
     setShowHistoricoBatchNfModal(false);
     setHistoricoBatchInvoiceModalValue('');
-  }, [showHistoricoPleitosModal, generatedPleitos]);
+  }, [showHistoricoPleitosModal, loadingPleitos, generatedPleitos]);
 
   const changedHistoricoPleitoIds = useMemo(() => {
     return generatedPleitos
@@ -2341,6 +2357,26 @@ export default function ContractDetailPage() {
       .map((p) => p.id);
   }, [generatedPleitos, historicoDrafts]);
 
+  const patchHistoricoPleitoFaturamento = async (
+    pleito: ContractPleito,
+    draft: { billingStatus: 'pago' | 'nao-pago'; invoiceNumber: string },
+    options?: { usarOrcamento100?: boolean }
+  ) => {
+    const orc = parseBudgetToNumberSafe(pleito.budget);
+    const payload: {
+      billingStatus: string;
+      invoiceNumber: string | null;
+      billingRequest?: string;
+    } = {
+      billingStatus: draft.billingStatus,
+      invoiceNumber: draft.invoiceNumber.trim() || null,
+    };
+    if (options?.usarOrcamento100 && draft.billingStatus === 'pago' && orc > 0) {
+      payload.billingRequest = orc.toFixed(2);
+    }
+    await api.patch(`/pleitos/${pleito.id}`, payload);
+  };
+
   const handleSaveAllHistoricoPleitos = async () => {
     if (changedHistoricoPleitoIds.length === 0) return;
     setIsSavingHistoricoPleitos(true);
@@ -2348,15 +2384,26 @@ export default function ContractDetailPage() {
       await Promise.all(
         changedHistoricoPleitoIds.map(async (pleitoId) => {
           const draft = historicoDrafts[pleitoId];
-          if (!draft) return;
-          await api.patch(`/pleitos/${pleitoId}`, {
-            billingStatus: draft.billingStatus,
-            invoiceNumber: draft.invoiceNumber.trim() || null
-          });
+          const pleito = generatedPleitos.find((p) => p.id === pleitoId);
+          if (!draft || !pleito) return;
+          await patchHistoricoPleitoFaturamento(pleito, draft);
         })
       );
-      await queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
-      toast.success('Histórico de pleitos salvo com sucesso.');
+      await invalidateHistoricoAndBillings();
+      setHistoricoDrafts((prev) => {
+        const next = { ...prev };
+        changedHistoricoPleitoIds.forEach((id) => {
+          const d = historicoDrafts[id];
+          if (d) {
+            next[id] = {
+              billingStatus: d.billingStatus,
+              invoiceNumber: d.invoiceNumber.trim(),
+            };
+          }
+        });
+        return next;
+      });
+      toast.success('Histórico de pleitos salvo e faturamento atualizado.');
     } catch {
       toast.error('Não foi possível salvar as informações do histórico de pleitos.');
     } finally {
@@ -2396,7 +2443,7 @@ export default function ContractDetailPage() {
     setShowHistoricoBatchNfModal(true);
   };
 
-  const handleConfirmHistoricoFaturar100Selecionadas = () => {
+  const handleConfirmHistoricoFaturar100Selecionadas = async () => {
     const idsSelecionados = Array.from(selectedHistoricoPleitos).filter((id) =>
       filteredHistoricoPleitoIds.includes(id)
     );
@@ -2409,21 +2456,37 @@ export default function ContractDetailPage() {
       toast.error('Informe o número da nota fiscal para faturar as OSs selecionadas.');
       return;
     }
+    const draftFaturado = {
+      billingStatus: 'pago' as const,
+      invoiceNumber: invoice,
+    };
     setHistoricoDrafts((prev) => {
       const next = { ...prev };
       idsSelecionados.forEach((id) => {
-        const current = next[id] || { billingStatus: 'nao-pago' as const, invoiceNumber: '' };
-        next[id] = {
-          ...current,
-          billingStatus: 'pago',
-          invoiceNumber: invoice
-        };
+        next[id] = { ...draftFaturado };
       });
       return next;
     });
-    setShowHistoricoBatchNfModal(false);
-    setHistoricoBatchInvoiceModalValue('');
-    toast.success(`${idsSelecionados.length} OS(s) marcada(s) como faturada(s) com a NF ${invoice}.`);
+    setIsSavingHistoricoPleitos(true);
+    try {
+      await Promise.all(
+        idsSelecionados.map(async (id) => {
+          const pleito = generatedPleitos.find((p) => p.id === id);
+          if (!pleito) return;
+          await patchHistoricoPleitoFaturamento(pleito, draftFaturado, { usarOrcamento100: true });
+        })
+      );
+      await invalidateHistoricoAndBillings();
+      setShowHistoricoBatchNfModal(false);
+      setHistoricoBatchInvoiceModalValue('');
+      toast.success(
+        `${idsSelecionados.length} OS(s) faturada(s) a 100% com NF ${invoice}. O valor foi registrado no faturamento do contrato.`
+      );
+    } catch {
+      toast.error('Não foi possível faturar as OSs selecionadas. Tente novamente.');
+    } finally {
+      setIsSavingHistoricoPleitos(false);
+    }
   };
 
   const loadLogoBase64 = (): Promise<string | null> => {
@@ -4789,7 +4852,10 @@ export default function ContractDetailPage() {
           {showHistoricoPleitosModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowHistoricoPleitosModal(false)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Histórico de Pleitos</h3>
                   <button onClick={() => setShowHistoricoPleitosModal(false)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400">
@@ -4998,6 +5064,65 @@ export default function ContractDetailPage() {
                     </div>
                   )}
                 </div>
+                {showHistoricoBatchNfModal && (
+                  <div
+                    className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 p-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div
+                      className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          Faturar 100% das OSs selecionadas
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => setShowHistoricoBatchNfModal(false)}
+                          className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="px-5 py-4 space-y-3">
+                        <p className="text-sm text-gray-600 dark:text-gray-300">
+                          Informe o número da nota fiscal para aplicar em todas as OSs selecionadas. O valor
+                          faturado será 100% do orçamento de cada OS.
+                        </p>
+                        <input
+                          type="text"
+                          value={historicoBatchInvoiceModalValue}
+                          onChange={(e) => setHistoricoBatchInvoiceModalValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void handleConfirmHistoricoFaturar100Selecionadas();
+                          }}
+                          placeholder="Número da Nota Fiscal"
+                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowHistoricoBatchNfModal(false)}
+                          disabled={isSavingHistoricoPleitos}
+                          className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleConfirmHistoricoFaturar100Selecionadas()}
+                          disabled={isSavingHistoricoPleitos}
+                          className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800 disabled:opacity-50"
+                        >
+                          {isSavingHistoricoPleitos ? 'Salvando…' : 'Aplicar e faturar'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -5066,52 +5191,6 @@ export default function ContractDetailPage() {
               </div>
             </div>
           )}
-          {showHistoricoBatchNfModal && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2">
-              <div className="absolute inset-0" onClick={() => setShowHistoricoBatchNfModal(false)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Faturar 100% das OSs selecionadas</h3>
-                  <button
-                    onClick={() => setShowHistoricoBatchNfModal(false)}
-                    className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="px-5 py-4 space-y-3">
-                  <p className="text-sm text-gray-600 dark:text-gray-300">
-                    Informe o número da nota fiscal uma única vez para aplicar em todas as OSs selecionadas.
-                  </p>
-                  <input
-                    type="text"
-                    value={historicoBatchInvoiceModalValue}
-                    onChange={(e) => setHistoricoBatchInvoiceModalValue(e.target.value)}
-                    placeholder="Número da Nota Fiscal"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    autoFocus
-                  />
-                </div>
-                <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowHistoricoBatchNfModal(false)}
-                    className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmHistoricoFaturar100Selecionadas}
-                    className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800"
-                  >
-                    Aplicar nas selecionadas
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Modal Resumo do Pleito */}
           {showPleitoResumoModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
