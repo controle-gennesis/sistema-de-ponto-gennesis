@@ -11,6 +11,7 @@ import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
 import { KanbanBoardLabelSettings } from '@/components/kanban/KanbanBoardLabelSettings';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import {
   kanbanLabel,
   kanbanInput,
@@ -37,7 +38,7 @@ import {
   kanbanCardQueryKey,
 } from '@/lib/kanban';
 import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
-import { KANBAN_PRIORITY_CONFIG } from '@/components/kanban/kanbanPriority';
+import { KANBAN_PRIORITY_CONFIG, KANBAN_PRIORITY_ORDER } from '@/components/kanban/kanbanPriority';
 import { KanbanPriorityBars } from '@/components/kanban/KanbanPriorityBars';
 import {
   getKanbanLabelPalette,
@@ -71,7 +72,6 @@ import {
   XCircle,
   Loader,
   LayoutGrid,
-  SlidersHorizontal,
   ChevronUp,
   Building2,
   ChevronRight,
@@ -82,6 +82,19 @@ import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 
 const PRIORITY_CONFIG = KANBAN_PRIORITY_CONFIG;
+
+const KANBAN_PRIORITY_ALL_VALUES = KANBAN_PRIORITY_ORDER;
+
+/** Todos marcados (ou lista vazia) = sem filtro restritivo nesse campo. */
+function multiselectFilterShowsAll(selected: string[], allValues: string[]): boolean {
+  if (allValues.length === 0) return true;
+  return selected.length === 0 || selected.length >= allValues.length;
+}
+
+function isMultiselectFilterActive(selected: string[], allValues: string[]): boolean {
+  if (allValues.length === 0) return false;
+  return selected.length > 0 && selected.length < allValues.length;
+}
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
 
@@ -1299,11 +1312,16 @@ function KanbanPage() {
   };
 
   const columns = board?.columns ?? [];
+  const boardLabelPresets = getKanbanLabelPalette(board?.labelPresets);
+  const labelFilterAllValues = boardLabelPresets.map((p) => p.color);
 
   const [search, setSearch] = useState('');
-  const [filterPriority, setFilterPriority] = useState<Priority | ''>('');
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
+  const [filterLabelColors, setFilterLabelColors] = useState<string[]>([]);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
-  const hasActiveKanbanFilters = !!filterPriority;
+  const hasActiveKanbanFilters =
+    isMultiselectFilterActive(filterPriorities, KANBAN_PRIORITY_ALL_VALUES) ||
+    isMultiselectFilterActive(filterLabelColors, labelFilterAllValues);
   const [savingColumn, setSavingColumn] = useState(false);
 
   const [cardModal, setCardModal] = useState<
@@ -1321,8 +1339,6 @@ function KanbanPage() {
   const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
   const [savingLabelPresets, setSavingLabelPresets] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'card'; cardId: string; columnId: string } | { type: 'column'; columnId: string } | null>(null);
-
-  const boardLabelPresets = getKanbanLabelPalette(board?.labelPresets);
 
   const [dragState, setDragState] = useState<DragState>({
     draggingCardId: null,
@@ -1622,12 +1638,31 @@ function KanbanPage() {
     }
   }
 
+  const priorityFilterOptions = KANBAN_PRIORITY_ALL_VALUES.map((p) => ({
+    value: p,
+    label: PRIORITY_CONFIG[p].label,
+  }));
+  const labelFilterOptions = boardLabelPresets.map((preset) => ({
+    value: preset.color,
+    label: preset.name,
+    swatchColor: preset.color,
+  }));
+
   const filteredColumns = columns.map((col) => ({
     ...col,
     cards: col.cards.filter(card => {
       const matchSearch = !search || card.title.toLowerCase().includes(search.toLowerCase()) || card.description.toLowerCase().includes(search.toLowerCase()) || card.assignee.toLowerCase().includes(search.toLowerCase());
-      const matchPriority = !filterPriority || card.priority === filterPriority;
-      return matchSearch && matchPriority;
+      const matchPriority =
+        multiselectFilterShowsAll(filterPriorities, KANBAN_PRIORITY_ALL_VALUES) ||
+        filterPriorities.includes(card.priority);
+      const matchLabel =
+        multiselectFilterShowsAll(filterLabelColors, labelFilterAllValues) ||
+        normalizeKanbanLabels(card.labels, boardLabelPresets).some((l) =>
+          filterLabelColors.some(
+            (c) => l.color.trim().toLowerCase() === c.trim().toLowerCase(),
+          ),
+        );
+      return matchSearch && matchPriority && matchLabel;
     })
   }));
 
@@ -1701,31 +1736,40 @@ function KanbanPage() {
 
             <div className="flex flex-wrap items-center justify-end gap-2">
               {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                 <input
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Pesquisar cards..."
-                  className="pl-9 pr-4 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 w-52 transition-all"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                 />
+                {search ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    aria-label="Limpar busca"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 outline-none transition-colors hover:bg-gray-100 hover:text-gray-600 focus:ring-0 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
               </div>
               {/* Filter */}
               <button
                 type="button"
                 onClick={() => setIsFiltersModalOpen(true)}
                 className={clsx(
-                  'relative flex items-center gap-2 px-3 py-2 text-sm rounded-lg border transition-colors',
+                  'relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors outline-none focus:ring-0',
                   hasActiveKanbanFilters
                     ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700',
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
                 )}
-                aria-label="Abrir filtros"
-                title={hasActiveKanbanFilters ? 'Filtros ativos' : 'Filtros'}
+                aria-label="Abrir filtro"
+                title={hasActiveKanbanFilters ? 'Filtro (ativo)' : 'Filtro'}
               >
-                <SlidersHorizontal className="w-4 h-4" />
-                Filtros
+                <Filter className="h-4 w-4" />
                 {hasActiveKanbanFilters && (
                   <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                 )}
@@ -1872,39 +1916,47 @@ function KanbanPage() {
         size="md"
       >
         <div className="space-y-4">
-          <div>
-            <label className={kanbanLabel}>Prioridade</label>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {(['', 'low', 'medium', 'high', 'critical'] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setFilterPriority(p as Priority | '')}
-                  className={clsx(
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border',
-                    filterPriority === p
-                      ? 'bg-red-600 text-white border-red-600'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-700',
-                  )}
-                >
-                  {p !== '' && <KanbanPriorityBars priority={p as Priority} />}
-                  {p === '' ? 'Todas' : PRIORITY_CONFIG[p as Priority].label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center justify-between gap-2 border-t border-gray-200 dark:border-gray-700 pt-4">
+          <MultiSelectSearchDropdown
+            label="Prioridade"
+            options={priorityFilterOptions}
+            selected={filterPriorities}
+            onChange={setFilterPriorities}
+            placeholder="Todas as prioridades"
+            searchPlaceholder="Pesquisar prioridade..."
+            emptyOptionsMessage="Nenhuma prioridade disponível."
+            emptySearchMessage="Nenhuma prioridade encontrada."
+            icon={<Flag className="h-4 w-4" aria-hidden />}
+            menuInline
+            noFocusRing
+          />
+          <MultiSelectSearchDropdown
+            label="Etiquetas"
+            options={labelFilterOptions}
+            selected={filterLabelColors}
+            onChange={setFilterLabelColors}
+            placeholder="Todas as etiquetas"
+            searchPlaceholder="Pesquisar etiqueta..."
+            emptyOptionsMessage="Nenhuma etiqueta configurada neste setor."
+            emptySearchMessage="Nenhuma etiqueta encontrada."
+            icon={<Tag className="h-4 w-4" aria-hidden />}
+            menuInline
+            noFocusRing
+          />
+          <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
             <button
               type="button"
-              onClick={() => setFilterPriority('')}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              onClick={() => {
+                setFilterPriorities([]);
+                setFilterLabelColors([]);
+              }}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 outline-none transition-colors hover:bg-gray-50 focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
             >
               Limpar filtros
             </button>
             <button
               type="button"
               onClick={() => setIsFiltersModalOpen(false)}
-              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 outline-none transition-colors hover:bg-red-100 focus:ring-0 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
             >
               Aplicar
             </button>
