@@ -56,6 +56,7 @@ import {
   enrichDivSeOptionsWithPleitos,
   type DivSeOptionRow
 } from '@/lib/formatOsSePasta';
+import { getOsEtiquetaAbertura, isOsConcluida, type BillingForOsCheck } from '@/lib/pleitoOsExport';
 
 interface ContractBilling {
   id: string;
@@ -618,14 +619,27 @@ function buildPleitoGerarItems(
 }
 
 function isPleitoHistorico(p: ContractPleito): boolean {
+  return (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER;
+}
+
+function isPleitoGerado100(p: ContractPleito): boolean {
   const marker = (p.reportsBilling || '').trim();
-  return marker === PLEITO_HISTORY_MARKER || marker === PLEITO_HISTORY_MARKER_GERADO_100;
+  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return true;
+  const orc = parseBudgetToNumberSafe(p.budget);
+  const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
+  return orc > 0 && br >= orc - 0.01;
 }
 
 function getHistoricoEtiqueta(p: ContractPleito): string | null {
-  const marker = (p.reportsBilling || '').trim();
-  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return HISTORICO_ETIQUETA_GERADO_100;
+  if (isPleitoGerado100(p)) return HISTORICO_ETIQUETA_GERADO_100;
   return null;
+}
+
+function osEtiquetaBadgeClass(etiqueta: 'Aberta' | 'Concluída'): string {
+  if (etiqueta === 'Concluída') {
+    return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
+  }
+  return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
 }
 
 function totvsQueryTransportErrorMessage(err: unknown): string {
@@ -705,7 +719,6 @@ export default function ContractDetailPage() {
   const [showPleitoValoresModal, setShowPleitoValoresModal] = useState(false);
   const [showPleitoResumoModal, setShowPleitoResumoModal] = useState(false);
   const [showHistoricoPleitosModal, setShowHistoricoPleitosModal] = useState(false);
-  const [showHistoricoOsModal, setShowHistoricoOsModal] = useState(false);
   const [histYearFilter, setHistYearFilter] = useState('all');
   const [histMonthFilter, setHistMonthFilter] = useState('all');
   const [histOsFilter, setHistOsFilter] = useState('');
@@ -1212,7 +1225,11 @@ export default function ContractDetailPage() {
   const valorMaisAditivosTotal = contract ? contract.valuePlusAddenda + totalAddenda : 0;
   const billings = (billingsData?.data || []) as ContractBilling[];
   const allPleitos = (pleitosData?.data || []) as ContractPleito[];
-  const pleitos = allPleitos.filter((p) => !isPleitoHistorico(p));
+  const billingsForOs = billings as BillingForOsCheck[];
+  const pleitos = useMemo(
+    () => allPleitos.filter((p) => !isPleitoHistorico(p) && !isOsConcluida(p, billingsForOs)),
+    [allPleitos, billingsForOs]
+  );
   const productions = ((Array.isArray(productionsData) ? productionsData : (productionsData as { data?: ContractWeeklyProduction[] })?.data) || []) as ContractWeeklyProduction[];
   /** Somente OS / SE cadastradas neste contrato (não usar lista global de todos os contratos). */
   const divSeOptions = useMemo(
@@ -2073,7 +2090,9 @@ export default function ContractDetailPage() {
             budgetAmount4: source.budgetAmount4,
             pv: source.pv,
             ipi: source.ipi,
-            reportsBilling: generatedByPleitear100 ? PLEITO_HISTORY_MARKER_GERADO_100 : PLEITO_HISTORY_MARKER,
+            reportsBilling: generatedByPleitear100
+              ? source.reportsBilling?.trim() || null
+              : PLEITO_HISTORY_MARKER,
             engineer: source.engineer,
             supervisor: source.supervisor
           });
@@ -2188,6 +2207,10 @@ export default function ContractDetailPage() {
     window.open(`/ponto/contratos/${contractId}/cronograma-mensal?${p.toString()}`, '_blank', 'noopener,noreferrer');
   };
 
+  const handleAbrirHistoricoOs = () => {
+    window.open(`/ponto/contratos/${contractId}/historico-os`, '_blank', 'noopener,noreferrer');
+  };
+
   const handleConfirmarPleito = () => {
     if (!canCreateContrato) {
       toast.error('Você não tem permissão para criar no módulo Contratos.');
@@ -2280,10 +2303,6 @@ export default function ContractDetailPage() {
         isPleitoHistorico(p) ||
         ((p.billingRequest != null ? Number(p.billingRequest) : 0) > 0)
       ),
-    [allPleitos]
-  );
-  const historicoOsList = useMemo(
-    () => allPleitos.filter((p) => isPleitoHistorico(p)),
     [allPleitos]
   );
   const historicoYears = useMemo(() => {
@@ -3308,21 +3327,63 @@ export default function ContractDetailPage() {
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowPleitoModal(true)}
-                  disabled={!canCreateContrato}
-                  className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                >
-                  <Plus className="h-4 w-4 shrink-0" />
-                  <span>Nova Ordem de Serviço</span>
-                </button>
+                <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                  {!loadingPleitos && pleitos.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleGerarCronogramaMensal}
+                      className="inline-flex h-10 shrink-0 items-center px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
+                    >
+                      Gerar cronograma mensal
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowPleitoModal(true)}
+                    disabled={!canCreateContrato}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova Ordem de Serviço</span>
+                  </button>
+                  {!loadingPleitos && pleitos.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleExcluirPleitosSelecionados}
+                      disabled={!canDeleteContrato || deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
+                      className="inline-flex h-10 items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+                      title="Excluir as ordens de serviço marcadas na tabela"
+                    >
+                      <Trash2 className="w-4 h-4 shrink-0" />
+                      {deletePleitosSelecionadosMutation.isPending ? 'Excluindo...' : 'Excluir selecionadas'}
+                    </button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
+              {!loadingPleitos && pleitos.length === 0 && allPleitos.length > 0 && (
+                <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleAbrirHistoricoOs}
+                    className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
+                  >
+                    Histórico de OS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowHistoricoPleitosModal(true)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors"
+                  >
+                    Histórico de Pleitos
+                  </button>
+                </div>
+              )}
               {!loadingPleitos && pleitos.length > 0 && (
                 <div className="mb-4 flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                           <button
                             onClick={handleVisualizarPleito}
                             className="px-3 py-1.5 rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-sm font-medium transition-colors"
@@ -3346,39 +3407,25 @@ export default function ContractDetailPage() {
                             <Percent className="w-4 h-4 shrink-0" />
                             {gerarPleitoMutation.isPending ? 'Gerando...' : 'Pleitear 100%'}
                           </button>
-                          <button
-                            type="button"
-                            onClick={handleGerarCronogramaMensal}
-                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
-                          >
-                            Gerar cronograma mensal
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleExcluirPleitosSelecionados}
-                            disabled={!canDeleteContrato || deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-                            title="Excluir as ordens de serviço marcadas na tabela"
-                          >
-                            <Trash2 className="w-4 h-4 shrink-0" />
-                            {deletePleitosSelecionadosMutation.isPending ? 'Excluindo...' : 'Excluir selecionadas'}
-                          </button>
-                    {allPleitos.length > 0 && (
-                      <>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleAbrirHistoricoOs}
+                        className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
+                      >
+                        Histórico de OS
+                      </button>
+                      {allPleitos.length > 0 && (
                         <button
-                          onClick={() => setShowHistoricoOsModal(true)}
-                          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
-                        >
-                          Histórico de OS
-                        </button>
-                        <button
+                          type="button"
                           onClick={() => setShowHistoricoPleitosModal(true)}
                           className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors"
                         >
                           Histórico de Pleitos
                         </button>
-                      </>
-                    )}
+                      )}
+                    </div>
                   </div>
                   <div className="flex flex-nowrap items-center gap-4 overflow-x-auto pb-1">
                   <div className="flex items-center gap-2 shrink-0">
@@ -3450,10 +3497,13 @@ export default function ContractDetailPage() {
                 <div className="p-8 text-center">
                   <ClipboardList className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
                   <p className="text-gray-500 dark:text-gray-400">
-                    {pleitos.length === 0
+                    {allPleitos.length === 0
                       ? 'Nenhuma ordem de serviço cadastrada para este contrato.'
-                      : `Nenhuma ordem de serviço no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
+                      : pleitos.length === 0
+                        ? 'Todas as ordens de serviço deste contrato foram concluídas (faturamento 100%). Consulte o Histórico de OS.'
+                        : `Nenhuma ordem de serviço no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
                   </p>
+                  {allPleitos.length === 0 && (
                   <button
                     onClick={() => setShowPleitoModal(true)}
                     disabled={!canCreateContrato}
@@ -3461,6 +3511,7 @@ export default function ContractDetailPage() {
                   >
                     Cadastrar primeira ordem de serviço
                   </button>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -3479,6 +3530,9 @@ export default function ContractDetailPage() {
                             aria-label="Selecionar todas as ordens de serviço visíveis"
                             className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
                           />
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">
+                          Etiqueta
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
@@ -3513,6 +3567,7 @@ export default function ContractDetailPage() {
                           .reduce((sum, b) => sum + b.grossValue, 0);
                         const orcamentoPleito = p.budget ? Number(p.budget) : 0;
                         const statusFaturamentoPct = orcamentoPleito > 0 ? (acumulado / orcamentoPleito) * 100 : null;
+                        const osEtiqueta = getOsEtiquetaAbertura(p, billingsForOs);
                         const mesAnoCriacao =
                           p.creationMonth && p.creationYear
                             ? `${String(p.creationMonth).padStart(2, '0')}/${p.creationYear}`
@@ -3550,6 +3605,13 @@ export default function ContractDetailPage() {
                               }}
                               className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
                             />
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osEtiquetaBadgeClass(osEtiqueta)}`}
+                            >
+                              {osEtiqueta}
+                            </span>
                           </td>
                           <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                             {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
@@ -4995,71 +5057,6 @@ export default function ContractDetailPage() {
                         </tbody>
                       </table>
                     </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-          {showHistoricoOsModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
-              <div className="absolute inset-0" onClick={() => setShowHistoricoOsModal(false)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Histórico de OS</h3>
-                  <button onClick={() => setShowHistoricoOsModal(false)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="p-6">
-                  {historicoOsList.length === 0 ? (
-                    <div className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhuma OS movida para histórico até o momento.</div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[900px]">
-                        <thead className="border-b border-gray-200 dark:border-gray-700">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Etiqueta</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Orçamento</th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor pleiteado</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Preenchimento</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:border-gray-700">
-                          {historicoOsList.map((p) => {
-                            const etiqueta = getHistoricoEtiqueta(p);
-                            const valorPleito = p.billingRequest ? Number(p.billingRequest) : 0;
-                            return (
-                              <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                                  {etiqueta ? (
-                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5 text-xs font-medium">
-                                      {etiqueta}
-                                    </span>
-                                  ) : '-'}
-                                </td>
-                                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                  {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={p.serviceDescription}>
-                                  {p.serviceDescription || '-'}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">
-                                  {p.budget ? formatCurrency(Number(p.budget)) : '-'}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">
-                                  {formatCurrency(valorPleito)}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                  {formatDateTime(p.createdAt || '')}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
                     </div>
                   )}
                 </div>
