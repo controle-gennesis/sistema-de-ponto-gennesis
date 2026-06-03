@@ -94,6 +94,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   { key: pathToModuleKey('/ponto/pleitos-gerados'), name: 'Pleitos Gerados', href: '/ponto/pleitos-gerados', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/aprovacao-fds'), name: 'Fichas de Demanda', href: '/ponto/aprovacao-fds', category: 'Engenharia' },
+  {
+    key: pathToModuleKey('/ponto/recebimento-entregas'),
+    name: 'Recebimento de Entregas',
+    href: '/ponto/recebimento-entregas',
+    category: 'Engenharia',
+  },
   // Jurídico
   { key: pathToModuleKey('/ponto/juridico'), name: 'Processos Trabalhistas', href: '/ponto/juridico', category: 'Jurídico' },
   // Suprimentos
@@ -101,6 +107,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/gerenciar-materiais'), name: 'Requisições de Materiais', href: '/ponto/gerenciar-materiais', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/mapa-cotacao'), name: 'Mapa de Cotação', href: '/ponto/mapa-cotacao', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/ordem-de-compra'), name: 'Ordens de Compra', href: '/ponto/ordem-de-compra', category: 'Suprimentos' },
+  { key: pathToModuleKey('/ponto/controle-entregas'), name: 'Controle de Entregas', href: '/ponto/controle-entregas', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/estoque'), name: 'Estoque', href: '/ponto/estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/furo-estoque'), name: 'Furo de Estoque', href: '/ponto/furo-estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/ajuste-estoque'), name: 'Ajuste de Estoque', href: '/ponto/ajuste-estoque', category: 'Suprimentos' },

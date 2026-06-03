@@ -5188,6 +5188,7 @@ export default function ContractDetailPage() {
               </div>
             </div>
           )}
+
           {/* Modal Resumo do Pleito */}
           {showPleitoResumoModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
