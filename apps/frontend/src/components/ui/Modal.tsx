@@ -23,8 +23,6 @@ function isEventInTopModal(target: EventTarget | null): boolean {
   if (top?.contains(target)) return true;
   const portal = document.getElementById('dropdown-portal-root');
   return !!portal?.contains(target);
-  const dropdownPortal = document.getElementById('dropdown-portal-root');
-  return !!dropdownPortal?.contains(target);
 }
 
 function lockPageScroll() {

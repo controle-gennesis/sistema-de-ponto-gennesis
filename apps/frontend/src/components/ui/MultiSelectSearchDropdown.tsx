@@ -46,7 +46,7 @@ function DropdownCheckbox({
   indeterminate?: boolean;
   disabled?: boolean;
   onToggle: () => void;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   noFocusRing?: boolean;
   children?: React.ReactNode;
 }) {
