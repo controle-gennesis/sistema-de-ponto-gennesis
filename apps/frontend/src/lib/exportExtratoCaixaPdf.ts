@@ -547,7 +547,7 @@ function drawAjustesManuaisSection(
 
   y = ensureSpace(doc, y, titleH + headerH + rowH * Math.min(rows.length, 3) + 20, margin);
 
-  drawSectionTitleBar(doc, margin, y, contentW, titleH, 'Ajustes manuais', 'Somados ao extrato do TOTVS');
+  drawSectionTitleBar(doc, margin, y, contentW, titleH, 'Ajustes manuais', 'Somados ao balanço do TOTVS');
   y += titleH + 3;
 
   const drawTableHeader = () => {
@@ -631,7 +631,7 @@ function drawFooter(doc: jsPDF, margin: number) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...TEXT_MUTED);
-    doc.text(`${COMPANY.name} — Extrato de Caixa`, margin, pageH - 8);
+    doc.text(`${COMPANY.name} — Balanço Financeiro`, margin, pageH - 8);
     doc.text(`Página ${p} de ${pageCount}`, pageW - margin, pageH - 8, { align: 'right' });
   }
 }
@@ -643,7 +643,7 @@ export async function exportExtratoCaixaPdf(input: ExportExtratoCaixaPdfInput): 
   const margin = 16;
   const contentW = pageWidth - margin * 2;
   const generatedAt = input.generatedAt ?? new Date();
-  const title = input.title ?? 'Extrato de Caixa';
+  const title = input.title ?? 'Balanço Financeiro';
   const ajustesRows = input.ajustesManuais ?? [];
 
   let y = drawPageHeader(
@@ -676,5 +676,5 @@ export async function exportExtratoCaixaPdf(input: ExportExtratoCaixaPdfInput): 
   drawFooter(doc, margin);
 
   const datePart = generatedAt.toISOString().slice(0, 10);
-  doc.save(`extrato-caixa-resumos_${datePart}.pdf`);
+  doc.save(`balanco-financeiro-resumos_${datePart}.pdf`);
 }

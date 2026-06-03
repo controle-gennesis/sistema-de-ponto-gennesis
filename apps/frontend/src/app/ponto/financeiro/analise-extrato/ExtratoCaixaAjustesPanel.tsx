@@ -253,7 +253,7 @@ export function ExtratoCaixaAjustesPanel({
                 </h3>
                 {expanded ? (
                   <p className="text-sm leading-snug text-gray-600 dark:text-gray-400">
-                    Correções permanentes somadas ao extrato do TOTVS (resumos e listagem)
+                    Correções permanentes somadas ao balanço do TOTVS (resumos e listagem)
                   </p>
                 ) : (
                   <p className="text-sm leading-snug text-gray-500 dark:text-gray-400">
@@ -517,7 +517,7 @@ export function ExtratoCaixaAjustesPanel({
               disabled={!listsReady}
             >
               <option value="">
-                {listsReady ? 'Selecione o centro de custo' : 'Carregue o extrato para listar opções'}
+                {listsReady ? 'Selecione o centro de custo' : 'Carregue o balanço para listar opções'}
               </option>
               {ccOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -548,7 +548,7 @@ export function ExtratoCaixaAjustesPanel({
               <option value="">
                 {listsReady
                   ? 'Selecione a natureza financeira'
-                  : 'Carregue o extrato para listar opções'}
+                  : 'Carregue o balanço para listar opções'}
               </option>
               {natureOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -589,7 +589,7 @@ export function ExtratoCaixaAjustesPanel({
                 disabled={!listsReady}
               >
                 <option value="">
-                  {listsReady ? 'Selecione o fornecedor' : 'Carregue o extrato para listar opções'}
+                  {listsReady ? 'Selecione o fornecedor' : 'Carregue o balanço para listar opções'}
                 </option>
                 {fornecedorOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -669,7 +669,7 @@ export function ExtratoCaixaAjustesPanel({
         size="sm"
       >
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Excluir este ajuste manual? A alteração será removida permanentemente do extrato.
+          Excluir este ajuste manual? A alteração será removida permanentemente do balanço.
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <button

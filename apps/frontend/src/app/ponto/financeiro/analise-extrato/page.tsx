@@ -7,15 +7,14 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CalendarDays,
-  ClipboardList,
   Filter,
   BookOpen,
+  Building2,
   ListPlus,
   Loader2,
   Search,
-  Building2,
   Download,
-  FileText,
+  TrendingUp,
   Wallet,
   X,
   type LucideIcon
@@ -23,7 +22,6 @@ import {
 import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
-import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -34,9 +32,11 @@ import {
   SEM_FORNECEDOR_KEY,
   SEM_NATUREZA_KEY,
   ajusteToExtratoItem,
-  isExtratoAjusteManual
+  isExtratoAjusteManual,
+  type ExtratoCaixaAjuste
 } from '@/lib/extratoCaixaAjuste';
 import { extratoMatchesAnyNatureCodes, normalizeBudgetNatureCode } from '@/lib/budgetNatureMatch';
+import { normalizeNaturezaLabel } from '@/lib/contractPaidNaturezaExclusions';
 import {
   exportExtratoCaixaPdf,
   EXTRATO_RESUMO_TOP_SAIDA,
@@ -60,11 +60,19 @@ import {
 } from '@/lib/extratoCaixaFiltrosSalvos';
 import { ExtratoCaixaAjustesPanel } from './ExtratoCaixaAjustesPanel';
 import { ExtratoFiltrosDesmarcadosResumo } from './ExtratoFiltrosDesmarcadosResumo';
-import { ExtratoFiltrosSalvosPanel } from './ExtratoFiltrosSalvosPanel';
+import { ExtratoFiltrosModal } from './ExtratoFiltrosModal';
+import {
+  BalancoFinanceiroTabNav,
+  type BalancoFinanceiroTabId
+} from './BalancoFinanceiroTabNav';
 import {
   ExtratoExportPdfModal,
   type ExtratoPdfNatureMode
 } from './ExtratoExportPdfModal';
+import {
+  MOVIMENTO_TIPO_ALL_VALUES,
+  MOVIMENTO_TIPO_FILTER_OPTIONS
+} from './extratoFiltrosConstants';
 import type { ExtratoCaixaApiResponse, ExtratoCaixaItem } from './extratoCaixaTypes';
 
 const EXTRATO_ITEMS_PER_PAGE = 50;
@@ -244,6 +252,256 @@ function itemSaldoLinha(item: ExtratoCaixaItem): number {
   return item.entrada + item.saida;
 }
 
+/** Naturezas que compõem a Receita Líquida (comparação normalizada, sem acentos). */
+const RECEITA_LIQUIDA_NATUREZAS = new Set([
+  normalizeNaturezaLabel('RECEITA - MANUTENCAO'),
+  normalizeNaturezaLabel('RECEITA - TERCEIRIZACAO MAO DE OBRA'),
+  normalizeNaturezaLabel('RECEITA - TERCEIRIZADO MAO DE OBRA')
+]);
+
+function receitaLiquidaLabelMatches(item: ExtratoCaixaItem): boolean {
+  const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
+  return label.length > 0 && RECEITA_LIQUIDA_NATUREZAS.has(label);
+}
+
+function buildReceitaLiquidaNatureCodes(
+  items: ExtratoCaixaItem[],
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): Set<string> {
+  const codes = new Set<string>();
+  for (const item of items) {
+    if (!receitaLiquidaLabelMatches(item)) continue;
+    const code = normalizeBudgetNatureCode(item.codNatFinanceira);
+    if (code) codes.add(code.toUpperCase());
+  }
+  for (const opt of natureOptions) {
+    if (opt.value === SEM_NATUREZA_KEY) continue;
+    if (!RECEITA_LIQUIDA_NATUREZAS.has(normalizeNaturezaLabel(opt.label))) continue;
+    const code = normalizeBudgetNatureCode(opt.value);
+    if (code) codes.add(code.toUpperCase());
+  }
+  return codes;
+}
+
+function itemMatchesReceitaLiquidaNature(
+  item: ExtratoCaixaItem,
+  natureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): boolean {
+  if (receitaLiquidaLabelMatches(item)) return true;
+  const code = normalizeBudgetNatureCode(item.codNatFinanceira).toUpperCase();
+  if (code && natureCodes.has(code)) return true;
+  if (!code) return false;
+  const opt = natureOptions.find(
+    (o) => normalizeBudgetNatureCode(o.value).toUpperCase() === code
+  );
+  return Boolean(
+    opt && RECEITA_LIQUIDA_NATUREZAS.has(normalizeNaturezaLabel(opt.label))
+  );
+}
+
+/** RM: saldo da linha; ajuste manual: valor assinado. */
+function contribuicaoReceitaLiquida(item: ExtratoCaixaItem): number {
+  if (isExtratoAjusteManual(item)) {
+    return Number.isFinite(item.valor) ? item.valor : 0;
+  }
+  return itemSaldoLinha(item);
+}
+
+function collectDemonstrativoReceitaLiquidaItems(
+  filteredItems: ExtratoCaixaItem[],
+  ajustes: ReadonlyArray<ExtratoCaixaAjuste>,
+  periodFrom: string,
+  periodTo: string,
+  searchQuery: string,
+  receitaLiquidaNatureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): ExtratoCaixaItem[] {
+  const result: ExtratoCaixaItem[] = [];
+  const add = (item: ExtratoCaixaItem) => {
+    if (
+      !itemMatchesReceitaLiquidaNature(item, receitaLiquidaNatureCodes, natureOptions)
+    ) {
+      return;
+    }
+    if (contribuicaoReceitaLiquida(item) === 0) return;
+    result.push(item);
+  };
+  for (const item of filteredItems) {
+    if (!isExtratoAjusteManual(item)) add(item);
+  }
+  for (const ajuste of ajustes) {
+    const item = ajusteToExtratoItem(ajuste);
+    if (!itemMatchesCompensacaoPeriod(item, periodFrom, periodTo)) continue;
+    if (!extratoItemMatchesSearch(item, searchQuery)) continue;
+    add(item);
+  }
+  return sortItemsForResumoDetalhe(result);
+}
+
+function collectDemonstrativoEntradasItems(
+  filteredItems: ExtratoCaixaItem[]
+): ExtratoCaixaItem[] {
+  return sortItemsForResumoDetalhe(
+    filteredItems.filter((item) => itemEntrada(item) > 0)
+  );
+}
+
+type DemonstrativoDetalheKind = 'entradas' | 'receita-liquida';
+
+function valorLinhaDemonstrativoDetalhe(
+  item: ExtratoCaixaItem,
+  kind: DemonstrativoDetalheKind
+): number {
+  return kind === 'receita-liquida' ? contribuicaoReceitaLiquida(item) : itemEntrada(item);
+}
+
+function ExtratoDemonstrativoDetalheModal({
+  kind,
+  onClose,
+  items
+}: {
+  kind: DemonstrativoDetalheKind | null;
+  onClose: () => void;
+  items: ExtratoCaixaItem[];
+}) {
+  const title = kind === 'receita-liquida' ? 'Receita Líquida' : kind === 'entradas' ? 'Entradas' : '';
+  const sorted = useMemo(() => sortItemsForResumoDetalhe(items), [items]);
+  const stats = useMemo(() => {
+    if (!kind) {
+      return { totalEntrada: 0, totalSaida: 0, totalValor: 0 };
+    }
+    let totalEntrada = 0;
+    let totalSaida = 0;
+    for (const item of sorted) {
+      const v = valorLinhaDemonstrativoDetalhe(item, kind);
+      if (v > 0) totalEntrada += v;
+      else if (v < 0) totalSaida += Math.abs(v);
+    }
+    return {
+      totalEntrada,
+      totalSaida,
+      totalValor: totalEntrada - totalSaida
+    };
+  }, [sorted, kind]);
+
+  const visiveis = sorted.slice(0, RESUMO_DETALHE_LIMITE);
+  const restante = sorted.length - visiveis.length;
+
+  if (!kind) return null;
+
+  return (
+    <Modal isOpen onClose={onClose} title={title} size="xl" closeOnOverlayClick>
+      <ExtratoResumoStatCards
+        totalSaida={stats.totalSaida}
+        totalEntrada={stats.totalEntrada}
+        totalValor={stats.totalValor}
+      />
+
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+        {sorted.length} movimentação(ões) no recorte atual
+        {restante > 0 ? ` — exibindo ${visiveis.length}` : null}.
+      </p>
+
+      {sorted.length === 0 ? (
+        <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+          Nenhuma movimentação neste total.
+        </p>
+      ) : (
+        <div className="max-h-[min(60vh,32rem)] overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Data
+                </th>
+                <th className="min-w-[12rem] px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Histórico
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Centro de custo
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Natureza
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Fornecedor
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">
+                  Filial
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-medium uppercase text-gray-500">
+                  Valor
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {visiveis.map((item, index) => {
+                const linhaValor = valorLinhaDemonstrativoDetalhe(item, kind);
+                return (
+                  <tr
+                    key={item.ajusteId ?? `dem-card-${index}-${item.dataCompensacao}`}
+                    className={item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''}
+                  >
+                    <td className="whitespace-nowrap px-3 py-2 text-gray-900 dark:text-gray-100">
+                      {formatDate(item.dataCompensacao)}
+                    </td>
+                    <td className="max-w-[14rem] px-3 py-2">
+                      <span
+                        className="line-clamp-2 text-gray-700 dark:text-gray-300"
+                        title={item.historico}
+                      >
+                        {item.historico || '—'}
+                      </span>
+                      {item.isAjusteManual ? (
+                        <span className="mt-0.5 inline-block rounded bg-amber-200 px-1 py-0.5 text-[10px] font-semibold uppercase text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
+                          Ajuste
+                        </span>
+                      ) : null}
+                    </td>
+                    <td
+                      className="max-w-[10rem] truncate px-3 py-2 text-gray-700 dark:text-gray-300"
+                      title={displayCcLabel(item)}
+                    >
+                      {displayCcLabel(item)}
+                    </td>
+                    <td
+                      className="max-w-[10rem] truncate px-3 py-2 text-gray-700 dark:text-gray-300"
+                      title={displayNatLabel(item)}
+                    >
+                      {displayNatLabel(item)}
+                    </td>
+                    <td className="max-w-[8rem] truncate px-3 py-2 text-gray-700 dark:text-gray-300">
+                      {item.fornecedor || '—'}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-gray-300">
+                      {item.codFilial != null ? formatFilialLabel(item.codFilial) : '—'}
+                    </td>
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums ${valorCellClass(linhaValor)}`}
+                    >
+                      {formatCurrency(linhaValor)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {restante > 0 ? (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          + {restante} movimentação(ões) não exibida(s). Refine os filtros para reduzir o volume.
+        </p>
+      ) : null}
+    </Modal>
+  );
+}
+
+const DEMONSTRATIVO_CARD_CLICKABLE_CLASS =
+  'cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900';
+
 function formatMonthYearLabel(monthKey: string): string {
   const year = Number(monthKey.slice(0, 4));
   const month = Number(monthKey.slice(5, 7));
@@ -267,8 +525,18 @@ type ExtratoResumoRow = {
 
 const EXTRATO_RESUMO_ITEMS_PER_PAGE = 20;
 
-function sortResumoRowsByValorDesc(rows: ExtratoResumoRow[]): ExtratoResumoRow[] {
+type ExtratoResumoRowSort = 'valor-desc' | 'month-desc' | 'month-asc' | 'label';
+
+function sortResumoRows(rows: ExtratoResumoRow[], sort: ExtratoResumoRowSort): ExtratoResumoRow[] {
   return [...rows].sort((a, b) => {
+    if (sort === 'month-desc' || sort === 'month-asc') {
+      const cmp = a.key.localeCompare(b.key);
+      if (cmp !== 0) return sort === 'month-desc' ? -cmp : cmp;
+      return a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' });
+    }
+    if (sort === 'label') {
+      return a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' });
+    }
     const diff = b.totalValor - a.totalValor;
     if (diff !== 0) return diff;
     return a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' });
@@ -560,7 +828,7 @@ function ExtratoResumoDetalheModal({
   const visiveis = sorted.slice(0, RESUMO_DETALHE_LIMITE);
   const restante = sorted.length - visiveis.length;
 
-  if (!row) return null;
+  if (!isOpen || !row) return null;
 
   return (
     <Modal
@@ -568,6 +836,7 @@ function ExtratoResumoDetalheModal({
       onClose={onClose}
       title={`${rowLabelHeader}: ${row.label}`}
       size="xl"
+      closeOnOverlayClick
     >
       <ExtratoResumoStatCards
         totalSaida={row.totalSaida}
@@ -685,7 +954,8 @@ function ExtratoResumoTable({
   getItemGroupKey,
   labelClassName = '',
   headerActions,
-  totalRowLabel = 'Total geral'
+  totalRowLabel = 'Total geral',
+  rowSort = 'valor-desc'
 }: {
   title: string;
   subtitle: string;
@@ -698,11 +968,13 @@ function ExtratoResumoTable({
   labelClassName?: string;
   headerActions?: React.ReactNode;
   totalRowLabel?: string;
+  /** Resumo por mês usa `month-desc` (mais recente primeiro). Demais tabelas: valor. */
+  rowSort?: ExtratoResumoRowSort;
 }) {
   const [detalheRow, setDetalheRow] = useState<ExtratoResumoRow | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const sortedRows = useMemo(() => sortResumoRowsByValorDesc(rows), [rows]);
+  const sortedRows = useMemo(() => sortResumoRows(rows, rowSort), [rows, rowSort]);
 
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / EXTRATO_RESUMO_ITEMS_PER_PAGE));
   const showPagination = sortedRows.length > EXTRATO_RESUMO_ITEMS_PER_PAGE;
@@ -898,13 +1170,6 @@ function ExtratoResumoTable({
   );
 }
 
-const MOVIMENTO_TIPO_FILTER_OPTIONS = [
-  { value: 'entrada', label: 'Entradas', searchText: 'entradas entrada crédito' },
-  { value: 'saida', label: 'Saídas', searchText: 'saídas saida débito' }
-] as const;
-
-const MOVIMENTO_TIPO_ALL_VALUES = MOVIMENTO_TIPO_FILTER_OPTIONS.map((o) => o.value);
-
 function extratoMatchesMovimentoTipo(
   item: ExtratoCaixaItem,
   selected: string[],
@@ -986,23 +1251,6 @@ function extratoItemMatchesSearch(item: ExtratoCaixaItem, query: string): boolea
   return haystack.some((part) => part && part.toLowerCase().includes(q));
 }
 
-const FILTER_SELECT_CLASS =
-  'w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:ring-red-400';
-
-type ExtratoFilterDraft = ExtratoCaixaFiltroPayload;
-
-const EMPTY_FILTER_DRAFT: ExtratoFilterDraft = {
-  ccFilterCodes: [],
-  natureFilterCodes: [],
-  poloFilterIds: [],
-  fornecedorFilterValues: [],
-  historicoFilterValues: [],
-  tipoOperacaoFilterValues: [],
-  movimentoTipoFilter: [],
-  periodFrom: '',
-  periodTo: ''
-};
-
 const EXTRATO_TH_CENTER =
   'whitespace-nowrap px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4';
 const EXTRATO_TH_HISTORICO =
@@ -1081,7 +1329,7 @@ function ExtratoSearchFilterBar({
 
 function ExtratoCaixaLoadingSkeleton() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-label="Carregando extrato de caixa">
+    <div className="space-y-6" aria-busy="true" aria-label="Carregando balanço financeiro">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
         {[0, 1, 2].map((i) => (
           <Card key={i}>
@@ -1152,7 +1400,7 @@ function ExtratoCaixaRefetchBar() {
       aria-live="polite"
     >
       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-      <span>Atualizando movimentações do extrato…</span>
+      <span>Atualizando movimentações…</span>
     </div>
   );
 }
@@ -1195,7 +1443,7 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Movimentações</h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Consulte as movimentações do extrato de caixa
+                Consulte as movimentações do balanço financeiro
               </p>
             </div>
           </div>
@@ -1377,8 +1625,8 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
 }
 
 export default function AnaliseExtratoPage() {
-  const pageTitle = 'Extrato de Caixa';
-  const pageSubtitle = 'Movimentações do extrato de caixa integradas ao TOTVS RM';
+  const pageTitle = 'Balanço Financeiro';
+  const pageSubtitle = 'Movimentações do balanço financeiro integradas ao TOTVS RM';
 
   const { isDepartmentFinanceiro, userPosition, can, user } = usePermissions();
   const isAdministrator = userPosition === 'Administrador';
@@ -1397,10 +1645,18 @@ export default function AnaliseExtratoPage() {
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeBalancoTab, setActiveBalancoTab] = useState<BalancoFinanceiroTabId>('extrato');
+  const [demonstrativoDetalhe, setDemonstrativoDetalhe] =
+    useState<DemonstrativoDetalheKind | null>(null);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (activeBalancoTab !== 'demonstrativo') {
+      setDemonstrativoDetalhe(null);
+    }
+  }, [activeBalancoTab]);
   const [exportPdfModalOpen, setExportPdfModalOpen] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
-  const [filterDraft, setFilterDraft] = useState<ExtratoFilterDraft>(EMPTY_FILTER_DRAFT);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filtersInitializedRef = useRef(false);
 
@@ -1601,7 +1857,7 @@ export default function AnaliseExtratoPage() {
   );
 
   const buildDefaultFilters = useCallback(
-    (): ExtratoFilterDraft => ({
+    (): ExtratoCaixaFiltroPayload => ({
       ccFilterCodes: [...ccAllValues],
       natureFilterCodes: [...natureAllValues],
       poloFilterIds: [...poloAllValues],
@@ -1636,43 +1892,30 @@ export default function AnaliseExtratoPage() {
     filtersInitializedRef.current = true;
   }, [rmItems.length, buildDefaultFilters]);
 
-  const openFiltersModal = () => {
-    const withAllIfEmpty = (applied: string[], all: string[]) =>
-      applied.length === 0 && all.length > 0 ? [...all] : [...applied];
-
-    setFilterDraft({
-      ccFilterCodes: withAllIfEmpty(ccFilterCodes, ccAllValues),
-      natureFilterCodes: withAllIfEmpty(natureFilterCodes, natureAllValues),
-      poloFilterIds: withAllIfEmpty(poloFilterIds, poloAllValues),
-      fornecedorFilterValues: withAllIfEmpty(fornecedorFilterValues, fornecedorAllValues),
-      historicoFilterValues: withAllIfEmpty(historicoFilterValues, historicoAllValues),
-      tipoOperacaoFilterValues: withAllIfEmpty(
-        tipoOperacaoFilterValues,
-        tipoOperacaoAllValues
-      ),
-      movimentoTipoFilter: withAllIfEmpty(movimentoTipoFilter, MOVIMENTO_TIPO_ALL_VALUES),
+  const appliedFiltroPayload: ExtratoCaixaFiltroPayload = useMemo(
+    () => ({
+      ccFilterCodes,
+      natureFilterCodes,
+      poloFilterIds,
+      fornecedorFilterValues,
+      historicoFilterValues,
+      tipoOperacaoFilterValues,
+      movimentoTipoFilter,
       periodFrom,
       periodTo
-    });
-    setIsFiltersModalOpen(true);
-  };
-
-  const closeFiltersModal = () => setIsFiltersModalOpen(false);
-
-  const applyFiltersModal = () => {
-    setCcFilterCodes(filterDraft.ccFilterCodes);
-    setNatureFilterCodes(filterDraft.natureFilterCodes);
-    setPoloFilterIds(filterDraft.poloFilterIds);
-    setFornecedorFilterValues(filterDraft.fornecedorFilterValues);
-    setHistoricoFilterValues(filterDraft.historicoFilterValues);
-    setTipoOperacaoFilterValues(filterDraft.tipoOperacaoFilterValues);
-    setMovimentoTipoFilter(filterDraft.movimentoTipoFilter);
-    setPeriodFrom(filterDraft.periodFrom);
-    setPeriodTo(filterDraft.periodTo);
-    setIsFiltersModalOpen(false);
-  };
-
-  const clearFilterDraft = () => setFilterDraft(buildDefaultFilters());
+    }),
+    [
+      ccFilterCodes,
+      natureFilterCodes,
+      poloFilterIds,
+      fornecedorFilterValues,
+      historicoFilterValues,
+      tipoOperacaoFilterValues,
+      movimentoTipoFilter,
+      periodFrom,
+      periodTo
+    ]
+  );
 
   const hasCcFilter = isMultiselectFilterActive(ccFilterCodes, ccAllValues);
   const hasNatureFilter = isMultiselectFilterActive(natureFilterCodes, natureAllValues);
@@ -1700,31 +1943,6 @@ export default function AnaliseExtratoPage() {
     hasMovimentoTipoFilter ||
     hasPeriodFilter;
   const hasListRefinement = hasActiveFilters || hasSearchQuery;
-
-  const appliedFiltroPayload: ExtratoCaixaFiltroPayload = useMemo(
-    () => ({
-      ccFilterCodes,
-      natureFilterCodes,
-      poloFilterIds,
-      fornecedorFilterValues,
-      historicoFilterValues,
-      tipoOperacaoFilterValues,
-      movimentoTipoFilter,
-      periodFrom,
-      periodTo
-    }),
-    [
-      ccFilterCodes,
-      natureFilterCodes,
-      poloFilterIds,
-      fornecedorFilterValues,
-      historicoFilterValues,
-      tipoOperacaoFilterValues,
-      movimentoTipoFilter,
-      periodFrom,
-      periodTo
-    ]
-  );
 
   const filtroLabelMaps: ExtratoFiltroLabelMaps = useMemo(
     () => ({
@@ -1875,6 +2093,46 @@ export default function AnaliseExtratoPage() {
     };
   }, [filteredItems]);
 
+  const receitaLiquidaNatureCodes = useMemo(
+    () => buildReceitaLiquidaNatureCodes(items, natureFilterOptions),
+    [items, natureFilterOptions]
+  );
+
+  const demonstrativoReceitaLiquidaItems = useMemo(
+    () =>
+      collectDemonstrativoReceitaLiquidaItems(
+        filteredItems,
+        ajustes,
+        periodFrom,
+        periodTo,
+        searchQuery,
+        receitaLiquidaNatureCodes,
+        natureFilterOptions
+      ),
+    [
+      filteredItems,
+      ajustes,
+      periodFrom,
+      periodTo,
+      searchQuery,
+      receitaLiquidaNatureCodes,
+      natureFilterOptions
+    ]
+  );
+
+  const demonstrativoReceitaLiquida = useMemo(() => {
+    let total = 0;
+    for (const item of demonstrativoReceitaLiquidaItems) {
+      total += contribuicaoReceitaLiquida(item);
+    }
+    return { total, qtd: demonstrativoReceitaLiquidaItems.length };
+  }, [demonstrativoReceitaLiquidaItems]);
+
+  const demonstrativoEntradasItems = useMemo(
+    () => collectDemonstrativoEntradasItems(filteredItems),
+    [filteredItems]
+  );
+
   const extratoResumoMensal = useMemo(
     () => buildExtratoResumoMensal(filteredItems),
     [filteredItems]
@@ -1974,7 +2232,7 @@ export default function AnaliseExtratoPage() {
           : pickResumoRowsForPdf(extratoResumoNatureza, false, EXTRATO_RESUMO_TOP_SAIDA);
 
         await exportExtratoCaixaPdf({
-          title: 'Extrato de Caixa',
+          title: 'Balanço Financeiro',
           subtitle: pageSubtitle,
           stats: {
             totalEntrada: extratoStats.totalEntrada,
@@ -2079,6 +2337,10 @@ export default function AnaliseExtratoPage() {
             </p>
           </div>
 
+          <BalancoFinanceiroTabNav activeTab={activeBalancoTab} onTabChange={setActiveBalancoTab} />
+
+          {activeBalancoTab === 'extrato' ? (
+            <>
           {canAccess ? (
             <ExtratoCaixaAjustesPanel enabled={canAccess} sourceItems={rmItems} />
           ) : null}
@@ -2089,7 +2351,7 @@ export default function AnaliseExtratoPage() {
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
                 searchInputRef={searchInputRef}
-                onOpenFilters={openFiltersModal}
+                onOpenFilters={() => setIsFiltersModalOpen(true)}
                 hasActiveFilters={hasActiveFilters}
                 disabled={isLoading || isFetching}
                 exportAction={
@@ -2121,7 +2383,7 @@ export default function AnaliseExtratoPage() {
                   <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
                   <div className="min-w-0 text-sm text-amber-800 dark:text-amber-200">
                     <p className="font-medium">
-                      Algumas consultas do extrato no TOTVS RM não retornaram dados.
+                      Algumas consultas do balanço no TOTVS RM não retornaram dados.
                     </p>
                     <ul className="mt-2 list-inside list-disc space-y-1 text-amber-700 dark:text-amber-300">
                       {pathFailures.map((f) => (
@@ -2220,6 +2482,7 @@ export default function AnaliseExtratoPage() {
                 rows={extratoResumoMensal}
                 detailItems={filteredItems}
                 getItemGroupKey={itemCompensacaoMonthKey}
+                rowSort="month-desc"
               />
 
               <ExtratoResumoTable
@@ -2274,7 +2537,7 @@ export default function AnaliseExtratoPage() {
             <Card>
               <CardContent className="py-8 text-center">
                 <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-400" />
-                <p className="text-gray-600 dark:text-gray-400">Erro ao carregar extrato de caixa</p>
+                <p className="text-gray-600 dark:text-gray-400">Erro ao carregar balanço financeiro</p>
                 <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
                   {(error as Error)?.message || 'Tente novamente.'}
                 </p>
@@ -2319,12 +2582,293 @@ export default function AnaliseExtratoPage() {
                 emptyMessage={
                   hasListRefinement
                     ? 'Nenhuma movimentação encontrada com os filtros ou termo de busca aplicados.'
-                    : 'Nenhuma movimentação encontrada no extrato.'
+                    : 'Nenhuma movimentação encontrada no balanço.'
                 }
               />
             </div>
           )}
+            </>
+          ) : (
+            <div className="space-y-6" role="tabpanel" aria-label="Demonstrativo Financeiro">
+              {canAccess ? (
+                <ExtratoCaixaAjustesPanel enabled={canAccess} sourceItems={rmItems} />
+              ) : null}
+
+              {configured && !loadFailed ? (
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Os resultados seguem os filtros aplicados na aba{' '}
+                      <span className="font-medium text-gray-800 dark:text-gray-200">
+                        Extrato de Caixa
+                      </span>
+                      .
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setIsFiltersModalOpen(true)}
+                      disabled={isLoading || isFetching}
+                      className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                        hasActiveFilters
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <Filter className="h-4 w-4" aria-hidden />
+                      Filtros
+                    </button>
+                  </div>
+                  {filtrosDesmarcados.length > 0 ? (
+                    <ExtratoFiltrosDesmarcadosResumo
+                      camposDesmarcados={filtrosDesmarcados}
+                      temAjustesManuais={ajustes.length > 0}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
+              {pathFailures.length > 0 ? (
+                <Card className="border-amber-200 dark:border-amber-800">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+                      <div className="min-w-0 text-sm text-amber-800 dark:text-amber-200">
+                        <p className="font-medium">
+                          Algumas consultas do balanço no TOTVS RM não retornaram dados.
+                        </p>
+                        <ul className="mt-2 list-inside list-disc space-y-1 text-amber-700 dark:text-amber-300">
+                          {pathFailures.map((f) => (
+                            <li key={f.path} className="break-all">
+                              <span className="font-mono text-xs">{f.path}</span>
+                              {f.error ? ` — ${f.error}` : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {isLoading ? (
+                <ExtratoCaixaLoadingSkeleton />
+              ) : isError ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-400" />
+                    <p className="text-gray-600 dark:text-gray-400">
+                      Erro ao carregar balanço financeiro
+                    </p>
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
+                      {(error as Error)?.message || 'Tente novamente.'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => refetch()}
+                      className="mt-4 text-sm font-medium text-red-600 underline dark:text-red-400"
+                    >
+                      Tentar novamente
+                    </button>
+                  </CardContent>
+                </Card>
+              ) : !configured ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <AlertCircle className="mx-auto mb-4 h-12 w-12 text-amber-400" />
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {apiMessage || 'Integração TOTVS RM não configurada no servidor.'}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : loadFailed ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-400" />
+                    <p className="text-gray-600 dark:text-gray-400">Falha ao consultar o TOTVS RM</p>
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">{apiMessage}</p>
+                    <button
+                      type="button"
+                      onClick={() => refetch()}
+                      className="mt-4 text-sm font-medium text-red-600 underline dark:text-red-400"
+                    >
+                      Tentar novamente
+                    </button>
+                  </CardContent>
+                </Card>
+              ) : showDashboards ? (
+                <div className="space-y-6">
+                  {isFetching ? <ExtratoCaixaRefetchBar /> : null}
+
+                  <Card className={`border-emerald-200 dark:border-emerald-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}>
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => setDemonstrativoDetalhe('receita-liquida')}
+                      aria-label="Ver detalhes da Receita Líquida"
+                    >
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 rounded-lg bg-emerald-100 p-2 sm:p-3 dark:bg-emerald-900/30">
+                            <TrendingUp className="h-5 w-5 text-emerald-600 dark:text-emerald-400 sm:h-6 sm:w-6" />
+                          </div>
+                          <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                            <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                              Receita Líquida{' '}
+                              <span className="text-gray-400 dark:text-gray-500">
+                                ({demonstrativoReceitaLiquida.qtd})
+                              </span>
+                            </p>
+                            <p
+                              className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
+                                demonstrativoReceitaLiquida.total >= 0
+                                  ? 'text-emerald-700 dark:text-emerald-300'
+                                  : 'text-red-600 dark:text-red-400'
+                              }`}
+                            >
+                              {formatCurrency(demonstrativoReceitaLiquida.total)}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              Lançamentos e ajustes manuais com natureza &quot;RECEITA -
+                              MANUTENCAO&quot; ou &quot;RECEITA - TERCEIRIZACAO MAO DE OBRA&quot;, no
+                              período e busca do recorte.
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-emerald-600/90 dark:text-emerald-400/90">
+                              Clique para ver detalhes
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </button>
+                  </Card>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
+                    <Card>
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                            <ArrowUpRight className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                          </div>
+                          <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                              Saídas{' '}
+                              <span className="text-gray-400 dark:text-gray-500">
+                                ({extratoStats.qtdSaida})
+                              </span>
+                            </p>
+                            <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                              {formatCurrency(extratoStats.totalSaida)}
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className={DEMONSTRATIVO_CARD_CLICKABLE_CLASS}>
+                      <button
+                        type="button"
+                        className="w-full text-left"
+                        onClick={() => setDemonstrativoDetalhe('entradas')}
+                        aria-label="Ver detalhes das Entradas"
+                      >
+                        <CardContent className="p-4 sm:p-6">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
+                              <ArrowDownLeft className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                              <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Entradas{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({extratoStats.qtdEntrada})
+                                </span>
+                              </p>
+                              <p className="mt-1 truncate text-lg font-bold text-green-700 dark:text-green-300 sm:text-2xl">
+                                {formatCurrency(extratoStats.totalEntrada)}
+                              </p>
+                              <p className="mt-1 text-xs font-medium text-green-600/90 dark:text-green-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card>
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 rounded-lg bg-yellow-100 p-2 sm:p-3 dark:bg-yellow-900/30">
+                            <Wallet className="h-5 w-5 text-yellow-600 dark:text-yellow-400 sm:h-6 sm:w-6" />
+                          </div>
+                          <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                              Valor
+                            </p>
+                            <p
+                              className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
+                                extratoStats.saldoLiquido >= 0
+                                  ? 'text-gray-900 dark:text-gray-100'
+                                  : 'text-red-600 dark:text-red-400'
+                              }`}
+                            >
+                              {formatCurrency(extratoStats.saldoLiquido)}
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <ExtratoResumoTable
+                    title="Resumo por mês"
+                    subtitle="Totais de entrada, saída e valor agrupados pela data de compensação."
+                    icon={CalendarDays}
+                    rowLabelHeader="Mês"
+                    countLabel="meses"
+                    rows={extratoResumoMensal}
+                    detailItems={filteredItems}
+                    getItemGroupKey={itemCompensacaoMonthKey}
+                    rowSort="month-desc"
+                  />
+
+                  <ExtratoResumoTable
+                    title="Resumo por polo"
+                    subtitle="Totais de entrada, saída e valor agrupados por polo, conforme o centro de custo da movimentação."
+                    icon={Building2}
+                    rowLabelHeader="Polo"
+                    countLabel="polos"
+                    rows={extratoResumoPolo}
+                    detailItems={filteredItems}
+                    getItemGroupKey={poloGroupKey}
+                  />
+
+                  <ExtratoResumoTable
+                    title="Resumo por centro de custo"
+                    subtitle="Totais de entrada, saída e valor agrupados por centro de custo."
+                    icon={ListPlus}
+                    rowLabelHeader="Centro de custo"
+                    countLabel="centros de custo"
+                    rows={extratoResumoCentroCusto}
+                    detailItems={filteredItems}
+                    getItemGroupKey={ccGroupKey}
+                  />
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
+
+        <ExtratoDemonstrativoDetalheModal
+          kind={demonstrativoDetalhe}
+          onClose={() => setDemonstrativoDetalhe(null)}
+          items={
+            demonstrativoDetalhe === 'receita-liquida'
+              ? demonstrativoReceitaLiquidaItems
+              : demonstrativoDetalhe === 'entradas'
+                ? demonstrativoEntradasItems
+                : []
+          }
+        />
 
         <ExtratoExportPdfModal
           isOpen={exportPdfModalOpen}
@@ -2335,200 +2879,34 @@ export default function AnaliseExtratoPage() {
           topLimit={EXTRATO_RESUMO_TOP_SAIDA}
         />
 
-        <Modal
+        <ExtratoFiltrosModal
           isOpen={isFiltersModalOpen}
-          onClose={closeFiltersModal}
-          title="Filtros"
-          size="lg"
-        >
-          <div className="space-y-4">
-            <ExtratoFiltrosSalvosPanel
-              filterDraft={filterDraft}
-              onLoadDraft={setFilterDraft}
-              allValues={filtroAllValues}
-              disabled={isLoading}
-            />
-
-            <div>
-              <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                Período (data de compensação)
-              </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="extrato-filter-from"
-                    className="mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400"
-                  >
-                    De
-                  </label>
-                  <input
-                    id="extrato-filter-from"
-                    type="date"
-                    value={filterDraft.periodFrom}
-                    onChange={(e) =>
-                      setFilterDraft((d) => ({ ...d, periodFrom: e.target.value }))
-                    }
-                    className={FILTER_SELECT_CLASS}
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="extrato-filter-to"
-                    className="mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400"
-                  >
-                    Até
-                  </label>
-                  <input
-                    id="extrato-filter-to"
-                    type="date"
-                    value={filterDraft.periodTo}
-                    onChange={(e) =>
-                      setFilterDraft((d) => ({ ...d, periodTo: e.target.value }))
-                    }
-                    min={filterDraft.periodFrom || undefined}
-                    className={FILTER_SELECT_CLASS}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <MultiSelectSearchDropdown
-                label="Entradas e Saídas"
-                options={[...MOVIMENTO_TIPO_FILTER_OPTIONS]}
-                selected={filterDraft.movimentoTipoFilter}
-                onChange={(ids) =>
-                  setFilterDraft((d) => ({ ...d, movimentoTipoFilter: ids }))
-                }
-                disabled={isLoading}
-                placeholder="Entradas e saídas"
-                searchPlaceholder="Pesquisar..."
-                emptyOptionsMessage="Nenhuma opção disponível."
-                emptySearchMessage="Nenhuma opção encontrada."
-                icon={<Wallet className="h-4 w-4" aria-hidden />}
-                menuInline
-              />
-            </div>
-
-            <div>
-              <MultiSelectSearchDropdown
-                label="Polo"
-                options={poloFilterOptions}
-                selected={filterDraft.poloFilterIds}
-                onChange={(ids) => setFilterDraft((d) => ({ ...d, poloFilterIds: ids }))}
-                disabled={isLoading}
-                placeholder="Todos os polos"
-                searchPlaceholder="Pesquisar polo..."
-                emptyOptionsMessage="Nenhum polo no extrato carregado."
-                emptySearchMessage="Nenhum polo encontrado."
-                icon={<Building2 className="h-4 w-4" aria-hidden />}
-                menuInline
-              />
-            </div>
-
-            <div>
-              <MultiSelectSearchDropdown
-                label="Centro de Custo"
-                options={ccFilterOptions}
-                selected={filterDraft.ccFilterCodes}
-                onChange={(ids) => setFilterDraft((d) => ({ ...d, ccFilterCodes: ids }))}
-                disabled={isLoading}
-                placeholder="Todos os centros de custo"
-                searchPlaceholder="Pesquisar centro de custo..."
-                emptyOptionsMessage="Nenhum centro de custo no extrato carregado."
-                emptySearchMessage="Nenhum centro de custo encontrado."
-                icon={<ListPlus className="h-4 w-4" aria-hidden />}
-                menuInline
-              />
-            </div>
-            <div>
-              <MultiSelectSearchDropdown
-                label="Natureza Financeira"
-                options={natureFilterOptions}
-                selected={filterDraft.natureFilterCodes}
-                onChange={(ids) => setFilterDraft((d) => ({ ...d, natureFilterCodes: ids }))}
-                disabled={isLoading}
-                placeholder="Todas as naturezas financeiras"
-                searchPlaceholder="Pesquisar natureza ou código..."
-                emptyOptionsMessage="Nenhuma natureza no extrato carregado."
-                emptySearchMessage="Nenhuma natureza encontrada."
-                icon={<BookOpen className="h-4 w-4" aria-hidden />}
-                menuInline
-              />
-            </div>
-
-            <div>
-              <MultiSelectSearchDropdown
-                label="Fornecedor"
-                options={fornecedorFilterOptions}
-                selected={filterDraft.fornecedorFilterValues}
-                onChange={(ids) =>
-                  setFilterDraft((d) => ({ ...d, fornecedorFilterValues: ids }))
-                }
-                disabled={isLoading}
-                placeholder="Todos os fornecedores"
-                searchPlaceholder="Pesquisar fornecedor..."
-                emptyOptionsMessage="Nenhum fornecedor no extrato carregado."
-                emptySearchMessage="Nenhum fornecedor encontrado."
-                icon={<Building2 className="h-4 w-4" aria-hidden />}
-                menuInline
-              />
-            </div>
-
-            <div>
-              <MultiSelectSearchDropdown
-                label="Histórico"
-                options={historicoFilterOptions}
-                selected={filterDraft.historicoFilterValues}
-                onChange={(ids) =>
-                  setFilterDraft((d) => ({ ...d, historicoFilterValues: ids }))
-                }
-                disabled={isLoading}
-                placeholder="Todos os históricos"
-                searchPlaceholder="Pesquisar histórico..."
-                emptyOptionsMessage="Nenhum histórico no extrato carregado."
-                emptySearchMessage="Nenhum histórico encontrado."
-                icon={<FileText className="h-4 w-4" aria-hidden />}
-                menuInline
-              />
-            </div>
-
-            <div>
-              <MultiSelectSearchDropdown
-                label="Tipo de Operação"
-                options={tipoOperacaoFilterOptions}
-                selected={filterDraft.tipoOperacaoFilterValues}
-                onChange={(ids) =>
-                  setFilterDraft((d) => ({ ...d, tipoOperacaoFilterValues: ids }))
-                }
-                disabled={isLoading}
-                placeholder="Todos os tipos de operação"
-                searchPlaceholder="Pesquisar tipo..."
-                emptyOptionsMessage="Nenhum tipo de operação no extrato carregado."
-                emptySearchMessage="Nenhum tipo encontrado."
-                icon={<ClipboardList className="h-4 w-4" aria-hidden />}
-                menuInline
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
-              <button
-                type="button"
-                onClick={clearFilterDraft}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-              >
-                Limpar filtros
-              </button>
-              <button
-                type="button"
-                onClick={applyFiltersModal}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-              >
-                Aplicar
-              </button>
-            </div>
-          </div>
-        </Modal>
+          onClose={() => setIsFiltersModalOpen(false)}
+          onApply={(draft) => {
+            setCcFilterCodes(draft.ccFilterCodes);
+            setNatureFilterCodes(draft.natureFilterCodes);
+            setPoloFilterIds(draft.poloFilterIds);
+            setFornecedorFilterValues(draft.fornecedorFilterValues);
+            setHistoricoFilterValues(draft.historicoFilterValues);
+            setTipoOperacaoFilterValues(draft.tipoOperacaoFilterValues);
+            setMovimentoTipoFilter(draft.movimentoTipoFilter);
+            setPeriodFrom(draft.periodFrom);
+            setPeriodTo(draft.periodTo);
+            setIsFiltersModalOpen(false);
+          }}
+          applied={appliedFiltroPayload}
+          allValues={filtroAllValues}
+          buildDefaults={buildDefaultFilters}
+          disabled={isLoading}
+          options={{
+            polo: poloFilterOptions,
+            cc: ccFilterOptions,
+            nature: natureFilterOptions,
+            fornecedor: fornecedorFilterOptions,
+            historico: historicoFilterOptions,
+            tipoOperacao: tipoOperacaoFilterOptions
+          }}
+        />
       </MainLayout>
     </ProtectedRoute>
   );
