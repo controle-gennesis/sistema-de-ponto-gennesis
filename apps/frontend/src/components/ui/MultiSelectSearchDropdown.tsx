@@ -36,6 +36,7 @@ function DropdownCheckbox({
   checked,
   indeterminate,
   disabled,
+  onToggle,
   onChange,
   noFocusRing,
   children,
@@ -44,7 +45,8 @@ function DropdownCheckbox({
   checked: boolean;
   indeterminate?: boolean;
   disabled?: boolean;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onToggle: () => void;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   noFocusRing?: boolean;
   children?: React.ReactNode;
 }) {
@@ -60,7 +62,11 @@ function DropdownCheckbox({
       className={`group flex w-full min-h-[2.5rem] items-center gap-3 rounded-md px-2.5 py-2 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-700/55 ${
         disabled ? 'opacity-45 cursor-not-allowed hover:bg-transparent' : ''
       }`}
-      onMouseDown={(e) => e.preventDefault()}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!disabled) onToggle();
+      }}
     >
       <input
         ref={ref}
@@ -69,7 +75,9 @@ function DropdownCheckbox({
         className="sr-only"
         checked={checked}
         disabled={disabled}
-        onChange={onChange}
+        readOnly
+        tabIndex={-1}
+        aria-hidden
       />
       <span
         className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors outline-none ${
@@ -114,9 +122,11 @@ export type MultiSelectSearchDropdownProps = {
   icon?: React.ReactNode;
   className?: string;
   closeOnSelect?: boolean;
+  /** Fecha o painel ao clicar fora do campo (padrão: true). */
+  closeOnOutsideClick?: boolean;
   /**
-   * Menu expande no fluxo do documento, logo abaixo do campo (ideal em modais).
-   * Evita position:absolute/fixed que quebram ao rolar ou selecionar itens.
+   * Menu expande no fluxo do documento, logo abaixo do campo.
+   * Em modais longos prefira menu flutuante (portal), sem menuInline.
    */
   menuInline?: boolean;
   /** Remove anéis/bordas de foco do campo, busca e checkboxes. */
@@ -188,6 +198,7 @@ function MenuPanel({
   selectAllFiltered,
   deselectAllFiltered,
   toggleValue,
+  toggleSelectAll,
   listMaxHeight,
   noFocusRing,
   className,
@@ -213,6 +224,7 @@ function MenuPanel({
   selectAllFiltered: () => void;
   deselectAllFiltered: () => void;
   toggleValue: (value: string) => void;
+  toggleSelectAll: (checked: boolean) => void;
   listMaxHeight: number;
   noFocusRing?: boolean;
   className?: string;
@@ -269,12 +281,15 @@ function MenuPanel({
                 ? someFilteredSelected && !allFilteredSelected
                 : someSelected && !allSelected
             }
-            onChange={(e) => {
+            onToggle={() => {
+              const nextChecked = search.trim()
+                ? !allFilteredSelected
+                : !allSelected;
               if (search.trim()) {
-                if (e.target.checked) selectAllFiltered();
+                if (nextChecked) selectAllFiltered();
                 else deselectAllFiltered();
               } else {
-                onChange(e.target.checked ? [...allValues] : []);
+                toggleSelectAll(nextChecked);
               }
             }}
           >
@@ -287,8 +302,8 @@ function MenuPanel({
 
       <div
         ref={listRef}
-        style={{ maxHeight: listMaxHeight }}
-        className="overflow-y-auto overflow-x-hidden px-1.5 py-1"
+        className="min-h-[5rem] flex-1 basis-0 overflow-y-auto overflow-x-hidden px-1.5 py-1"
+        style={listMaxHeight > 0 ? { maxHeight: listMaxHeight } : undefined}
       >
         {options.length === 0 ? (
           <p className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">{emptyOptionsMessage}</p>
@@ -301,7 +316,7 @@ function MenuPanel({
                 key={opt.value}
                 noFocusRing={noFocusRing}
                 checked={selectedSet.has(opt.value)}
-                onChange={() => toggleValue(opt.value)}
+                onToggle={() => toggleValue(opt.value)}
               >
                 <OptionLabelContent opt={opt} />
               </DropdownCheckbox>
@@ -326,6 +341,7 @@ export function MultiSelectSearchDropdown({
   icon,
   className = '',
   closeOnSelect = false,
+  closeOnOutsideClick = true,
   menuInline = false,
   noFocusRing = false,
 }: MultiSelectSearchDropdownProps) {
@@ -393,16 +409,16 @@ export function MultiSelectSearchDropdown({
   }, [disabled, open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !closeOnOutsideClick) return;
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (containerRef.current?.contains(t)) return;
+      if (containerRef.current?.contains(t) || panelRef.current?.contains(t)) return;
       setOpen(false);
       setSearch('');
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  }, [open, closeOnOutsideClick]);
 
   const closePanel = () => {
     setOpen(false);
@@ -419,6 +435,10 @@ export function MultiSelectSearchDropdown({
   const deselectAllFiltered = () => {
     const remove = new Set(allFilteredValues);
     onChange(selected.filter((v) => !remove.has(v)));
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    onChange(checked ? [...allValues] : []);
   };
 
   const triggerLabel =
@@ -457,6 +477,7 @@ export function MultiSelectSearchDropdown({
     selectAllFiltered,
     deselectAllFiltered,
     toggleValue,
+    toggleSelectAll,
     listMaxHeight,
     noFocusRing,
   };
