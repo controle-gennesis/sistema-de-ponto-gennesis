@@ -82,6 +82,8 @@ model User {
   demandSheetApprovalsAsSolicitante DemandSheetApproval[] @relation("DemandSheetApprovalSolicitante")
   demandSheetApprovalsManagerApproved DemandSheetApproval[] @relation("DemandSheetApprovalManager")
   demandSheetApprovalsPurchaseStatusUpdated DemandSheetApproval[] @relation("DemandSheetApprovalPurchaseStatusUpdater")
+  materialDeliveriesCreated               MaterialDelivery[] @relation("MaterialDeliveryCreator")
+  materialDeliveriesReceived              MaterialDelivery[] @relation("MaterialDeliveryReceiver")
 
   @@map("users")
 }
@@ -1135,6 +1137,7 @@ model Contract {
   userPermissions   UserContractPermission[]
   dpApprovalUsers   UserDpApprovalContract[]
   demandSheetApprovals DemandSheetApproval[]
+  materialDeliveries   MaterialDelivery[]
 
   @@index([costCenterId])
   @@index([number])
@@ -1563,6 +1566,7 @@ model Supplier {
   quoteMapSuppliers     QuoteMapSupplier[]     @relation("QuoteMapSupplierSupplier")
   quoteMapSupplierItems QuoteMapSupplierItem[] @relation("QuoteMapSupplierItemSupplier")
   quoteMapWinnerItems   QuoteMapWinnerItem[]   @relation("QuoteMapWinnerSupplier")
+  materialDeliveries    MaterialDelivery[]
 
   @@index([code])
   @@index([isActive])
@@ -1640,8 +1644,9 @@ model PurchaseOrder {
   approver        User?               @relation("PurchaseOrderApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
   comprasApprover User?               @relation("PurchaseOrderComprasApprover", fields: [comprasApprovedBy], references: [id], onDelete: SetNull)
   gestorApprover  User?               @relation("PurchaseOrderGestorApprover", fields: [gestorApprovedBy], references: [id], onDelete: SetNull)
-  items           PurchaseOrderItem[]
-  stockShortfalls StockShortfall[]
+  items             PurchaseOrderItem[]
+  stockShortfalls   StockShortfall[]
+  materialDeliveries MaterialDelivery[]
 
   @@index([orderNumber])
   @@index([materialRequestId])
@@ -2065,6 +2070,7 @@ model UserContractPermission {
   accessRelatorios      Boolean  @default(true)
   accessOrdemServico    Boolean  @default(true)
   accessProducaoSemanal Boolean  @default(true)
+  accessRecebimentoEntregas Boolean @default(false)
   updatedBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -2105,7 +2111,7 @@ model PositionPermissionTemplate {
   permissions           Json
   allowedContractIds    Json     @default("[]")
   dpApprovalContractIds Json     @default("[]")
-  /// Map contractId -> { orcamento, relatorios, ordemServico, producaoSemanal }
+  /// Map contractId -> { orcamento, relatorios, ordemServico, producaoSemanal, recebimentoEntregas }
   contractModuleFlags   Json     @default("{}")
   updatedAt             DateTime @updatedAt
 
@@ -2484,4 +2490,97 @@ model KanbanCardAttachment {
   @@index([cardId])
   @@index([userId])
   @@map("kanban_card_attachments")
+}
+
+/// Controle de entregas de material (substitui planilha de recebimento)
+model MaterialDelivery {
+  id                  String                          @id @default(cuid())
+  deliveryNumber      String                          @unique
+  polo                MaterialDeliveryPolo
+  movementId          String?
+  movementNumber      String?
+  contractId          String?
+  currentStatus       MaterialDeliveryCurrentStatus   @default(APROVADO_SUPRIMENTOS)
+  paymentStatus       MaterialDeliveryPaymentStatus   @default(AGUARDANDO_PAGAMENTO)
+  supplierId          String?
+  supplierName        String?
+  purchaseOrderId     String?
+  orderValue          Decimal?                        @db.Decimal(15, 2)
+  expectedDelivery    DateTime?
+  actualDelivery      DateTime?
+  totalPaid           Decimal?                        @db.Decimal(15, 2)
+  stockShortfallType  MaterialDeliveryStockShortfallType?
+  rmNumber            String?
+  deliveryType        String?
+  observations        String?                         @db.Text
+  finalStatus         MaterialDeliveryFinalStatus     @default(PENDENTE)
+  receivedByEngineering Boolean                       @default(false)
+  receivedByUserId    String?
+  receivedAt          DateTime?
+  createdBy           String
+  createdAt           DateTime                        @default(now())
+  updatedAt           DateTime                        @updatedAt
+
+  supplier      Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  contractRecord Contract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  creator       User           @relation("MaterialDeliveryCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  receivedByUser User?         @relation("MaterialDeliveryReceiver", fields: [receivedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([polo])
+  @@index([currentStatus])
+  @@index([paymentStatus])
+  @@index([finalStatus])
+  @@index([receivedByEngineering])
+  @@index([expectedDelivery])
+  @@index([supplierId])
+  @@index([purchaseOrderId])
+  @@index([contractId])
+  @@map("material_deliveries")
+}
+
+enum MaterialDeliveryStockShortfallType {
+  NORMAL
+  CORRECAO
+}
+
+enum MaterialDeliveryPolo {
+  DF
+  GO
+}
+
+enum MaterialDeliveryCurrentStatus {
+  ENTREGA_FORNECEDOR_CIF
+  APROVADO_SUPRIMENTOS
+  ENTREGA_LOGISTICA_FOB
+  ENTREGUE
+  APROVAR_DIR
+  CANCELADO
+}
+
+enum MaterialDeliveryPaymentStatus {
+  OK
+  AGUARDANDO_PAGAMENTO
+  BOLETO
+  A_VISTA
+  CANCELADO
+  CREDITO
+}
+
+enum MaterialDeliveryFinalStatus {
+  PENDENTE
+  CONCLUIDO
+  CANCELADO
+}
+
+/// Espelho da aba GERAL (coluna E → L): ID Mov → Normal/Correção para pagamento boleto
+model MaterialDeliveryGeralLookup {
+  id             String                          @id @default(cuid())
+  lookupKey      String                          @unique
+  shortfallType  MaterialDeliveryStockShortfallType
+  createdAt      DateTime                        @default(now())
+  updatedAt      DateTime                        @updatedAt
+
+  @@index([lookupKey])
+  @@map("material_delivery_geral_lookups")
 }

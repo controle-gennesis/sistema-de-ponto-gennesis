@@ -52,6 +52,18 @@ export async function assertContractAccess(req: AuthRequest, contractId: string)
 /** Flags da aba «Contratos» em permissões (orçamento, relatórios, OS, produção semanal). */
 export type ContractScopedModuleFlag = 'orcamento' | 'relatorios' | 'ordemServico' | 'producaoSemanal';
 
+export async function assertRecebimentoEntregasOnContract(
+  req: AuthRequest,
+  contractId: string | null | undefined
+): Promise<void> {
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+  if (req.user.isAdmin) return;
+  if (!contractId) {
+    throw createError('Entrega sem contrato vinculado', 403);
+  }
+  await assertContractAccess(req, contractId);
+}
+
 export async function assertContractModulePermission(
   req: AuthRequest,
   contractId: string,

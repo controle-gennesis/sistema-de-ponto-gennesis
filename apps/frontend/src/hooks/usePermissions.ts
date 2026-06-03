@@ -222,6 +222,11 @@ export function usePermissions() {
     isElevatedUser ||
     (can(pk('/ponto/contratos')) && hasOrdemServicoViaAnyAllowedContract);
 
+  /** Recebimento de entregas: módulo Contratos + ao menos um contrato liberado. */
+  const canAccessRecebimentoEntregasRoutePage =
+    isElevatedUser ||
+    (can(pk('/ponto/contratos')) && allowedContractIds.length > 0);
+
   const canAccessContractOrdemServicoTab = (contractId: string) => {
     if (isElevatedUser) return true;
     return (
@@ -302,6 +307,7 @@ export function usePermissions() {
     contractModuleFlags,
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
+    canAccessRecebimentoEntregasRoutePage,
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
     canAccessContractOrdemServicoTab,
@@ -341,6 +347,7 @@ export function useRoutePermission(route: string) {
     canApproveEspelhoNf,
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
+    canAccessRecebimentoEntregasRoutePage,
   } = usePermissions();
 
   if (isLoading) {
@@ -400,6 +407,7 @@ export function useRoutePermission(route: string) {
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
+    '/ponto/recebimento-entregas': canAccessRecebimentoEntregasRoutePage,
     '/ponto/espelho-nf': isAdministrator || can(pk('/ponto/espelho-nf')),
     '/ponto/prestadores-servico':
       isAdministrator ||
@@ -423,6 +431,7 @@ export function useRoutePermission(route: string) {
     '/ponto/gerenciar-materiais': isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais')),
     '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),
     '/ponto/ordem-de-compra': isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra')),
+    '/ponto/controle-entregas': isAdministrator || can(pk('/ponto/controle-entregas')),
     '/ponto/estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
     '/ponto/ajuste-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/ajuste-estoque')),
     '/ponto/furo-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque')),

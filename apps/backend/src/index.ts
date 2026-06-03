@@ -76,6 +76,7 @@ import relatoriosFotograficosRoutes from './routes/relatorios-fotograficos';
 import orcafascioRoutes from './routes/orcafascio';
 import callHistoryRoutes from './routes/callHistory';
 import kanbanRoutes from './routes/kanban';
+import materialDeliveryRoutes from './routes/materialDeliveries';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 import { prisma } from './lib/prisma';
 import { ensureProductionSchema } from './lib/ensureProductionSchema';
@@ -285,6 +286,7 @@ app.use('/api/relatorios-fotograficos', relatoriosFotograficosRoutes);
 app.use('/api/orcafascio', orcafascioRoutes);
 app.use('/api/call-history', callHistoryRoutes);
 app.use('/api/kanban', kanbanRoutes);
+app.use('/api/material-deliveries', materialDeliveryRoutes);
 
 // Middleware de erro 404
 app.use(notFound);
