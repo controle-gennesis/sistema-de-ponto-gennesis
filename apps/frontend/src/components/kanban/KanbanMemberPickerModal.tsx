@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Loader2, Search } from 'lucide-react';
 import { clsx } from 'clsx';
 import api from '@/lib/api';
+import { isGennecyBotUser } from '@/lib/gennecyBot';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { Modal } from '@/components/ui/Modal';
 import { kanbanInput } from './kanbanFormStyles';
@@ -85,22 +86,24 @@ export function KanbanMemberPickerModal({
     staleTime: 60_000,
   });
 
-  const showSelfOption =
-    !!currentUser &&
-    !excludeUserIds.includes(currentUser.id) &&
-    (!search.trim() ||
-      currentUser.name.toLowerCase().includes(search.trim().toLowerCase()) ||
-      currentUser.email.toLowerCase().includes(search.trim().toLowerCase()));
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users.filter((u) => {
+      if (isGennecyBotUser(u)) return false;
       if (currentUser && u.id === currentUser.id) return false;
       if (excludeUserIds.includes(u.id)) return false;
       if (!q) return true;
       return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
     });
   }, [users, search, excludeUserIds, currentUser]);
+
+  const showSelfOption =
+    !!currentUser &&
+    !isGennecyBotUser(currentUser) &&
+    !excludeUserIds.includes(currentUser.id) &&
+    (!search.trim() ||
+      currentUser.name.toLowerCase().includes(search.trim().toLowerCase()) ||
+      currentUser.email.toLowerCase().includes(search.trim().toLowerCase()));
 
   async function handleSelect(user: KanbanPickerUser) {
     await onSelect(user);
@@ -116,6 +119,7 @@ export function KanbanMemberPickerModal({
       title="Adicionar membro"
       closeOnOverlayClick
       elevated={elevated}
+      scrollContent={false}
     >
       <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -129,7 +133,7 @@ export function KanbanMemberPickerModal({
         />
       </div>
 
-      <div className="max-h-[min(320px,50vh)] overflow-y-auto -mx-1">
+      <div className="max-h-[min(320px,50vh)] overflow-y-auto overscroll-y-contain -mx-1">
         {isLoading && (
           <div className="flex items-center justify-center py-10 text-gray-500">
             <Loader2 className="w-6 h-6 animate-spin" />

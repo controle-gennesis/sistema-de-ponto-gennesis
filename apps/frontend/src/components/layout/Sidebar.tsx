@@ -454,10 +454,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
         icon: BarChart3,
         items: [
           {
-            name: 'Extrato de Caixa',
+            name: 'Balanço Financeiro',
             href: '/ponto/financeiro/analise-extrato',
             icon: BarChart3,
-            description: 'Acompanhe o extrato de caixa',
+            description: 'Acompanhe o balanço financeiro',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           },
           {

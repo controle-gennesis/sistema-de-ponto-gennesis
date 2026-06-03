@@ -190,6 +190,8 @@ export function KanbanCardModal({
   const mainColumnRef = useRef<HTMLDivElement>(null);
   const descriptionSectionRef = useRef<HTMLDivElement>(null);
   const attachmentsSectionRef = useRef<HTMLDivElement>(null);
+  /** Evita que um fetch antigo do card sobrescreva membros após atribuir/remover. */
+  const memberMutationInFlight = useRef(0);
   const [commentsPanelHeight, setCommentsPanelHeight] = useState<number | undefined>(undefined);
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
@@ -243,16 +245,23 @@ export function KanbanCardModal({
       const next = card.endDate ?? '';
       return prev === next ? prev : next;
     });
-    setMembers((prev) => {
-      const next = Array.isArray(card.members) ? card.members : [];
-      if (
-        prev.length === next.length &&
-        prev.every((m, i) => m.userId === next[i]?.userId)
-      ) {
-        return prev;
-      }
-      return next;
-    });
+    if (memberMutationInFlight.current === 0) {
+      setMembers((prev) => {
+        const next = Array.isArray(card.members) ? card.members : [];
+        if (
+          prev.length === next.length &&
+          prev.every((m, i) => m.userId === next[i]?.userId)
+        ) {
+          return prev;
+        }
+        const nextIds = new Set(next.map((m) => m.userId));
+        const prevOnly = prev.filter((m) => !nextIds.has(m.userId));
+        if (prevOnly.length > 0 && next.length < prev.length) {
+          return prev;
+        }
+        return next;
+      });
+    }
     setChecklistEnabled((prev) => {
       const next = card.checklistEnabled ?? false;
       return prev === next ? prev : next;
@@ -373,18 +382,22 @@ export function KanbanCardModal({
     if (members.some((m) => m.userId === user.id)) return;
     const next = pickerUserToMember(user);
     setMembers((prev) => [...prev, next]);
-    if (isDetail && cardId) {
-      setSaving(true);
-      try {
-        const updated = await addKanbanCardMember(cardId, user.id);
-        setMembers(Array.isArray(updated.members) ? updated.members : [...members, next]);
-        await refreshAll();
-      } catch {
-        setMembers((prev) => prev.filter((m) => m.userId !== user.id));
-        toast.error('Erro ao adicionar membro');
-      } finally {
-        setSaving(false);
-      }
+    if (!isDetail || !cardId) return;
+
+    memberMutationInFlight.current += 1;
+    setSaving(true);
+    try {
+      const updated = await addKanbanCardMember(cardId, user.id);
+      const normalized = normalizeKanbanCardDetail(updated);
+      applyCardDetail(normalized);
+      setMembers(Array.isArray(normalized.members) ? normalized.members : []);
+      onBoardRefresh();
+    } catch {
+      setMembers((prev) => prev.filter((m) => m.userId !== user.id));
+      toast.error('Erro ao adicionar membro');
+    } finally {
+      memberMutationInFlight.current -= 1;
+      setSaving(false);
     }
   }
 
@@ -392,18 +405,22 @@ export function KanbanCardModal({
     const prev = members;
     setMembers((m) => m.filter((x) => x.userId !== userId));
     setHoveringMemberId(null);
-    if (isDetail && cardId) {
-      setSaving(true);
-      try {
-        const updated = await removeKanbanCardMember(cardId, userId);
-        setMembers(Array.isArray(updated.members) ? updated.members : []);
-        await refreshAll();
-      } catch {
-        setMembers(prev);
-        toast.error('Erro ao remover membro');
-      } finally {
-        setSaving(false);
-      }
+    if (!isDetail || !cardId) return;
+
+    memberMutationInFlight.current += 1;
+    setSaving(true);
+    try {
+      const updated = await removeKanbanCardMember(cardId, userId);
+      const normalized = normalizeKanbanCardDetail(updated);
+      applyCardDetail(normalized);
+      setMembers(Array.isArray(normalized.members) ? normalized.members : []);
+      onBoardRefresh();
+    } catch {
+      setMembers(prev);
+      toast.error('Erro ao remover membro');
+    } finally {
+      memberMutationInFlight.current -= 1;
+      setSaving(false);
     }
   }
 
