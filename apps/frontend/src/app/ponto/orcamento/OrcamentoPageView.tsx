@@ -30,7 +30,8 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
-  DownloadCloud
+  DownloadCloud,
+  Calendar
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -42,6 +43,15 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
 import { OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
+import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
+import {
+  calcularDataFimOrcamento,
+  cronogramaVazio,
+  formatDataBr,
+  normalizarCronograma,
+  type CronogramaLinhaServico,
+  type CronogramaPersist
+} from './orcamentoCronogramaTypes';
 import {
   gradeTableCls,
   gradeTableRowTrCls,
@@ -944,8 +954,8 @@ export interface ImportRecord {
 
 type OrcamentoMeta = {
   osNumeroPasta: string;
-  dataAbertura: string; // yyyy-mm-dd
-  dataEnvio: string; // yyyy-mm-dd (atualiza ao salvar)
+  dataAbertura: string; // yyyy-mm-dd — data de início
+  dataEnvio: string; // yyyy-mm-dd — data de fim
   prazoExecucaoDias: string; // mantém como string p/ input
   responsavelOrcamento: string;
   descricao: string;
@@ -1245,6 +1255,8 @@ interface SessaoOrcamentoPersist {
    * O catálogo da planilha perfeita do contrato continua em `servicos-padrao.json` e vem em GET `servicos`.
    */
   servicosDocumento?: ServicoPadrao[];
+  /** Prazos e andamento por item/bloco do orçamento (aba Cronograma). */
+  cronograma?: CronogramaPersist;
 }
 
 interface OrcamentoRecoverySnapshot {
@@ -1264,6 +1276,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     planilhaTipoInsumo: {},
     showDetalhesFinanceiros: false,
     itensOcultosNoOrcamento: [],
+    cronograma: cronogramaVazio(),
     meta: {
       osNumeroPasta: '',
       dataAbertura: '',
@@ -1330,6 +1343,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           : {},
       showDetalhesFinanceiros: Boolean(p.showDetalhesFinanceiros),
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
+      cronograma: normalizarCronograma((p as { cronograma?: unknown }).cronograma),
       meta,
       ...(Array.isArray(p.servicosDocumento) ? { servicosDocumento: p.servicosDocumento as ServicoPadrao[] } : {})
     };
@@ -1585,6 +1599,7 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
                 : {},
             showDetalhesFinanceiros: Boolean(so.showDetalhesFinanceiros),
             itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
+            cronograma: normalizarCronograma(so.cronograma),
             meta,
             ...(Array.isArray(so.servicosDocumento) ? { servicosDocumento: so.servicosDocumento as ServicoPadrao[] } : {})
           }
@@ -3237,7 +3252,7 @@ export function OrcamentoPageView({
 
   // Analítico (detalhamento) da composição para visualização/exportação.
   const [orcamentoViewTab, setOrcamentoViewTab] = useState<
-    'dados' | 'montagem' | 'analitico' | 'memorial' | 'planilhaAnalitica'
+    'dados' | 'montagem' | 'analitico' | 'memorial' | 'planilhaAnalitica' | 'cronograma'
   >('montagem');
   const [memorialItemKey, setMemorialItemKey] = useState<string | null>(null);
   // Cache do analítico por composição (por item) para não recalcular a cada clique.
@@ -3347,6 +3362,29 @@ export function OrcamentoPageView({
   }, [centroCustoId, costCenters]);
 
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
+  const [cronograma, setCronograma] = useState<CronogramaPersist>(() => cronogramaVazio());
+
+  const dataFimOrcamento = useMemo(
+    () => calcularDataFimOrcamento(meta.dataAbertura, meta.dataEnvio, meta.prazoExecucaoDias),
+    [meta.dataAbertura, meta.dataEnvio, meta.prazoExecucaoDias]
+  );
+
+  useEffect(() => {
+    const ini = meta.dataAbertura || '';
+    const fim = dataFimOrcamento || '';
+    setCronograma((c) => {
+      if ((c.config?.dataInicioObra ?? '') === ini && (c.config?.dataFimObra ?? '') === fim) return c;
+      return {
+        ...c,
+        config: {
+          ...c.config,
+          dataInicioObra: ini,
+          dataFimObra: fim
+        }
+      };
+    });
+  }, [meta.dataAbertura, dataFimOrcamento]);
+
   const [novoOrcamentoMetaOpen, setNovoOrcamentoMetaOpen] = useState(false);
   const [novoOrcamentoStep, setNovoOrcamentoStep] = useState<1 | 2 | 3>(1);
   const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta & { nomeOrcamento: string }>(
@@ -3538,6 +3576,7 @@ export function OrcamentoPageView({
     setPlanilhaTipoInsumo({});
     setPlanilhaCompraDraft({});
     setShowDetalhesFinanceiros(false);
+    setCronograma(cronogramaVazio());
     setServicosPadraoContrato([]);
 
     const aplicarSessao = (s: SessaoOrcamentoPersist | null) => {
@@ -3553,6 +3592,7 @@ export function OrcamentoPageView({
       setPlanilhaTipoInsumo(normalizarPlanilhaTipoInsumo(s.planilhaTipoInsumo as Record<string, unknown>));
       setPlanilhaCompraDraft({});
       setShowDetalhesFinanceiros(s.showDetalhesFinanceiros);
+      setCronograma(normalizarCronograma(s.cronograma));
       setMeta(s.meta ? s.meta : sessaoVazia().meta!);
     };
 
@@ -3711,7 +3751,8 @@ export function OrcamentoPageView({
       planilhaTipoInsumo,
       showDetalhesFinanceiros,
       meta,
-      itensOcultosNoOrcamento
+      itensOcultosNoOrcamento,
+      cronograma
     };
     servicosImportsRef.current = { servicos, imports };
     if (centroCustoId && orcamentoAtivoId) {
@@ -3733,11 +3774,10 @@ export function OrcamentoPageView({
     showDetalhesFinanceiros,
     meta,
     itensOcultosNoOrcamento,
+    cronograma,
     servicos,
     imports
   ]);
-
-  /** Salva montagem + planilha analítica no servidor após pausa na edição (sem alterar revisão/data de envio). */
   useEffect(() => {
     const ORCAMENTO_AUTOSAVE_MS = 900;
     if (!centroCustoId || !orcamentoAtivoId || loadingFromApi) return;
@@ -3809,6 +3849,7 @@ export function OrcamentoPageView({
     showDetalhesFinanceiros,
     meta,
     itensOcultosNoOrcamento,
+    cronograma,
     servicos,
     imports
   ]);
@@ -3932,7 +3973,13 @@ export function OrcamentoPageView({
         percentual: (r.percentual || '').trim()
       })),
       dataAbertura: novoOrcamentoMetaDraft.dataAbertura || todayInputDate(),
-      dataEnvio: ''
+      dataEnvio:
+        novoOrcamentoMetaDraft.dataEnvio.trim() ||
+        calcularDataFimOrcamento(
+          novoOrcamentoMetaDraft.dataAbertura || todayInputDate(),
+          '',
+          novoOrcamentoMetaDraft.prazoExecucaoDias
+        )
     };
     if (!d.osNumeroPasta || !d.descricao) {
       toast.error('Preencha OS/Nº da pasta e descrição.');
@@ -5683,6 +5730,42 @@ export function OrcamentoPageView({
     }
     return m;
   }, [linhasAnaliticoOrcamento]);
+
+  const linhasCronograma = useMemo((): CronogramaLinhaServico[] => {
+    const map = new Map<string, CronogramaLinhaServico>();
+    for (const row of itensCalculados) {
+      const sep = row.blocoKey.lastIndexOf('|');
+      const servicoKey = sep > 0 ? row.blocoKey.slice(0, sep) : row.blocoKey;
+      const compRef = {
+        chave: row.item.chave,
+        codigo: row.item.codigo,
+        descricao: row.item.descricao,
+        subtituloNome: row.subtituloNome,
+        quantidade: row.quantidade,
+        unidade: row.item.unidade
+      };
+      const prev = map.get(servicoKey);
+      if (prev) {
+        prev.valorTotal += row.total;
+        prev.qtdItens += 1;
+        prev.composicoes.push(compRef);
+      } else {
+        map.set(servicoKey, {
+          servicoKey,
+          servicoNome: row.servicoNome,
+          valorTotal: row.total,
+          qtdItens: 1,
+          composicoes: [compRef]
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [itensCalculados]);
+
+  const nomeOrcamentoAtivo = useMemo(
+    () => listaOrcamentos.find((o) => o.id === orcamentoAtivoId)?.nome ?? '',
+    [listaOrcamentos, orcamentoAtivoId]
+  );
 
   /** Ficha de demanda: só composições e insumos (sem faixas de título/subtítulo). */
   const linhasFichaDemanda = useMemo(() => {
@@ -8041,6 +8124,17 @@ export function OrcamentoPageView({
                       >
                         Ficha de demanda
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setOrcamentoViewTab('cronograma')}
+                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+                          orcamentoViewTab === 'cronograma'
+                            ? 'bg-red-600 text-white shadow-sm'
+                            : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        Cronograma
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -8099,8 +8193,18 @@ export function OrcamentoPageView({
                         <p className="text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400 mb-2.5">Datas</p>
                         <div className="space-y-2">
                           {[
-                            ['Data de abertura', meta.dataAbertura || '—'],
-                            ['Data de envio', meta.dataEnvio || '—']
+                            ['Data de início', formatDataBr(meta.dataAbertura)],
+                            [
+                              'Data de fim',
+                              formatDataBr(
+                                meta.dataEnvio ||
+                                  calcularDataFimOrcamento(
+                                    meta.dataAbertura,
+                                    meta.dataEnvio,
+                                    meta.prazoExecucaoDias
+                                  )
+                              )
+                            ]
                           ].map(([label, value]) => (
                             <div key={label} className="grid grid-cols-[10.5rem_1fr] gap-3">
                               <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
@@ -9470,6 +9574,18 @@ export function OrcamentoPageView({
                   </div>
                 )}
 
+
+                {!loadingFromApi && orcamentoViewTab === 'cronograma' && (
+                  <OrcamentoCronogramaPainel
+                    linhas={linhasCronograma}
+                    cronograma={cronograma}
+                    onChange={setCronograma}
+                    centroCustoId={centroCustoId}
+                    orcamentoId={orcamentoAtivoId}
+                    dataInicioObra={meta.dataAbertura}
+                    dataFimObra={dataFimOrcamento}
+                  />
+                )}
 
                 {!loadingFromApi && orcamentoViewTab === 'memorial' && meta.importadoPlanilha && (
                   <OrcamentoSecaoVazia
@@ -11583,7 +11699,7 @@ export function OrcamentoPageView({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de abertura</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de início</label>
               <input
                 type="date"
                 value={editarDadosDraft.dataAbertura}
@@ -11592,7 +11708,7 @@ export function OrcamentoPageView({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de envio</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de fim</label>
               <input
                 type="date"
                 value={editarDadosDraft.dataEnvio}
@@ -11826,11 +11942,21 @@ export function OrcamentoPageView({
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de abertura *</label>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de início *</label>
                 <input
                   type="date"
                   value={novoOrcamentoMetaDraft.dataAbertura}
                   onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataAbertura: e.target.value }))}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  disabled={isCreatingOrcamento}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de fim</label>
+                <input
+                  type="date"
+                  value={novoOrcamentoMetaDraft.dataEnvio}
+                  onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataEnvio: e.target.value }))}
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   disabled={isCreatingOrcamento}
                 />
@@ -11969,7 +12095,8 @@ export function OrcamentoPageView({
               <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-sm text-gray-700 dark:text-gray-200">
                 <p><strong>Nome:</strong> {novoOrcamentoMetaDraft.nomeOrcamento.trim() || '—'}</p>
                 <p><strong>OS/Nº da pasta:</strong> {novoOrcamentoMetaDraft.osNumeroPasta || '—'}</p>
-                <p><strong>Data de abertura:</strong> {novoOrcamentoMetaDraft.dataAbertura || '—'}</p>
+                <p><strong>Data de início:</strong> {formatDataBr(novoOrcamentoMetaDraft.dataAbertura)}</p>
+                <p><strong>Data de fim:</strong> {formatDataBr(novoOrcamentoMetaDraft.dataEnvio || calcularDataFimOrcamento(novoOrcamentoMetaDraft.dataAbertura, novoOrcamentoMetaDraft.dataEnvio, novoOrcamentoMetaDraft.prazoExecucaoDias))}</p>
                 <p><strong>Responsável:</strong> {novoOrcamentoMetaDraft.responsavelOrcamento || '—'}</p>
               </div>
             </div>

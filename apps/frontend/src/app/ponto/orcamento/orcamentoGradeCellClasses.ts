@@ -43,3 +43,7 @@ export const moedaGradeFieldWrapperCls =
 
 export const inputGradeMoedaCls =
   'box-border block min-h-0 min-w-0 flex-1 border-0 rounded-none bg-transparent py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 shadow-none outline-none ring-0 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:bg-transparent dark:focus:bg-transparent focus:outline-none focus:ring-0';
+
+/** Célula da grade com seletor de data (cronograma). */
+export const tdGradeDateCls =
+  'p-1.5 align-middle border-l border-gray-200 dark:border-gray-600 min-w-[9rem]';
