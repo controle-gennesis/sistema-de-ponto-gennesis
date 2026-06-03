@@ -8,12 +8,26 @@ import type { RowActionMenuState } from '@/hooks/useRowActionMenu';
 type RowActionMenuCellProps = {
   isOpen: boolean;
   onToggle: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  align?: 'left' | 'center' | 'right';
+  className?: string;
 };
 
-export function RowActionMenuCell({ isOpen, onToggle }: RowActionMenuCellProps) {
+const actionAlignClass = {
+  left: { td: 'text-left', flex: 'justify-start' },
+  center: { td: 'text-center', flex: 'justify-center' },
+  right: { td: 'text-right', flex: 'justify-end' },
+} as const;
+
+export function RowActionMenuCell({
+  isOpen,
+  onToggle,
+  align = 'right',
+  className,
+}: RowActionMenuCellProps) {
+  const alignment = actionAlignClass[align];
   return (
-    <td className="px-3 py-4 text-right sm:px-6">
-      <div className="flex justify-end">
+    <td className={className ?? `px-3 py-3 align-middle sm:px-6 ${alignment.td}`}>
+      <div className={`flex ${alignment.flex}`}>
         <button
           type="button"
           onClick={(e) => {

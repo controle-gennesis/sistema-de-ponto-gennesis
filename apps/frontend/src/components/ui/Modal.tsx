@@ -20,7 +20,9 @@ function unregisterModalRoot(root: HTMLElement) {
 function isEventInTopModal(target: EventTarget | null): boolean {
   if (!(target instanceof Node)) return false;
   const top = modalRootStack[modalRootStack.length - 1];
-  return !!top && top.contains(target);
+  if (top?.contains(target)) return true;
+  const dropdownPortal = document.getElementById('dropdown-portal-root');
+  return !!dropdownPortal?.contains(target);
 }
 
 function lockPageScroll() {

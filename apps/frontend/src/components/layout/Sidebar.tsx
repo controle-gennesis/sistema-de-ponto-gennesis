@@ -41,6 +41,7 @@ import {
   FileCheck,
   DollarSign,
   Package,
+  PackageCheck,
   PackageX,
   Warehouse,
   ShoppingCart,
@@ -134,6 +135,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     canApproveEspelhoNf,
     canApproveOc,
     canAccessOsRoutePage,
+    canAccessRecebimentoEntregasRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -178,12 +180,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     staleTime: 20_000
   });
 
+  const { data: recebimentoPendingCount = 0 } = useQuery({
+    queryKey: ['material-deliveries-recebimento-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/material-deliveries/summary', {
+        params: { forRecebimento: 'true' },
+      });
+      const n = Number(res.data?.data?.awaitingEngineering ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canAccessRecebimentoEntregasRoutePage && !isLoading,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
 
   const navBadgeCountForHref = (href: string): number => {
     if (href === '/ponto/aprovacoes') return fdNotificationCounts.pendingManager;
     if (href === '/ponto/fds-aprovadas') return fdNotificationCounts.pendingPurchase;
     if (href === '/ponto/furo-estoque') return pendingFuroCount;
+    if (href === '/ponto/recebimento-entregas') return recebimentoPendingCount;
     return 0;
   };
 
@@ -192,6 +210,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     if (categoryId === 'suprimentos') {
       return fdNotificationCounts.pendingPurchase + pendingFuroCount;
     }
+    if (categoryId === 'engenharia') return recebimentoPendingCount;
     return 0;
   };
 
@@ -501,6 +520,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: ClipboardCheck,
             description: 'Cadastro e gestão das fichas de demanda',
             permission: isAdministrator || can(pk('/ponto/aprovacao-fds'))
+          },
+          {
+            name: 'Recebimento de Entregas',
+            href: '/ponto/recebimento-entregas',
+            icon: PackageCheck,
+            description: 'Confirmar recebimento de material na obra',
+            permission: canAccessRecebimentoEntregasRoutePage
           }
         ]
       },
@@ -578,6 +604,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             icon: FileText,
             description: 'Listar e gerenciar ordens de compra',
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra'))
+          },
+          {
+            name: 'Controle de Entregas',
+            href: '/ponto/controle-entregas',
+            icon: Truck,
+            description: 'Acompanhar entregas de material e recebimento pela engenharia',
+            permission: isAdministrator || can(pk('/ponto/controle-entregas'))
           },
           {
             name: 'Estoque',
