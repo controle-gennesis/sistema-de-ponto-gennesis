@@ -1,4 +1,5 @@
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
+import { isGennecyBotUser } from './gennecyBotUser';
 import { prisma } from './prisma';
 
 export const KANBAN_VIEW_ALL_BOARDS_KEY = pathToModuleKey(
@@ -9,8 +10,11 @@ export const KANBAN_VIEW_ALL_BOARDS_KEY = pathToModuleKey(
 export const KANBAN_LEGACY_DEPARTMENT_KEY = 'LEGADO';
 
 export function isKanbanHiddenPickerUser(user: {
+  name?: string | null;
+  email?: string | null;
   employee?: { position?: string | null } | null;
 }): boolean {
+  if (isGennecyBotUser(user)) return true;
   return (user.employee?.position ?? '').trim().toLowerCase() === 'administrador';
 }
 

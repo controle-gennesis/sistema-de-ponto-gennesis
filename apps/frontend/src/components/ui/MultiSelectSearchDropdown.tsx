@@ -8,7 +8,23 @@ export type MultiSelectSearchOption = {
   value: string;
   label: string;
   searchText?: string;
+  /** Quando definido, exibe um indicador de cor ao lado do rótulo. */
+  swatchColor?: string;
 };
+
+function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
+  if (!opt.swatchColor) return <>{opt.label}</>;
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2.5">
+      <span
+        className="h-5 w-5 shrink-0 rounded-md border border-black/15 shadow-sm dark:border-white/20"
+        style={{ backgroundColor: opt.swatchColor }}
+        aria-hidden
+      />
+      <span className="truncate">{opt.label}</span>
+    </span>
+  );
+}
 
 function getPortalRoot(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
@@ -21,6 +37,7 @@ function DropdownCheckbox({
   indeterminate,
   disabled,
   onChange,
+  noFocusRing,
   children,
 }: {
   id?: string;
@@ -28,6 +45,7 @@ function DropdownCheckbox({
   indeterminate?: boolean;
   disabled?: boolean;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  noFocusRing?: boolean;
   children?: React.ReactNode;
 }) {
   const ref = useRef<HTMLInputElement>(null);
@@ -54,7 +72,11 @@ function DropdownCheckbox({
         onChange={onChange}
       />
       <span
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors outline-none group-focus-within:ring-2 group-focus-within:ring-red-500/80 group-focus-within:ring-offset-1 ring-offset-white dark:ring-offset-gray-800 ${
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors outline-none ${
+          noFocusRing
+            ? ''
+            : 'group-focus-within:ring-2 group-focus-within:ring-red-500/80 group-focus-within:ring-offset-1 ring-offset-white dark:ring-offset-gray-800'
+        } ${
           filled
             ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
             : 'border-gray-300 bg-white group-hover:border-red-400 dark:border-gray-500 dark:bg-gray-800 dark:group-hover:border-red-400/70'
@@ -97,6 +119,8 @@ export type MultiSelectSearchDropdownProps = {
    * Evita position:absolute/fixed que quebram ao rolar ou selecionar itens.
    */
   menuInline?: boolean;
+  /** Remove anéis/bordas de foco do campo, busca e checkboxes. */
+  noFocusRing?: boolean;
 };
 
 type FloatingPos = {
@@ -165,6 +189,7 @@ function MenuPanel({
   deselectAllFiltered,
   toggleValue,
   listMaxHeight,
+  noFocusRing,
   className,
   style,
 }: {
@@ -189,6 +214,7 @@ function MenuPanel({
   deselectAllFiltered: () => void;
   toggleValue: (value: string) => void;
   listMaxHeight: number;
+  noFocusRing?: boolean;
   className?: string;
   style?: React.CSSProperties;
 }) {
@@ -212,9 +238,9 @@ function MenuPanel({
             placeholder={searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={`block w-full rounded-lg border border-gray-300 bg-gray-50 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none dark:border-gray-600 dark:bg-gray-900/50 dark:text-gray-100 dark:placeholder:text-gray-500 ${
-              search ? 'pl-3 pr-9' : 'px-3'
-            }`}
+            className={`block h-10 w-full rounded-lg border border-gray-300 bg-gray-50 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none dark:border-gray-600 dark:bg-gray-900/50 dark:text-gray-100 dark:placeholder:text-gray-500 ${
+              noFocusRing ? 'focus:ring-0 focus:border-gray-300 dark:focus:border-gray-600' : 'focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:focus:ring-red-400'
+            } ${search ? 'pl-3 pr-9' : 'px-3'}`}
           />
           {search ? (
             <button
@@ -223,7 +249,7 @@ function MenuPanel({
                 e.stopPropagation();
                 setSearch('');
               }}
-              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-200/80 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 outline-none transition-colors hover:bg-gray-200/80 hover:text-gray-600 focus:ring-0 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-300"
               aria-label="Limpar pesquisa"
             >
               <X className="h-4 w-4" />
@@ -236,6 +262,7 @@ function MenuPanel({
         <div className="shrink-0 border-b border-gray-200 px-1.5 py-1 dark:border-gray-600">
           <DropdownCheckbox
             id={`${panelId}-all`}
+            noFocusRing={noFocusRing}
             checked={search.trim() ? allFilteredSelected : allSelected}
             indeterminate={
               search.trim()
@@ -272,10 +299,11 @@ function MenuPanel({
             {filtered.map((opt) => (
               <DropdownCheckbox
                 key={opt.value}
+                noFocusRing={noFocusRing}
                 checked={selectedSet.has(opt.value)}
                 onChange={() => toggleValue(opt.value)}
               >
-                {opt.label}
+                <OptionLabelContent opt={opt} />
               </DropdownCheckbox>
             ))}
           </div>
@@ -299,6 +327,7 @@ export function MultiSelectSearchDropdown({
   className = '',
   closeOnSelect = false,
   menuInline = false,
+  noFocusRing = false,
 }: MultiSelectSearchDropdownProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -429,6 +458,7 @@ export function MultiSelectSearchDropdown({
     deselectAllFiltered,
     toggleValue,
     listMaxHeight,
+    noFocusRing,
   };
 
   const inlineMenu =
@@ -476,7 +506,11 @@ export function MultiSelectSearchDropdown({
             return !v;
           });
         }}
-        className="relative flex h-10 w-full items-center rounded-md border border-gray-300 bg-white pl-10 pr-11 text-left text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:ring-red-400"
+        className={`relative flex h-10 w-full items-center rounded-md border border-gray-300 bg-white pl-10 pr-11 text-left text-sm text-gray-900 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${
+          noFocusRing
+            ? 'focus:ring-0 focus:border-gray-300 dark:focus:border-gray-600'
+            : 'focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:focus:ring-red-400'
+        }`}
       >
         {icon ? (
           <span className="pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 text-gray-400 dark:text-gray-500">
