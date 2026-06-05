@@ -8,13 +8,20 @@ import {
   ArrowUpRight,
   CalendarDays,
   Filter,
+  HardHat,
   BookOpen,
+  Briefcase,
   Building2,
+  Landmark,
   ListPlus,
+  Package,
+  PieChart,
+  Percent,
   Loader2,
   Search,
   Download,
   TrendingUp,
+  Users,
   Wallet,
   X,
   type LucideIcon
@@ -32,8 +39,7 @@ import {
   SEM_FORNECEDOR_KEY,
   SEM_NATUREZA_KEY,
   ajusteToExtratoItem,
-  isExtratoAjusteManual,
-  type ExtratoCaixaAjuste
+  isExtratoAjusteManual
 } from '@/lib/extratoCaixaAjuste';
 import { extratoMatchesAnyNatureCodes, normalizeBudgetNatureCode } from '@/lib/budgetNatureMatch';
 import { normalizeNaturezaLabel } from '@/lib/contractPaidNaturezaExclusions';
@@ -100,6 +106,13 @@ function formatCurrency(value: number): string {
 function formatCurrencyOrDash(value: number): string {
   if (value === 0) return '—';
   return formatCurrency(value);
+}
+
+function formatPercent(value: number): string {
+  return `${value.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}%`;
 }
 
 function parseCalendarDateParts(value: string): { y: number; m: number; d: number } | null {
@@ -253,11 +266,15 @@ function itemSaldoLinha(item: ExtratoCaixaItem): number {
 }
 
 /** Naturezas que compõem a Receita Líquida (comparação normalizada, sem acentos). */
-const RECEITA_LIQUIDA_NATUREZAS = new Set([
-  normalizeNaturezaLabel('RECEITA - MANUTENCAO'),
-  normalizeNaturezaLabel('RECEITA - TERCEIRIZACAO MAO DE OBRA'),
-  normalizeNaturezaLabel('RECEITA - TERCEIRIZADO MAO DE OBRA')
-]);
+const RECEITA_LIQUIDA_NATUREZAS_RAW = [
+  'RECEITA - MANUTENCAO',
+  'RECEITA - TERCEIRIZACAO MAO DE OBRA',
+  'RECEITA - TERCEIRIZADO MAO DE OBRA'
+] as const;
+
+const RECEITA_LIQUIDA_NATUREZAS = new Set(
+  RECEITA_LIQUIDA_NATUREZAS_RAW.map((n) => normalizeNaturezaLabel(n))
+);
 
 function receitaLiquidaLabelMatches(item: ExtratoCaixaItem): boolean {
   const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
@@ -310,31 +327,535 @@ function contribuicaoReceitaLiquida(item: ExtratoCaixaItem): number {
 
 function collectDemonstrativoReceitaLiquidaItems(
   filteredItems: ExtratoCaixaItem[],
-  ajustes: ReadonlyArray<ExtratoCaixaAjuste>,
-  periodFrom: string,
-  periodTo: string,
-  searchQuery: string,
   receitaLiquidaNatureCodes: Set<string>,
   natureOptions: ReadonlyArray<{ value: string; label: string }>
 ): ExtratoCaixaItem[] {
   const result: ExtratoCaixaItem[] = [];
-  const add = (item: ExtratoCaixaItem) => {
+  for (const item of filteredItems) {
     if (
       !itemMatchesReceitaLiquidaNature(item, receitaLiquidaNatureCodes, natureOptions)
     ) {
-      return;
+      continue;
     }
-    if (contribuicaoReceitaLiquida(item) === 0) return;
+    if (contribuicaoReceitaLiquida(item) === 0) continue;
     result.push(item);
-  };
-  for (const item of filteredItems) {
-    if (!isExtratoAjusteManual(item)) add(item);
   }
-  for (const ajuste of ajustes) {
-    const item = ajusteToExtratoItem(ajuste);
-    if (!itemMatchesCompensacaoPeriod(item, periodFrom, periodTo)) continue;
-    if (!extratoItemMatchesSearch(item, searchQuery)) continue;
-    add(item);
+  return sortItemsForResumoDetalhe(result);
+}
+
+/** Naturezas que compõem Gastos com Pessoal (comparação normalizada, sem acentos). */
+const GASTOS_PESSOAL_NATUREZAS_RAW = [
+  'COMPRA DE MEDICAMENTOS - SV',
+  'PENSAO ALIMENTICIA',
+  'SEGURO FUNCIONARIOS - SV',
+  'GRATIFICACOES/COMISSOES',
+  'AUXILIO ALIMENTACAO - SV',
+  'INSS',
+  'VIAGENS DE COLABORADORES - ALIMENTACAO',
+  'BOLSAS E OUTROS GASTOS COM ESTAGIARIOS',
+  'ADIANTAMENTO SALARIAL - SV',
+  'ASO E EXAMES MEDICOS',
+  'FARDAMENTOS',
+  'FESTA E EVENTOS',
+  'CURSOS E TREINAMENTOS',
+  'DIARIAS SALARIAIS',
+  'BONIFICACAO META (PREMIACAO) - SV',
+  'VIAGENS DE COLABORADORES - HOSPEDAGEM E DIARIAS',
+  'VIAGENS DE COLABORADORES - TRANSPORTE',
+  'ACRESCIMOS (PESSOAL)',
+  'FERIAS',
+  'ACOES TRABALHISTAS/ INDENIZACOES/CUSTAS',
+  'ACOES TRABALHISTAS/INDENIZACOES/CUSTAS',
+  'VALE TRANSPORTE',
+  'RESCISAO PESSOAL',
+  'FGTS',
+  'VALE ALIMENTACAO',
+  'SALARIOS E ENCARGOS - COLIGADA',
+  'SALARIO'
+] as const;
+
+const GASTOS_PESSOAL_NATUREZAS = new Set(
+  GASTOS_PESSOAL_NATUREZAS_RAW.map((n) => normalizeNaturezaLabel(n))
+);
+
+function gastosPessoalLabelMatches(item: ExtratoCaixaItem): boolean {
+  const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
+  return label.length > 0 && GASTOS_PESSOAL_NATUREZAS.has(label);
+}
+
+function buildGastosPessoalNatureCodes(
+  items: ExtratoCaixaItem[],
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): Set<string> {
+  const codes = new Set<string>();
+  for (const item of items) {
+    if (!gastosPessoalLabelMatches(item)) continue;
+    const code = normalizeBudgetNatureCode(item.codNatFinanceira);
+    if (code) codes.add(code.toUpperCase());
+  }
+  for (const opt of natureOptions) {
+    if (opt.value === SEM_NATUREZA_KEY) continue;
+    if (!GASTOS_PESSOAL_NATUREZAS.has(normalizeNaturezaLabel(opt.label))) continue;
+    const code = normalizeBudgetNatureCode(opt.value);
+    if (code) codes.add(code.toUpperCase());
+  }
+  return codes;
+}
+
+function itemMatchesGastosPessoalNature(
+  item: ExtratoCaixaItem,
+  natureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): boolean {
+  if (gastosPessoalLabelMatches(item)) return true;
+  const code = normalizeBudgetNatureCode(item.codNatFinanceira).toUpperCase();
+  if (code && natureCodes.has(code)) return true;
+  if (!code) return false;
+  const opt = natureOptions.find(
+    (o) => normalizeBudgetNatureCode(o.value).toUpperCase() === code
+  );
+  return Boolean(
+    opt && GASTOS_PESSOAL_NATUREZAS.has(normalizeNaturezaLabel(opt.label))
+  );
+}
+
+/** Saídas (valor absoluto) das naturezas de pessoal; ajuste manual negativo conta como gasto. */
+function contribuicaoGastosPessoal(item: ExtratoCaixaItem): number {
+  if (isExtratoAjusteManual(item)) {
+    const v = item.valor;
+    if (Number.isFinite(v) && v < 0) return Math.abs(v);
+    return 0;
+  }
+  return itemSaidaAbs(item);
+}
+
+function collectDemonstrativoGastosPessoalItems(
+  filteredItems: ExtratoCaixaItem[],
+  gastosPessoalNatureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): ExtratoCaixaItem[] {
+  const result: ExtratoCaixaItem[] = [];
+  for (const item of filteredItems) {
+    if (!itemMatchesGastosPessoalNature(item, gastosPessoalNatureCodes, natureOptions)) {
+      continue;
+    }
+    if (contribuicaoGastosPessoal(item) === 0) continue;
+    result.push(item);
+  }
+  return sortItemsForResumoDetalhe(result);
+}
+
+/** Naturezas que compõem Gastos com Assessoria Externa. */
+const GASTOS_ASSESSORIA_EXTERNA_NATUREZAS_RAW = [
+  'ASSESSORIA JURIDICA NAO TRABALHISTA',
+  'CONTABILIDADE',
+  'ASSESSORIA JURIDICA TRABALHISTA',
+  'ASSESSORIA GERENCIAL'
+] as const;
+
+const GASTOS_ASSESSORIA_EXTERNA_NATUREZAS = new Set(
+  GASTOS_ASSESSORIA_EXTERNA_NATUREZAS_RAW.map((n) => normalizeNaturezaLabel(n))
+);
+
+function gastosAssessoriaExternaLabelMatches(item: ExtratoCaixaItem): boolean {
+  const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
+  return label.length > 0 && GASTOS_ASSESSORIA_EXTERNA_NATUREZAS.has(label);
+}
+
+function buildGastosAssessoriaExternaNatureCodes(
+  items: ExtratoCaixaItem[],
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): Set<string> {
+  const codes = new Set<string>();
+  for (const item of items) {
+    if (!gastosAssessoriaExternaLabelMatches(item)) continue;
+    const code = normalizeBudgetNatureCode(item.codNatFinanceira);
+    if (code) codes.add(code.toUpperCase());
+  }
+  for (const opt of natureOptions) {
+    if (opt.value === SEM_NATUREZA_KEY) continue;
+    if (!GASTOS_ASSESSORIA_EXTERNA_NATUREZAS.has(normalizeNaturezaLabel(opt.label))) continue;
+    const code = normalizeBudgetNatureCode(opt.value);
+    if (code) codes.add(code.toUpperCase());
+  }
+  return codes;
+}
+
+function itemMatchesGastosAssessoriaExternaNature(
+  item: ExtratoCaixaItem,
+  natureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): boolean {
+  if (gastosAssessoriaExternaLabelMatches(item)) return true;
+  const code = normalizeBudgetNatureCode(item.codNatFinanceira).toUpperCase();
+  if (code && natureCodes.has(code)) return true;
+  if (!code) return false;
+  const opt = natureOptions.find(
+    (o) => normalizeBudgetNatureCode(o.value).toUpperCase() === code
+  );
+  return Boolean(
+    opt && GASTOS_ASSESSORIA_EXTERNA_NATUREZAS.has(normalizeNaturezaLabel(opt.label))
+  );
+}
+
+function contribuicaoGastosAssessoriaExterna(item: ExtratoCaixaItem): number {
+  if (isExtratoAjusteManual(item)) {
+    const v = item.valor;
+    if (Number.isFinite(v) && v < 0) return Math.abs(v);
+    return 0;
+  }
+  return itemSaidaAbs(item);
+}
+
+function collectDemonstrativoGastosAssessoriaExternaItems(
+  filteredItems: ExtratoCaixaItem[],
+  gastosAssessoriaExternaNatureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): ExtratoCaixaItem[] {
+  const result: ExtratoCaixaItem[] = [];
+  for (const item of filteredItems) {
+    if (
+      !itemMatchesGastosAssessoriaExternaNature(
+        item,
+        gastosAssessoriaExternaNatureCodes,
+        natureOptions
+      )
+    ) {
+      continue;
+    }
+    if (contribuicaoGastosAssessoriaExterna(item) === 0) continue;
+    result.push(item);
+  }
+  return sortItemsForResumoDetalhe(result);
+}
+
+/** Naturezas que compõem Gastos com Empreitas. */
+const GASTOS_EMPREITAS_NATUREZAS_RAW = [
+  'PROJETOS DE ARQUITETURA / ENGENHARIA',
+  'PRESTACAO DE SERVICOS TERCEIRIZADOS - SV',
+  'SERVICOS ESPECIALIZADOS DE ENGENHARIA (PF/PJ)',
+  'OUTROS SERVICOS TOMADOS'
+] as const;
+
+const GASTOS_EMPREITAS_NATUREZAS = new Set(
+  GASTOS_EMPREITAS_NATUREZAS_RAW.map((n) => normalizeNaturezaLabel(n))
+);
+
+function gastosEmpreitasLabelMatches(item: ExtratoCaixaItem): boolean {
+  const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
+  return label.length > 0 && GASTOS_EMPREITAS_NATUREZAS.has(label);
+}
+
+function buildGastosEmpreitasNatureCodes(
+  items: ExtratoCaixaItem[],
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): Set<string> {
+  const codes = new Set<string>();
+  for (const item of items) {
+    if (!gastosEmpreitasLabelMatches(item)) continue;
+    const code = normalizeBudgetNatureCode(item.codNatFinanceira);
+    if (code) codes.add(code.toUpperCase());
+  }
+  for (const opt of natureOptions) {
+    if (opt.value === SEM_NATUREZA_KEY) continue;
+    if (!GASTOS_EMPREITAS_NATUREZAS.has(normalizeNaturezaLabel(opt.label))) continue;
+    const code = normalizeBudgetNatureCode(opt.value);
+    if (code) codes.add(code.toUpperCase());
+  }
+  return codes;
+}
+
+function itemMatchesGastosEmpreitasNature(
+  item: ExtratoCaixaItem,
+  natureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): boolean {
+  if (gastosEmpreitasLabelMatches(item)) return true;
+  const code = normalizeBudgetNatureCode(item.codNatFinanceira).toUpperCase();
+  if (code && natureCodes.has(code)) return true;
+  if (!code) return false;
+  const opt = natureOptions.find(
+    (o) => normalizeBudgetNatureCode(o.value).toUpperCase() === code
+  );
+  return Boolean(
+    opt && GASTOS_EMPREITAS_NATUREZAS.has(normalizeNaturezaLabel(opt.label))
+  );
+}
+
+function contribuicaoGastosEmpreitas(item: ExtratoCaixaItem): number {
+  if (isExtratoAjusteManual(item)) {
+    const v = item.valor;
+    if (Number.isFinite(v) && v < 0) return Math.abs(v);
+    return 0;
+  }
+  return itemSaidaAbs(item);
+}
+
+function collectDemonstrativoGastosEmpreitasItems(
+  filteredItems: ExtratoCaixaItem[],
+  gastosEmpreitasNatureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): ExtratoCaixaItem[] {
+  const result: ExtratoCaixaItem[] = [];
+  for (const item of filteredItems) {
+    if (!itemMatchesGastosEmpreitasNature(item, gastosEmpreitasNatureCodes, natureOptions)) {
+      continue;
+    }
+    if (contribuicaoGastosEmpreitas(item) === 0) continue;
+    result.push(item);
+  }
+  return sortItemsForResumoDetalhe(result);
+}
+
+/** Naturezas que compõem Gastos com Materiais. */
+const GASTOS_MATERIAIS_NATUREZAS_RAW = [
+  'LOUCAS E METAIS',
+  'INSUMOS - CONCRETO',
+  'INSUMOS - PAISAGISMO',
+  'MATERIAL BRUTO DE CONSTRUCAO (CIMENTO, AREIA, BRITA E TIJOLO)',
+  'INSUMOS - MADEIRAMENTO',
+  'INSUMOS - MATERIAL DE LIMPEZA DE OBRA',
+  'MATERIAL DE CLIMATIZACAO',
+  'SINALIZACAO',
+  'COBERTURA/CALHA',
+  'INSUMOS - EPI / EPC',
+  'INSUMOS - VIDRACARIA',
+  'FRETES E CARREGOS',
+  'MATERIAL EXPEDIENTE',
+  'INSUMOS - TELECOMUNICACOES',
+  'MATERIAL CONSUMO',
+  'INSUMOS - FORRO',
+  'MARMORE/GRANITO',
+  'INSUMOS - IMPERMEABILIZACAO',
+  'INSUMOS - FERRAMENTAS EQUIP E MAQ',
+  'INSUMOS - PINTURA',
+  'INSUMOS - HIDRAULICA',
+  'INSUMOS - MARCENARIA',
+  'INSUMOS - ALVENARIA',
+  'CAIXA - FUNDO FIXO OBRA - SV',
+  'INSUMOS - REVESTIMENTOS',
+  'INSUMOS - SERRALHERIA E FERRAGENS',
+  'INSUMOS - ELETRICA'
+] as const;
+
+const GASTOS_MATERIAIS_NATUREZAS = new Set(
+  GASTOS_MATERIAIS_NATUREZAS_RAW.map((n) => normalizeNaturezaLabel(n))
+);
+
+function gastosMateriaisLabelMatches(item: ExtratoCaixaItem): boolean {
+  const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
+  return label.length > 0 && GASTOS_MATERIAIS_NATUREZAS.has(label);
+}
+
+function buildGastosMateriaisNatureCodes(
+  items: ExtratoCaixaItem[],
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): Set<string> {
+  const codes = new Set<string>();
+  for (const item of items) {
+    if (!gastosMateriaisLabelMatches(item)) continue;
+    const code = normalizeBudgetNatureCode(item.codNatFinanceira);
+    if (code) codes.add(code.toUpperCase());
+  }
+  for (const opt of natureOptions) {
+    if (opt.value === SEM_NATUREZA_KEY) continue;
+    if (!GASTOS_MATERIAIS_NATUREZAS.has(normalizeNaturezaLabel(opt.label))) continue;
+    const code = normalizeBudgetNatureCode(opt.value);
+    if (code) codes.add(code.toUpperCase());
+  }
+  return codes;
+}
+
+function itemMatchesGastosMateriaisNature(
+  item: ExtratoCaixaItem,
+  natureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): boolean {
+  if (gastosMateriaisLabelMatches(item)) return true;
+  const code = normalizeBudgetNatureCode(item.codNatFinanceira).toUpperCase();
+  if (code && natureCodes.has(code)) return true;
+  if (!code) return false;
+  const opt = natureOptions.find(
+    (o) => normalizeBudgetNatureCode(o.value).toUpperCase() === code
+  );
+  return Boolean(
+    opt && GASTOS_MATERIAIS_NATUREZAS.has(normalizeNaturezaLabel(opt.label))
+  );
+}
+
+function contribuicaoGastosMateriais(item: ExtratoCaixaItem): number {
+  if (isExtratoAjusteManual(item)) {
+    const v = item.valor;
+    if (Number.isFinite(v) && v < 0) return Math.abs(v);
+    return 0;
+  }
+  return itemSaidaAbs(item);
+}
+
+function collectDemonstrativoGastosMateriaisItems(
+  filteredItems: ExtratoCaixaItem[],
+  gastosMateriaisNatureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): ExtratoCaixaItem[] {
+  const result: ExtratoCaixaItem[] = [];
+  for (const item of filteredItems) {
+    if (!itemMatchesGastosMateriaisNature(item, gastosMateriaisNatureCodes, natureOptions)) {
+      continue;
+    }
+    if (contribuicaoGastosMateriais(item) === 0) continue;
+    result.push(item);
+  }
+  return sortItemsForResumoDetalhe(result);
+}
+
+/** Naturezas que compõem Aporte de Capital dos Sócios. */
+const APORTE_CAPITAL_SOCIOS_NATUREZAS_RAW = [
+  'APORTE DE CAPITAL DE SOCIOS',
+  'EMPRESTIMO DE SOCIOS - ENTRADA'
+] as const;
+
+const APORTE_CAPITAL_SOCIOS_NATUREZAS = new Set(
+  APORTE_CAPITAL_SOCIOS_NATUREZAS_RAW.map((n) => normalizeNaturezaLabel(n))
+);
+
+function aporteCapitalSociosLabelMatches(item: ExtratoCaixaItem): boolean {
+  const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
+  return label.length > 0 && APORTE_CAPITAL_SOCIOS_NATUREZAS.has(label);
+}
+
+function buildAporteCapitalSociosNatureCodes(
+  items: ExtratoCaixaItem[],
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): Set<string> {
+  const codes = new Set<string>();
+  for (const item of items) {
+    if (!aporteCapitalSociosLabelMatches(item)) continue;
+    const code = normalizeBudgetNatureCode(item.codNatFinanceira);
+    if (code) codes.add(code.toUpperCase());
+  }
+  for (const opt of natureOptions) {
+    if (opt.value === SEM_NATUREZA_KEY) continue;
+    if (!APORTE_CAPITAL_SOCIOS_NATUREZAS.has(normalizeNaturezaLabel(opt.label))) continue;
+    const code = normalizeBudgetNatureCode(opt.value);
+    if (code) codes.add(code.toUpperCase());
+  }
+  return codes;
+}
+
+function itemMatchesAporteCapitalSociosNature(
+  item: ExtratoCaixaItem,
+  natureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): boolean {
+  if (aporteCapitalSociosLabelMatches(item)) return true;
+  const code = normalizeBudgetNatureCode(item.codNatFinanceira).toUpperCase();
+  if (code && natureCodes.has(code)) return true;
+  if (!code) return false;
+  const opt = natureOptions.find(
+    (o) => normalizeBudgetNatureCode(o.value).toUpperCase() === code
+  );
+  return Boolean(
+    opt && APORTE_CAPITAL_SOCIOS_NATUREZAS.has(normalizeNaturezaLabel(opt.label))
+  );
+}
+
+function contribuicaoAporteCapitalSocios(item: ExtratoCaixaItem): number {
+  if (isExtratoAjusteManual(item)) {
+    return Number.isFinite(item.valor) ? item.valor : 0;
+  }
+  return itemSaldoLinha(item);
+}
+
+function collectDemonstrativoAporteCapitalSociosItems(
+  filteredItems: ExtratoCaixaItem[],
+  aporteCapitalSociosNatureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): ExtratoCaixaItem[] {
+  const result: ExtratoCaixaItem[] = [];
+  for (const item of filteredItems) {
+    if (
+      !itemMatchesAporteCapitalSociosNature(item, aporteCapitalSociosNatureCodes, natureOptions)
+    ) {
+      continue;
+    }
+    if (contribuicaoAporteCapitalSocios(item) === 0) continue;
+    result.push(item);
+  }
+  return sortItemsForResumoDetalhe(result);
+}
+
+/** Naturezas que compõem Distribuição de Lucro. */
+const DISTRIBUICAO_LUCRO_NATUREZAS_RAW = [
+  'REPASSES A DEMANDAS DA DIRETORIA - SV',
+  'DISTRIBUICAO DE LUCROS'
+] as const;
+
+const DISTRIBUICAO_LUCRO_NATUREZAS = new Set(
+  DISTRIBUICAO_LUCRO_NATUREZAS_RAW.map((n) => normalizeNaturezaLabel(n))
+);
+
+function distribuicaoLucroLabelMatches(item: ExtratoCaixaItem): boolean {
+  const label = normalizeNaturezaLabel(item.natureza?.trim() || '');
+  return label.length > 0 && DISTRIBUICAO_LUCRO_NATUREZAS.has(label);
+}
+
+function buildDistribuicaoLucroNatureCodes(
+  items: ExtratoCaixaItem[],
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): Set<string> {
+  const codes = new Set<string>();
+  for (const item of items) {
+    if (!distribuicaoLucroLabelMatches(item)) continue;
+    const code = normalizeBudgetNatureCode(item.codNatFinanceira);
+    if (code) codes.add(code.toUpperCase());
+  }
+  for (const opt of natureOptions) {
+    if (opt.value === SEM_NATUREZA_KEY) continue;
+    if (!DISTRIBUICAO_LUCRO_NATUREZAS.has(normalizeNaturezaLabel(opt.label))) continue;
+    const code = normalizeBudgetNatureCode(opt.value);
+    if (code) codes.add(code.toUpperCase());
+  }
+  return codes;
+}
+
+function itemMatchesDistribuicaoLucroNature(
+  item: ExtratoCaixaItem,
+  natureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): boolean {
+  if (distribuicaoLucroLabelMatches(item)) return true;
+  const code = normalizeBudgetNatureCode(item.codNatFinanceira).toUpperCase();
+  if (code && natureCodes.has(code)) return true;
+  if (!code) return false;
+  const opt = natureOptions.find(
+    (o) => normalizeBudgetNatureCode(o.value).toUpperCase() === code
+  );
+  return Boolean(
+    opt && DISTRIBUICAO_LUCRO_NATUREZAS.has(normalizeNaturezaLabel(opt.label))
+  );
+}
+
+function contribuicaoDistribuicaoLucro(item: ExtratoCaixaItem): number {
+  if (isExtratoAjusteManual(item)) {
+    const v = item.valor;
+    if (Number.isFinite(v) && v < 0) return Math.abs(v);
+    return 0;
+  }
+  return itemSaidaAbs(item);
+}
+
+function collectDemonstrativoDistribuicaoLucroItems(
+  filteredItems: ExtratoCaixaItem[],
+  distribuicaoLucroNatureCodes: Set<string>,
+  natureOptions: ReadonlyArray<{ value: string; label: string }>
+): ExtratoCaixaItem[] {
+  const result: ExtratoCaixaItem[] = [];
+  for (const item of filteredItems) {
+    if (!itemMatchesDistribuicaoLucroNature(item, distribuicaoLucroNatureCodes, natureOptions)) {
+      continue;
+    }
+    if (contribuicaoDistribuicaoLucro(item) === 0) continue;
+    result.push(item);
   }
   return sortItemsForResumoDetalhe(result);
 }
@@ -347,13 +868,83 @@ function collectDemonstrativoEntradasItems(
   );
 }
 
-type DemonstrativoDetalheKind = 'entradas' | 'receita-liquida';
+type DemonstrativoDetalheKind =
+  | 'entradas'
+  | 'receita-liquida'
+  | 'gastos-pessoal'
+  | 'gastos-assessoria-externa'
+  | 'gastos-empreitas'
+  | 'gastos-materiais'
+  | 'aporte-capital-socios'
+  | 'distribuicao-lucro';
+
+function uniqueNatureLabelsForDisplay(labels: readonly string[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const label of labels) {
+    const key = normalizeNaturezaLabel(label);
+    if (!key || byKey.has(key)) continue;
+    byKey.set(key, label);
+  }
+  return Array.from(byKey.values()).sort((a, b) =>
+    a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+  );
+}
+
+function demonstrativoCardNatureLabels(kind: DemonstrativoDetalheKind): string[] {
+  switch (kind) {
+    case 'receita-liquida':
+      return uniqueNatureLabelsForDisplay(RECEITA_LIQUIDA_NATUREZAS_RAW);
+    case 'gastos-pessoal':
+      return uniqueNatureLabelsForDisplay(GASTOS_PESSOAL_NATUREZAS_RAW);
+    case 'gastos-assessoria-externa':
+      return uniqueNatureLabelsForDisplay(GASTOS_ASSESSORIA_EXTERNA_NATUREZAS_RAW);
+    case 'gastos-empreitas':
+      return uniqueNatureLabelsForDisplay(GASTOS_EMPREITAS_NATUREZAS_RAW);
+    case 'gastos-materiais':
+      return uniqueNatureLabelsForDisplay(GASTOS_MATERIAIS_NATUREZAS_RAW);
+    case 'aporte-capital-socios':
+      return uniqueNatureLabelsForDisplay(APORTE_CAPITAL_SOCIOS_NATUREZAS_RAW);
+    case 'distribuicao-lucro':
+      return uniqueNatureLabelsForDisplay(DISTRIBUICAO_LUCRO_NATUREZAS_RAW);
+    default:
+      return [];
+  }
+}
+
+function DemonstrativoNaturezasIncluidas({ labels }: { labels: string[] }) {
+  if (labels.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/80 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40">
+      <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        Naturezas incluídas na soma ({labels.length})
+      </p>
+      <ul className="mt-2 flex max-h-32 flex-wrap gap-1.5 overflow-y-auto sm:max-h-40">
+        {labels.map((label) => (
+          <li
+            key={label}
+            className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs leading-snug text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+          >
+            {label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function valorLinhaDemonstrativoDetalhe(
   item: ExtratoCaixaItem,
   kind: DemonstrativoDetalheKind
 ): number {
-  return kind === 'receita-liquida' ? contribuicaoReceitaLiquida(item) : itemEntrada(item);
+  if (kind === 'receita-liquida') return contribuicaoReceitaLiquida(item);
+  if (kind === 'gastos-pessoal') return -contribuicaoGastosPessoal(item);
+  if (kind === 'gastos-assessoria-externa') return -contribuicaoGastosAssessoriaExterna(item);
+  if (kind === 'gastos-empreitas') return -contribuicaoGastosEmpreitas(item);
+  if (kind === 'gastos-materiais') return -contribuicaoGastosMateriais(item);
+  if (kind === 'aporte-capital-socios') return contribuicaoAporteCapitalSocios(item);
+  if (kind === 'distribuicao-lucro') return -contribuicaoDistribuicaoLucro(item);
+  return itemEntrada(item);
 }
 
 function ExtratoDemonstrativoDetalheModal({
@@ -365,7 +956,25 @@ function ExtratoDemonstrativoDetalheModal({
   onClose: () => void;
   items: ExtratoCaixaItem[];
 }) {
-  const title = kind === 'receita-liquida' ? 'Receita Líquida' : kind === 'entradas' ? 'Entradas' : '';
+  const [selectedItem, setSelectedItem] = useState<ExtratoCaixaItem | null>(null);
+  const title =
+    kind === 'receita-liquida'
+      ? 'Receita Líquida'
+      : kind === 'gastos-pessoal'
+        ? 'Gastos com Pessoal'
+        : kind === 'gastos-assessoria-externa'
+          ? 'Gastos com Assessoria Externa'
+          : kind === 'gastos-empreitas'
+            ? 'Gastos com Empreitas'
+            : kind === 'gastos-materiais'
+              ? 'Gastos com Materiais'
+              : kind === 'aporte-capital-socios'
+          ? 'Aporte de Capital dos Socios'
+          : kind === 'distribuicao-lucro'
+            ? 'Distribuição de Lucro'
+            : kind === 'entradas'
+            ? 'Entradas'
+            : '';
   const sorted = useMemo(() => sortItemsForResumoDetalhe(items), [items]);
   const stats = useMemo(() => {
     if (!kind) {
@@ -387,6 +996,7 @@ function ExtratoDemonstrativoDetalheModal({
 
   const visiveis = sorted.slice(0, RESUMO_DETALHE_LIMITE);
   const restante = sorted.length - visiveis.length;
+  const naturezasIncluidas = kind ? demonstrativoCardNatureLabels(kind) : [];
 
   if (!kind) return null;
 
@@ -398,9 +1008,13 @@ function ExtratoDemonstrativoDetalheModal({
         totalValor={stats.totalValor}
       />
 
+      <DemonstrativoNaturezasIncluidas labels={naturezasIncluidas} />
+
       <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
-        {sorted.length} movimentação(ões) no recorte atual
-        {restante > 0 ? ` — exibindo ${visiveis.length}` : null}.
+        {sorted.length} movimentação(ões){' '}
+        {kind === 'entradas' ? 'no recorte atual' : 'no total geral'}
+        {restante > 0 ? ` — exibindo ${visiveis.length}` : null}. Clique em uma linha para ver os
+        detalhes.
       </p>
 
       {sorted.length === 0 ? (
@@ -441,7 +1055,10 @@ function ExtratoDemonstrativoDetalheModal({
                 return (
                   <tr
                     key={item.ajusteId ?? `dem-card-${index}-${item.dataCompensacao}`}
-                    className={item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''}
+                    {...extratoLancamentoRowHandlers(item, setSelectedItem)}
+                    className={`${EXTRATO_LANCAMENTO_ROW_CLICKABLE_CLASS} ${
+                      item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''
+                    }`}
                   >
                     <td className="whitespace-nowrap px-3 py-2 text-gray-900 dark:text-gray-100">
                       {formatDate(item.dataCompensacao)}
@@ -495,12 +1112,26 @@ function ExtratoDemonstrativoDetalheModal({
           + {restante} movimentação(ões) não exibida(s). Refine os filtros para reduzir o volume.
         </p>
       ) : null}
+
+      <ExtratoLancamentoDetalheModal
+        item={selectedItem}
+        onClose={() => setSelectedItem(null)}
+      />
     </Modal>
   );
 }
 
 const DEMONSTRATIVO_CARD_CLICKABLE_CLASS =
   'cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900';
+
+const DEMONSTRATIVO_RECORTE_CARD_CLASS = 'flex h-full flex-col';
+const DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS = 'flex h-full w-full flex-col text-left';
+const DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS = 'flex flex-1 flex-col p-4 sm:p-6';
+const DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS = 'flex h-full items-start';
+const DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS =
+  'ml-3 flex min-w-0 flex-1 flex-col sm:ml-4';
+const DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS =
+  'mt-1 flex-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400';
 
 function formatMonthYearLabel(monthKey: string): string {
   const year = Number(monthKey.slice(0, 4));
@@ -824,6 +1455,7 @@ function ExtratoResumoDetalheModal({
   row: ExtratoResumoRow | null;
   items: ExtratoCaixaItem[];
 }) {
+  const [selectedItem, setSelectedItem] = useState<ExtratoCaixaItem | null>(null);
   const sorted = useMemo(() => sortItemsForResumoDetalhe(items), [items]);
   const visiveis = sorted.slice(0, RESUMO_DETALHE_LIMITE);
   const restante = sorted.length - visiveis.length;
@@ -846,7 +1478,8 @@ function ExtratoResumoDetalheModal({
 
       <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
         {sorted.length} movimentação(ões) com os filtros atuais
-        {restante > 0 ? ` — exibindo ${visiveis.length}` : null}.
+        {restante > 0 ? ` — exibindo ${visiveis.length}` : null}. Clique em uma linha para ver os
+        detalhes.
       </p>
 
       {sorted.length === 0 ? (
@@ -885,7 +1518,10 @@ function ExtratoResumoDetalheModal({
               {visiveis.map((item, index) => (
                 <tr
                   key={item.ajusteId ?? `det-${index}-${item.dataCompensacao}`}
-                  className={item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''}
+                  {...extratoLancamentoRowHandlers(item, setSelectedItem)}
+                  className={`${EXTRATO_LANCAMENTO_ROW_CLICKABLE_CLASS} ${
+                    item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''
+                  }`}
                 >
                   <td className="whitespace-nowrap px-3 py-2 text-gray-900 dark:text-gray-100">
                     {formatDate(item.dataCompensacao)}
@@ -927,6 +1563,11 @@ function ExtratoResumoDetalheModal({
           + {restante} movimentação(ões) não exibida(s). Refine os filtros para reduzir o volume.
         </p>
       ) : null}
+
+      <ExtratoLancamentoDetalheModal
+        item={selectedItem}
+        onClose={() => setSelectedItem(null)}
+      />
     </Modal>
   );
 }
@@ -1221,6 +1862,32 @@ function sortItemsByDateDesc(items: ExtratoCaixaItem[]): ExtratoCaixaItem[] {
   });
 }
 
+function computeExtratoStats(source: readonly ExtratoCaixaItem[]) {
+  let totalEntrada = 0;
+  let totalSaida = 0;
+  let qtdEntrada = 0;
+  let qtdSaida = 0;
+  for (const item of source) {
+    const ent = itemEntrada(item);
+    const sai = itemSaidaAbs(item);
+    if (ent > 0) {
+      totalEntrada += ent;
+      qtdEntrada += 1;
+    }
+    if (itemHasSaida(item)) {
+      totalSaida += sai;
+      qtdSaida += 1;
+    }
+  }
+  return {
+    totalEntrada,
+    totalSaida,
+    qtdEntrada,
+    qtdSaida,
+    saldoLiquido: totalEntrada - totalSaida
+  };
+}
+
 function extratoItemMatchesSearch(item: ExtratoCaixaItem, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -1258,6 +1925,152 @@ const EXTRATO_TH_HISTORICO =
 const EXTRATO_TD_CENTER = 'px-3 py-3 text-center sm:px-4';
 const EXTRATO_TD_HISTORICO =
   'max-w-[16rem] truncate px-3 py-3 text-left text-gray-700 dark:text-gray-300 sm:px-4';
+
+const EXTRATO_LANCAMENTO_ROW_CLICKABLE_CLASS =
+  'cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500';
+
+function extratoLancamentoRowHandlers(
+  item: ExtratoCaixaItem,
+  onSelect: (item: ExtratoCaixaItem) => void
+) {
+  const label =
+    item.idxcx != null
+      ? `Ver detalhes do lançamento ${item.idxcx}`
+      : item.isAjusteManual
+        ? 'Ver detalhes do ajuste manual'
+        : 'Ver detalhes do lançamento';
+
+  return {
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick: () => onSelect(item),
+    onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onSelect(item);
+      }
+    },
+    'aria-label': label
+  };
+}
+
+function ExtratoDetalheCampo({
+  label,
+  value,
+  valueClassName
+}: {
+  label: string;
+  value: React.ReactNode;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        {label}
+      </dt>
+      <dd
+        className={`mt-1 break-words text-sm text-gray-900 dark:text-gray-100 ${valueClassName ?? ''}`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function ExtratoLancamentoDetalheModal({
+  item,
+  onClose
+}: {
+  item: ExtratoCaixaItem | null;
+  onClose: () => void;
+}) {
+  if (!item) return null;
+
+  const saldo = itemSaldoLinha(item);
+  const ccLabel = displayCcLabel(item);
+  const natLabel = displayNatLabel(item);
+  const title = item.isAjusteManual
+    ? 'Detalhes do ajuste manual'
+    : item.idxcx != null
+      ? `Lançamento #${item.idxcx}`
+      : 'Detalhes do lançamento';
+
+  return (
+    <Modal isOpen onClose={onClose} title={title} size="lg" closeOnOverlayClick>
+      {item.isAjusteManual ? (
+        <p className="mb-4 inline-flex items-center rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+          Ajuste manual
+        </p>
+      ) : null}
+
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ExtratoDetalheCampo
+          label={item.isAjusteManual ? 'ID do ajuste' : 'ID (TOTVS)'}
+          value={
+            item.isAjusteManual
+              ? item.ajusteId ?? '—'
+              : item.idxcx != null
+                ? String(item.idxcx)
+                : '—'
+          }
+          valueClassName="font-mono text-xs sm:text-sm"
+        />
+        <ExtratoDetalheCampo
+          label="Data de compensação"
+          value={formatDate(item.dataCompensacao)}
+        />
+        <ExtratoDetalheCampo label="Data do lançamento" value={formatDate(item.data)} />
+        <ExtratoDetalheCampo label="Histórico" value={item.historico?.trim() || '—'} />
+        <ExtratoDetalheCampo
+          label="Centro de custo"
+          value={
+            item.codCCusto && ccLabel !== item.codCCusto
+              ? `${ccLabel} (${item.codCCusto})`
+              : ccLabel
+          }
+        />
+        <ExtratoDetalheCampo
+          label="Natureza financeira"
+          value={
+            item.codNatFinanceira && natLabel !== item.codNatFinanceira
+              ? `${natLabel} (${item.codNatFinanceira})`
+              : natLabel
+          }
+        />
+        <ExtratoDetalheCampo label="Fornecedor" value={item.fornecedor?.trim() || '—'} />
+        <ExtratoDetalheCampo
+          label="Filial"
+          value={item.codFilial != null ? formatFilialLabel(item.codFilial) : '—'}
+        />
+        <ExtratoDetalheCampo label="Tipo de operação" value={item.tipoOperacao?.trim() || '—'} />
+        <ExtratoDetalheCampo label="Nº documento" value={item.numeroDocumento?.trim() || '—'} />
+        <ExtratoDetalheCampo label="Conta caixa" value={item.codCxa?.trim() || '—'} />
+        <ExtratoDetalheCampo
+          label="Coligada"
+          value={item.codColigada != null ? String(item.codColigada) : '—'}
+        />
+      </dl>
+
+      <div className="mt-6 grid grid-cols-1 gap-3 border-t border-gray-200 pt-4 dark:border-gray-700 sm:grid-cols-3">
+        <ExtratoDetalheCampo
+          label="Entrada"
+          value={formatCurrencyOrDash(itemEntrada(item))}
+          valueClassName="font-semibold tabular-nums text-green-600 dark:text-green-400"
+        />
+        <ExtratoDetalheCampo
+          label="Saída"
+          value={formatCurrencyOrDash(itemSaidaAbs(item))}
+          valueClassName="font-semibold tabular-nums text-red-600 dark:text-red-400"
+        />
+        <ExtratoDetalheCampo
+          label="Saldo da linha"
+          value={formatCurrency(saldo)}
+          valueClassName={`font-semibold tabular-nums ${valorCellClass(saldo)}`}
+        />
+      </div>
+    </Modal>
+  );
+}
 
 const skeletonPulse = 'animate-pulse rounded-md bg-gray-200/90 dark:bg-gray-700/80';
 
@@ -1412,6 +2225,7 @@ interface ExtratoItemsListProps {
 
 function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedItem, setSelectedItem] = useState<ExtratoCaixaItem | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(items.length / EXTRATO_ITEMS_PER_PAGE));
   const showPagination = items.length > EXTRATO_ITEMS_PER_PAGE;
@@ -1443,7 +2257,8 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Movimentações</h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Consulte as movimentações do balanço financeiro
+                Consulte as movimentações do balanço financeiro. Clique em uma linha para ver os
+                detalhes.
               </p>
             </div>
           </div>
@@ -1491,7 +2306,8 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
                       item.ajusteId ??
                       `${item.idxcx ?? ''}-${item.data}-${item.dataCompensacao}-${rowIndex}`
                     }
-                    className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                    {...extratoLancamentoRowHandlers(item, setSelectedItem)}
+                    className={`${EXTRATO_LANCAMENTO_ROW_CLICKABLE_CLASS} ${
                       item.isAjusteManual ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''
                     }`}
                   >
@@ -1620,6 +2436,11 @@ function ExtratoItemsList({ items, emptyMessage }: ExtratoItemsListProps) {
             </>
           )}
       </CardContent>
+
+      <ExtratoLancamentoDetalheModal
+        item={selectedItem}
+        onClose={() => setSelectedItem(null)}
+      />
     </Card>
   );
 }
@@ -1995,11 +2816,6 @@ export default function AnaliseExtratoPage() {
           const matchesPeriod = itemMatchesCompensacaoPeriod(item, periodFrom, periodTo);
           const matchesSearch = extratoItemMatchesSearch(item, searchQuery);
 
-          /** Ajustes manuais são sempre somados ao extrato (período e busca ainda aplicam). */
-          if (isExtratoAjusteManual(item)) {
-            return matchesPeriod && matchesSearch;
-          }
-
           return (
             extratoMatchesAnyCcCodes(item.codCCusto, ccFilterCodes, ccAllValues) &&
             extratoMatchesAnyNatureCodesFiltered(
@@ -2067,57 +2883,70 @@ export default function AnaliseExtratoPage() {
       }));
   }, [filteredItems]);
 
-  const extratoStats = useMemo(() => {
-    let totalEntrada = 0;
-    let totalSaida = 0;
-    let qtdEntrada = 0;
-    let qtdSaida = 0;
-    for (const item of filteredItems) {
-      const ent = itemEntrada(item);
-      const sai = itemSaidaAbs(item);
-      if (ent > 0) {
-        totalEntrada += ent;
-        qtdEntrada += 1;
-      }
-      if (itemHasSaida(item)) {
-        totalSaida += sai;
-        qtdSaida += 1;
-      }
-    }
-    return {
-      totalEntrada,
-      totalSaida,
-      qtdEntrada,
-      qtdSaida,
-      saldoLiquido: totalEntrada - totalSaida
-    };
-  }, [filteredItems]);
+  const extratoStats = useMemo(() => computeExtratoStats(filteredItems), [filteredItems]);
+
+  /** Base do grid do demonstrativo — ignora filtros da tela. */
+  const demonstrativoItems = useMemo(() => sortItemsByDateDesc(items), [items]);
+
+  const demonstrativoRoi = useMemo(() => {
+    const { totalEntrada, totalSaida } = extratoStats;
+    if (totalSaida === 0) return null;
+    return ((totalEntrada - totalSaida) / totalSaida) * 100;
+  }, [extratoStats]);
 
   const receitaLiquidaNatureCodes = useMemo(
     () => buildReceitaLiquidaNatureCodes(items, natureFilterOptions),
     [items, natureFilterOptions]
   );
 
+  const gastosPessoalNatureCodes = useMemo(
+    () => buildGastosPessoalNatureCodes(items, natureFilterOptions),
+    [items, natureFilterOptions]
+  );
+
+  const gastosAssessoriaExternaNatureCodes = useMemo(
+    () => buildGastosAssessoriaExternaNatureCodes(items, natureFilterOptions),
+    [items, natureFilterOptions]
+  );
+
+  const gastosEmpreitasNatureCodes = useMemo(
+    () => buildGastosEmpreitasNatureCodes(items, natureFilterOptions),
+    [items, natureFilterOptions]
+  );
+
+  const gastosMateriaisNatureCodes = useMemo(
+    () => buildGastosMateriaisNatureCodes(items, natureFilterOptions),
+    [items, natureFilterOptions]
+  );
+
+  const aporteCapitalSociosNatureCodes = useMemo(
+    () => buildAporteCapitalSociosNatureCodes(items, natureFilterOptions),
+    [items, natureFilterOptions]
+  );
+
+  const distribuicaoLucroNatureCodes = useMemo(
+    () => buildDistribuicaoLucroNatureCodes(items, natureFilterOptions),
+    [items, natureFilterOptions]
+  );
+
+  const ajustesVisiveis = useMemo(() => {
+    const ids = new Set(
+      filteredItems
+        .filter(isExtratoAjusteManual)
+        .map((item) => item.ajusteId)
+        .filter((id): id is string => Boolean(id))
+    );
+    return ajustes.filter((a) => ids.has(a.id));
+  }, [ajustes, filteredItems]);
+
   const demonstrativoReceitaLiquidaItems = useMemo(
     () =>
       collectDemonstrativoReceitaLiquidaItems(
-        filteredItems,
-        ajustes,
-        periodFrom,
-        periodTo,
-        searchQuery,
+        demonstrativoItems,
         receitaLiquidaNatureCodes,
         natureFilterOptions
       ),
-    [
-      filteredItems,
-      ajustes,
-      periodFrom,
-      periodTo,
-      searchQuery,
-      receitaLiquidaNatureCodes,
-      natureFilterOptions
-    ]
+    [demonstrativoItems, receitaLiquidaNatureCodes, natureFilterOptions]
   );
 
   const demonstrativoReceitaLiquida = useMemo(() => {
@@ -2127,6 +2956,114 @@ export default function AnaliseExtratoPage() {
     }
     return { total, qtd: demonstrativoReceitaLiquidaItems.length };
   }, [demonstrativoReceitaLiquidaItems]);
+
+  const demonstrativoGastosPessoalItems = useMemo(
+    () =>
+      collectDemonstrativoGastosPessoalItems(
+        demonstrativoItems,
+        gastosPessoalNatureCodes,
+        natureFilterOptions
+      ),
+    [demonstrativoItems, gastosPessoalNatureCodes, natureFilterOptions]
+  );
+
+  const demonstrativoGastosPessoal = useMemo(() => {
+    let total = 0;
+    for (const item of demonstrativoGastosPessoalItems) {
+      total += contribuicaoGastosPessoal(item);
+    }
+    return { total, qtd: demonstrativoGastosPessoalItems.length };
+  }, [demonstrativoGastosPessoalItems]);
+
+  const demonstrativoGastosAssessoriaExternaItems = useMemo(
+    () =>
+      collectDemonstrativoGastosAssessoriaExternaItems(
+        demonstrativoItems,
+        gastosAssessoriaExternaNatureCodes,
+        natureFilterOptions
+      ),
+    [demonstrativoItems, gastosAssessoriaExternaNatureCodes, natureFilterOptions]
+  );
+
+  const demonstrativoGastosAssessoriaExterna = useMemo(() => {
+    let total = 0;
+    for (const item of demonstrativoGastosAssessoriaExternaItems) {
+      total += contribuicaoGastosAssessoriaExterna(item);
+    }
+    return { total, qtd: demonstrativoGastosAssessoriaExternaItems.length };
+  }, [demonstrativoGastosAssessoriaExternaItems]);
+
+  const demonstrativoGastosEmpreitasItems = useMemo(
+    () =>
+      collectDemonstrativoGastosEmpreitasItems(
+        demonstrativoItems,
+        gastosEmpreitasNatureCodes,
+        natureFilterOptions
+      ),
+    [demonstrativoItems, gastosEmpreitasNatureCodes, natureFilterOptions]
+  );
+
+  const demonstrativoGastosEmpreitas = useMemo(() => {
+    let total = 0;
+    for (const item of demonstrativoGastosEmpreitasItems) {
+      total += contribuicaoGastosEmpreitas(item);
+    }
+    return { total, qtd: demonstrativoGastosEmpreitasItems.length };
+  }, [demonstrativoGastosEmpreitasItems]);
+
+  const demonstrativoGastosMateriaisItems = useMemo(
+    () =>
+      collectDemonstrativoGastosMateriaisItems(
+        demonstrativoItems,
+        gastosMateriaisNatureCodes,
+        natureFilterOptions
+      ),
+    [demonstrativoItems, gastosMateriaisNatureCodes, natureFilterOptions]
+  );
+
+  const demonstrativoGastosMateriais = useMemo(() => {
+    let total = 0;
+    for (const item of demonstrativoGastosMateriaisItems) {
+      total += contribuicaoGastosMateriais(item);
+    }
+    return { total, qtd: demonstrativoGastosMateriaisItems.length };
+  }, [demonstrativoGastosMateriaisItems]);
+
+  const demonstrativoAporteCapitalSociosItems = useMemo(
+    () =>
+      collectDemonstrativoAporteCapitalSociosItems(
+        demonstrativoItems,
+        aporteCapitalSociosNatureCodes,
+        natureFilterOptions
+      ),
+    [demonstrativoItems, aporteCapitalSociosNatureCodes, natureFilterOptions]
+  );
+
+  const demonstrativoAporteCapitalSocios = useMemo(() => {
+    let total = 0;
+    for (const item of demonstrativoAporteCapitalSociosItems) {
+      total += contribuicaoAporteCapitalSocios(item);
+    }
+    return { total, qtd: demonstrativoAporteCapitalSociosItems.length };
+  }, [demonstrativoAporteCapitalSociosItems]);
+
+  const demonstrativoDistribuicaoLucroItems = useMemo(
+    () =>
+      collectDemonstrativoDistribuicaoLucroItems(
+        demonstrativoItems,
+        distribuicaoLucroNatureCodes,
+        natureFilterOptions
+      ),
+    [demonstrativoItems, distribuicaoLucroNatureCodes, natureFilterOptions]
+  );
+
+  const demonstrativoDistribuicaoLucro = useMemo(() => {
+    let total = 0;
+    for (const item of demonstrativoDistribuicaoLucroItems) {
+      total += contribuicaoDistribuicaoLucro(item);
+    }
+    return { total, qtd: demonstrativoDistribuicaoLucroItems.length };
+  }, [demonstrativoDistribuicaoLucroItems]);
 
   const demonstrativoEntradasItems = useMemo(
     () => collectDemonstrativoEntradasItems(filteredItems),
@@ -2183,12 +3120,6 @@ export default function AnaliseExtratoPage() {
       lines.push(`Busca: "${searchQuery.trim()}"`);
     }
 
-    if (ajustes.length > 0) {
-      lines.push(
-        'Ajustes manuais: sempre incluídos nos totais e resumos (independente dos filtros de lista).'
-      );
-    }
-
     for (const campo of filtrosDesmarcados) {
       const qtd = campo.desmarcados.length;
       const lista = campo.desmarcados.join(' · ');
@@ -2218,8 +3149,7 @@ export default function AnaliseExtratoPage() {
     searchQuery,
     filtrosDesmarcados,
     hasMultiselectFilters,
-    filteredItems.length,
-    ajustes.length
+    filteredItems.length
   ]);
 
   const handleExportPdf = useCallback(
@@ -2342,7 +3272,12 @@ export default function AnaliseExtratoPage() {
           {activeBalancoTab === 'extrato' ? (
             <>
           {canAccess ? (
-            <ExtratoCaixaAjustesPanel enabled={canAccess} sourceItems={rmItems} />
+            <ExtratoCaixaAjustesPanel
+              enabled={canAccess}
+              sourceItems={rmItems}
+              ajustesVisiveis={ajustesVisiveis}
+              totalAjustesCadastrados={ajustes.length}
+            />
           ) : null}
 
           {configured && !loadFailed ? (
@@ -2370,7 +3305,6 @@ export default function AnaliseExtratoPage() {
               {filtrosDesmarcados.length > 0 ? (
                 <ExtratoFiltrosDesmarcadosResumo
                   camposDesmarcados={filtrosDesmarcados}
-                  temAjustesManuais={ajustes.length > 0}
                 />
               ) : null}
             </div>
@@ -2456,7 +3390,7 @@ export default function AnaliseExtratoPage() {
                       </div>
                       <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                         <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                          Valor
+                          Saldo Liquido
                         </p>
                         <p
                           className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
@@ -2591,7 +3525,12 @@ export default function AnaliseExtratoPage() {
           ) : (
             <div className="space-y-6" role="tabpanel" aria-label="Demonstrativo Financeiro">
               {canAccess ? (
-                <ExtratoCaixaAjustesPanel enabled={canAccess} sourceItems={rmItems} />
+                <ExtratoCaixaAjustesPanel
+              enabled={canAccess}
+              sourceItems={rmItems}
+              ajustesVisiveis={ajustesVisiveis}
+              totalAjustesCadastrados={ajustes.length}
+            />
               ) : null}
 
               {configured && !loadFailed ? (
@@ -2621,7 +3560,6 @@ export default function AnaliseExtratoPage() {
                   {filtrosDesmarcados.length > 0 ? (
                     <ExtratoFiltrosDesmarcadosResumo
                       camposDesmarcados={filtrosDesmarcados}
-                      temAjustesManuais={ajustes.length > 0}
                     />
                   ) : null}
                 </div>
@@ -2699,47 +3637,311 @@ export default function AnaliseExtratoPage() {
                 <div className="space-y-6">
                   {isFetching ? <ExtratoCaixaRefetchBar /> : null}
 
-                  <Card className={`border-emerald-200 dark:border-emerald-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}>
-                    <button
-                      type="button"
-                      className="w-full text-left"
-                      onClick={() => setDemonstrativoDetalhe('receita-liquida')}
-                      aria-label="Ver detalhes da Receita Líquida"
+                  <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 sm:gap-6">
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-rose-200 dark:border-rose-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
-                      <CardContent className="p-4 sm:p-6">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 rounded-lg bg-emerald-100 p-2 sm:p-3 dark:bg-emerald-900/30">
-                            <TrendingUp className="h-5 w-5 text-emerald-600 dark:text-emerald-400 sm:h-6 sm:w-6" />
+                      <button
+                        type="button"
+                        className={DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS}
+                        onClick={() => setDemonstrativoDetalhe('gastos-pessoal')}
+                        aria-label="Ver detalhes de Gastos com Pessoal"
+                      >
+                        <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                            <div className="flex-shrink-0 rounded-lg bg-rose-100 p-2 sm:p-3 dark:bg-rose-900/30">
+                              <Users className="h-5 w-5 text-rose-600 dark:text-rose-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
+                              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Gastos com Pessoal{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({demonstrativoGastosPessoal.qtd})
+                                </span>
+                              </p>
+                              <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                                {formatCurrency(demonstrativoGastosPessoal.total)}
+                              </p>
+                              <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                                Soma das saídas com naturezas de folha, benefícios, encargos e
+                                despesas de pessoal no recorte atual.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-rose-600/90 dark:text-rose-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
                           </div>
-                          <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-emerald-200 dark:border-emerald-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
+                    >
+                      <button
+                        type="button"
+                        className={DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS}
+                        onClick={() => setDemonstrativoDetalhe('receita-liquida')}
+                        aria-label="Ver detalhes da Receita Líquida"
+                      >
+                        <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                            <div className="flex-shrink-0 rounded-lg bg-emerald-100 p-2 sm:p-3 dark:bg-emerald-900/30">
+                              <TrendingUp className="h-5 w-5 text-emerald-600 dark:text-emerald-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
+                              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Receita Líquida{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({demonstrativoReceitaLiquida.qtd})
+                                </span>
+                              </p>
+                              <p
+                                className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
+                                  demonstrativoReceitaLiquida.total >= 0
+                                    ? 'text-emerald-700 dark:text-emerald-300'
+                                    : 'text-red-600 dark:text-red-400'
+                                }`}
+                              >
+                                {formatCurrency(demonstrativoReceitaLiquida.total)}
+                              </p>
+                              <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                                Lançamentos e ajustes manuais com natureza &quot;RECEITA -
+                                MANUTENCAO&quot; ou &quot;RECEITA - TERCEIRIZACAO MAO DE OBRA&quot;, no
+                                período e busca do recorte.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-emerald-600/90 dark:text-emerald-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-violet-200 dark:border-violet-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
+                    >
+                      <button
+                        type="button"
+                        className={DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS}
+                        onClick={() => setDemonstrativoDetalhe('gastos-assessoria-externa')}
+                        aria-label="Ver detalhes de Gastos com Assessoria Externa"
+                      >
+                        <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                            <div className="flex-shrink-0 rounded-lg bg-violet-100 p-2 sm:p-3 dark:bg-violet-900/30">
+                              <Briefcase className="h-5 w-5 text-violet-600 dark:text-violet-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
+                              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Gastos com Assessoria Externa{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({demonstrativoGastosAssessoriaExterna.qtd})
+                                </span>
+                              </p>
+                              <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                                {formatCurrency(demonstrativoGastosAssessoriaExterna.total)}
+                              </p>
+                              <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                                Soma das saídas com naturezas de assessoria jurídica, contabilidade
+                                e assessoria gerencial no recorte atual.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-violet-600/90 dark:text-violet-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-sky-200 dark:border-sky-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
+                    >
+                      <button
+                        type="button"
+                        className={DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS}
+                        onClick={() => setDemonstrativoDetalhe('aporte-capital-socios')}
+                        aria-label="Ver detalhes de Aporte de Capital dos Socios"
+                      >
+                        <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                            <div className="flex-shrink-0 rounded-lg bg-sky-100 p-2 sm:p-3 dark:bg-sky-900/30">
+                              <Landmark className="h-5 w-5 text-sky-600 dark:text-sky-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
+                              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Aporte de Capital dos Socios{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({demonstrativoAporteCapitalSocios.qtd})
+                                </span>
+                              </p>
+                              <p
+                                className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
+                                  demonstrativoAporteCapitalSocios.total >= 0
+                                    ? 'text-sky-700 dark:text-sky-300'
+                                    : 'text-red-600 dark:text-red-400'
+                                }`}
+                              >
+                                {formatCurrency(demonstrativoAporteCapitalSocios.total)}
+                              </p>
+                              <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                                Soma das entradas com natureza &quot;APORTE DE CAPITAL DE
+                                SOCIOS&quot; ou &quot;EMPRESTIMO DE SOCIOS - ENTRADA&quot; no recorte
+                                atual.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-sky-600/90 dark:text-sky-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-amber-200 dark:border-amber-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
+                    >
+                      <button
+                        type="button"
+                        className={DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS}
+                        onClick={() => setDemonstrativoDetalhe('gastos-empreitas')}
+                        aria-label="Ver detalhes de Gastos com Empreitas"
+                      >
+                        <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                            <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
+                              <HardHat className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
+                              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Gastos com Empreitas{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({demonstrativoGastosEmpreitas.qtd})
+                                </span>
+                              </p>
+                              <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                                {formatCurrency(demonstrativoGastosEmpreitas.total)}
+                              </p>
+                              <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                                Soma das saídas com naturezas de projetos, serviços terceirizados,
+                                engenharia especializada e outros serviços tomados no recorte atual.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-amber-600/90 dark:text-amber-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-fuchsia-200 dark:border-fuchsia-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
+                    >
+                      <button
+                        type="button"
+                        className={DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS}
+                        onClick={() => setDemonstrativoDetalhe('distribuicao-lucro')}
+                        aria-label="Ver detalhes de Distribuição de Lucro"
+                      >
+                        <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                            <div className="flex-shrink-0 rounded-lg bg-fuchsia-100 p-2 sm:p-3 dark:bg-fuchsia-900/30">
+                              <PieChart className="h-5 w-5 text-fuchsia-600 dark:text-fuchsia-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
+                              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Distribuição de Lucro{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({demonstrativoDistribuicaoLucro.qtd})
+                                </span>
+                              </p>
+                              <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                                {formatCurrency(demonstrativoDistribuicaoLucro.total)}
+                              </p>
+                              <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                                Soma das saídas com natureza &quot;DISTRIBUICAO DE LUCROS&quot; ou
+                                &quot;REPASSES A DEMANDAS DA DIRETORIA - SV&quot; no recorte atual.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-fuchsia-600/90 dark:text-fuchsia-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-orange-200 dark:border-orange-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
+                    >
+                      <button
+                        type="button"
+                        className={DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS}
+                        onClick={() => setDemonstrativoDetalhe('gastos-materiais')}
+                        aria-label="Ver detalhes de Gastos com Materiais"
+                      >
+                        <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                            <div className="flex-shrink-0 rounded-lg bg-orange-100 p-2 sm:p-3 dark:bg-orange-900/30">
+                              <Package className="h-5 w-5 text-orange-600 dark:text-orange-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
+                              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Gastos com Materiais{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({demonstrativoGastosMateriais.qtd})
+                                </span>
+                              </p>
+                              <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                                {formatCurrency(demonstrativoGastosMateriais.total)}
+                              </p>
+                              <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                                Soma das saídas com naturezas de insumos, materiais de construção,
+                                ferramentas e demais itens de material no recorte atual.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-orange-600/90 dark:text-orange-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </button>
+                    </Card>
+
+                    <Card
+                      className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-teal-200 dark:border-teal-800/60`}
+                    >
+                      <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
+                        <div className={DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS}>
+                          <div className="flex-shrink-0 rounded-lg bg-teal-100 p-2 sm:p-3 dark:bg-teal-900/30">
+                            <Percent className="h-5 w-5 text-teal-600 dark:text-teal-400 sm:h-6 sm:w-6" />
+                          </div>
+                          <div className={DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS}>
                             <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Receita Líquida{' '}
-                              <span className="text-gray-400 dark:text-gray-500">
-                                ({demonstrativoReceitaLiquida.qtd})
-                              </span>
+                              ROI
                             </p>
                             <p
                               className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
-                                demonstrativoReceitaLiquida.total >= 0
-                                  ? 'text-emerald-700 dark:text-emerald-300'
-                                  : 'text-red-600 dark:text-red-400'
+                                demonstrativoRoi == null
+                                  ? 'text-gray-500 dark:text-gray-400'
+                                  : demonstrativoRoi >= 0
+                                    ? 'text-teal-700 dark:text-teal-300'
+                                    : 'text-red-600 dark:text-red-400'
                               }`}
                             >
-                              {formatCurrency(demonstrativoReceitaLiquida.total)}
+                              {demonstrativoRoi == null ? '—' : formatPercent(demonstrativoRoi)}
                             </p>
-                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                              Lançamentos e ajustes manuais com natureza &quot;RECEITA -
-                              MANUTENCAO&quot; ou &quot;RECEITA - TERCEIRIZACAO MAO DE OBRA&quot;, no
-                              período e busca do recorte.
-                            </p>
-                            <p className="mt-1 text-xs font-medium text-emerald-600/90 dark:text-emerald-400/90">
-                              Clique para ver detalhes
+                            <p className={DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS}>
+                              ROI = ((Ganho Obtido − Investimento) ÷ Investimento) × 100
                             </p>
                           </div>
                         </div>
                       </CardContent>
-                    </button>
-                  </Card>
+                    </Card>
+                  </div>
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
                     <Card>
@@ -2802,7 +4004,7 @@ export default function AnaliseExtratoPage() {
                           </div>
                           <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                             <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Valor
+                              Saldo Liquido
                             </p>
                             <p
                               className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
@@ -2864,9 +4066,21 @@ export default function AnaliseExtratoPage() {
           items={
             demonstrativoDetalhe === 'receita-liquida'
               ? demonstrativoReceitaLiquidaItems
-              : demonstrativoDetalhe === 'entradas'
-                ? demonstrativoEntradasItems
-                : []
+              : demonstrativoDetalhe === 'gastos-pessoal'
+                ? demonstrativoGastosPessoalItems
+                : demonstrativoDetalhe === 'gastos-assessoria-externa'
+                  ? demonstrativoGastosAssessoriaExternaItems
+                  : demonstrativoDetalhe === 'gastos-empreitas'
+                    ? demonstrativoGastosEmpreitasItems
+                    : demonstrativoDetalhe === 'gastos-materiais'
+                      ? demonstrativoGastosMateriaisItems
+                      : demonstrativoDetalhe === 'aporte-capital-socios'
+                      ? demonstrativoAporteCapitalSociosItems
+                      : demonstrativoDetalhe === 'distribuicao-lucro'
+                        ? demonstrativoDistribuicaoLucroItems
+                        : demonstrativoDetalhe === 'entradas'
+                    ? demonstrativoEntradasItems
+                    : []
           }
         />
 

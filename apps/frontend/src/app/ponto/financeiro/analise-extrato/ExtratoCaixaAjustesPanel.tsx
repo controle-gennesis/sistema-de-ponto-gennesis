@@ -109,10 +109,15 @@ function ensureSelectOption(
 
 export function ExtratoCaixaAjustesPanel({
   enabled,
-  sourceItems
+  sourceItems,
+  ajustesVisiveis,
+  totalAjustesCadastrados
 }: {
   enabled: boolean;
   sourceItems: ExtratoCaixaItem[];
+  /** Recorte conforme filtros do balanço; quando omitido, exibe todos do cadastro. */
+  ajustesVisiveis?: ExtratoCaixaAjuste[];
+  totalAjustesCadastrados?: number;
 }) {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
@@ -152,7 +157,10 @@ export function ExtratoCaixaAjustesPanel({
     enabled
   });
 
-  const ajustes = data?.data ?? [];
+  const ajustesCadastrados = data?.data ?? [];
+  const ajustes = ajustesVisiveis ?? ajustesCadastrados;
+  const totalCadastrados = totalAjustesCadastrados ?? ajustesCadastrados.length;
+  const recorteParcial = totalCadastrados > 0 && ajustes.length < totalCadastrados;
 
   const totalPages = Math.max(1, Math.ceil(ajustes.length / AJUSTES_ITEMS_PER_PAGE));
   const showPagination = ajustes.length > AJUSTES_ITEMS_PER_PAGE;
@@ -253,15 +261,22 @@ export function ExtratoCaixaAjustesPanel({
                 </h3>
                 {expanded ? (
                   <p className="text-sm leading-snug text-gray-600 dark:text-gray-400">
-                    Correções permanentes somadas ao balanço do TOTVS (resumos e listagem)
+                    Correções permanentes somadas ao balanço do TOTVS (resumos e listagem).
+                    {recorteParcial
+                      ? ' A listagem abaixo segue os filtros aplicados.'
+                      : null}
                   </p>
                 ) : (
                   <p className="text-sm leading-snug text-gray-500 dark:text-gray-400">
                     {isLoading
                       ? 'Carregando...'
                       : ajustes.length === 0
-                        ? 'Nenhum cadastrado'
-                        : `${ajustes.length} ${ajustes.length === 1 ? 'ajuste cadastrado' : 'ajustes cadastrados'}`}
+                        ? recorteParcial && totalCadastrados > 0
+                          ? `Nenhum no recorte (${totalCadastrados} cadastrado${totalCadastrados !== 1 ? 's' : ''})`
+                          : 'Nenhum cadastrado'
+                        : recorteParcial
+                          ? `${ajustes.length} de ${totalCadastrados} no recorte`
+                          : `${ajustes.length} ${ajustes.length === 1 ? 'ajuste cadastrado' : 'ajustes cadastrados'}`}
                   </p>
                 )}
               </div>
@@ -310,10 +325,14 @@ export function ExtratoCaixaAjustesPanel({
           ) : ajustes.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <p className="text-gray-600 dark:text-gray-400">
-                Nenhum ajuste manual cadastrado
+                {recorteParcial && totalCadastrados > 0
+                  ? 'Nenhum ajuste manual neste recorte de filtros'
+                  : 'Nenhum ajuste manual cadastrado'}
               </p>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-500">
-                Clique em &quot;Novo ajuste&quot; para incluir uma correção
+                {recorteParcial && totalCadastrados > 0
+                  ? 'Altere os filtros para ver outros ajustes ou cadastre um novo no recorte atual'
+                  : 'Clique em "Novo ajuste" para incluir uma correção'}
               </p>
             </div>
           ) : (
