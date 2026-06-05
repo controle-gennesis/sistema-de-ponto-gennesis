@@ -1,16 +1,29 @@
 import {
   calcularStatusCronograma,
   agregarDatasSubServicosNoServicoPai,
+  agruparSubServicosPorBloco,
+  cronogramaUsaHierarquiaSubtitulos,
   diasEntre,
+  filtrarSubServicosOperacionaisCronograma,
   formatDataIso,
+  listarEtapasCronogramaBloco,
   listarSubServicos,
+  listarSubtitulosVisiveisCronograma,
+  ordenarSubServicosSequenciaObra,
   parseDataIso,
+  resolverDadosCronogramaBloco,
+  resolverDadosCronogramaComposicao,
   resolverDadosCronogramaServico,
+  resolverDadosCronogramaServicoParaLinha,
   resolverDadosCronogramaSubServico,
+  etapaCronogramaEhSintetica,
+  type CronogramaComposicaoRef,
   type CronogramaItemData,
   type CronogramaLinhaServico,
   type CronogramaPersist,
-  type CronogramaStatus
+  type CronogramaStatus,
+  type CronogramaSubServico,
+  type EtapaPrazoPayload
 } from './orcamentoCronogramaTypes';
 
 export type CronogramaResumo = {
@@ -35,13 +48,78 @@ type EtapaCronogramaResumo = {
   peso: number;
 };
 
+export function etapaKeyCronograma(servicoKey: string, subId?: string): string {
+  return subId ? `${servicoKey}|${subId}` : servicoKey;
+}
+
+function composicoesParaSub(
+  linha: CronogramaLinhaServico,
+  sub: CronogramaSubServico
+): CronogramaComposicaoRef[] {
+  if (sub.composicaoChave) {
+    const pool: CronogramaComposicaoRef[] = [...(linha.composicoes ?? [])];
+    for (const st of linha.subtitulos ?? []) {
+      pool.push(...st.composicoes);
+    }
+    const found = pool.filter((c) => c.chave === sub.composicaoChave);
+    if (found.length > 0) return found;
+  }
+  if (sub.subtituloBlocoKey) {
+    const st = linha.subtitulos?.find((s) => s.blocoKey === sub.subtituloBlocoKey);
+    if (st?.composicoes.length) return st.composicoes;
+  }
+  return linha.composicoes ?? [];
+}
+
+/** Monta payload para a API estimar duração de cada etapa do cronograma. */
+export function montarPayloadEstimativaPrazoCronograma(
+  linhas: CronogramaLinhaServico[],
+  cronograma: CronogramaPersist
+): EtapaPrazoPayload[] {
+  const etapas: EtapaPrazoPayload[] = [];
+  for (const linha of linhas) {
+    const subs = ordenarSubServicosSequenciaObra(
+      filtrarSubServicosOperacionaisCronograma(
+        linha,
+        listarSubServicos(cronograma, linha.servicoKey)
+      )
+    );
+    if (subs.length === 0) {
+      etapas.push({
+        etapaKey: etapaKeyCronograma(linha.servicoKey),
+        servicoNome: linha.servicoNome,
+        etapaNome: linha.servicoNome,
+        valorTotal: linha.valorTotal,
+        composicoes: linha.composicoes ?? []
+      });
+      continue;
+    }
+    const pesoSub = Math.max(linha.valorTotal, 1) / subs.length;
+    for (const sub of subs) {
+      etapas.push({
+        etapaKey: etapaKeyCronograma(linha.servicoKey, sub.id),
+        servicoNome: linha.servicoNome,
+        etapaNome: sub.nome,
+        valorTotal: pesoSub,
+        composicoes: composicoesParaSub(linha, sub)
+      });
+    }
+  }
+  return etapas;
+}
+
 function listarEtapasCronograma(
   servicos: CronogramaLinhaServico[],
   cronograma: CronogramaPersist
 ): EtapaCronogramaResumo[] {
   const etapas: EtapaCronogramaResumo[] = [];
   for (const linha of servicos) {
-    const subs = listarSubServicos(cronograma, linha.servicoKey);
+    const subs = ordenarSubServicosSequenciaObra(
+      filtrarSubServicosOperacionaisCronograma(
+        linha,
+        listarSubServicos(cronograma, linha.servicoKey)
+      )
+    );
     const pesoBase = Math.max(linha.valorTotal, 1);
     if (subs.length === 0) {
       etapas.push({
@@ -149,12 +227,13 @@ export function copiarDatasPlanParaRealCronograma(
   return sincronizarDatasServicosPaiComSubs(linhas, next);
 }
 
-/** Distribui o prazo geral da obra entre etapas, sequencial e proporcional ao valor. */
+/** Distribui o prazo geral da obra entre etapas, sequencial e proporcional ao peso (valor ou estimativa). */
 export function distribuirPrazoGeralCronograma(
   linhas: CronogramaLinhaServico[],
   cronograma: CronogramaPersist,
   inicioIso: string,
-  fimIso: string
+  fimIso: string,
+  pesosPorEtapa?: Record<string, number>
 ): CronogramaPersist | null {
   const ini = parseDataIso(inicioIso);
   const fim = parseDataIso(fimIso);
@@ -166,7 +245,11 @@ export function distribuirPrazoGeralCronograma(
 
   const diasPorEtapa = alocarDiasPorPeso(
     totalDias,
-    etapas.map((e) => e.peso)
+    etapas.map((e) => {
+      const key = etapaKeyCronograma(e.servicoKey, e.subId);
+      const custom = pesosPorEtapa?.[key];
+      return custom && custom > 0 ? custom : e.peso;
+    })
   );
 
   const next: CronogramaPersist = {
@@ -502,10 +585,15 @@ export type CronogramaTimelineLinha = {
   key: string;
   servicoKey: string;
   subId?: string;
+  blocoKey?: string;
+  composicaoChave?: string;
   label: string;
   isSub: boolean;
   /** Serviço pai — exibe só o título, sem faixa de barra. */
   isCabecalhoServico: boolean;
+  /** Subtítulo do orçamento — faixa intermediária. */
+  isCabecalhoSubtitulo?: boolean;
+  indentLevel?: 0 | 1 | 2;
   dados: CronogramaItemData;
   showBar: boolean;
   editavel: boolean;
@@ -551,38 +639,134 @@ function cronogramaTemDatasTimeline(dados: CronogramaItemData): boolean {
   return cronogramaTemDatasPlan(dados) || cronogramaTemDatasReais(dados);
 }
 
+function montarFilhasSubtituloTimeline(
+  rows: CronogramaTimelineLinha[],
+  linha: CronogramaLinhaServico,
+  cronograma: CronogramaPersist,
+  st: import('./orcamentoCronogramaTypes').CronogramaLinhaSubtitulo,
+  subsDoBloco: import('./orcamentoCronogramaTypes').CronogramaSubServico[]
+) {
+  const etapasBloco = listarEtapasCronogramaBloco(st, subsDoBloco);
+
+  etapasBloco.forEach((sub, idx) => {
+    const porItem =
+      etapaCronogramaEhSintetica(sub) && sub.composicaoChave
+        ? resolverDadosCronogramaComposicao(cronograma, st.blocoKey, {
+            chave: sub.composicaoChave,
+            codigo: '',
+            descricao: sub.nome,
+            subtituloNome: st.subtituloNome,
+            quantidade: 0
+          })
+        : null;
+    const subDados =
+      porItem?.dataInicio && porItem?.dataFim
+        ? porItem
+        : resolverDadosCronogramaSubServico(
+            cronograma,
+            linha.servicoKey,
+            sub,
+            idx,
+            etapasBloco.length
+          );
+    rows.push({
+      key: `${linha.servicoKey}::${sub.id}`,
+      servicoKey: linha.servicoKey,
+      subId: etapaCronogramaEhSintetica(sub) ? undefined : sub.id,
+      blocoKey: st.blocoKey,
+      composicaoChave: etapaCronogramaEhSintetica(sub) ? sub.composicaoChave : undefined,
+      label: sub.nome,
+      isSub: true,
+      isCabecalhoServico: false,
+      indentLevel: 2,
+      dados: subDados,
+      showBar: cronogramaTemDatasTimeline(subDados),
+      editavel: true
+    });
+  });
+}
+
 export function montarLinhasTimeline(
   linhas: CronogramaLinhaServico[],
   cronograma: CronogramaPersist
 ): CronogramaTimelineLinha[] {
   const rows: CronogramaTimelineLinha[] = [];
   for (const linha of linhas) {
-    const subs = listarSubServicos(cronograma, linha.servicoKey);
-    const dados = resolverDadosCronogramaServico(cronograma, linha.servicoKey);
+    const subs = filtrarSubServicosOperacionaisCronograma(
+      linha,
+      listarSubServicos(cronograma, linha.servicoKey)
+    );
+    const dados = resolverDadosCronogramaServicoParaLinha(cronograma, linha);
+    const usaHierarquia = cronogramaUsaHierarquiaSubtitulos(linha);
+    const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
+    const temFilhas = subs.length > 0;
+
     rows.push({
       key: linha.servicoKey,
       servicoKey: linha.servicoKey,
       label: linha.servicoNome,
       isSub: false,
-      isCabecalhoServico: subs.length > 0,
+      isCabecalhoServico: temFilhas,
+      indentLevel: 0,
       dados,
-      showBar: subs.length === 0 && cronogramaTemDatasTimeline(dados),
-      editavel: subs.length === 0
+      showBar: !temFilhas && cronogramaTemDatasTimeline(dados),
+      editavel: !temFilhas
     });
-    subs.forEach((sub, idx) => {
-      const subDados = resolverDadosCronogramaSubServico(cronograma, linha.servicoKey, sub, idx, subs.length);
-      rows.push({
-        key: `${linha.servicoKey}::${sub.id}`,
-        servicoKey: linha.servicoKey,
-        subId: sub.id,
-        label: sub.nome,
-        isSub: true,
-        isCabecalhoServico: false,
-        dados: subDados,
-        showBar: cronogramaTemDatasTimeline(subDados),
-        editavel: true
+
+    if (!usaHierarquia) {
+      const subsOrdenados = ordenarSubServicosSequenciaObra(subs);
+      subsOrdenados.forEach((sub, idx) => {
+        const subDados = resolverDadosCronogramaSubServico(
+          cronograma,
+          linha.servicoKey,
+          sub,
+          idx,
+          subsOrdenados.length
+        );
+        rows.push({
+          key: `${linha.servicoKey}::${sub.id}`,
+          servicoKey: linha.servicoKey,
+          subId: sub.id,
+          label: sub.nome,
+          isSub: true,
+          isCabecalhoServico: false,
+          indentLevel: 1,
+          dados: subDados,
+          showBar: cronogramaTemDatasTimeline(subDados),
+          editavel: true
+        });
       });
-    });
+      continue;
+    }
+
+    const subsPorBloco = agruparSubServicosPorBloco(linha, subs);
+
+    for (const st of subtitulosVisiveis) {
+      const subsDoBloco = ordenarSubServicosSequenciaObra(subsPorBloco.get(st.blocoKey) ?? []);
+      const etapasBloco = listarEtapasCronogramaBloco(st, subsDoBloco);
+      const dadosBloco = resolverDadosCronogramaBloco(
+        cronograma,
+        st.blocoKey,
+        etapasBloco,
+        linha.servicoKey
+      );
+
+      rows.push({
+        key: `${st.blocoKey}::cabecalho`,
+        servicoKey: linha.servicoKey,
+        blocoKey: st.blocoKey,
+        label: st.subtituloNome,
+        isSub: false,
+        isCabecalhoServico: false,
+        isCabecalhoSubtitulo: true,
+        indentLevel: 1,
+        dados: dadosBloco,
+        showBar: etapasBloco.length > 0 && cronogramaTemDatasTimeline(dadosBloco),
+        editavel: false
+      });
+
+      montarFilhasSubtituloTimeline(rows, linha, cronograma, st, subsDoBloco);
+    }
   }
   return rows;
 }

@@ -6,6 +6,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -241,10 +242,6 @@ const URGENCY_ROW_BADGE: Record<DpUrgency, string> = {
   HIGH: 'text-red-700 dark:text-red-300',
   URGENT: 'text-red-700 dark:text-red-300',
 };
-
-/** Mesmo padrão do botão de ações na lista de funcionários (quadrado 9×9 com borda). */
-const TABLE_ACTION_ICON_BTN_CLASS =
-  'inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
 
 const TYPE_LABELS: Record<DpRequestType, string> = {
   ADMISSAO: 'Admissão',
@@ -703,9 +700,13 @@ export default function AprovacoesPage() {
                       </thead>
                       <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                         {dpFiltered.map((r) => (
-                          <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                            <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
-                              {r.displayNumber ?? '—'}
+                          <tr
+                            key={r.id}
+                            onClick={() => setDetailRequest(r)}
+                            className={getListTableRowClassName(true)}
+                          >
+                            <td className="px-3 sm:px-6 py-3 align-middle text-sm tabular-nums">
+                              <ListRowNavigableLabel className="font-medium">{r.displayNumber ?? '—'}</ListRowNavigableLabel>
                             </td>
                             <td className="px-3 sm:px-6 py-3 align-middle text-center">
                               <span
@@ -730,12 +731,12 @@ export default function AprovacoesPage() {
                               <div className="font-medium text-gray-900 dark:text-gray-100">{r.solicitanteNome}</div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">{r.sectorSolicitante}</div>
                             </td>
-                            <td className="px-3 sm:px-6 py-3 align-middle text-center">
+                            <td className="px-3 sm:px-6 py-3 align-middle text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-center">
                                 <button
                                   type="button"
                                   onClick={() => setDetailRequest(r)}
-                                  className={TABLE_ACTION_ICON_BTN_CLASS}
+                                  className={rowActionMenuButtonClass(false)}
                                   title="Ver detalhes"
                                   aria-label="Ver detalhes da solicitação"
                                 >
@@ -849,10 +850,10 @@ export default function AprovacoesPage() {
                           const medTxt = med !== null ? fmtEspelhoBrl(med) : 'Medição não informada';
                           const title = `${m.takerName || 'Tomador não informado'} | ${medTxt} | ${m.measurementRef || 'Sem referência'}`;
                           return (
-                            <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <tr key={m.id} className={listTableRowClasses.tr}>
+                              <td className="px-3 sm:px-6 py-3 align-middle text-sm">
                                 <div className="space-y-0.5">
-                                  <div>{title}</div>
+                                  <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{title}</span>
                                   <div className="text-xs text-gray-500 dark:text-gray-400">ID: {m.id}</div>
                                 </div>
                               </td>
@@ -873,7 +874,7 @@ export default function AprovacoesPage() {
                                   <button
                                     type="button"
                                     onClick={() => void applyEspelhoDecision(m.id, 'APPROVED', 'Espelho aprovado.')}
-                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-emerald-600 dark:text-emerald-400`}
+                                    className={`${rowActionMenuButtonClass(false)} text-emerald-600 dark:text-emerald-400`}
                                     title="Aprovar"
                                     aria-label="Aprovar espelho"
                                   >
@@ -888,7 +889,7 @@ export default function AprovacoesPage() {
                                         'Espelho enviado para correção.'
                                       )
                                     }
-                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-amber-500 dark:text-amber-400`}
+                                    className={`${rowActionMenuButtonClass(false)} text-amber-500 dark:text-amber-400`}
                                     title="Enviar para correção"
                                     aria-label="Enviar espelho para correção"
                                   >
@@ -897,7 +898,7 @@ export default function AprovacoesPage() {
                                   <button
                                     type="button"
                                     onClick={() => void applyEspelhoDecision(m.id, 'CANCELLED', 'Espelho cancelado.')}
-                                    className={`${TABLE_ACTION_ICON_BTN_CLASS} text-red-600 dark:text-red-400`}
+                                    className={`${rowActionMenuButtonClass(false)} text-red-600 dark:text-red-400`}
                                     title="Cancelar"
                                     aria-label="Cancelar espelho"
                                   >
@@ -906,7 +907,7 @@ export default function AprovacoesPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleDownloadEspelhoPdf(m)}
-                                    className={TABLE_ACTION_ICON_BTN_CLASS}
+                                    className={rowActionMenuButtonClass(false)}
                                     title="Baixar PDF do espelho"
                                     aria-label="Baixar PDF do espelho"
                                   >

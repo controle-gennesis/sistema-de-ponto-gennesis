@@ -23,6 +23,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import {
   budgetStatusPillClass,
   executionStatusPillClass,
@@ -772,10 +773,10 @@ function AndamentoDaOsPageContent() {
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {rows.map((p) => (
-                        <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                        <tr key={p.id} className={listTableRowClasses.tr}>
                           <td className="px-2 py-2 max-w-[200px] truncate" title={p.updatedContract ? `${p.updatedContract.number} ${p.updatedContract.name}` : ''}>
                             {p.updatedContract ? (
-                              <span className="text-gray-900 dark:text-gray-100">
+                              <span className="text-sm text-gray-900 dark:text-gray-100 truncate">
                                 {p.updatedContract.name}
                                 {p.updatedContract.number ? (
                                   <span className="text-gray-500 dark:text-gray-400"> ({p.updatedContract.number})</span>
@@ -836,7 +837,7 @@ function AndamentoDaOsPageContent() {
                                     return { pleitoId: p.id, top: r.bottom + 4, left };
                                   });
                                 }}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                className={rowActionMenuButtonClass(rowActionMenu?.pleitoId === p.id)}
                                 aria-label="Menu de ações"
                                 aria-expanded={rowActionMenu?.pleitoId === p.id}
                                 aria-haspopup="menu"

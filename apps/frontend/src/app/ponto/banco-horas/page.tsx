@@ -13,6 +13,7 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
+import { listTableRowClasses } from '@/components/ui/listTableUi';
 
 interface BankHoursData {
   employeeId: string;
@@ -665,12 +666,12 @@ export default function BankHoursPage() {
                     </tr>
                   ) : (
                     filteredData.map((employee: BankHoursData) => (
-                      <tr key={employee.employeeId} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <tr key={employee.employeeId} className={listTableRowClasses.tr}>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                           <div>
-                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">
                               {employee.employeeName}
-                            </div>
+                            </span>
                             <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                               {employee.employeeCpf}
                             </div>

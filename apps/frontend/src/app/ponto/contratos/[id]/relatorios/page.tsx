@@ -13,6 +13,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 
 interface RelatorioEntry {
   id: string;
@@ -404,21 +405,25 @@ export default function ContratoRelatoriosPage() {
                     </thead>
                     <tbody>
                       {relatoriosFiltrados.map((r) => (
-                        <tr key={r.id} className="border-b border-gray-100 dark:border-gray-800/80 last:border-0">
+                        <tr
+                          key={r.id}
+                          onClick={() => router.push(`/ponto/contratos/${contractId}/relatorios/${r.id}`)}
+                          className={`border-b border-gray-100 dark:border-gray-800/80 last:border-0 ${getListTableRowClassName(true)}`}
+                        >
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-md bg-red-50 dark:bg-red-900/20 flex items-center justify-center shrink-0">
                                 <FileImage className="w-4 h-4 text-red-600 dark:text-red-400" />
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="font-medium text-gray-900 dark:text-gray-100 truncate">{r.titulo}</p>
+                                <ListRowNavigableLabel className="font-medium truncate">{r.titulo}</ListRowNavigableLabel>
                               </div>
                             </div>
                           </td>
                           <td className="px-4 py-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">
                             {formatDate(r.updatedAt)}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end">
                                 <button
                                   type="button"
@@ -435,7 +440,7 @@ export default function ContratoRelatoriosPage() {
                                       return { relatorioId: r.id, titulo: r.titulo, top: bounds.bottom + 4, left };
                                     });
                                   }}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                  className={rowActionMenuButtonClass(relatorioActionMenu?.relatorioId === r.id)}
                                   aria-label="Menu de ações"
                                   aria-expanded={relatorioActionMenu?.relatorioId === r.id}
                                   aria-haspopup="menu"

@@ -4,6 +4,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { Edit, MoreVertical, Trash2 } from 'lucide-react';
 import type { RowActionMenuState } from '@/hooks/useRowActionMenu';
+import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 
 type RowActionMenuCellProps = {
   isOpen: boolean;
@@ -26,7 +27,13 @@ export function RowActionMenuCell({
 }: RowActionMenuCellProps) {
   const alignment = actionAlignClass[align];
   return (
-    <td className={className ?? `px-3 py-3 align-middle sm:px-6 ${alignment.td}`}>
+    <td
+      className={
+        className ??
+        `${listTableRowClasses.actionTd} ${alignment.td}`
+      }
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className={`flex ${alignment.flex}`}>
         <button
           type="button"
@@ -34,7 +41,7 @@ export function RowActionMenuCell({
             e.stopPropagation();
             onToggle(e);
           }}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+          className={rowActionMenuButtonClass(isOpen)}
           aria-label="Menu de ações"
           aria-expanded={isOpen}
           aria-haspopup="menu"
@@ -124,7 +131,11 @@ export function RowActionMenuPortal({
   );
 }
 
-/** Classes padrão para páginas de cadastro (alinhamento com Condições de Pagamento). */
+/**
+ * Classes padrão para páginas de cadastro.
+ * Alinhamento: texto/código à esquerda (`th`/`td`); status e Sim/Não centralizados (`thCenter`/`tdCenter`);
+ * números à direita (`thNumeric`/`tdNumeric`); ações à direita (`thRight` + `RowActionMenuCell`).
+ */
 export const cadastroListClasses = {
   card: 'w-full',
   cardHeader: 'border-b-0 pb-1',
@@ -136,11 +147,27 @@ export const cadastroListClasses = {
   listSummary:
     'mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2',
   pagination: 'mt-6 flex items-center justify-center space-x-2',
-  table: 'w-full text-sm',
+  table: 'w-full table-fixed text-sm',
   th: 'px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6',
   thCenter:
     'px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6',
-  thRight:
+  thNumeric:
     'px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6',
-  td: 'px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6'
+  thRight: listTableRowClasses.actionTh,
+  td: 'px-3 py-4 text-sm text-gray-900 dark:text-gray-100 sm:px-6',
+  tdMuted: 'px-3 py-4 text-sm text-gray-600 dark:text-gray-400 sm:px-6',
+  tdMono:
+    'whitespace-nowrap px-3 py-4 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6',
+  tdCenter:
+    'whitespace-nowrap px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6',
+  tdNumeric:
+    'whitespace-nowrap px-3 py-4 text-right text-sm text-gray-600 dark:text-gray-400 sm:px-6',
+  tdTruncate: 'min-w-0 px-3 py-4 sm:px-6',
 } as const;
+
+export {
+  listTableRowClasses,
+  ListRowNavigableLabel,
+  getListTableRowClassName,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';

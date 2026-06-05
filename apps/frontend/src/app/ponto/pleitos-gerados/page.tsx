@@ -14,6 +14,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 
 interface PleitoGerado {
@@ -233,15 +234,17 @@ export default function PleitosGeradosPage() {
                         const vp = p.billingRequest || 0;
                         const pct = orc > 0 ? (vp / orc) * 100 : null;
                         return (
-                          <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                            <td className="px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
+                          <tr key={p.id} className={listTableRowClasses.tr}>
+                            <td className="px-3 sm:px-6 py-4 text-sm">
                               {p.updatedContract ? (
-                                <Link
-                                  href={`/ponto/contratos/${p.updatedContract.id}`}
-                                  className="text-blue-600 dark:text-blue-400 hover:underline"
-                                >
-                                  {p.updatedContract.name} - nº {p.updatedContract.number}
-                                </Link>
+                                <span className="text-sm text-gray-900 dark:text-gray-100">
+                                  <Link
+                                    href={`/ponto/contratos/${p.updatedContract.id}`}
+                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                  >
+                                    {p.updatedContract.name} - nº {p.updatedContract.number}
+                                  </Link>
+                                </span>
                               ) : (
                                 '-'
                               )}
@@ -282,7 +285,7 @@ export default function PleitosGeradosPage() {
                                       return { pleitoId: p.id, top: r.bottom + 4, left };
                                     });
                                   }}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                  className={rowActionMenuButtonClass(rowActionMenu?.pleitoId === p.id)}
                                   aria-label="Menu de ações"
                                   aria-expanded={rowActionMenu?.pleitoId === p.id}
                                   aria-haspopup="menu"

@@ -29,6 +29,8 @@ export interface CronogramaSubServico {
   observacao?: string;
   /** Vínculo opcional com composição do orçamento */
   composicaoChave?: string;
+  /** Bloco/subtítulo do orçamento (`servicoId|subtituloId`) — preenchido na geração por subtítulo. */
+  subtituloBlocoKey?: string;
 }
 
 export interface CronogramaPersist {
@@ -61,6 +63,23 @@ export type CronogramaComposicaoRef = {
   unidade?: string;
 };
 
+export type EtapaPrazoPayload = {
+  etapaKey: string;
+  servicoNome: string;
+  etapaNome: string;
+  valorTotal?: number;
+  composicoes: CronogramaComposicaoRef[];
+};
+
+/** Bloco de subtítulo dentro de um serviço do cronograma. */
+export type CronogramaLinhaSubtitulo = {
+  blocoKey: string;
+  subtituloNome: string;
+  valorTotal: number;
+  qtdItens: number;
+  composicoes: CronogramaComposicaoRef[];
+};
+
 /** Linha agregada por serviço do orçamento. */
 export type CronogramaLinhaServico = {
   servicoKey: string;
@@ -68,6 +87,8 @@ export type CronogramaLinhaServico = {
   valorTotal: number;
   qtdItens: number;
   composicoes: CronogramaComposicaoRef[];
+  /** Subtítulos do orçamento agrupados por blocoKey (`servicoId|subtituloId`). */
+  subtitulos: CronogramaLinhaSubtitulo[];
 };
 
 /** @deprecated use CronogramaLinhaServico */
@@ -136,7 +157,11 @@ function normalizarSubServico(raw: unknown): CronogramaSubServico | null {
         ? Math.min(100, Math.max(0, o.percentualExecutado))
         : undefined,
     observacao: typeof o.observacao === 'string' ? o.observacao : '',
-    composicaoChave: typeof o.composicaoChave === 'string' ? o.composicaoChave : undefined
+    composicaoChave: typeof o.composicaoChave === 'string' ? o.composicaoChave : undefined,
+    subtituloBlocoKey:
+      typeof o.subtituloBlocoKey === 'string' && o.subtituloBlocoKey.trim()
+        ? o.subtituloBlocoKey.trim()
+        : undefined
   };
 }
 
@@ -464,6 +489,487 @@ export function resolverDadosCronogramaSubServico(
 
 export function listarSubServicos(cronograma: CronogramaPersist, servicoKey: string): CronogramaSubServico[] {
   return cronograma.subServicosPorServico?.[servicoKey] ?? [];
+}
+
+function normalizarTextoCronograma(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function mesmoTituloSubtituloCronograma(servicoNome: string, subtituloNome: string): boolean {
+  return (
+    normalizarTextoCronograma(servicoNome) === normalizarTextoCronograma(subtituloNome)
+  );
+}
+
+/** Subtítulos que devem aparecer como faixa no cronograma (mesma regra da aba Orçamento). */
+export function listarSubtitulosVisiveisCronograma(
+  linha: CronogramaLinhaServico
+): CronogramaLinhaSubtitulo[] {
+  const blocos = linha.subtitulos ?? [];
+  if (blocos.length === 0) return [];
+  if (blocos.length === 1 && mesmoTituloSubtituloCronograma(linha.servicoNome, blocos[0]!.subtituloNome)) {
+    return [];
+  }
+  return blocos.filter(
+    (st) => !mesmoTituloSubtituloCronograma(linha.servicoNome, st.subtituloNome)
+  );
+}
+
+export function cronogramaUsaHierarquiaSubtitulos(linha: CronogramaLinhaServico): boolean {
+  return listarSubtitulosVisiveisCronograma(linha).length > 0;
+}
+
+export function itemKeyComposicaoCronograma(blocoKey: string, chave: string): string {
+  return `${blocoKey}|${chave}`;
+}
+
+export function mapaChaveComposicaoParaBloco(linha: CronogramaLinhaServico): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const st of linha.subtitulos ?? []) {
+    for (const c of st.composicoes) {
+      if (c.chave) map.set(c.chave, st.blocoKey);
+    }
+  }
+  return map;
+}
+
+function palavrasSignificativasCronograma(texto: string): string[] {
+  const stop = new Set([
+    'de',
+    'da',
+    'do',
+    'das',
+    'dos',
+    'e',
+    'em',
+    'para',
+    'com',
+    'sem',
+    'ou',
+    'a',
+    'o',
+    'as',
+    'os'
+  ]);
+  return normalizarTextoCronograma(texto)
+    .split(' ')
+    .filter((p) => p.length > 3 && !stop.has(p));
+}
+
+function pontuarSubServicoParaBloco(
+  sub: CronogramaSubServico,
+  st: CronogramaLinhaSubtitulo
+): number {
+  const nomeSub = normalizarTextoCronograma(sub.nome);
+  let score = 0;
+
+  for (const palavra of palavrasSignificativasCronograma(st.subtituloNome)) {
+    if (nomeSub.includes(palavra)) score += 2;
+  }
+
+  for (const comp of st.composicoes) {
+    const desc = normalizarTextoCronograma(comp.descricao);
+    if (desc === nomeSub) continue;
+    if (nomeSub.length >= 10 && desc.includes(nomeSub)) {
+      score += 6;
+      continue;
+    }
+    for (const palavra of palavrasSignificativasCronograma(comp.descricao)) {
+      if (nomeSub.includes(palavra)) score += 1;
+    }
+  }
+
+  return score;
+}
+
+/** Etapas gerais do serviço (mobilização, entulho, limpeza). */
+export function etapaPreparacaoOuEncerramentoServicoCronograma(nome: string): boolean {
+  const n = normalizarTextoCronograma(nome);
+  if (n.includes('mobilizacao') || n.includes('desmobilizacao')) return true;
+  if (n.includes('entulho') && (n.includes('remocao') || n.includes('transporte'))) return true;
+  if (n.includes('limpeza') && (n.includes('final') || n.includes('liberacao') || n.includes('area'))) {
+    return true;
+  }
+  return false;
+}
+
+function etapaPreparacaoServicoCronograma(nome: string): boolean {
+  const n = normalizarTextoCronograma(nome);
+  return n.includes('mobilizacao');
+}
+
+/** Prioridade na sequência física de canteiro (menor = executa antes). */
+export function prioridadeSequenciaObraCronograma(nome: string): number {
+  const n = normalizarTextoCronograma(nome);
+  if (n.includes('desmobiliz')) return 110;
+  if (n.includes('mobiliz') || n.includes('instalacao do canteiro')) return 0;
+  if (n.includes('prepar') || n.includes('protec') || n.includes('liberacao da frente')) {
+    return 10;
+  }
+  if (n.includes('locacao') || n.includes('marcacao')) {
+    return 20;
+  }
+  if (n.includes('entulho')) return 90;
+  if (n.includes('limpeza') && (n.includes('final') || n.includes('liberacao da area'))) {
+    return 100;
+  }
+  if (n.includes('limpeza')) return 15;
+  if (n.includes('liberacao da area') || n.includes('verificacao')) return 100;
+  return 50;
+}
+
+/** Etapas manuais genéricas (ex.: "Novo subserviço") ficam por último na exibição. */
+function prioridadeExibicaoSubServico(sub: CronogramaSubServico): number {
+  const base = prioridadeSequenciaObraCronograma(sub.nome);
+  if (sub.origem === 'manual' && base === 50) return 120;
+  return base;
+}
+
+/** Ordena subserviços na sequência típica de obra (mobilização → locação → execução → encerramento). */
+export function ordenarSubServicosSequenciaObra(
+  subs: CronogramaSubServico[]
+): CronogramaSubServico[] {
+  return [...subs]
+    .map((sub, idx) => ({ sub, idx }))
+    .sort((a, b) => {
+      const pa = prioridadeExibicaoSubServico(a.sub);
+      const pb = prioridadeExibicaoSubServico(b.sub);
+      if (pa !== pb) return pa - pb;
+      return a.idx - b.idx;
+    })
+    .map(({ sub }) => sub);
+}
+
+function etapaEncerramentoServicoCronograma(nome: string): boolean {
+  return (
+    etapaPreparacaoOuEncerramentoServicoCronograma(nome) &&
+    !etapaPreparacaoServicoCronograma(nome)
+  );
+}
+
+function resolverBlocoKeyDoSubServico(
+  linha: CronogramaLinhaServico,
+  sub: CronogramaSubServico
+): string | undefined {
+  if (sub.subtituloBlocoKey) {
+    const blocos = linha.subtitulos ?? [];
+    if (blocos.some((st) => st.blocoKey === sub.subtituloBlocoKey)) {
+      return sub.subtituloBlocoKey;
+    }
+  }
+
+  const chaveMap = mapaChaveComposicaoParaBloco(linha);
+  if (sub.composicaoChave && chaveMap.has(sub.composicaoChave)) {
+    return chaveMap.get(sub.composicaoChave);
+  }
+
+  const visiveis = listarSubtitulosVisiveisCronograma(linha);
+  const blocos = visiveis.length > 0 ? visiveis : linha.subtitulos ?? [];
+
+  const nomeSub = normalizarTextoCronograma(sub.nome);
+  let melhorBloco: string | undefined;
+  let melhorScore = 0;
+
+  for (const st of blocos) {
+    if (normalizarTextoCronograma(st.subtituloNome) === nomeSub) {
+      return st.blocoKey;
+    }
+
+    for (const comp of st.composicoes) {
+      const desc = normalizarTextoCronograma(comp.descricao);
+      if (desc === nomeSub) continue;
+      if (desc.includes(nomeSub) || (nomeSub.length >= 12 && nomeSub.includes(desc.slice(0, 40)))) {
+        return st.blocoKey;
+      }
+    }
+
+    const score = pontuarSubServicoParaBloco(sub, st);
+    if (score > melhorScore) {
+      melhorScore = score;
+      melhorBloco = st.blocoKey;
+    }
+  }
+
+  if (melhorBloco && melhorScore >= 2) return melhorBloco;
+  return undefined;
+}
+
+function distribuirSemVinculoPorBlocos(
+  linha: CronogramaLinhaServico,
+  semBloco: CronogramaSubServico[],
+  grouped: Map<string, CronogramaSubServico[]>
+): void {
+  const visiveis = listarSubtitulosVisiveisCronograma(linha);
+  if (visiveis.length === 0) return;
+
+  const primeiroBloco = visiveis[0]!.blocoKey;
+  const ultimoBloco = visiveis[visiveis.length - 1]!.blocoKey;
+  const pendentes: CronogramaSubServico[] = [];
+
+  for (const sub of semBloco) {
+    if (etapaPreparacaoServicoCronograma(sub.nome)) {
+      grouped.set(primeiroBloco, [sub, ...(grouped.get(primeiroBloco) ?? [])]);
+      continue;
+    }
+    if (etapaEncerramentoServicoCronograma(sub.nome)) {
+      grouped.set(ultimoBloco, [...(grouped.get(ultimoBloco) ?? []), sub]);
+      continue;
+    }
+
+    let melhorBloco: string | undefined;
+    let melhorScore = 0;
+    for (const st of visiveis) {
+      const score = pontuarSubServicoParaBloco(sub, st);
+      if (score > melhorScore) {
+        melhorScore = score;
+        melhorBloco = st.blocoKey;
+      }
+    }
+
+    if (melhorBloco && melhorScore >= 2) {
+      grouped.set(melhorBloco, [...(grouped.get(melhorBloco) ?? []), sub]);
+    } else {
+      pendentes.push(sub);
+    }
+  }
+
+  if (pendentes.length > 0) {
+    grouped.set(primeiroBloco, [...(grouped.get(primeiroBloco) ?? []), ...pendentes]);
+  }
+}
+
+export const CRONOGRAMA_BLOCO_SEM_VINCULO = '__sem_bloco__';
+
+/** Agrupa subserviços gerados/manual por bloco de subtítulo do orçamento. */
+export function agruparSubServicosPorBloco(
+  linha: CronogramaLinhaServico,
+  subs: CronogramaSubServico[]
+): Map<string, CronogramaSubServico[]> {
+  const grouped = new Map<string, CronogramaSubServico[]>();
+  let semBloco: CronogramaSubServico[] = [];
+
+  for (const sub of subs) {
+    const blocoKey = resolverBlocoKeyDoSubServico(linha, sub);
+    if (blocoKey) {
+      const prev = grouped.get(blocoKey) ?? [];
+      prev.push(sub);
+      grouped.set(blocoKey, prev);
+    } else {
+      semBloco.push(sub);
+    }
+  }
+
+  if (semBloco.length > 0) {
+    const visiveis = listarSubtitulosVisiveisCronograma(linha);
+    if (visiveis.length === 0) {
+      grouped.set(CRONOGRAMA_BLOCO_SEM_VINCULO, semBloco);
+    } else if (visiveis.length === 1) {
+      const bk = visiveis[0]!.blocoKey;
+      grouped.set(bk, [...(grouped.get(bk) ?? []), ...semBloco]);
+    } else {
+      distribuirSemVinculoPorBlocos(linha, semBloco, grouped);
+    }
+  }
+
+  return grouped;
+}
+
+/** Nome curto para etapa derivada de composição (sem texto SINAPI completo). */
+export function resumirDescricaoComposicaoCronograma(descricao: string): string {
+  const limpo = descricao.replace(/\s+/g, ' ').trim();
+  if (limpo.length <= 72) return limpo;
+  const cortado = limpo.slice(0, 72);
+  const espaco = cortado.lastIndexOf(' ');
+  return `${(espaco > 48 ? cortado.slice(0, espaco) : cortado).trim()}…`;
+}
+
+const PREFIXO_ETAPA_SINTETICA = 'comp-etapa::';
+
+/** Etapas exibidas no bloco: subserviços reais ou, se vazio, uma etapa resumida por composição. */
+export function listarEtapasCronogramaBloco(
+  st: CronogramaLinhaSubtitulo,
+  subsDoBloco: CronogramaSubServico[]
+): CronogramaSubServico[] {
+  if (subsDoBloco.length > 0) return subsDoBloco;
+  return st.composicoes.map((comp) => ({
+    id: `${PREFIXO_ETAPA_SINTETICA}${st.blocoKey}::${comp.chave}`,
+    nome: resumirDescricaoComposicaoCronograma(comp.descricao),
+    origem: 'manual' as const,
+    composicaoChave: comp.chave
+  }));
+}
+
+export function etapaCronogramaEhSintetica(sub: CronogramaSubServico): boolean {
+  return sub.id.startsWith(PREFIXO_ETAPA_SINTETICA);
+}
+
+/** Subserviço que repete o texto integral da composição do orçamento. */
+export function subServicoEhEspelhoComposicao(
+  linha: CronogramaLinhaServico,
+  sub: CronogramaSubServico
+): boolean {
+  if (etapaCronogramaEhSintetica(sub)) return false;
+
+  const nomeSub = normalizarTextoCronograma(sub.nome);
+  for (const comp of linha.composicoes) {
+    if (normalizarTextoCronograma(comp.descricao) === nomeSub) return true;
+  }
+  return false;
+}
+
+/** Apenas etapas operacionais do cronograma (sem espelhos de composição do orçamento). */
+export function filtrarSubServicosOperacionaisCronograma(
+  linha: CronogramaLinhaServico,
+  subs: CronogramaSubServico[]
+): CronogramaSubServico[] {
+  return subs.filter((sub) => !subServicoEhEspelhoComposicao(linha, sub));
+}
+
+export function resolverDadosCronogramaBloco(
+  cronograma: CronogramaPersist,
+  blocoKey: string,
+  subsDoBloco: CronogramaSubServico[],
+  servicoKey: string
+): CronogramaItemData {
+  const bloco = cronograma.porBloco?.[blocoKey] ?? {};
+  if (subsDoBloco.length === 0) {
+    return {
+      dataInicio: bloco.dataInicio || '',
+      dataFim: bloco.dataFim || '',
+      dataInicioReal: bloco.dataInicioReal || '',
+      dataFimReal: bloco.dataFimReal || '',
+      percentualExecutado: bloco.percentualExecutado ?? undefined,
+      observacao: bloco.observacao || ''
+    };
+  }
+
+  let minIni = '';
+  let maxFim = '';
+  let minIniReal = '';
+  let maxFimReal = '';
+  let somaPct = 0;
+
+  subsDoBloco.forEach((sub, idx) => {
+    const dados = resolverDadosCronogramaSubServico(
+      cronograma,
+      servicoKey,
+      sub,
+      idx,
+      subsDoBloco.length
+    );
+    if (dados.dataInicio && (!minIni || dados.dataInicio < minIni)) minIni = dados.dataInicio;
+    if (dados.dataFim && (!maxFim || dados.dataFim > maxFim)) maxFim = dados.dataFim;
+    if (dados.dataInicioReal && (!minIniReal || dados.dataInicioReal < minIniReal)) {
+      minIniReal = dados.dataInicioReal;
+    }
+    if (dados.dataFimReal && (!maxFimReal || dados.dataFimReal > maxFimReal)) {
+      maxFimReal = dados.dataFimReal;
+    }
+    somaPct += dados.percentualExecutado ?? 0;
+  });
+
+  return {
+    dataInicio: minIni,
+    dataFim: maxFim,
+    dataInicioReal: minIniReal,
+    dataFimReal: maxFimReal,
+    percentualExecutado: somaPct / subsDoBloco.length,
+    observacao: bloco.observacao || ''
+  };
+}
+
+/** Datas e progresso do serviço agregados só das etapas operacionais visíveis. */
+export function resolverDadosCronogramaServicoParaLinha(
+  cronograma: CronogramaPersist,
+  linha: CronogramaLinhaServico
+): CronogramaItemData {
+  const subs = filtrarSubServicosOperacionaisCronograma(
+    linha,
+    listarSubServicos(cronograma, linha.servicoKey)
+  );
+  if (subs.length === 0) {
+    return resolverDadosCronogramaServico(cronograma, linha.servicoKey);
+  }
+
+  const servico = cronograma.porServico[linha.servicoKey] ?? {};
+  let minIni = '';
+  let maxFim = '';
+  let minIniReal = '';
+  let maxFimReal = '';
+  let somaPct = 0;
+
+  subs.forEach((sub, idx) => {
+    const dados = resolverDadosCronogramaSubServico(
+      cronograma,
+      linha.servicoKey,
+      sub,
+      idx,
+      subs.length
+    );
+    if (dados.dataInicio && (!minIni || dados.dataInicio < minIni)) minIni = dados.dataInicio;
+    if (dados.dataFim && (!maxFim || dados.dataFim > maxFim)) maxFim = dados.dataFim;
+    if (dados.dataInicioReal && (!minIniReal || dados.dataInicioReal < minIniReal)) {
+      minIniReal = dados.dataInicioReal;
+    }
+    if (dados.dataFimReal && (!maxFimReal || dados.dataFimReal > maxFimReal)) {
+      maxFimReal = dados.dataFimReal;
+    }
+    somaPct += dados.percentualExecutado ?? 0;
+  });
+
+  return {
+    dataInicio: servico.dataInicio || minIni || cronograma.config?.dataInicioObra || '',
+    dataFim: servico.dataFim || maxFim || cronograma.config?.dataFimObra || '',
+    dataInicioReal: servico.dataInicioReal || minIniReal || '',
+    dataFimReal: servico.dataFimReal || maxFimReal || '',
+    percentualExecutado: somaPct / subs.length,
+    observacao: servico.observacao || ''
+  };
+}
+
+export function resolverDadosCronogramaComposicao(
+  cronograma: CronogramaPersist,
+  blocoKey: string,
+  comp: CronogramaComposicaoRef
+): CronogramaItemData {
+  const itemKey = itemKeyComposicaoCronograma(blocoKey, comp.chave);
+  const item = cronograma.porItem?.[itemKey] ?? {};
+  const bloco = cronograma.porBloco?.[blocoKey] ?? {};
+  return {
+    dataInicio: item.dataInicio || bloco.dataInicio || cronograma.config?.dataInicioObra || '',
+    dataFim: item.dataFim || bloco.dataFim || cronograma.config?.dataFimObra || '',
+    dataInicioReal: item.dataInicioReal || '',
+    dataFimReal: item.dataFimReal || '',
+    percentualExecutado: item.percentualExecutado ?? bloco.percentualExecutado ?? undefined,
+    observacao: item.observacao || bloco.observacao || ''
+  };
+}
+
+/** Composições já representadas por subserviços do bloco (evita linha duplicada). */
+export function chavesComposicaoCobertasPorSubs(
+  composicoes: CronogramaComposicaoRef[],
+  subs: CronogramaSubServico[]
+): Set<string> {
+  const cobertas = new Set<string>();
+  for (const sub of subs) {
+    if (sub.composicaoChave) {
+      cobertas.add(sub.composicaoChave);
+      continue;
+    }
+    const nomeSub = normalizarTextoCronograma(sub.nome);
+    for (const comp of composicoes) {
+      const desc = normalizarTextoCronograma(comp.descricao);
+      if (desc === nomeSub || desc.includes(nomeSub) || nomeSub.includes(desc)) {
+        cobertas.add(comp.chave);
+      }
+    }
+  }
+  return cobertas;
 }
 
 /** @deprecated */

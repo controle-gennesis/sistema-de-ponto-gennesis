@@ -7,6 +7,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -165,10 +166,6 @@ const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
   CONCLUDED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 };
-
-/** Mesmo padrão visual do botão de ações em `EmployeeList` (quadrado 9×9 com borda). */
-const LIST_TABLE_ACTION_ICON_CLASS =
-  'inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
 
 const SENSITIVE_DP_REQUEST_TYPES = ['RESCISAO', 'ALTERACAO_FUNCAO_SALARIO'] as const;
 
@@ -794,9 +791,15 @@ export function SolicitacoesGeraisPage() {
                           </thead>
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                             {filteredMyRequests.map((r) => (
-                                <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                <tr
+                                  key={r.id}
+                                  onClick={() => setHistoryRequest(r)}
+                                  className={getListTableRowClassName(true)}
+                                >
                                   <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
-                                    {r.displayNumber ?? '—'}
+                                    <ListRowNavigableLabel className="font-medium tabular-nums">
+                                      {r.displayNumber ?? '—'}
+                                    </ListRowNavigableLabel>
                                   </td>
                                   <td className="px-3 sm:px-6 py-3 align-middle text-center">
                                     <span
@@ -830,7 +833,7 @@ export function SolicitacoesGeraisPage() {
                                   <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
                                     {r.solicitanteNome}
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-right">
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-right" onClick={(e) => e.stopPropagation()}>
                                     {r.status === 'WAITING_RETURN' ? (
                                       <div className="ml-auto max-w-[280px] space-y-2 text-left">
                                         <div className="flex justify-end">
@@ -839,7 +842,7 @@ export function SolicitacoesGeraisPage() {
                                             onClick={() => setHistoryRequest(r)}
                                             title="Ver histórico"
                                             aria-label="Ver histórico"
-                                            className={LIST_TABLE_ACTION_ICON_CLASS}
+                                            className={rowActionMenuButtonClass(false)}
                                           >
                                             <Eye className="h-4 w-4 shrink-0" strokeWidth={2} />
                                           </button>
@@ -867,7 +870,7 @@ export function SolicitacoesGeraisPage() {
                                           onClick={() => setHistoryRequest(r)}
                                           title="Ver histórico"
                                           aria-label="Ver histórico"
-                                          className={LIST_TABLE_ACTION_ICON_CLASS}
+                                          className={rowActionMenuButtonClass(false)}
                                         >
                                           <Eye className="h-4 w-4 shrink-0" strokeWidth={2} />
                                         </button>

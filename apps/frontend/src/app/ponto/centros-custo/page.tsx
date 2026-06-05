@@ -9,9 +9,10 @@ import {
   CadastroListEmpty,
   CadastroListLoading,
   CadastroListSummary,
+  formatCadastroListId,
   getCadastroListRange
 } from '@/components/ui/CadastroListSummary';
-import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -444,7 +445,7 @@ export default function CentrosCustoPage() {
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th scope="col" className={cadastroListClasses.th}>
-                        Código
+                        ID
                       </th>
                       <th scope="col" className={cadastroListClasses.th}>
                         Nome
@@ -461,18 +462,18 @@ export default function CentrosCustoPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                      {filteredCostCenters.map((cc: CostCenter) => (
-                        <tr key={cc.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-900 dark:text-gray-100 font-mono">{cc.code}</span>
+                      {filteredCostCenters.map((cc: CostCenter, index) => (
+                        <tr key={cc.id} className={listTableRowClasses.tr}>
+                          <td className={cadastroListClasses.tdMono}>
+                            {formatCadastroListId(cc.code, listRange.startItem + index)}
                           </td>
                           <td className="min-w-0 px-3 py-4 sm:px-6">
-                            <span className="block truncate text-sm text-gray-900 dark:text-gray-100">{cc.name}</span>
+                            <span className="text-sm text-gray-900 dark:text-gray-100 block truncate">{cc.name}</span>
                           </td>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                             <span className="text-sm text-gray-700 dark:text-gray-400">{cc.polo || '-'}</span>
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                          <td className={cadastroListClasses.tdCenter}>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                               cc.isActive
                                 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
@@ -680,7 +681,7 @@ function CostCenterFormModal({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Código *
+                  ID *
                 </label>
                 <input
                   type="text"

@@ -16,6 +16,7 @@ import {
   X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { Loading } from '@/components/ui/Loading';
 import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import type { FluxTab, MaterialRequest } from '../_lib/types';
@@ -252,10 +253,13 @@ export function MaterialRequestsRmList({
                     return (
                       <tr
                         key={request.id}
-                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        onClick={() => onDetails(request)}
+                        className={getListTableRowClassName(true)}
                       >
-                        <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                          {request.requestNumber || `#${request.id.slice(0, 8)}`}
+                        <td className="px-3 sm:px-6 py-3 text-sm whitespace-nowrap">
+                          <ListRowNavigableLabel className="font-medium">
+                            {request.requestNumber || `#${request.id.slice(0, 8)}`}
+                          </ListRowNavigableLabel>
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[140px] truncate">
                           {rmSolicitante(request)?.name || '—'}
@@ -293,7 +297,7 @@ export function MaterialRequestsRmList({
                         <td className="px-3 sm:px-6 py-3 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
                           {formatDate(request.createdAt)}
                         </td>
-                        <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap">
+                        <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             onClick={(e) => {
@@ -309,7 +313,7 @@ export function MaterialRequestsRmList({
                                 return { requestId: request.id, top: rect.bottom + 4, left };
                               });
                             }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                            className={rowActionMenuButtonClass(actionMenu?.requestId === request.id)}
                             aria-label="Menu de ações"
                             aria-expanded={actionMenu?.requestId === request.id}
                             aria-haspopup="menu"

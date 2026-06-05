@@ -20,6 +20,12 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import {
+  ListRowNavigableLabel,
+  getListTableRowClassName,
+  listTableRowClasses,
+  rowActionMenuButtonClass,
+} from '@/components/ui/RowActionMenu';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -210,6 +216,15 @@ export default function ContratosPage() {
     canAction(pk('/ponto/controle/alterar-permissoes'), 'ver');
   const canManageContrato = canEditContrato || canDeleteContrato;
   const showActionsColumn = canManageContrato || canManageUserPermissions;
+
+  const openContractDetails = useCallback(
+    (contractId: string) => {
+      router.push(`/ponto/contratos/${contractId}`);
+    },
+    [router]
+  );
+
+  const tableColSpan = showActionsColumn ? 7 : 6;
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
   const costCentersList = (Array.isArray(costCenters) ? costCenters : []) as CostCenter[];
@@ -707,8 +722,8 @@ export default function ContratosPage() {
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
+                    <FileText className="w-6 h-6 text-red-600 dark:text-red-400" />
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -757,29 +772,29 @@ export default function ContratosPage() {
                 <span>Página 1 de 1</span>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full table-fixed text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[240px]">
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[26%] min-w-[180px]">
                         Nome
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[11%]">
                         Nº Contrato
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[18%]">
                         Vigência
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[15%]">
                         Centro de Custo
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
                         Valor + Aditivos
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className={`px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider ${showActionsColumn ? 'w-[12%]' : 'w-[16%]'}`}>
                         Valor + Aditivos Anual
                       </th>
                       {showActionsColumn && (
-                        <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        <th className={listTableRowClasses.actionTh}>
                           Ação
                         </th>
                       )}
@@ -788,7 +803,7 @@ export default function ContratosPage() {
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {loadingContracts ? (
                       <tr>
-                        <td colSpan={showActionsColumn ? 7 : 6} className="px-6 py-8 text-center">
+                        <td colSpan={tableColSpan} className="px-6 py-8 text-center">
                           <div className="flex items-center justify-center">
                             <div className="loading-spinner w-6 h-6 mr-2" />
                             <span className="text-gray-600 dark:text-gray-400">
@@ -799,7 +814,7 @@ export default function ContratosPage() {
                       </tr>
                     ) : contracts.length === 0 ? (
                       <tr>
-                        <td colSpan={showActionsColumn ? 7 : 6} className="px-6 py-8 text-center">
+                        <td colSpan={tableColSpan} className="px-6 py-8 text-center">
                           <div className="text-gray-500 dark:text-gray-400">
                             <p>Nenhum contrato encontrado.</p>
                             <p className="text-sm mt-1">
@@ -812,12 +827,14 @@ export default function ContratosPage() {
                       contracts.map((c: Contract) => (
                         <tr
                           key={c.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                          onClick={() => openContractDetails(c.id)}
+                          className={getListTableRowClassName(true)}
+                          aria-label={`Abrir detalhes do contrato ${c.name}`}
                         >
-                          <td className="px-3 sm:px-6 py-3 min-w-[240px] align-middle text-left">
-                            <span className="text-sm text-gray-900 dark:text-gray-100 font-medium whitespace-normal">
+                          <td className="px-3 sm:px-6 py-3 align-middle text-left min-w-0">
+                            <ListRowNavigableLabel className="font-medium whitespace-normal">
                               {c.name}
-                            </span>
+                            </ListRowNavigableLabel>
                           </td>
                           <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
                             <span className="text-sm font-mono text-gray-900 dark:text-gray-100">
@@ -840,29 +857,34 @@ export default function ContratosPage() {
                             })()}
                           </td>
                           {showActionsColumn && (
-                            <td className="relative px-3 sm:px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                  setContractActionMenu((prev) => {
-                                    if (prev?.contractId === c.id) return null;
-                                    let left = r.right - CONTRACT_ACTION_MENU_WIDTH_PX;
-                                    left = Math.max(
-                                      8,
-                                      Math.min(left, window.innerWidth - CONTRACT_ACTION_MENU_WIDTH_PX - 8)
-                                    );
-                                    return { contractId: c.id, top: r.bottom + 4, left };
-                                  });
-                                }}
-                                className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                                aria-label="Abrir ações"
-                                aria-expanded={contractActionMenu?.contractId === c.id}
-                                aria-haspopup="menu"
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </button>
+                            <td
+                              className={listTableRowClasses.actionTd}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                    setContractActionMenu((prev) => {
+                                      if (prev?.contractId === c.id) return null;
+                                      let left = r.right - CONTRACT_ACTION_MENU_WIDTH_PX;
+                                      left = Math.max(
+                                        8,
+                                        Math.min(left, window.innerWidth - CONTRACT_ACTION_MENU_WIDTH_PX - 8)
+                                      );
+                                      return { contractId: c.id, top: r.bottom + 4, left };
+                                    });
+                                  }}
+                                  className={rowActionMenuButtonClass(contractActionMenu?.contractId === c.id)}
+                                  aria-label="Abrir ações"
+                                  aria-expanded={contractActionMenu?.contractId === c.id}
+                                  aria-haspopup="menu"
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </button>
+                              </div>
                             </td>
                           )}
                         </tr>
@@ -895,7 +917,7 @@ export default function ContratosPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setContractActionMenu(null);
-                          router.push(`/ponto/contratos/${contractForActionMenu.id}`);
+                          openContractDetails(contractForActionMenu.id);
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                       >

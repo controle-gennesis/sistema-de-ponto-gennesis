@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera, FileCheck, Eye, EyeOff, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield, Filter, KeyRound } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { TOMADORES_LIST } from '@/constants/tomadores';
 import { 
   DEPARTMENTS_LIST,
@@ -1724,7 +1725,11 @@ export function EmployeeList({
                     return (
                       <tr
                         key={employee.id}
-                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        onClick={() => {
+                          setSelectedEmployee(employee);
+                          setDetailsTab('info');
+                        }}
+                        className={getListTableRowClassName(true)}
                       >
                         <td className="px-3 sm:px-6 py-3 align-middle text-left">
                           <div className="flex items-center gap-3">
@@ -1746,7 +1751,9 @@ export function EmployeeList({
                               )}
                             </div>
                             <div className="min-w-0 text-left">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{employee.name}</p>
+                              <ListRowNavigableLabel className="truncate font-semibold">
+                                {employee.name}
+                              </ListRowNavigableLabel>
                               <p className="text-xs text-gray-500 dark:text-gray-400">{formatCPF(employee.cpf) || '—'}</p>
                             </div>
                           </div>
@@ -1767,7 +1774,7 @@ export function EmployeeList({
                         <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
                           {addedAt ? formatDate(addedAt) : '—'}
                         </td>
-                        <td className="px-3 sm:px-6 py-3 text-right">
+                        <td className="px-3 sm:px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end">
                             <button
                               type="button"
@@ -1784,7 +1791,7 @@ export function EmployeeList({
                                   return { employeeId: employee.id, top: r.bottom + 4, left };
                                 });
                               }}
-                              className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                              className={rowActionMenuButtonClass(employeeActionMenu?.employeeId === employee.id)}
                               aria-label="Menu de ações"
                               aria-expanded={employeeActionMenu?.employeeId === employee.id}
                               aria-haspopup="menu"

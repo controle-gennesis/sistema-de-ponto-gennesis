@@ -22,6 +22,14 @@ export function getCadastroListRange(page: number, limit: number, total: number)
   return { startItem, endItem, totalPages };
 }
 
+/** Valor exibido na coluna ID das listas de cadastro (`code` ou número da linha). */
+export function formatCadastroListId(code?: string | null, rowNumber?: number): string {
+  const trimmed = String(code ?? '').trim();
+  if (trimmed) return trimmed;
+  if (rowNumber != null && rowNumber > 0) return String(rowNumber);
+  return '—';
+}
+
 export function CadastroListLoading({ message }: { message: string }) {
   return (
     <div className="py-8 text-center">

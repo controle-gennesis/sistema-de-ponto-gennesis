@@ -5,8 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { CreditCard, Plus, Search, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
-import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 
 const ITEMS_PER_PAGE = 20;
@@ -246,7 +246,7 @@ export default function CondicoesPagamentoPage() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="search"
-                      placeholder="Buscar por nome ou código..."
+                      placeholder="Buscar por nome ou ID..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
@@ -305,39 +305,39 @@ export default function CondicoesPagamentoPage() {
                   <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
+                        <th className={cadastroListClasses.th}>ID</th>
                         <th className={cadastroListClasses.th}>Nome</th>
                         <th className={cadastroListClasses.th}>Parcelas / prazos</th>
-                        <th className={cadastroListClasses.th}>Código</th>
                         <th className={cadastroListClasses.th}>Tipo</th>
-                        <th className={cadastroListClasses.th}>Ordem</th>
+                        <th className={cadastroListClasses.thNumeric}>Ordem</th>
                         <th className={cadastroListClasses.thCenter}>Ativo</th>
                         <th className={cadastroListClasses.thCenter}>Sistema</th>
                         <th className={cadastroListClasses.thRight}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                      {paginatedRows.map((r) => (
+                      {paginatedRows.map((r, index) => (
                         <tr
                           key={r.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                          className={listTableRowClasses.tr}
                         >
-                          <td className="px-3 py-4 font-medium text-gray-900 dark:text-gray-100 sm:px-6">
-                            {r.label}
+                          <td className={cadastroListClasses.tdMono}>
+                            {formatCadastroListId(r.code, startIndex + index + 1)}
+                          </td>
+                          <td className="px-3 py-4 sm:px-6">
+                            <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{r.label}</span>
                           </td>
                           <td className="max-w-[14rem] px-3 py-4 text-xs text-gray-600 dark:text-gray-400 sm:px-6">
                             {formatParcelSummary(r.parcelCount ?? 1, r.parcelDueDays) || '—'}
                           </td>
-                          <td className="px-3 py-4 font-mono text-xs text-gray-600 dark:text-gray-400 sm:px-6">
-                            {r.code}
-                          </td>
-                          <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
+                          <td className={cadastroListClasses.td}>
                             {r.paymentType === 'AVISTA' ? 'À vista' : 'Boleto'}
                           </td>
-                          <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">{r.sortOrder}</td>
-                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                          <td className={cadastroListClasses.tdNumeric}>{r.sortOrder}</td>
+                          <td className={cadastroListClasses.tdCenter}>
                             {r.isActive ? 'Sim' : 'Não'}
                           </td>
-                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                          <td className={cadastroListClasses.tdCenter}>
                             {r.isSystem ? 'Sim' : 'Não'}
                           </td>
                           <RowActionMenuCell

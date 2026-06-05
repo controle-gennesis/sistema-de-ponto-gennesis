@@ -34,6 +34,7 @@ import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { DEPARTMENTS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 
 interface PointCorrectionRequest {
   id: string;
@@ -713,15 +714,28 @@ export default function GerenciarSolicitacoesPage() {
                   const StatusIcon = statusInfo.icon;
 
                   return (
-                    <Card key={request.id} className="hover:shadow-md transition-all duration-200">
+                    <div
+                      key={request.id}
+                      onClick={() => setSelectedRequest(request)}
+                      className={`${getListTableRowClassName(true)} rounded-lg`}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedRequest(request);
+                        }
+                      }}
+                    >
+                    <Card className="hover:shadow-md transition-all duration-200 h-full">
                       <CardContent className="p-4">
                         {/* Header compacto */}
                         <div className="flex items-start justify-between gap-3 mb-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
-                              <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
+                              <ListRowNavigableLabel className="truncate text-base font-semibold">
                                   {request.title}
-                              </h4>
+                              </ListRowNavigableLabel>
                               <Badge className={`${statusInfo.color} shrink-0 text-xs`}>
                                   <StatusIcon className="w-3 h-3 mr-1" />
                                   {statusInfo.label}
@@ -737,7 +751,7 @@ export default function GerenciarSolicitacoesPage() {
                               </p>
                             )}
                                 </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                             {request.status === 'PENDING' && (
                               <>
                                 <Button
@@ -836,6 +850,7 @@ export default function GerenciarSolicitacoesPage() {
                         )}
                       </CardContent>
                     </Card>
+                    </div>
                   );
                 })
               )}

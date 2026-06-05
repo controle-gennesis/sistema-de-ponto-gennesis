@@ -5,8 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Store, Plus, Search, X, AlertCircle, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
-import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -372,7 +372,7 @@ export default function FornecedoresPage() {
                   <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th scope="col" className={cadastroListClasses.th}>Código</th>
+                        <th scope="col" className={cadastroListClasses.th}>ID</th>
                         <th scope="col" className={cadastroListClasses.th}>Nome</th>
                         <th scope="col" className={cadastroListClasses.th}>CNPJ</th>
                         <th scope="col" className={cadastroListClasses.th}>Contato</th>
@@ -381,13 +381,13 @@ export default function FornecedoresPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                        {suppliers.map((s: Supplier) => (
-                          <tr key={s.id} className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                            <td className="whitespace-nowrap px-3 py-4 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6">
-                              {s.code}
+                        {suppliers.map((s: Supplier, index) => (
+                          <tr key={s.id} className={listTableRowClasses.tr}>
+                            <td className={cadastroListClasses.tdMono}>
+                              {formatCadastroListId(s.code, index + 1)}
                             </td>
                             <td className="min-w-0 px-3 py-4 sm:px-6">
-                              <span className="block truncate text-sm text-gray-900 dark:text-gray-100">{s.name}</span>
+                              <span className="text-sm text-gray-900 dark:text-gray-100 block truncate">{s.name}</span>
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-400 sm:px-6">
                               {s.cnpj || '-'}
@@ -397,7 +397,7 @@ export default function FornecedoresPage() {
                                 {s.phone || s.email || '-'}
                               </span>
                             </td>
-                            <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
+                            <td className={cadastroListClasses.tdCenter}>
                               <span
                                 className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
                                   s.isActive

@@ -9,6 +9,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import toast from 'react-hot-toast';
 
 const CATEGORIES = [
@@ -348,10 +349,11 @@ export default function FuroEstoquePage() {
                         {paginatedRows.map((row) => (
                           <tr
                             key={row.id}
-                            className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                            onClick={() => setDetail(row)}
+                            className={getListTableRowClassName(true)}
                           >
-                            <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                              {row.orderNumber}
+                            <td className="px-3 sm:px-6 py-3 text-sm whitespace-nowrap">
+                              <ListRowNavigableLabel className="font-medium">{row.orderNumber}</ListRowNavigableLabel>
                             </td>
                             <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
                               {row.constructionMaterial.name}
@@ -385,11 +387,11 @@ export default function FuroEstoquePage() {
                                 {row.status === 'ABERTO' ? 'Aberto' : 'Resolvido'}
                               </span>
                             </td>
-                            <td className="px-3 sm:px-6 py-3 text-right">
+                            <td className="px-3 sm:px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => setDetail(row)}
-                                className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                className={rowActionMenuButtonClass(false)}
                                 aria-label="Ver detalhes"
                               >
                                 <MoreVertical className="w-4 h-4" />

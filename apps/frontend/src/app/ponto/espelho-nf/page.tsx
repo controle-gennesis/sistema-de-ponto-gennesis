@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import toast from 'react-hot-toast';
 import {
   buildEspelhoDetailRows,
@@ -3390,13 +3391,14 @@ export default function EspelhoNfPage() {
                                 return (
                                   <tr
                                     key={item.id}
-                                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                    onClick={() => setDetailMirror(item)}
+                                    className={getListTableRowClassName(true)}
                                   >
                                     <td className="px-3 py-3 align-middle text-left sm:px-6">
                                       <div className="min-w-0 text-left">
-                                        <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                        <ListRowNavigableLabel className="truncate font-semibold">
                                           {takerTitle}
-                                        </p>
+                                        </ListRowNavigableLabel>
                                         <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                                           {refTitle} · {medTitle}
                                         </p>
@@ -3418,7 +3420,7 @@ export default function EspelhoNfPage() {
                                     <td className="px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                                       {createdLabel}
                                     </td>
-                                    <td className="px-3 py-3 text-right sm:px-6">
+                                    <td className="px-3 py-3 text-right sm:px-6" onClick={(e) => e.stopPropagation()}>
                                       <div className="flex justify-end">
                                         <button
                                           type="button"
@@ -3438,7 +3440,7 @@ export default function EspelhoNfPage() {
                                               return { mirrorId: item.id, top: r.bottom + 4, left };
                                             });
                                           }}
-                                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                          className={rowActionMenuButtonClass(mirrorActionMenu?.mirrorId === item.id)}
                                           aria-label="Menu de ações"
                                           aria-expanded={mirrorActionMenu?.mirrorId === item.id}
                                           aria-haspopup="menu"

@@ -5,8 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Percent, Plus, Search, X, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
-import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -367,32 +367,36 @@ export default function CodigosTributariosEspelhoNfPage() {
                   <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
+                        <th className={cadastroListClasses.th}>ID</th>
                         <th className={cadastroListClasses.th}>Nome / Município</th>
-                        <th className={cadastroListClasses.th}>Alíquota ISS</th>
-                        <th className={cadastroListClasses.th}>Abate Material</th>
-                        <th className={cadastroListClasses.th}>Garantia Complementar</th>
+                        <th className={cadastroListClasses.thNumeric}>Alíquota ISS</th>
+                        <th className={cadastroListClasses.thCenter}>Abate Material</th>
+                        <th className={cadastroListClasses.thCenter}>Garantia Complementar</th>
                         <th className={cadastroListClasses.thRight}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                        {rows.map((t) => (
-                          <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        {rows.map((t, index) => (
+                          <tr key={t.id} className={listTableRowClasses.tr}>
+                            <td className={cadastroListClasses.tdMono}>
+                              {formatCadastroListId(null, index + 1)}
+                            </td>
                             <td className="min-w-0 px-3 py-4 sm:px-6">
-                              <span className="block truncate text-sm text-gray-900 dark:text-gray-100">
+                              <span className="text-sm text-gray-900 dark:text-gray-100 block truncate">
                                 {t.cityName}
                               </span>
                             </td>
-                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-400 sm:px-6">
+                            <td className={cadastroListClasses.tdNumeric}>
                               {t.issRate || '—'}
                             </td>
-                            <td className="px-3 py-4 text-sm sm:px-6">
+                            <td className={cadastroListClasses.tdCenter}>
                               {t.abatesMaterial ? (
                                 <span className="text-green-700 dark:text-green-400">Sim</span>
                               ) : (
                                 <span className="text-gray-500">Não</span>
                               )}
                             </td>
-                            <td className="px-3 py-4 text-sm sm:px-6">
+                            <td className={cadastroListClasses.tdCenter}>
                               {t.hasComplementaryWarranty ? (
                                 <span className="text-green-700 dark:text-green-400">Sim</span>
                               ) : (

@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -1192,7 +1193,7 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
                 return (
                   <tr
                     key={entry.id}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                    className={listTableRowClasses.tr}
                   >
                     <td className="px-3 sm:px-6 py-3 text-center">
                       <span
@@ -1204,8 +1205,8 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
                     <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
                       {entry.osCode || '—'}
                     </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-left font-medium text-gray-900 dark:text-gray-100">
-                      {entry.supplierName || '—'}
+                    <td className="px-3 sm:px-6 py-3 text-sm text-left">
+                      <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{entry.supplierName || '—'}</span>
                     </td>
                     <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
                       {entry.parcelNumber || '—'}
@@ -1276,7 +1277,7 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
                             });
                           }}
                           disabled={isDeleting}
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                          className={`${rowActionMenuButtonClass(actionMenu?.entryId === entry.id)} disabled:opacity-50`}
                           aria-label="Menu de ações"
                           aria-expanded={actionMenu?.entryId === entry.id}
                           aria-haspopup="menu"

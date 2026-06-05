@@ -23,6 +23,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
@@ -190,8 +191,7 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   RETIFICACAO_ALOCACAO: 'Retificação de alocação',
 };
 
-const LIST_TABLE_ACTION_ICON_CLASS =
-  'inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
+const LIST_TABLE_ACTION_ICON_CLASS = rowActionMenuButtonClass(false);
 
 export function GerenciarSolicitacoesGeraisPage() {
   const queryClient = useQueryClient();
@@ -524,9 +524,15 @@ export function GerenciarSolicitacoesGeraisPage() {
                       <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                         {filteredRequests.map((r) => {
                           return (
-                            <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <tr
+                              key={r.id}
+                              onClick={() => setHistoryRequest(r)}
+                              className={getListTableRowClassName(true)}
+                            >
                               <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
-                                {r.displayNumber ?? '—'}
+                                <ListRowNavigableLabel className="font-medium tabular-nums">
+                                  {r.displayNumber ?? '—'}
+                                </ListRowNavigableLabel>
                               </td>
                               <td className="px-3 sm:px-6 py-3 align-middle text-center">
                                 <span
@@ -557,7 +563,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                               <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium text-gray-900 dark:text-gray-100">
                                 {r.solicitanteNome}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-right">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-right" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex justify-end">
                                   <button
                                     type="button"

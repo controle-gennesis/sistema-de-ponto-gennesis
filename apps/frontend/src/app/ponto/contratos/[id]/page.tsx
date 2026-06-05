@@ -24,12 +24,14 @@ import {
   Eye,
   ChevronDown,
   Info,
+  History,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { TableCheckbox } from '@/components/ui/Checkbox';
 import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
 import api from '@/lib/api';
@@ -3375,183 +3377,194 @@ export default function ContractDetailPage() {
           <>
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
           <Card>
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                    <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+            <CardHeader className="border-b border-gray-200 dark:border-gray-700">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg shrink-0">
+                      <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        Ordem de Serviço
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Visualizar e gerenciar ordens de serviço do contrato
+                      </p>
+                      {!loadingPleitos && filteredPleitos.length > 0 && (
+                        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                          Mostrando 1 a {Math.min(LIST_DISPLAY_LIMIT, filteredPleitos.length)} de {filteredPleitos.length}{' '}
+                          {filteredPleitos.length === 1 ? 'ordem de serviço' : 'ordens de serviço'}
+                          {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
+                          {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
+                          {filteredPleitos.length > LIST_DISPLAY_LIMIT ? ` · exibindo os ${LIST_DISPLAY_LIMIT} primeiros` : ''}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Ordem de Serviço
-                    </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Visualizar e gerenciar ordens de serviço do contrato
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                  {!loadingPleitos && pleitos.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {!loadingPleitos && pleitos.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleGerarCronogramaMensal}
+                        className="inline-flex h-9 items-center rounded-lg border border-indigo-300 bg-indigo-50 px-3 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/60 dark:bg-indigo-950/30 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                      >
+                        Gerar cronograma mensal
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={handleGerarCronogramaMensal}
-                      className="inline-flex h-10 shrink-0 items-center px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
+                      onClick={() => setShowPleitoModal(true)}
+                      disabled={!canCreateContrato}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Gerar cronograma mensal
+                      <Plus className="h-4 w-4 shrink-0" />
+                      Nova Ordem de Serviço
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowPleitoModal(true)}
-                    disabled={!canCreateContrato}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                  >
-                    <Plus className="h-4 w-4 shrink-0" />
-                    <span>Nova Ordem de Serviço</span>
-                  </button>
-                  {!loadingPleitos && pleitos.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleExcluirPleitosSelecionados}
-                      disabled={!canDeleteContrato || deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
-                      className="inline-flex h-10 items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-                      title="Excluir as ordens de serviço marcadas na tabela"
-                    >
-                      <Trash2 className="w-4 h-4 shrink-0" />
-                      {deletePleitosSelecionadosMutation.isPending ? 'Excluindo...' : 'Excluir selecionadas'}
-                    </button>
-                  )}
+                    {!loadingPleitos && pleitos.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleExcluirPleitosSelecionados}
+                        disabled={!canDeleteContrato || deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                        title="Excluir as ordens de serviço marcadas na tabela"
+                      >
+                        <Trash2 className="w-4 h-4 shrink-0" />
+                        {deletePleitosSelecionadosMutation.isPending ? 'Excluindo...' : 'Excluir selecionadas'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {!loadingPleitos && pleitos.length === 0 && allPleitos.length > 0 && (
-                <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={handleAbrirHistoricoOs}
-                    className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
-                  >
-                    Histórico de OS
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowHistoricoPleitosModal(true)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors"
-                  >
-                    Histórico de Pleitos
-                  </button>
-                </div>
-              )}
-              {!loadingPleitos && pleitos.length > 0 && (
-                <div className="mb-4 flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+
+                {!loadingPleitos && pleitos.length > 0 && (
+                  <div className="flex flex-col gap-3 border-t border-gray-100 pt-4 dark:border-gray-700/60 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={handleVisualizarPleito}
-                            className="px-3 py-1.5 rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-sm font-medium transition-colors"
-                          >
-                            Visualizar Pleito
-                          </button>
-                          <button
-                            onClick={handleGerarPleito}
-                            disabled={!canCreateContrato || gerarPleitoMutation.isPending}
-                            className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-                          >
-                            {gerarPleitoMutation.isPending ? 'Gerando...' : 'Gerar Pleito'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handlePleitar100PorcentoSelecionadas}
-                            disabled={gerarPleitoMutation.isPending || selectedForPleito.size === 0}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-                            title="Gera pleito com 100% do orçamento em cada OS marcada (sem abrir o modal de %)"
-                          >
-                            <Percent className="w-4 h-4 shrink-0" />
-                            {gerarPleitoMutation.isPending ? 'Gerando...' : 'Pleitear 100%'}
-                          </button>
+                      <span className="mr-1 hidden text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 sm:inline">
+                        Pleitos
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleVisualizarPleito}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                      >
+                        <Eye className="h-4 w-4 shrink-0" />
+                        Visualizar Pleito
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGerarPleito}
+                        disabled={!canCreateContrato || gerarPleitoMutation.isPending}
+                        className="inline-flex h-9 items-center rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {gerarPleitoMutation.isPending ? 'Gerando...' : 'Gerar Pleito'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handlePleitar100PorcentoSelecionadas}
+                        disabled={gerarPleitoMutation.isPending || selectedForPleito.size === 0}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                        title="Gera pleito com 100% do orçamento em cada OS marcada (sem abrir o modal de %)"
+                      >
+                        <Percent className="h-4 w-4 shrink-0" />
+                        {gerarPleitoMutation.isPending ? 'Gerando...' : 'Pleitear 100%'}
+                      </button>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={handleAbrirHistoricoOs}
-                        className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                       >
+                        <History className="h-4 w-4 shrink-0" />
                         Histórico de OS
                       </button>
                       {allPleitos.length > 0 && (
                         <button
                           type="button"
                           onClick={() => setShowHistoricoPleitosModal(true)}
-                          className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                         >
+                          <History className="h-4 w-4 shrink-0" />
                           Histórico de Pleitos
                         </button>
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-nowrap items-center gap-4 overflow-x-auto pb-1">
-                  <div className="flex items-center gap-2 shrink-0">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Orçamento:</label>
-                    <select
-                      value={filterStatusOrcamento}
-                      onChange={(e) => setFilterStatusOrcamento(e.target.value)}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-[160px]"
+                )}
+
+                {!loadingPleitos && pleitos.length === 0 && allPleitos.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 pt-4 dark:border-gray-700/60">
+                    <button
+                      type="button"
+                      onClick={handleAbrirHistoricoOs}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     >
-                      <option value="">Todos</option>
-                      {STATUS_ORCAMENTO_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                      <option value="—">— (vazio)</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Execução:</label>
-                    <select
-                      value={filterStatusExecucao}
-                      onChange={(e) => setFilterStatusExecucao(e.target.value)}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 min-w-[160px]"
+                      <History className="h-4 w-4 shrink-0" />
+                      Histórico de OS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowHistoricoPleitosModal(true)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     >
-                      <option value="">Todos</option>
-                      {STATUS_EXECUCAO_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                      <option value="—">— (vazio)</option>
-                    </select>
+                      <History className="h-4 w-4 shrink-0" />
+                      Histórico de Pleitos
+                    </button>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Faturamento (%):</label>
-                    <select
-                      value={filterStatusFaturamento}
-                      onChange={(e) => setFilterStatusFaturamento(e.target.value)}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-[160px]"
-                    >
-                      <option value="">Todos</option>
-                      <option value="0">0% (não faturado)</option>
-                      <option value="1-25">1% a 25%</option>
-                      <option value="26-50">26% a 50%</option>
-                      <option value="51-75">51% a 75%</option>
-                      <option value="76-99">76% a 99%</option>
-                      <option value="100">100% ou mais</option>
-                      <option value="sem-orcamento">Sem orçamento</option>
-                    </select>
+                )}
+
+                {!loadingPleitos && pleitos.length > 0 && (
+                  <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-4 dark:border-gray-700/60 sm:grid-cols-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Orçamento</label>
+                      <select
+                        value={filterStatusOrcamento}
+                        onChange={(e) => setFilterStatusOrcamento(e.target.value)}
+                        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      >
+                        <option value="">Todos</option>
+                        {STATUS_ORCAMENTO_OPCOES.map((op) => (
+                          <option key={op} value={op}>{op}</option>
+                        ))}
+                        <option value="—">— (vazio)</option>
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Execução</label>
+                      <select
+                        value={filterStatusExecucao}
+                        onChange={(e) => setFilterStatusExecucao(e.target.value)}
+                        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      >
+                        <option value="">Todos</option>
+                        {STATUS_EXECUCAO_OPCOES.map((op) => (
+                          <option key={op} value={op}>{op}</option>
+                        ))}
+                        <option value="—">— (vazio)</option>
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Faturamento (%)</label>
+                      <select
+                        value={filterStatusFaturamento}
+                        onChange={(e) => setFilterStatusFaturamento(e.target.value)}
+                        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      >
+                        <option value="">Todos</option>
+                        <option value="0">0% (não faturado)</option>
+                        <option value="1-25">1% a 25%</option>
+                        <option value="26-50">26% a 50%</option>
+                        <option value="51-75">51% a 75%</option>
+                        <option value="76-99">76% a 99%</option>
+                        <option value="100">100% ou mais</option>
+                        <option value="sem-orcamento">Sem orçamento</option>
+                      </select>
+                    </div>
                   </div>
-                  </div>
-                </div>
-              )}
-              {!loadingPleitos && filteredPleitos.length > 0 && (
-                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                  <span>
-                    Mostrando 1 a {Math.min(LIST_DISPLAY_LIMIT, filteredPleitos.length)} de {filteredPleitos.length}{' '}
-                    {filteredPleitos.length === 1 ? 'ordem de serviço' : 'ordens de serviço'}
-                    {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
-                    {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
-                  </span>
-                  {filteredPleitos.length > LIST_DISPLAY_LIMIT && (
-                    <span>Exibindo os {LIST_DISPLAY_LIMIT} primeiros</span>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
               {loadingPleitos ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   Carregando ordens de serviço...
@@ -3578,21 +3591,19 @@ export default function ContractDetailPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th data-col-key="select" data-col-lock-first="1" className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
-                          <input
-                            type="checkbox"
-                            checked={allVisibleSelected}
-                            ref={(el) => {
-                              if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected;
-                            }}
-                            onChange={(e) => toggleSelectAllVisiblePleitos(e.target.checked)}
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label="Selecionar todas as ordens de serviço visíveis"
-                            className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                          />
+                        <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
+                          <div className="flex justify-center">
+                            <TableCheckbox
+                              checked={allVisibleSelected}
+                              indeterminate={someVisibleSelected && !allVisibleSelected}
+                              onChange={toggleSelectAllVisiblePleitos}
+                              onClick={(e) => e.stopPropagation()}
+                              ariaLabel="Selecionar todas as ordens de serviço visíveis"
+                            />
+                          </div>
                         </th>
                         <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">
                           Etiqueta
@@ -3622,7 +3633,7 @@ export default function ContractDetailPage() {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Preenchimento</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-200 dark:border-gray-700">
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {displayedPleitos.map((p) => {
                         const osSe = (p.divSe || '').trim();
                         const acumulado = billings
@@ -3643,31 +3654,32 @@ export default function ContractDetailPage() {
                           className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer ${isSelected ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
                         >
                           <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedForPleito((prev) => {
-                                    const next = new Set(prev);
-                                    next.add(p.id);
-                                    return next;
-                                  });
-                                } else {
-                                  setSelectedForPleito((prev) => {
-                                    const next = new Set(prev);
-                                    next.delete(p.id);
-                                    return next;
-                                  });
-                                  setValorPleiteado((prev) => {
-                                    const next = { ...prev };
-                                    delete next[p.id];
-                                    return next;
-                                  });
-                                }
-                              }}
-                              className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                            />
+                            <div className="flex justify-center">
+                              <TableCheckbox
+                                checked={isSelected}
+                                onChange={(next) => {
+                                  if (next) {
+                                    setSelectedForPleito((prev) => {
+                                      const nextSet = new Set(prev);
+                                      nextSet.add(p.id);
+                                      return nextSet;
+                                    });
+                                  } else {
+                                    setSelectedForPleito((prev) => {
+                                      const nextSet = new Set(prev);
+                                      nextSet.delete(p.id);
+                                      return nextSet;
+                                    });
+                                    setValorPleiteado((prev) => {
+                                      const nextVal = { ...prev };
+                                      delete nextVal[p.id];
+                                      return nextVal;
+                                    });
+                                  }
+                                }}
+                                ariaLabel={`Selecionar ordem de serviço ${formatOsSePastaOrDash(p.divSe, p.folderNumber)}`}
+                              />
+                            </div>
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap">
                             <span

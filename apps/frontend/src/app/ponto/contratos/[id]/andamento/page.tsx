@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { TableCheckbox } from '@/components/ui/Checkbox';
 import api from '@/lib/api';
 import { STATUS_ORCAMENTO_OPCOES, STATUS_EXECUCAO_OPCOES, type PleitoFormData } from '@/lib/pleitoForm';
 import {
@@ -1208,21 +1209,19 @@ export default function AndamentoListPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1500px]">
+                  <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th data-col-key="select" data-col-lock-first="1" className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
-                          <input
-                            type="checkbox"
-                            checked={allVisibleSelected}
-                            ref={(el) => {
-                              if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected;
-                            }}
-                            onChange={(e) => toggleSelectAllVisiblePleitos(e.target.checked)}
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label="Selecionar todas as ordens de serviço visíveis"
-                            className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                          />
+                        <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
+                          <div className="flex justify-center">
+                            <TableCheckbox
+                              checked={allVisibleSelected}
+                              indeterminate={someVisibleSelected && !allVisibleSelected}
+                              onChange={toggleSelectAllVisiblePleitos}
+                              onClick={(e) => e.stopPropagation()}
+                              ariaLabel="Selecionar todas as ordens de serviço visíveis"
+                            />
+                          </div>
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
@@ -1249,7 +1248,7 @@ export default function AndamentoListPage() {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Preenchimento</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-200 dark:border-gray-700">
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {filteredPleitos.map((p) => {
                         const osSe = (p.divSe || '').trim();
                         const acumulado = billings
@@ -1279,31 +1278,32 @@ export default function AndamentoListPage() {
                             className="hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
                           >
                             <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={selectedForPleito.has(p.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedForPleito((prev) => {
-                                      const next = new Set(prev);
-                                      next.add(p.id);
-                                      return next;
-                                    });
-                                  } else {
-                                    setSelectedForPleito((prev) => {
-                                      const next = new Set(prev);
-                                      next.delete(p.id);
-                                      return next;
-                                    });
-                                    setValorPleiteado((prev) => {
-                                      const next = { ...prev };
-                                      delete next[p.id];
-                                      return next;
-                                    });
-                                  }
-                                }}
-                                className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                              />
+                              <div className="flex justify-center">
+                                <TableCheckbox
+                                  checked={selectedForPleito.has(p.id)}
+                                  onChange={(next) => {
+                                    if (next) {
+                                      setSelectedForPleito((prev) => {
+                                        const nextSet = new Set(prev);
+                                        nextSet.add(p.id);
+                                        return nextSet;
+                                      });
+                                    } else {
+                                      setSelectedForPleito((prev) => {
+                                        const nextSet = new Set(prev);
+                                        nextSet.delete(p.id);
+                                        return nextSet;
+                                      });
+                                      setValorPleiteado((prev) => {
+                                        const nextVal = { ...prev };
+                                        delete nextVal[p.id];
+                                        return nextVal;
+                                      });
+                                    }
+                                  }}
+                                  ariaLabel={`Selecionar ordem de serviço ${formatOsSePastaOrDash(p.divSe, p.folderNumber)}`}
+                                />
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                               {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
