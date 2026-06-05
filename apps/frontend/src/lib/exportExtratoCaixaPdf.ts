@@ -42,7 +42,7 @@ export type ExportExtratoCaixaPdfInput = {
   stats: ExtratoCaixaPdfStats;
   movimentacoesFiltradas: number;
   filterLines: string[];
-  /** Ajustes manuais do recorte (período/busca), exibidos antes dos resumos. */
+  /** Ajustes manuais do recorte (mesmos filtros do balanço), exibidos antes dos resumos. */
   ajustesManuais?: ExtratoCaixaPdfAjusteRow[];
   sections: ExtratoCaixaPdfSection[];
 };

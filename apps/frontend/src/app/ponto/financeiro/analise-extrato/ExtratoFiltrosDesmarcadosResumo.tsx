@@ -1,17 +1,14 @@
 'use client';
 
 import React from 'react';
-import { Info } from 'lucide-react';
 import type { ExtratoFiltroCampoDesmarcado } from '@/lib/extratoCaixaFiltrosSalvos';
 
 type ExtratoFiltrosDesmarcadosResumoProps = {
   camposDesmarcados: ExtratoFiltroCampoDesmarcado[];
-  temAjustesManuais?: boolean;
 };
 
 export function ExtratoFiltrosDesmarcadosResumo({
-  camposDesmarcados,
-  temAjustesManuais = false
+  camposDesmarcados
 }: ExtratoFiltrosDesmarcadosResumoProps) {
   if (camposDesmarcados.length === 0) return null;
 
@@ -41,15 +38,6 @@ export function ExtratoFiltrosDesmarcadosResumo({
           );
         })}
       </ul>
-
-      {temAjustesManuais ? (
-        <p className="mt-3 flex items-start gap-2 border-t border-gray-200 pt-3 text-xs leading-relaxed text-amber-800 dark:border-gray-700 dark:text-amber-200/90">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span>
-            Ajustes manuais entram sempre nos totais e resumos (respeitam apenas período e busca).
-          </span>
-        </p>
-      ) : null}
     </div>
   );
 }
