@@ -23,6 +23,9 @@ router.put('/:centroCustoId/orcamentos/:orcamentoId', (req, res, next) =>
 router.post('/:centroCustoId/orcamentos/:orcamentoId/cronograma/gerar-sub-servicos', (req, res, next) =>
   controller.gerarSubServicosCronograma(req as any, res, next)
 );
+router.post('/:centroCustoId/orcamentos/:orcamentoId/cronograma/estimar-prazos', (req, res, next) =>
+  controller.estimarPrazosCronograma(req as any, res, next)
+);
 router.delete('/:centroCustoId/orcamentos/:orcamentoId', (req, res, next) =>
   controller.deleteOrcamento(req as any, res, next)
 );

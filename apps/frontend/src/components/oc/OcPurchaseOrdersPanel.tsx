@@ -28,6 +28,7 @@ import { FinancialControlEntryModal } from '@/components/financeiro/FinancialCon
 import { buildFormFromPurchaseOrder } from '@/components/financeiro/financialControlEntry';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -1974,7 +1975,7 @@ export function OcPurchaseOrdersPanel({
                       const ocMovementTag = latestMovement ? buildOcTagFromMovement(latestMovement) : null;
                       const ocAttachmentTags = parseOcAttachmentTagsFromNotes(latestMovement?.notes);
                       return (
-                      <tr key={o.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <tr key={o.id} className={listTableRowClasses.tr}>
                         {activeTab === 'APPROVED' && (
                           <td className="w-12 min-w-[3rem] max-w-[3rem] px-2 sm:px-3 py-4 align-middle">
                             <div className="flex items-center justify-center">
@@ -1993,8 +1994,8 @@ export function OcPurchaseOrdersPanel({
                             </div>
                           </td>
                         )}
-                        <td className="px-3 sm:px-6 py-4 text-sm font-mono font-medium text-gray-900 dark:text-gray-100">
-                          {o.orderNumber}
+                        <td className="px-3 sm:px-6 py-4 text-sm">
+                          <span className="text-sm text-gray-900 dark:text-gray-100 font-mono font-medium">{o.orderNumber}</span>
                         </td>
                         <td className="px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                           {o.supplier?.name || '-'}
@@ -2372,7 +2373,7 @@ export function OcPurchaseOrdersPanel({
                                     return { orderId: o.id, ...pos };
                                   });
                                 }}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                className={rowActionMenuButtonClass(ocActionMenu?.orderId === o.id)}
                                 aria-label="Menu de ações"
                                 aria-expanded={ocActionMenu?.orderId === o.id}
                                 aria-haspopup="menu"

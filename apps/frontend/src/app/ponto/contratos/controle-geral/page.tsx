@@ -10,6 +10,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { listTableRowClasses } from '@/components/ui/listTableUi';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -296,13 +297,13 @@ export default function ControleGeralContratosPage() {
                           {pageContracts.map((c) => (
                             <tr
                               key={c.id}
-                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                              className={listTableRowClasses.tr}
                             >
                               <td className="px-3 sm:px-6 py-4">
                                 <div>
-                                  <p className="font-medium text-gray-900 dark:text-gray-100">
+                                  <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">
                                     {c.name}
-                                  </p>
+                                  </span>
                                   <p className="text-xs font-mono text-gray-500 dark:text-gray-400">
                                     nº {c.number}
                                   </p>

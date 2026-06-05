@@ -8,9 +8,12 @@ import {
   EyeOff,
   Loader2,
   Plus,
+  RefreshCw,
   Trash2
 } from 'lucide-react';
-import { gerarSubServicosCronograma } from './orcamentoCronogramaApi';
+import { estimarPrazosCronograma, gerarSubServicosCronograma } from './orcamentoCronogramaApi';
+import toast from 'react-hot-toast';
+import { isAxiosError } from 'axios';
 import {
   calcularDesvioTimeline,
   calcularMarcadorHojeTimeline,
@@ -19,6 +22,7 @@ import {
   calcularTimelineRangeVisivel,
   copiarDatasPlanParaRealCronograma,
   distribuirPrazoGeralCronograma,
+  montarPayloadEstimativaPrazoCronograma,
   formatDesvioDiasCurto,
   formatDesvioDiasLabel,
   montarLinhasTimeline,
@@ -37,17 +41,27 @@ import {
 import {
   CRONOGRAMA_STATUS_CLASS,
   CRONOGRAMA_STATUS_LABEL,
+  agruparSubServicosPorBloco,
   calcularStatusCronograma,
   criarSubServicoManual,
+  cronogramaUsaHierarquiaSubtitulos,
   diasEntre,
+  filtrarSubServicosOperacionaisCronograma,
   formatDataBr,
+  etapaCronogramaEhSintetica,
+  listarEtapasCronogramaBloco,
   listarSubServicos,
+  listarSubtitulosVisiveisCronograma,
   novoSubServicoId,
+  ordenarSubServicosSequenciaObra,
   parseDataIso,
-  resolverDadosCronogramaServico,
+  resolverDadosCronogramaBloco,
+  resolverDadosCronogramaComposicao,
+  resolverDadosCronogramaServicoParaLinha,
   resolverDadosCronogramaSubServico,
   type CronogramaItemData,
   type CronogramaLinhaServico,
+  type CronogramaLinhaSubtitulo,
   type CronogramaPersist,
   type CronogramaSubServico
 } from './orcamentoCronogramaTypes';
@@ -96,11 +110,18 @@ const timelineLabelColCls =
 const TIMELINE_LABEL_MIN_W_PX = 360;
 
 function calcularLarguraColunaServicoTimeline(
-  linhas: { label: string; isSub: boolean }[]
+  linhas: { label: string; indentLevel?: 0 | 1 | 2 }[]
 ): number {
   const longest = linhas.reduce((max, row) => Math.max(max, row.label.length), 0);
-  const indentExtra = linhas.some((r) => r.isSub) ? 4 : 0;
+  const maxIndent = linhas.reduce((max, row) => Math.max(max, row.indentLevel ?? (row as { isSub?: boolean }).isSub ? 1 : 0), 0);
+  const indentExtra = maxIndent * 16;
   return Math.min(720, Math.max(TIMELINE_LABEL_MIN_W_PX, longest * 7 + indentExtra + 40));
+}
+
+function paddingServicoColCls(indentLevel: 0 | 1 | 2 = 0): string {
+  if (indentLevel >= 2) return 'pl-9';
+  if (indentLevel === 1) return 'pl-6';
+  return 'pl-4';
 }
 
 function formatPct(v: number) {
@@ -178,6 +199,107 @@ function SubServicoNomeCell({
   );
 }
 
+function ComposicaoResumoNomeCell({ nome }: { nome: string }) {
+  return (
+    <div className="flex min-h-[2.75rem] items-center gap-2 min-w-0">
+      <span
+        className="flex-1 py-1.5 pl-1 pr-0.5 text-left text-xs font-normal text-gray-800 dark:text-gray-200 whitespace-nowrap"
+        title={nome}
+      >
+        {nome}
+      </span>
+    </div>
+  );
+}
+
+function CelulasEtapaCronograma({
+  resolvido,
+  status,
+  readOnly,
+  ariaPrefix,
+  onPatch
+}: {
+  resolvido: CronogramaItemData;
+  status: ReturnType<typeof calcularStatusCronograma>;
+  readOnly: boolean;
+  ariaPrefix: string;
+  onPatch: (patch: Partial<CronogramaItemData>) => void;
+}) {
+  const observacao = resolvido.observacao?.trim() || '';
+
+  return (
+    <>
+      <td className={tdGradeDateCls}>
+        <DatePickerField
+          size="table"
+          appearance="inline"
+          value={resolvido.dataInicio ?? ''}
+          onChange={(v) => onPatch({ dataInicio: v })}
+          placeholder="dd/mm/aaaa"
+          aria-label={`Início plan. — ${ariaPrefix}`}
+          disabled={readOnly}
+        />
+      </td>
+      <td className={tdGradeDateCls}>
+        <DatePickerField
+          size="table"
+          appearance="inline"
+          value={resolvido.dataFim ?? ''}
+          onChange={(v) => onPatch({ dataFim: v })}
+          placeholder="dd/mm/aaaa"
+          aria-label={`Fim plan. — ${ariaPrefix}`}
+          disabled={readOnly}
+        />
+      </td>
+      <td className={tdGradeDateCls}>
+        <DatePickerField
+          size="table"
+          appearance="inline"
+          value={resolvido.dataInicioReal ?? ''}
+          onChange={(v) => onPatch({ dataInicioReal: v })}
+          placeholder="dd/mm/aaaa"
+          aria-label={`Início real — ${ariaPrefix}`}
+          disabled={readOnly}
+        />
+      </td>
+      <td className={tdGradeDateCls}>
+        <DatePickerField
+          size="table"
+          appearance="inline"
+          value={resolvido.dataFimReal ?? ''}
+          onChange={(v) => onPatch({ dataFimReal: v })}
+          placeholder="dd/mm/aaaa"
+          aria-label={`Fim real — ${ariaPrefix}`}
+          disabled={readOnly}
+        />
+      </td>
+      <td className={`${tdCls} text-center tabular-nums text-xs`}>
+        {diasEntre(resolvido.dataInicio, resolvido.dataFim) ?? '—'}
+      </td>
+      <td className={tdPctColCls}>
+        <PercentualExecCell
+          value={resolvido.percentualExecutado}
+          readOnly={readOnly}
+          onChange={
+            readOnly
+              ? undefined
+              : (v) => onPatch({ percentualExecutado: v })
+          }
+          ariaLabel={`% executado — ${ariaPrefix}`}
+        />
+      </td>
+      <td className={`${tdCls} text-center`}>
+        <span
+          className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}`}
+          title={observacao || undefined}
+        >
+          {CRONOGRAMA_STATUS_LABEL[status]}
+        </span>
+      </td>
+    </>
+  );
+}
+
 function PercentualExecCell({
   value,
   onChange,
@@ -225,7 +347,7 @@ function PercentualExecCell({
       <span
         className="block w-full py-1 text-center text-xs tabular-nums text-gray-800 dark:text-gray-200"
         aria-label={ariaLabel}
-        title="Calculado automaticamente a partir dos subserviços"
+        title="Calculado automaticamente a partir das etapas"
       >
         {exibir}
       </span>
@@ -271,97 +393,6 @@ function PercentualExecCell({
   );
 }
 
-function ObservacaoCell({
-  value,
-  onChange,
-  ariaLabel,
-  readOnly = false,
-  destacar = false
-}: {
-  value: string;
-  onChange?: (v: string) => void;
-  ariaLabel: string;
-  readOnly?: boolean;
-  destacar?: boolean;
-}) {
-  const [editando, setEditando] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const placeholder = destacar ? 'Motivo do atraso…' : 'Observação…';
-
-  useEffect(() => {
-    if (!editando) setDraft(value);
-  }, [value, editando]);
-
-  useEffect(() => {
-    if (editando) inputRef.current?.focus();
-  }, [editando]);
-
-  const commit = () => {
-    if (readOnly || !onChange) {
-      setEditando(false);
-      return;
-    }
-    onChange(draft.trim());
-    setEditando(false);
-  };
-
-  const display = value.trim();
-
-  if (readOnly) {
-    return (
-      <span
-        className="block max-w-[16rem] truncate text-xs text-gray-500 dark:text-gray-400"
-        title={display || undefined}
-      >
-        {display || '—'}
-      </span>
-    );
-  }
-
-  if (editando) {
-    return (
-      <textarea
-        ref={inputRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            commit();
-          }
-          if (e.key === 'Escape') {
-            setDraft(value);
-            setEditando(false);
-          }
-        }}
-        rows={2}
-        className="w-full min-w-[12rem] max-w-[18rem] rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 resize-y"
-        aria-label={ariaLabel}
-        placeholder={placeholder}
-      />
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => setEditando(true)}
-      className={`w-full max-w-[16rem] truncate rounded px-1 py-1.5 text-left text-xs transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 ${
-        display
-          ? destacar
-            ? 'font-medium text-red-700 dark:text-red-300'
-            : 'text-gray-800 dark:text-gray-200'
-          : 'italic text-gray-400 dark:text-gray-500'
-      }`}
-      title={display || placeholder}
-    >
-      {display || placeholder}
-    </button>
-  );
-}
-
 export function OrcamentoCronogramaPainel({
   linhas,
   cronograma,
@@ -377,6 +408,8 @@ export function OrcamentoCronogramaPainel({
   const [timelinePanOffset, setTimelinePanOffset] = useState(0);
   const [editorTarget, setEditorTarget] = useState<TimelineEtapaEditorTarget | null>(null);
   const [gerandoServicoKey, setGerandoServicoKey] = useState<string | null>(null);
+  const [gerandoBlocoKey, setGerandoBlocoKey] = useState<string | null>(null);
+  const [distribuindoPrazo, setDistribuindoPrazo] = useState(false);
   const cronogramaRef = useRef(cronograma);
   const autoGeradoRef = useRef<Set<string>>(new Set());
   cronogramaRef.current = cronograma;
@@ -437,6 +470,22 @@ export function OrcamentoCronogramaPainel({
     });
   };
 
+  const patchComposicaoEtapa = (
+    blocoKey: string,
+    composicaoChave: string,
+    patch: Partial<CronogramaItemData>
+  ) => {
+    const itemKey = `${blocoKey}|${composicaoChave}`;
+    const prev = cronograma.porItem?.[itemKey] ?? {};
+    onChange({
+      ...cronograma,
+      porItem: {
+        ...(cronograma.porItem ?? {}),
+        [itemKey]: { ...prev, ...patch }
+      }
+    });
+  };
+
   const applySubServicos = (servicoKey: string, lista: CronogramaSubServico[]) => {
     const next: CronogramaPersist = {
       ...cronogramaRef.current,
@@ -462,8 +511,24 @@ export function OrcamentoCronogramaPainel({
     setSubServicos(servicoKey, lista);
   };
 
-  const adicionarSubServico = (servicoKey: string) => {
-    const lista = [...listarSubServicos(cronograma, servicoKey), criarSubServicoManual()];
+  const adicionarSubServico = (servicoKey: string, subtituloBlocoKey?: string) => {
+    const novo = criarSubServicoManual();
+    const sub: CronogramaSubServico = subtituloBlocoKey
+      ? { ...novo, subtituloBlocoKey }
+      : novo;
+    const lista = [...listarSubServicos(cronograma, servicoKey)];
+    if (subtituloBlocoKey) {
+      let insertAt = lista.length;
+      for (let i = lista.length - 1; i >= 0; i--) {
+        if (lista[i].subtituloBlocoKey === subtituloBlocoKey) {
+          insertAt = i + 1;
+          break;
+        }
+      }
+      lista.splice(insertAt, 0, sub);
+    } else {
+      lista.push(sub);
+    }
     setSubServicos(servicoKey, lista);
   };
 
@@ -472,10 +537,59 @@ export function OrcamentoCronogramaPainel({
     setSubServicos(servicoKey, lista);
   };
 
-  const distribuirPrazoGeral = () => {
-    if (!dataInicioObra || !dataFimObra) return;
-    const next = distribuirPrazoGeralCronograma(linhas, cronograma, dataInicioObra, dataFimObra);
-    if (next) onChange(next);
+  const distribuirPrazoGeral = async () => {
+    if (!dataInicioObra || !dataFimObra || distribuindoPrazo) return;
+    setDistribuindoPrazo(true);
+    try {
+      let pesosPorEtapa: Record<string, number> | undefined;
+      let origem: 'ia' | 'heuristica' | 'valor' = 'valor';
+
+      if (centroCustoId && orcamentoId) {
+        const etapas = montarPayloadEstimativaPrazoCronograma(linhas, cronograma);
+        if (etapas.length > 0) {
+          const result = await estimarPrazosCronograma(centroCustoId, orcamentoId, {
+            dataInicioObra,
+            dataFimObra,
+            etapas
+          });
+          pesosPorEtapa = {};
+          for (const e of result.etapas) {
+            if (e.etapaKey && e.diasEstimados > 0) {
+              pesosPorEtapa[e.etapaKey] = e.diasEstimados;
+            }
+          }
+          origem = result.origem;
+        }
+      }
+
+      const next = distribuirPrazoGeralCronograma(
+        linhas,
+        cronograma,
+        dataInicioObra,
+        dataFimObra,
+        pesosPorEtapa
+      );
+      if (!next) return;
+      onChange(next);
+      if (origem === 'ia') {
+        toast.success('Prazos distribuídos com estimativa de IA por etapa.');
+      } else if (origem === 'heuristica') {
+        toast.success('Prazos distribuídos com estimativa por quantidade e tipo de serviço.');
+      }
+    } catch (err) {
+      const next = distribuirPrazoGeralCronograma(linhas, cronograma, dataInicioObra, dataFimObra);
+      if (!next) return;
+      onChange(next);
+      if (isAxiosError(err) && err.code === 'ECONNABORTED') {
+        toast.error('A estimativa demorou demais — prazos distribuídos pelo valor.');
+      } else if (isAxiosError(err) && !err.response) {
+        toast.error('Falha na conexão com o servidor — prazos distribuídos pelo valor.');
+      } else {
+        toast.error('Não foi possível estimar com IA — prazos distribuídos pelo valor.');
+      }
+    } finally {
+      setDistribuindoPrazo(false);
+    }
   };
 
   const copiarPlanParaReal = () => {
@@ -485,15 +599,70 @@ export function OrcamentoCronogramaPainel({
   const patchEtapaDados = (row: CronogramaTimelineLinha, patch: Partial<CronogramaItemData>) => {
     if (row.subId) {
       patchSubServico(row.servicoKey, row.subId, patch);
-    } else {
-      patchServico(row.servicoKey, patch);
+      return;
     }
+    if (row.composicaoChave && row.blocoKey) {
+      patchComposicaoEtapa(row.blocoKey, row.composicaoChave, patch);
+      return;
+    }
+    patchServico(row.servicoKey, patch);
   };
 
   const abrirEditorEtapa = (row: CronogramaTimelineLinha, e: React.MouseEvent) => {
-    if (!row.editavel || row.isCabecalhoServico) return;
+    if (!row.editavel || row.isCabecalhoServico || row.isCabecalhoSubtitulo) return;
     e.stopPropagation();
     setEditorTarget({ row, anchorEl: e.currentTarget as HTMLElement });
+  };
+
+  const gerarSubServicosBloco = async (
+    linha: CronogramaLinhaServico,
+    st: CronogramaLinhaSubtitulo
+  ): Promise<CronogramaSubServico[]> => {
+    const cfg = cronogramaRef.current.config;
+    const result = await gerarSubServicosCronograma(centroCustoId!, orcamentoId!, {
+      servicoId: linha.servicoKey,
+      servicoNome: linha.servicoNome,
+      subtituloNome: st.subtituloNome,
+      dataInicioObra: dataInicioObra || cfg?.dataInicioObra,
+      dataFimObra: dataFimObra || cfg?.dataFimObra,
+      composicoes: st.composicoes
+    });
+    return result.subServicos.map((s) => ({
+      id: novoSubServicoId(),
+      nome: s.nome,
+      origem: 'ia' as const,
+      composicaoChave: s.composicaoChave,
+      subtituloBlocoKey: st.blocoKey
+    }));
+  };
+
+  const gerarTodosSubServicos = async (
+    linha: CronogramaLinhaServico
+  ): Promise<CronogramaSubServico[]> => {
+    const cfg = cronogramaRef.current.config;
+    const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
+
+    if (subtitulosVisiveis.length > 0) {
+      const todos: CronogramaSubServico[] = [];
+      for (const st of subtitulosVisiveis) {
+        todos.push(...(await gerarSubServicosBloco(linha, st)));
+      }
+      return todos;
+    }
+
+    const result = await gerarSubServicosCronograma(centroCustoId!, orcamentoId!, {
+      servicoId: linha.servicoKey,
+      servicoNome: linha.servicoNome,
+      dataInicioObra: dataInicioObra || cfg?.dataInicioObra,
+      dataFimObra: dataFimObra || cfg?.dataFimObra,
+      composicoes: linha.composicoes
+    });
+    return result.subServicos.map((s) => ({
+      id: novoSubServicoId(),
+      nome: s.nome,
+      origem: 'ia' as const,
+      composicaoChave: s.composicaoChave
+    }));
   };
 
   const gerarSubServicosParaLinha = async (linha: CronogramaLinhaServico): Promise<boolean> => {
@@ -502,28 +671,35 @@ export function OrcamentoCronogramaPainel({
 
     setGerandoServicoKey(linha.servicoKey);
     try {
-      const cfg = cronogramaRef.current.config;
-      const result = await gerarSubServicosCronograma(centroCustoId, orcamentoId, {
-        servicoId: linha.servicoKey,
-        servicoNome: linha.servicoNome,
-        dataInicioObra: dataInicioObra || cfg?.dataInicioObra,
-        dataFimObra: dataFimObra || cfg?.dataFimObra,
-        composicoes: linha.composicoes
-      });
-
-      const novos: CronogramaSubServico[] = result.subServicos.map((s) => ({
-        id: novoSubServicoId(),
-        nome: s.nome,
-        origem: 'ia' as const,
-        composicaoChave: s.composicaoChave
-      }));
-
+      const novos = await gerarTodosSubServicos(linha);
       applySubServicos(linha.servicoKey, novos);
       return true;
     } catch {
       return false;
     } finally {
       setGerandoServicoKey((k) => (k === linha.servicoKey ? null : k));
+    }
+  };
+
+  const regerarSubServicosBloco = async (
+    linha: CronogramaLinhaServico,
+    st: CronogramaLinhaSubtitulo
+  ) => {
+    if (!centroCustoId || !orcamentoId) return;
+    setGerandoBlocoKey(st.blocoKey);
+    try {
+      const novosBloco = await gerarSubServicosBloco(linha, st);
+      const atuais = listarSubServicos(cronogramaRef.current, linha.servicoKey);
+      const porBloco = agruparSubServicosPorBloco(linha, atuais);
+      const mantidos: CronogramaSubServico[] = [];
+      for (const [blocoKey, subsBloco] of Array.from(porBloco.entries())) {
+        if (blocoKey !== st.blocoKey) mantidos.push(...subsBloco);
+      }
+      applySubServicos(linha.servicoKey, [...mantidos, ...novosBloco]);
+    } catch {
+      /* mantém etapas atuais */
+    } finally {
+      setGerandoBlocoKey((k) => (k === st.blocoKey ? null : k));
     }
   };
 
@@ -573,9 +749,6 @@ export function OrcamentoCronogramaPainel({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Serviços do cronograma</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Etapas sugeridas automaticamente a partir das composições. Edite, adicione ou exclua conforme a obra.
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex items-center gap-1 p-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-100/80 dark:bg-gray-800/70">
@@ -671,12 +844,16 @@ export function OrcamentoCronogramaPainel({
               <button
                 type="button"
                 onClick={distribuirPrazoGeral}
-                disabled={!dataInicioObra || !dataFimObra}
+                disabled={!dataInicioObra || !dataFimObra || distribuindoPrazo}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                title="Distribui o prazo do orçamento entre as etapas, proporcional ao valor"
+                title="Estima a duração de cada etapa (IA quando disponível) e distribui o prazo da obra em sequência"
               >
-                <Calendar className="h-3.5 w-3.5" aria-hidden />
-                Distribuir prazo geral
+                {distribuindoPrazo ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <Calendar className="h-3.5 w-3.5" aria-hidden />
+                )}
+                {distribuindoPrazo ? 'Estimando prazos…' : 'Distribuir prazo geral'}
               </button>
               <button
                 type="button"
@@ -857,7 +1034,9 @@ export function OrcamentoCronogramaPainel({
                     className={`group/tlrow grid border-b border-gray-100 dark:border-gray-800 ${
                       row.isCabecalhoServico
                         ? 'bg-gray-50/80 dark:bg-gray-800/40'
-                        : 'bg-white dark:bg-gray-900/80'
+                        : row.isCabecalhoSubtitulo
+                          ? 'bg-slate-100/90 dark:bg-gray-900/70'
+                          : 'bg-white dark:bg-gray-900/80'
                     }`}
                     style={{
                       gridTemplateColumns: timelineGridCols.linha,
@@ -865,26 +1044,30 @@ export function OrcamentoCronogramaPainel({
                     }}
                   >
                     <div
-                      className={`${timelineLabelColCls} flex flex-col justify-center border-r border-gray-200/70 dark:border-gray-700/70 ${
-                        row.isSub ? 'pl-5' : 'pl-4'
-                      }`}
+                      className={`${timelineLabelColCls} flex flex-col justify-center border-r border-gray-200/70 dark:border-gray-700/70 ${paddingServicoColCls(row.indentLevel ?? (row.isSub ? 1 : 0))}`}
                     >
                       <div
                         className={`flex items-center min-w-0 gap-1 ${
-                          row.isCabecalhoServico || row.showBar ? 'justify-between' : ''
+                          row.isCabecalhoServico || row.isCabecalhoSubtitulo || row.showBar
+                            ? 'justify-between'
+                            : ''
                         }`}
                       >
                         <span
                           className={`min-w-0 truncate leading-snug ${
-                            row.isCabecalhoServico || !row.isSub
+                            row.isCabecalhoServico
                               ? 'font-semibold text-gray-900 dark:text-gray-100'
-                              : 'font-normal text-gray-700 dark:text-gray-300'
+                              : row.isCabecalhoSubtitulo
+                                ? 'text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200'
+                                : row.isSub
+                                  ? 'font-normal text-gray-700 dark:text-gray-300'
+                                  : 'font-semibold text-gray-900 dark:text-gray-100'
                           }`}
                           title={row.label}
                         >
                           {row.label}
                         </span>
-                        {row.isCabecalhoServico || row.showBar ? (
+                        {row.isCabecalhoServico || row.isCabecalhoSubtitulo || row.showBar ? (
                           <span className="flex shrink-0 items-center gap-1">
                             {desvioFimLabel ? (
                               <span
@@ -912,7 +1095,7 @@ export function OrcamentoCronogramaPainel({
                       </div>
                     </div>
 
-                    {row.isCabecalhoServico ? (
+                    {row.isCabecalhoServico || row.isCabecalhoSubtitulo ? (
                       <div className="min-w-0" />
                     ) : (
                       <div
@@ -1036,15 +1219,21 @@ export function OrcamentoCronogramaPainel({
                   <th className={`${thCls} min-w-[4rem]`}>Dias</th>
                   <th className={thPctColCls}>% Exec.</th>
                   <th className={`${thCls} min-w-[7rem]`}>Status</th>
-                  <th className={`${thCls} min-w-[12rem] text-left`}>Observação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
                 {linhas.flatMap((linha) => {
-                  const resolvido = resolverDadosCronogramaServico(cronograma, linha.servicoKey);
+                  const resolvido = resolverDadosCronogramaServicoParaLinha(cronograma, linha);
                   const status = calcularStatusCronograma(resolvido);
-                  const subs = listarSubServicos(cronograma, linha.servicoKey);
+                  const subs = filtrarSubServicosOperacionaisCronograma(
+                    linha,
+                    listarSubServicos(cronograma, linha.servicoKey)
+                  );
                   const gerando = gerandoServicoKey === linha.servicoKey;
+                  const usaHierarquia = cronogramaUsaHierarquiaSubtitulos(linha);
+                  const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
+                  const subsPorBloco = agruparSubServicosPorBloco(linha, subs);
+                  const servicoComFilhas = subs.length > 0;
 
                   const linhaServico = (
                     <tr
@@ -1064,7 +1253,7 @@ export function OrcamentoCronogramaPainel({
                               </span>
                             ) : null}
                           </div>
-                          {!gerando ? (
+                          {!gerando && !usaHierarquia ? (
                             <button
                               type="button"
                               onClick={() => adicionarSubServico(linha.servicoKey)}
@@ -1077,187 +1266,159 @@ export function OrcamentoCronogramaPainel({
                           ) : null}
                         </div>
                       </td>
-                      <td className={tdGradeDateCls}>
-                        <DatePickerField
-                          size="table"
-                          appearance="inline"
-                          value={resolvido.dataInicio ?? ''}
-                          onChange={(v) => patchServico(linha.servicoKey, { dataInicio: v })}
-                          placeholder="dd/mm/aaaa"
-                          aria-label={`Início plan. — ${linha.servicoNome}`}
-                          disabled={subs.length > 0}
-                        />
-                      </td>
-                      <td className={tdGradeDateCls}>
-                        <DatePickerField
-                          size="table"
-                          appearance="inline"
-                          value={resolvido.dataFim ?? ''}
-                          onChange={(v) => patchServico(linha.servicoKey, { dataFim: v })}
-                          placeholder="dd/mm/aaaa"
-                          aria-label={`Fim plan. — ${linha.servicoNome}`}
-                          disabled={subs.length > 0}
-                        />
-                      </td>
-                      <td className={tdGradeDateCls}>
-                        <DatePickerField
-                          size="table"
-                          appearance="inline"
-                          value={resolvido.dataInicioReal ?? ''}
-                          onChange={(v) => patchServico(linha.servicoKey, { dataInicioReal: v })}
-                          placeholder="dd/mm/aaaa"
-                          aria-label={`Início real — ${linha.servicoNome}`}
-                          disabled={subs.length > 0}
-                        />
-                      </td>
-                      <td className={tdGradeDateCls}>
-                        <DatePickerField
-                          size="table"
-                          appearance="inline"
-                          value={resolvido.dataFimReal ?? ''}
-                          onChange={(v) => patchServico(linha.servicoKey, { dataFimReal: v })}
-                          placeholder="dd/mm/aaaa"
-                          aria-label={`Fim real — ${linha.servicoNome}`}
-                          disabled={subs.length > 0}
-                        />
-                      </td>
-                      <td className={`${tdCls} text-center tabular-nums text-xs`}>
-                        {diasEntre(resolvido.dataInicio, resolvido.dataFim) ?? '—'}
-                      </td>
-                      <td className={tdPctColCls}>
-                        <PercentualExecCell
-                          value={resolvido.percentualExecutado}
-                          readOnly={subs.length > 0}
-                          onChange={
-                            subs.length > 0
-                              ? undefined
-                              : (v) => patchServico(linha.servicoKey, { percentualExecutado: v })
-                          }
-                          ariaLabel={`% executado — ${linha.servicoNome}`}
-                        />
-                      </td>
-                      <td className={`${tdCls} text-center`}>
-                        <span className={statusSpanCls(status)}>{CRONOGRAMA_STATUS_LABEL[status]}</span>
-                      </td>
-                      <td className={`${tdCls} text-left`}>
-                        <ObservacaoCell
-                          value={resolvido.observacao ?? ''}
-                          readOnly={subs.length > 0}
-                          destacar={status === 'atrasado'}
-                          onChange={
-                            subs.length > 0
-                              ? undefined
-                              : (v) => patchServico(linha.servicoKey, { observacao: v })
-                          }
-                          ariaLabel={`Observação — ${linha.servicoNome}`}
-                        />
-                      </td>
+                      <CelulasEtapaCronograma
+                        resolvido={resolvido}
+                        status={status}
+                        readOnly={servicoComFilhas}
+                        ariaPrefix={linha.servicoNome}
+                        onPatch={(patch) => patchServico(linha.servicoKey, patch)}
+                      />
                     </tr>
                   );
 
-                  if (subs.length === 0) {
-                    return [linhaServico];
-                  }
-
-                  const linhasSub = subs.map((sub, idx) => {
-                    const subResolvido = resolverDadosCronogramaSubServico(
-                      cronograma,
-                      linha.servicoKey,
-                      sub,
-                      idx,
-                      subs.length
-                    );
+                  const renderLinhaSub = (
+                    sub: CronogramaSubServico,
+                    idx: number,
+                    total: number,
+                    indentLevel: 0 | 1 | 2,
+                    blocoKey?: string
+                  ) => {
+                    const sintetica = etapaCronogramaEhSintetica(sub);
+                    const subResolvido = (() => {
+                      if (sintetica && blocoKey && sub.composicaoChave) {
+                        const porItem = resolverDadosCronogramaComposicao(cronograma, blocoKey, {
+                          chave: sub.composicaoChave,
+                          codigo: '',
+                          descricao: sub.nome,
+                          subtituloNome: '',
+                          quantidade: 0
+                        });
+                        if (porItem.dataInicio && porItem.dataFim) return porItem;
+                      }
+                      return resolverDadosCronogramaSubServico(
+                        cronograma,
+                        linha.servicoKey,
+                        sub,
+                        idx,
+                        total
+                      );
+                    })();
                     const subStatus = calcularStatusCronograma(subResolvido);
                     return (
                       <tr
                         key={`${linha.servicoKey}-${sub.id}`}
                         className="group/subrow bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200/60 dark:border-gray-700/80"
                       >
-                        <td className={`${tdServicoColCls} text-left pl-5`}>
-                          <SubServicoNomeCell
-                            sub={sub}
-                            onPatch={(nome) => patchSubServico(linha.servicoKey, sub.id, { nome })}
-                            onRemove={() => removerSubServico(linha.servicoKey, sub.id)}
-                          />
+                        <td className={`${tdServicoColCls} text-left ${paddingServicoColCls(indentLevel)}`}>
+                          {sintetica ? (
+                            <ComposicaoResumoNomeCell nome={sub.nome} />
+                          ) : (
+                            <SubServicoNomeCell
+                              sub={sub}
+                              onPatch={(nome) => patchSubServico(linha.servicoKey, sub.id, { nome })}
+                              onRemove={() => removerSubServico(linha.servicoKey, sub.id)}
+                            />
+                          )}
                         </td>
-                        <td className={tdGradeDateCls}>
-                          <DatePickerField
-                            size="table"
-                          appearance="inline"
-                            value={sub.dataInicio ?? ''}
-                            onChange={(v) =>
-                              patchSubServico(linha.servicoKey, sub.id, { dataInicio: v })
+                        <CelulasEtapaCronograma
+                          resolvido={subResolvido}
+                          status={subStatus}
+                          readOnly={false}
+                          ariaPrefix={sub.nome}
+                          onPatch={(patch) => {
+                            if (sintetica && blocoKey && sub.composicaoChave) {
+                              patchComposicaoEtapa(blocoKey, sub.composicaoChave, patch);
+                              return;
                             }
-                            placeholder="dd/mm/aaaa"
-                            aria-label={`Início plan. subserviço — ${sub.nome}`}
-                          />
-                        </td>
-                        <td className={tdGradeDateCls}>
-                          <DatePickerField
-                            size="table"
-                          appearance="inline"
-                            value={sub.dataFim ?? ''}
-                            onChange={(v) => patchSubServico(linha.servicoKey, sub.id, { dataFim: v })}
-                            placeholder="dd/mm/aaaa"
-                            aria-label={`Fim plan. subserviço — ${sub.nome}`}
-                          />
-                        </td>
-                        <td className={tdGradeDateCls}>
-                          <DatePickerField
-                            size="table"
-                          appearance="inline"
-                            value={sub.dataInicioReal ?? ''}
-                            onChange={(v) =>
-                              patchSubServico(linha.servicoKey, sub.id, { dataInicioReal: v })
-                            }
-                            placeholder="dd/mm/aaaa"
-                            aria-label={`Início real subserviço — ${sub.nome}`}
-                          />
-                        </td>
-                        <td className={tdGradeDateCls}>
-                          <DatePickerField
-                            size="table"
-                          appearance="inline"
-                            value={sub.dataFimReal ?? ''}
-                            onChange={(v) =>
-                              patchSubServico(linha.servicoKey, sub.id, { dataFimReal: v })
-                            }
-                            placeholder="dd/mm/aaaa"
-                            aria-label={`Fim real subserviço — ${sub.nome}`}
-                          />
-                        </td>
-                        <td className={`${tdCls} text-center tabular-nums text-xs`}>
-                          {diasEntre(subResolvido.dataInicio, subResolvido.dataFim) ?? '—'}
-                        </td>
-                        <td className={tdPctColCls}>
-                          <PercentualExecCell
-                            value={sub.percentualExecutado}
-                            onChange={(v) =>
-                              patchSubServico(linha.servicoKey, sub.id, { percentualExecutado: v })
-                            }
-                            ariaLabel={`% executado — ${sub.nome}`}
-                          />
-                        </td>
-                        <td className={`${tdCls} text-center`}>
-                          <span className={statusSpanCls(subStatus)}>
-                            {CRONOGRAMA_STATUS_LABEL[subStatus]}
-                          </span>
-                        </td>
-                        <td className={`${tdCls} text-left`}>
-                          <ObservacaoCell
-                            value={sub.observacao ?? ''}
-                            destacar={subStatus === 'atrasado'}
-                            onChange={(v) =>
-                              patchSubServico(linha.servicoKey, sub.id, { observacao: v })
-                            }
-                            ariaLabel={`Observação — ${sub.nome}`}
-                          />
-                        </td>
+                            patchSubServico(linha.servicoKey, sub.id, patch);
+                          }}
+                        />
                       </tr>
                     );
-                  });
+                  };
 
-                  return [linhaServico, ...linhasSub];
+                  if (!usaHierarquia) {
+                    if (subs.length === 0) return [linhaServico];
+                    const subsOrdenados = ordenarSubServicosSequenciaObra(subs);
+                    return [
+                      linhaServico,
+                      ...subsOrdenados.map((sub, idx) =>
+                        renderLinhaSub(sub, idx, subsOrdenados.length, 1)
+                      )
+                    ];
+                  }
+
+                  const rows: React.ReactElement[] = [linhaServico];
+
+                  for (const st of subtitulosVisiveis) {
+                    const subsDoBloco = ordenarSubServicosSequenciaObra(
+                      subsPorBloco.get(st.blocoKey) ?? []
+                    );
+                    const etapasBloco = listarEtapasCronogramaBloco(st, subsDoBloco);
+                    const blocoResolvido = resolverDadosCronogramaBloco(
+                      cronograma,
+                      st.blocoKey,
+                      etapasBloco,
+                      linha.servicoKey
+                    );
+                    const blocoStatus = calcularStatusCronograma(blocoResolvido);
+                    const blocoComFilhas = etapasBloco.length > 0;
+
+                    rows.push(
+                      <tr
+                        key={`${st.blocoKey}::cabecalho`}
+                        className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
+                      >
+                        <td className={`${tdServicoColCls} text-left pl-6`}>
+                          <div className="flex min-h-[2rem] items-center gap-1">
+                            <span className="flex-1 text-xs font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 whitespace-nowrap">
+                              {st.subtituloNome}
+                            </span>
+                            {gerandoBlocoKey === st.blocoKey ? (
+                              <Loader2
+                                className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
+                                aria-hidden
+                              />
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => adicionarSubServico(linha.servicoKey, st.blocoKey)}
+                                  className="shrink-0 rounded p-1 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+                                  title="Adicionar subserviço neste subtítulo"
+                                  aria-label={`Adicionar subserviço — ${st.subtituloNome}`}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => regerarSubServicosBloco(linha, st)}
+                                  className="shrink-0 rounded p-1 text-gray-500 hover:text-violet-600 dark:text-gray-400 dark:hover:text-violet-400"
+                                  title="Regenerar etapas com IA"
+                                  aria-label={`Regenerar etapas — ${st.subtituloNome}`}
+                                >
+                                  <RefreshCw className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                        <CelulasEtapaCronograma
+                          resolvido={blocoResolvido}
+                          status={blocoStatus}
+                          readOnly={blocoComFilhas}
+                          ariaPrefix={st.subtituloNome}
+                          onPatch={() => {}}
+                        />
+                      </tr>
+                    );
+
+                    etapasBloco.forEach((sub, idx) => {
+                      rows.push(renderLinhaSub(sub, idx, etapasBloco.length, 2, st.blocoKey));
+                    });
+                  }
+
+                  return rows;
                 })}
               </tbody>
             </table>

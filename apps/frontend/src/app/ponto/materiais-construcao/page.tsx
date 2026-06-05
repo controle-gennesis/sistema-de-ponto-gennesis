@@ -21,9 +21,10 @@ import {
   CadastroListEmpty,
   CadastroListLoading,
   CadastroListSummary,
+  formatCadastroListId,
   getCadastroListRange
 } from '@/components/ui/CadastroListSummary';
-import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -1125,19 +1126,19 @@ export default function MateriaisConstrucaoPage() {
                 <table className={cadastroListClasses.table}>
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
-                      <th scope="col" className={cadastroListClasses.thCenter}>
-                        Código
+                      <th scope="col" className={cadastroListClasses.th}>
+                        ID
                       </th>
                       <th scope="col" className={cadastroListClasses.th}>
                         Nome
                       </th>
-                      <th scope="col" className={cadastroListClasses.thCenter}>
+                      <th scope="col" className={cadastroListClasses.th}>
                         Tipo
                       </th>
                       <th scope="col" className={cadastroListClasses.th}>
                         Descrição
                       </th>
-                      <th scope="col" className={cadastroListClasses.thCenter}>
+                      <th scope="col" className={cadastroListClasses.th}>
                         UN
                       </th>
                       <th scope="col" className={cadastroListClasses.thCenter}>
@@ -1149,40 +1150,34 @@ export default function MateriaisConstrucaoPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                      {filteredMaterials.map((material: ConstructionMaterial) => (
+                      {filteredMaterials.map((material: ConstructionMaterial, index: number) => (
                         <tr
                           key={material.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                          className={listTableRowClasses.tr}
                         >
-                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">
-                              {material.code || material.sinapiCode || '-'}
-                            </span>
+                          <td className={cadastroListClasses.tdMono}>
+                            {formatCadastroListId(material.code, listRange.startItem + index)}
                           </td>
-                          <td className="min-w-0 px-3 py-4 sm:px-6">
-                            <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <td className={cadastroListClasses.tdTruncate}>
+                            <span className="text-sm text-gray-900 dark:text-gray-100 block truncate font-medium">
                               {material.name || '-'}
                             </span>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">
-                              {normalizeProductType(material.productType || material.category) ||
-                                material.productType ||
-                                material.category ||
-                                '-'}
-                            </span>
+                          <td className={cadastroListClasses.td}>
+                            {normalizeProductType(material.productType || material.category) ||
+                              material.productType ||
+                              material.category ||
+                              '-'}
                           </td>
-                          <td className="min-w-0 max-w-xs px-3 py-4 sm:px-6">
+                          <td className={`${cadastroListClasses.tdTruncate} max-w-xs`}>
                             <span className="block truncate text-sm text-gray-600 dark:text-gray-400">
                               {material.description || '-'}
                             </span>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">
-                              {material.unit}
-                            </span>
+                          <td className={cadastroListClasses.td}>
+                            {material.unit}
                           </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
+                          <td className={cadastroListClasses.tdCenter}>
                             <span
                               className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-xs font-medium ${
                                 material.isActive
@@ -1703,9 +1698,9 @@ function MaterialFormModal({
           <form onSubmit={onSubmit} className="space-y-4">
             {editingMaterial ? (
               <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-600 dark:bg-gray-900/40">
-                <p className="text-xs text-gray-500 dark:text-gray-400">Código</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">ID</p>
                 <p className="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">
-                  {editingMaterial.code || editingMaterial.sinapiCode || '—'}
+                  {formatCadastroListId(editingMaterial.code)}
                 </p>
               </div>
             ) : null}

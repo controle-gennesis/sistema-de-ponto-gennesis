@@ -29,6 +29,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
 import api from '@/lib/api';
+import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
 
@@ -1150,7 +1151,7 @@ export default function EstoquePage() {
                             return (
                             <tr
                               key={group.material.id}
-                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                              className={listTableRowClasses.tr}
                             >
                               <td className="px-3 sm:px-4 py-3">
                                 <button
@@ -1166,7 +1167,7 @@ export default function EstoquePage() {
                                 </button>
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {group.material.name}
+                                <span className="text-sm text-gray-900 dark:text-gray-100">{group.material.name}</span>
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
                                 {group.material.category || '—'}
@@ -1395,16 +1396,17 @@ export default function EstoquePage() {
                             return (
                               <tr
                                 key={mov.id}
-                                className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                onClick={() => setHistoryDetail(mov)}
+                                className={getListTableRowClassName(true)}
                               >
                                 <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                   {new Date(mov.createdAt).toLocaleString('pt-BR')}
                                 </td>
-                                <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                  {ocNumber}
+                                <td className="px-3 sm:px-6 py-3 text-sm">
+                                  <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{ocNumber}</span>
                                 </td>
                                 <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
-                                  {mov.material.name}
+                                  <ListRowNavigableLabel className="font-medium">{mov.material.name}</ListRowNavigableLabel>
                                 </td>
                                 <td className="px-3 sm:px-6 py-3 text-center">
                                   <span
@@ -1431,11 +1433,11 @@ export default function EstoquePage() {
                                 <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
                                   {mov.user.name}
                                 </td>
-                                <td className="px-3 sm:px-6 py-3 text-right">
+                                <td className="px-3 sm:px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
                                     onClick={() => setHistoryDetail(mov)}
-                                    className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                    className={rowActionMenuButtonClass(false)}
                                     aria-label="Ver detalhes"
                                   >
                                     <MoreVertical className="w-4 h-4" />

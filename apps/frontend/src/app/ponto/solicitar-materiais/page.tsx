@@ -26,6 +26,7 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useServiceOrdersByCostCenter } from '@/hooks/useServiceOrdersByCostCenter';
 import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
@@ -1259,10 +1260,13 @@ function SolicitarMateriaisPage() {
                           ) => (
                             <tr
                               key={request.id}
-                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                              onClick={() => setDetailViewId(request.id)}
+                              className={getListTableRowClassName(true)}
                             >
                               <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                                {String(request.requestNumber || '—')}
+                                <ListRowNavigableLabel className="font-medium whitespace-nowrap">
+                                  {String(request.requestNumber || '—')}
+                                </ListRowNavigableLabel>
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                 {request.requestedAt
@@ -1307,7 +1311,7 @@ function SolicitarMateriaisPage() {
                                   ))}
                                 </div>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap">
+                              <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                                 <div className="inline-flex items-center justify-end gap-1">
                                   {request.status === 'IN_REVIEW' ? (
                                     <>
@@ -1333,7 +1337,7 @@ function SolicitarMateriaisPage() {
                                   <button
                                     type="button"
                                     onClick={() => setDetailViewId(request.id)}
-                                    className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                    className={rowActionMenuButtonClass(false)}
                                     aria-label="Ver detalhes"
                                   >
                                     <Eye className="w-4 h-4" />

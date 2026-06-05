@@ -5,8 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Landmark, Plus, Search, X, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
-import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -249,6 +249,7 @@ export default function ContasBancariasEspelhoNfPage() {
                   <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
+                        <th className={cadastroListClasses.th}>ID</th>
                         <th className={cadastroListClasses.th}>Nome</th>
                         <th className={cadastroListClasses.th}>Banco</th>
                         <th className={cadastroListClasses.th}>Agência</th>
@@ -257,10 +258,13 @@ export default function ContasBancariasEspelhoNfPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                        {rows.map((b) => (
-                          <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        {rows.map((b, index) => (
+                          <tr key={b.id} className={listTableRowClasses.tr}>
+                            <td className={cadastroListClasses.tdMono}>
+                              {formatCadastroListId(null, index + 1)}
+                            </td>
                             <td className="min-w-0 px-3 py-4 sm:px-6">
-                              <span className="block truncate text-sm text-gray-900 dark:text-gray-100">
+                              <span className="text-sm text-gray-900 dark:text-gray-100 block truncate">
                                 {b.name}
                               </span>
                             </td>

@@ -11,6 +11,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { PayrollEmployee, PayrollFilters, MonthlyPayrollData } from '@/types';
 import { 
   DEPARTMENTS_LIST, 
@@ -1268,12 +1269,16 @@ export default function FolhaPagamentoPage() {
                     </tr>
                   ) : (
                     employees.map((employee) => (
-                      <tr key={employee.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <tr
+                        key={employee.id}
+                        onClick={() => handleViewDetails(employee)}
+                        className={getListTableRowClassName(true)}
+                      >
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                           <div>
-                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <ListRowNavigableLabel className="font-medium">
                               {employee.name}
-                            </div>
+                            </ListRowNavigableLabel>
                             <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                               {employee.cpf || 'N/A'}
                             </div>
@@ -1435,7 +1440,7 @@ export default function FolhaPagamentoPage() {
                             })()}
                           </span>
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-center">
                             <button
                               onClick={() => handleViewDetails(employee)}

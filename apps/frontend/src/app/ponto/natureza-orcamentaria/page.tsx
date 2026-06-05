@@ -4,8 +4,8 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Plus, Upload, Search, X, Download, BookPlus, FileSpreadsheet, CheckCircle, Loader2 } from 'lucide-react';
-import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
-import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -272,7 +272,7 @@ export default function NaturezaOrcamentariaPage() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
-                      placeholder="Buscar por código ou natureza..."
+                      placeholder="Buscar por ID ou natureza..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
@@ -323,14 +323,20 @@ export default function NaturezaOrcamentariaPage() {
                   <table className={cadastroListClasses.table}>
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
+                        <th className={cadastroListClasses.th}>ID</th>
                         <th className={cadastroListClasses.th}>Natureza Orçamentária</th>
                         <th className={cadastroListClasses.thRight}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                      {items.map((it) => (
-                        <tr key={it.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                          <td className="px-3 py-4 text-sm text-gray-900 dark:text-gray-100 sm:px-6">{it.name}</td>
+                      {items.map((it, index) => (
+                        <tr key={it.id} className={listTableRowClasses.tr}>
+                          <td className={cadastroListClasses.tdMono}>
+                            {formatCadastroListId(it.code, index + 1)}
+                          </td>
+                          <td className="px-3 py-4 sm:px-6">
+                            <span className="text-sm text-gray-900 dark:text-gray-100">{it.name}</span>
+                          </td>
                           <RowActionMenuCell
                             isOpen={isRowMenuOpen(it.id)}
                             onToggle={(e) =>
@@ -369,7 +375,7 @@ export default function NaturezaOrcamentariaPage() {
               </div>
               <form onSubmit={handleSubmit} className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Código</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">ID</label>
                   <input type="text" value={formData.code} onChange={(e) => setFormData({ ...formData, code: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
                 </div>
                 <div>

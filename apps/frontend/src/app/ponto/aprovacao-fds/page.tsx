@@ -13,6 +13,7 @@ import { Loading } from '@/components/ui/Loading';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api from '@/lib/api';
+import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import {
   formatCurrencyDisplay,
   formToApiPayload,
@@ -318,10 +319,10 @@ export default function AprovacaoFdsPage() {
                         {paginatedRows.map((row) => (
                           <tr
                             key={row.id}
-                            className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                            className={listTableRowClasses.tr}
                           >
-                            <td className="px-3 py-4 font-medium text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.codFichaDemanda}
+                            <td className="px-3 py-4 sm:px-6">
+                              <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{row.codFichaDemanda}</span>
                             </td>
                             <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.codigoPedido}
@@ -363,7 +364,7 @@ export default function AprovacaoFdsPage() {
                                       return { rowId: row.id, top: rect.bottom + 4, left };
                                     });
                                   }}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                  className={rowActionMenuButtonClass(rowActionMenu?.rowId === row.id)}
                                   aria-label="Menu de ações"
                                 >
                                   <MoreVertical className="h-4 w-4" />

@@ -12,6 +12,9 @@ export const gradeTableRowTrCls =
 export const gradeTableCls =
   '[&_td]:min-h-[2.75rem] [&_th]:min-h-[2.75rem] [&_td]:align-middle [&_th]:align-middle';
 
+/** Linhas de título/subtítulo do orçamento: sem divisórias verticais entre colunas. */
+export const gradeTituloSubtituloRowTrCls = '[&>td]:!border-l-0';
+
 export const inputGradeCls =
   'box-border block h-full min-h-[2.75rem] w-full min-w-0 border-0 rounded-none bg-transparent px-2 py-2.5 text-sm text-gray-900 dark:text-gray-100 shadow-none outline-none ring-0 transition-[background-color,box-shadow] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:z-[1] focus:bg-red-50/95 dark:focus:bg-red-950/40 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400';
 
@@ -32,7 +35,15 @@ export const selectGradeHeaderMemorialCls =
  * Tipo MO/MA/LO (planilha analítica / ficha de demanda): mesmo padrão, sem seta visível.
  */
 export const selectGradeSemSetaCls =
-  'box-border min-h-[2.75rem] w-full min-w-0 cursor-pointer appearance-none border-0 rounded-none bg-transparent px-2 py-2 text-center text-xs font-medium text-gray-900 shadow-none [-moz-appearance:none] [-webkit-appearance:none] outline-none ring-0 dark:text-gray-100 sm:text-sm [&::-ms-expand]:hidden focus:z-[1] focus:bg-red-50/95 dark:focus:bg-red-950/40 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400';
+  'box-border min-h-[2.75rem] h-full w-full min-w-0 cursor-pointer appearance-none border-0 rounded-none bg-inherit px-2 py-2 text-center text-xs font-medium text-gray-900 shadow-none [-moz-appearance:none] [-webkit-appearance:none] outline-none ring-0 dark:bg-inherit dark:text-gray-100 sm:text-sm [&::-ms-expand]:hidden focus:z-[1] focus:bg-red-50/95 dark:focus:bg-red-950/40 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400';
+
+/** Célula da coluna Tipo (MO/MA/LO) na ficha de demanda — mesma base para composição e insumo. */
+export const tdPlanilhaTipoCls =
+  'p-0 align-middle border-l border-gray-200 dark:border-gray-700 w-14 min-w-[3.5rem] max-w-[3.5rem]';
+
+/** Composição sem tipo editável: ocupa a célula como os demais campos da grade. */
+export const planilhaTipoVazioCls =
+  `${inputGradeBloqueadoCls} block text-center text-sm text-gray-500 dark:text-gray-400`;
 
 /**
  * R$ + valor monetário: o realce de foco (anel vermelho) envolve os dois —

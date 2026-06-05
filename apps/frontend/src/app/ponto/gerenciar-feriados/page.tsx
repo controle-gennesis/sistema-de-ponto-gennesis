@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
+import { listTableRowClasses } from '@/components/ui/listTableUi';
 import { toast } from 'react-hot-toast';
 import { 
   Calendar, 
@@ -545,7 +546,7 @@ export default function GerenciarFeriadosPage() {
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {filteredHolidays.map((holiday) => (
-                      <tr key={holiday.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <tr key={holiday.id} className={listTableRowClasses.tr}>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                             {formatDate(holiday.date)}
@@ -553,9 +554,9 @@ export default function GerenciarFeriadosPage() {
                         </td>
                         <td className="px-3 sm:px-6 py-4">
                           <div>
-                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">
                               {holiday.name}
-                            </div>
+                            </span>
                             {holiday.description && (
                               <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                 {holiday.description}

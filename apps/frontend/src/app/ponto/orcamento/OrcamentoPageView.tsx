@@ -42,6 +42,14 @@ import * as XLSX from 'xlsx';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
+import { formatCadastroListId } from '@/components/ui/CadastroListSummary';
+import { TableCheckbox } from '@/components/ui/Checkbox';
+import {
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+  listTableRowClasses,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';
 import { OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import {
@@ -50,15 +58,19 @@ import {
   formatDataBr,
   normalizarCronograma,
   type CronogramaLinhaServico,
+  type CronogramaLinhaSubtitulo,
   type CronogramaPersist
 } from './orcamentoCronogramaTypes';
 import {
   gradeTableCls,
+  gradeTituloSubtituloRowTrCls,
   gradeTableRowTrCls,
   inputGradeCls,
   inputGradeMoedaCls,
   moedaGradeFieldWrapperCls,
-  selectGradeSemSetaCls
+  selectGradeSemSetaCls,
+  tdPlanilhaTipoCls,
+  planilhaTipoVazioCls
 } from './orcamentoGradeCellClasses';
 import { calcV, calcularQuantidadeLinha, inferirTipoUnidadePorDimensao } from './orcamentoMedicaoCalc';
 import type { LinhaMedicao, DimensoesItem, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
@@ -1014,6 +1026,17 @@ function buildItemKeyOrcamento(blocoKey: string, chave: string) {
   return `${blocoKey}|${chave}`;
 }
 
+/** Prefixo na seleção em lote da aba Orçamento — subtítulo sem composições visíveis. */
+const SELECAO_MONTAGEM_BLOCO_PREFIX = 'montagem-bloco:';
+
+function chaveSelecaoBlocoMontagem(blocoKey: string) {
+  return `${SELECAO_MONTAGEM_BLOCO_PREFIX}${blocoKey}`;
+}
+
+function isChaveComposicaoMontagem(key: string) {
+  return !key.startsWith(SELECAO_MONTAGEM_BLOCO_PREFIX);
+}
+
 /** Parse `servicoId|subtituloId|chave` (chave pode conter `|` em teoria; ids vêm de UUID). */
 function parseItemKeyOrcamento(itemKey: string): { blocoKey: string; chave: string } | null {
   const parts = itemKey.split('|');
@@ -1250,6 +1273,8 @@ interface SessaoOrcamentoPersist {
    * Não apagamos do catálogo `servicos` para poder restaurar sem reimportar.
    */
   itensOcultosNoOrcamento?: string[];
+  /** Chaves `${composicaoKey}|insumo|${i}` ocultas na aba Orçamento analítico. */
+  insumosAnaliticoOcultos?: string[];
   /**
    * Só em orçamentos `meta.importadoPlanilha`: árvore de serviços deste documento (importação + blocos adicionados).
    * O catálogo da planilha perfeita do contrato continua em `servicos-padrao.json` e vem em GET `servicos`.
@@ -1276,6 +1301,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     planilhaTipoInsumo: {},
     showDetalhesFinanceiros: false,
     itensOcultosNoOrcamento: [],
+    insumosAnaliticoOcultos: [],
     cronograma: cronogramaVazio(),
     meta: {
       osNumeroPasta: '',
@@ -1343,6 +1369,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           : {},
       showDetalhesFinanceiros: Boolean(p.showDetalhesFinanceiros),
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
+      insumosAnaliticoOcultos: Array.isArray(p.insumosAnaliticoOcultos) ? p.insumosAnaliticoOcultos : [],
       cronograma: normalizarCronograma((p as { cronograma?: unknown }).cronograma),
       meta,
       ...(Array.isArray(p.servicosDocumento) ? { servicosDocumento: p.servicosDocumento as ServicoPadrao[] } : {})
@@ -3228,6 +3255,8 @@ export function OrcamentoPageView({
   const [servicosSearch, setServicosSearch] = useState('');
   const [contratoSearch, setContratoSearch] = useState('');
   const [showDetalhesFinanceiros, setShowDetalhesFinanceiros] = useState(false);
+  /** Composições marcadas na grade da aba Orçamento (`servicoId|subtituloId|chave`). */
+  const [itensSelecionadosMontagem, setItensSelecionadosMontagem] = useState<Set<string>>(new Set());
   const servicosDropdownRef = useRef<HTMLDivElement | null>(null);
   const contratoDropdownRef = useRef<HTMLDivElement | null>(null);
   const contratoSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -3261,9 +3290,11 @@ export function OrcamentoPageView({
   const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
   const [calcHoverSourceIds, setCalcHoverSourceIds] = useState<string[]>([]);
   const [insumosAnaliticoManuais, setInsumosAnaliticoManuais] = useState<Record<string, InsumoAnaliticoManual[]>>({});
-  /** Menu botão direito — composição/insumo catálogo (adicionar manual + excluir composição) ou insumo manual (abaixo + excluir linha). */
+  const [insumosAnaliticoOcultos, setInsumosAnaliticoOcultos] = useState<string[]>([]);
+  /** Menu botão direito — composição, insumo do catálogo ou insumo manual. */
   const [menuCtxAnalitico, setMenuCtxAnalitico] = useState<
     | { kind: 'composicao'; left: number; top: number; composicaoKey: string }
+    | { kind: 'insumo'; left: number; top: number; parentKey: string; insumoKey: string; descricao: string }
     | { kind: 'manual'; left: number; top: number; parentKey: string; insumoId: string; idx: number }
     | null
   >(null);
@@ -3578,12 +3609,17 @@ export function OrcamentoPageView({
     setShowDetalhesFinanceiros(false);
     setCronograma(cronogramaVazio());
     setServicosPadraoContrato([]);
+    setInsumosAnaliticoManuais({});
+    setInsumosAnaliticoOcultos([]);
 
     const aplicarSessao = (s: SessaoOrcamentoPersist | null) => {
       if (!s) return;
       setSubtitulosNoOrcamento(s.subtitulosNoOrcamento);
       setItensOcultosNoOrcamento(
         Array.isArray(s.itensOcultosNoOrcamento) ? s.itensOcultosNoOrcamento : []
+      );
+      setInsumosAnaliticoOcultos(
+        Array.isArray(s.insumosAnaliticoOcultos) ? s.insumosAnaliticoOcultos : []
       );
       setQuantidadesPorItem(s.quantidadesPorItem);
       setDimensoesPorItem(s.dimensoesPorItem);
@@ -3752,6 +3788,7 @@ export function OrcamentoPageView({
       showDetalhesFinanceiros,
       meta,
       itensOcultosNoOrcamento,
+      insumosAnaliticoOcultos,
       cronograma
     };
     servicosImportsRef.current = { servicos, imports };
@@ -3774,6 +3811,7 @@ export function OrcamentoPageView({
     showDetalhesFinanceiros,
     meta,
     itensOcultosNoOrcamento,
+    insumosAnaliticoOcultos,
     cronograma,
     servicos,
     imports
@@ -5130,6 +5168,7 @@ export function OrcamentoPageView({
       return next;
     });
     setItensOcultosNoOrcamento(prev => (prev.includes(itemKey) ? prev : [...prev, itemKey]));
+    setInsumosAnaliticoOcultos(prev => prev.filter(k => !k.startsWith(`${itemKey}|insumo`)));
     const baseOcultos = sessaoRef.current.itensOcultosNoOrcamento ?? [];
     const nextOcultosPersist = baseOcultos.includes(itemKey) ? baseOcultos : [...baseOcultos, itemKey];
     if (centroCustoId && orcamentoAtivoId) {
@@ -5149,6 +5188,84 @@ export function OrcamentoPageView({
     const subtituloId = parts[parts.length - 2]!;
     const servicoId = parts.slice(0, -2).join('|');
     removeItemFromServico(servicoId, subtituloId, chave);
+  };
+
+  const apagarItensSelecionadosMontagem = () => {
+    const keys = Array.from(itensSelecionadosMontagem);
+    if (keys.length === 0) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        keys.length === 1
+          ? 'Apagar o item selecionado?'
+          : `Apagar ${keys.length} itens selecionados?`
+      )
+    ) {
+      return;
+    }
+
+    const itemKeys = keys.filter(isChaveComposicaoMontagem);
+    const blocoKeys = keys
+      .filter(k => k.startsWith(SELECAO_MONTAGEM_BLOCO_PREFIX))
+      .map(k => k.slice(SELECAO_MONTAGEM_BLOCO_PREFIX.length));
+
+    let nextOcultos = [...itensOcultosNoOrcamento];
+    const nextQuantidades = { ...quantidadesPorItem };
+    const nextDimensoes = { ...dimensoesPorItem };
+    let nextSubtitulos = [...subtitulosNoOrcamento];
+    const blocosAfetados = new Set<string>(blocoKeys);
+
+    for (const itemKey of itemKeys) {
+      if (!nextOcultos.includes(itemKey)) nextOcultos.push(itemKey);
+      delete nextQuantidades[itemKey];
+      delete nextDimensoes[itemKey];
+      const parsed = parseItemKeyOrcamento(itemKey);
+      if (parsed) blocosAfetados.add(parsed.blocoKey);
+    }
+
+    for (const blocoKey of Array.from(blocosAfetados)) {
+      const sub = findSubtituloPorBlocoKey(servicos, blocoKey);
+      const blocoVazioSelecionado = blocoKeys.includes(blocoKey);
+      if (blocoVazioSelecionado) {
+        nextSubtitulos = nextSubtitulos.filter(k => k !== blocoKey);
+        nextOcultos = nextOcultos.filter(k => !k.startsWith(`${blocoKey}|`));
+        Object.keys(nextQuantidades).forEach(k => {
+          if (k.startsWith(`${blocoKey}|`)) delete nextQuantidades[k];
+        });
+        Object.keys(nextDimensoes).forEach(k => {
+          if (k.startsWith(`${blocoKey}|`)) delete nextDimensoes[k];
+        });
+        continue;
+      }
+      if (!sub || sub.itens.length === 0) continue;
+      const allHidden = sub.itens.every(i =>
+        nextOcultos.includes(buildItemKeyOrcamento(blocoKey, i.chave))
+      );
+      if (!allHidden) continue;
+      nextSubtitulos = nextSubtitulos.filter(k => k !== blocoKey);
+      nextOcultos = nextOcultos.filter(k => !k.startsWith(`${blocoKey}|`));
+      Object.keys(nextQuantidades).forEach(k => {
+        if (k.startsWith(`${blocoKey}|`)) delete nextQuantidades[k];
+      });
+      Object.keys(nextDimensoes).forEach(k => {
+        if (k.startsWith(`${blocoKey}|`)) delete nextDimensoes[k];
+      });
+    }
+
+    setSubtitulosNoOrcamento(nextSubtitulos);
+    setItensOcultosNoOrcamento(nextOcultos);
+    setQuantidadesPorItem(nextQuantidades);
+    setDimensoesPorItem(nextDimensoes);
+    setItensSelecionadosMontagem(new Set());
+
+    if (centroCustoId && orcamentoAtivoId) {
+      persistToApi(servicos, imports, {
+        ...sessaoRef.current,
+        subtitulosNoOrcamento: nextSubtitulos,
+        itensOcultosNoOrcamento: nextOcultos
+      });
+    }
+    toast.success(keys.length === 1 ? 'Item removido' : `${keys.length} itens removidos`);
   };
 
 
@@ -5563,6 +5680,90 @@ export function OrcamentoPageView({
   /** Todos os itens do orçamento na ordem da memória de cálculo (inclui UN e medições dimensionais). */
   const itensMemoriaCalculoLista = useMemo(() => itensCalculados, [itensCalculados]);
 
+  const chavesItensMontagemVisiveis = useMemo(
+    () => itensCalculados.map(row => row.key),
+    [itensCalculados]
+  );
+  const chavesMontagemPorServicoNome = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const row of itensCalculados) {
+      const list = m.get(row.servicoNome) ?? [];
+      list.push(row.key);
+      m.set(row.servicoNome, list);
+    }
+    return m;
+  }, [itensCalculados]);
+  const chavesMontagemPorBlocoKey = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const bloco of subtitulosAdicionados) {
+      m.set(
+        bloco.key,
+        itensCalculados
+          .filter(r => r.servicoNome === bloco.servicoNome && r.subtituloNome === bloco.subtituloNome)
+          .map(r => r.key)
+      );
+    }
+    return m;
+  }, [subtitulosAdicionados, itensCalculados]);
+  const chavesSelecionaveisMontagem = useMemo(() => {
+    const keys = [...chavesItensMontagemVisiveis];
+    for (const bloco of subtitulosAdicionados) {
+      if ((chavesMontagemPorBlocoKey.get(bloco.key) ?? []).length === 0) {
+        keys.push(chaveSelecaoBlocoMontagem(bloco.key));
+      }
+    }
+    return keys;
+  }, [chavesItensMontagemVisiveis, subtitulosAdicionados, chavesMontagemPorBlocoKey]);
+  const montagemChavesGrupoSubtitulo = (blocoKey: string) => {
+    const itemKeys = chavesMontagemPorBlocoKey.get(blocoKey) ?? [];
+    if (itemKeys.length > 0) return itemKeys;
+    return [chaveSelecaoBlocoMontagem(blocoKey)];
+  };
+  const montagemChavesGrupoTitulo = (servicoNome: string) => {
+    const itemKeys = chavesMontagemPorServicoNome.get(servicoNome) ?? [];
+    const blocoKeysVazios = subtitulosAdicionados
+      .filter(b => b.servicoNome === servicoNome)
+      .filter(b => (chavesMontagemPorBlocoKey.get(b.key) ?? []).length === 0)
+      .map(b => chaveSelecaoBlocoMontagem(b.key));
+    return [...itemKeys, ...blocoKeysVazios];
+  };
+  const todosItensMontagemSelecionados =
+    chavesSelecionaveisMontagem.length > 0 &&
+    chavesSelecionaveisMontagem.every(key => itensSelecionadosMontagem.has(key));
+  const algumItemMontagemSelecionado = chavesSelecionaveisMontagem.some(key =>
+    itensSelecionadosMontagem.has(key)
+  );
+
+  useEffect(() => {
+    setItensSelecionadosMontagem(prev => {
+      const validas = new Set(chavesSelecionaveisMontagem);
+      const next = new Set(Array.from(prev).filter(key => validas.has(key)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [chavesSelecionaveisMontagem]);
+
+  const estadoCheckboxGrupoMontagem = (keys: string[]) => {
+    if (keys.length === 0) {
+      return { checked: false, indeterminate: false };
+    }
+    const selecionados = keys.filter(key => itensSelecionadosMontagem.has(key)).length;
+    return {
+      checked: selecionados === keys.length,
+      indeterminate: selecionados > 0 && selecionados < keys.length
+    };
+  };
+
+  const alternarGrupoMontagem = (keys: string[], checked: boolean) => {
+    setItensSelecionadosMontagem(prev => {
+      const next = new Set(prev);
+      for (const key of keys) {
+        if (checked) next.add(key);
+        else next.delete(key);
+      }
+      return next;
+    });
+  };
+
   const linhasAnaliticoOrcamento = useMemo(() => {
     type Linha =
       | {
@@ -5615,6 +5816,7 @@ export function OrcamentoPageView({
 
     const out: Linha[] = [];
     if (subtitulosAdicionados.length === 0) return out;
+    const insumosOcultosSet = new Set(insumosAnaliticoOcultos);
 
     const servicoNumero = new Map<string, number>();
     let nextMain = 0;
@@ -5695,13 +5897,15 @@ export function OrcamentoPageView({
 
         for (let i = 0; i < unitAnalitico.linhas.length; i++) {
           const ln = unitAnalitico.linhas[i];
+          const insumoKey = `${key}|insumo|${i}`;
+          if (insumosOcultosSet.has(insumoKey)) continue;
           const quantBase = ln.quantidade || 0;
           const qtd = quantBase * (row.quantidade || 0);
           const valorUnitInsumo = ln.precoUnitario || 0;
           const totalInsumo = qtd * valorUnitInsumo;
           out.push({
             kind: 'insumo',
-            key: `${key}|insumo|${i}`,
+            key: insumoKey,
             parentKey: key,
             item: `${itemComp}.${i + 1}`,
             codigo: ln.codigo ?? '',
@@ -5720,7 +5924,7 @@ export function OrcamentoPageView({
       }
     }
     return out;
-  }, [subtitulosAdicionados, itensCalculados, mapaComposicoes]);
+  }, [subtitulosAdicionados, itensCalculados, mapaComposicoes, insumosAnaliticoOcultos]);
 
   /** Número do item como na planilha analítica (ex. 1.2.3) — memória de cálculo. */
   const rotuloItemComposicaoPorKey = useMemo(() => {
@@ -5732,10 +5936,12 @@ export function OrcamentoPageView({
   }, [linhasAnaliticoOrcamento]);
 
   const linhasCronograma = useMemo((): CronogramaLinhaServico[] => {
-    const map = new Map<string, CronogramaLinhaServico>();
+    type Acc = CronogramaLinhaServico & { blocosMap: Map<string, CronogramaLinhaSubtitulo> };
+    const map = new Map<string, Acc>();
     for (const row of itensCalculados) {
-      const sep = row.blocoKey.lastIndexOf('|');
-      const servicoKey = sep > 0 ? row.blocoKey.slice(0, sep) : row.blocoKey;
+      const blocoKey = row.blocoKey;
+      const sep = blocoKey.lastIndexOf('|');
+      const servicoKey = sep > 0 ? blocoKey.slice(0, sep) : blocoKey;
       const compRef = {
         chave: row.item.chave,
         codigo: row.item.codigo,
@@ -5744,22 +5950,42 @@ export function OrcamentoPageView({
         quantidade: row.quantidade,
         unidade: row.item.unidade
       };
-      const prev = map.get(servicoKey);
-      if (prev) {
-        prev.valorTotal += row.total;
-        prev.qtdItens += 1;
-        prev.composicoes.push(compRef);
-      } else {
-        map.set(servicoKey, {
+      let linha = map.get(servicoKey);
+      if (!linha) {
+        linha = {
           servicoKey,
           servicoNome: row.servicoNome,
-          valorTotal: row.total,
-          qtdItens: 1,
-          composicoes: [compRef]
-        });
+          valorTotal: 0,
+          qtdItens: 0,
+          composicoes: [],
+          subtitulos: [],
+          blocosMap: new Map()
+        };
+        map.set(servicoKey, linha);
       }
+      linha.valorTotal += row.total;
+      linha.qtdItens += 1;
+      linha.composicoes.push(compRef);
+
+      let bloco = linha.blocosMap.get(blocoKey);
+      if (!bloco) {
+        bloco = {
+          blocoKey,
+          subtituloNome: row.subtituloNome,
+          valorTotal: 0,
+          qtdItens: 0,
+          composicoes: []
+        };
+        linha.blocosMap.set(blocoKey, bloco);
+      }
+      bloco.valorTotal += row.total;
+      bloco.qtdItens += 1;
+      bloco.composicoes.push(compRef);
     }
-    return Array.from(map.values());
+    return Array.from(map.values()).map(({ blocosMap, ...linha }) => ({
+      ...linha,
+      subtitulos: Array.from(blocosMap.values())
+    }));
   }, [itensCalculados]);
 
   const nomeOrcamentoAtivo = useMemo(
@@ -6798,6 +7024,10 @@ export function OrcamentoPageView({
       ...prev,
       [parentKey]: (prev[parentKey] ?? []).filter((ins) => ins.id !== id)
     }));
+  };
+
+  const ocultarInsumoAnalitico = (insumoKey: string) => {
+    setInsumosAnaliticoOcultos(prev => (prev.includes(insumoKey) ? prev : [...prev, insumoKey]));
   };
 
   const normalizarNumeroManualAnalitico = (
@@ -7934,42 +8164,51 @@ export function OrcamentoPageView({
                         <span>Página 1 de 1</span>
                       </div>
                       <div className="overflow-x-auto">
-                        <table className={`w-full border-collapse text-sm ${gradeTableCls}`}>
+                        <table className="w-full table-fixed text-sm">
                           <thead className="border-b border-gray-200 dark:border-gray-700">
-                            <tr className={gradeTableRowTrCls}>
-                              <th className="px-3 sm:px-6 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            <tr>
+                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[10%] min-w-[4rem]">
+                                ID
+                              </th>
+                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Orçamento
                               </th>
-                              <th className="px-3 sm:px-6 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[22%]">
                                 Atualizado
                               </th>
-                              <th className="px-3 sm:px-6 py-2.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Ação
-                              </th>
+                              <th className={listTableRowClasses.actionTh}>Ação</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                             {filteredListaOrcamentos.length === 0 ? (
                               <tr>
-                                <td colSpan={3} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                                <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                   Nenhum orçamento encontrado para essa busca.
                                 </td>
                               </tr>
                             ) : (
-                              filteredListaOrcamentos.map((o) => (
+                              filteredListaOrcamentos.map((o, index) => (
                                 <tr
                                   key={o.id}
-                                  className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${gradeTableRowTrCls}`}
+                                  onClick={() => abrirOrcamentoDaLista(o.id)}
+                                  className={getListTableRowClassName(true)}
+                                  aria-label={`Abrir orçamento ${o.nome}`}
                                 >
-                                  <td className="max-w-[min(100%,24rem)] whitespace-nowrap px-3 py-2.5 align-middle sm:px-6">
-                                    <span className="block truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                      {o.nome}
-                                    </span>
+                                  <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6">
+                                    {formatCadastroListId(null, index + 1)}
                                   </td>
-                                  <td className="whitespace-nowrap px-3 py-2.5 align-middle text-left text-sm text-gray-700 dark:text-gray-300 tabular-nums sm:px-6">
+                                  <td className="max-w-0 px-3 py-3 align-middle sm:px-6">
+                                    <ListRowNavigableLabel className="block truncate font-medium">
+                                      {o.nome}
+                                    </ListRowNavigableLabel>
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-3 text-left text-sm text-gray-700 dark:text-gray-300 tabular-nums sm:px-6">
                                     {o.updatedAt ? new Date(o.updatedAt).toLocaleString('pt-BR') : '—'}
                                   </td>
-                                  <td className="whitespace-nowrap px-3 py-2.5 text-right align-middle sm:px-6">
+                                  <td
+                                    className={listTableRowClasses.actionTd}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <div className="flex justify-end">
                                       <button
                                         type="button"
@@ -7986,8 +8225,8 @@ export function OrcamentoPageView({
                                             return { orcamentoId: o.id, nome: o.nome, top: r.bottom + 4, left };
                                           });
                                         }}
-                                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                                        aria-label="Menu de ações"
+                                        className={rowActionMenuButtonClass(orcamentoListaActionMenu?.orcamentoId === o.id)}
+                                        aria-label="Abrir ações"
                                         aria-expanded={orcamentoListaActionMenu?.orcamentoId === o.id}
                                         aria-haspopup="menu"
                                       >
@@ -8284,8 +8523,8 @@ export function OrcamentoPageView({
                             <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Descrição</th>
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Und</th>
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quant.</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade real</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade orçada</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quant. real</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quant. Orçada</th>
                             <th className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Valor unit</th>
                             <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Total</th>
                           </tr>
@@ -8294,7 +8533,7 @@ export function OrcamentoPageView({
                           {linhasAnaliticoOrcamento.map((l, idxLinha) => {
                             if (l.kind === 'tituloServico') {
                               return (
-                                <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
+                                <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}>
                                   <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white">
                                     {l.main}
                                   </td>
@@ -8311,7 +8550,7 @@ export function OrcamentoPageView({
                               return (
                                 <tr
                                   key={l.key}
-                                  className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls}`}
+                                  className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
                                 >
                                   <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
                                     {`${l.main}.${l.subIdx}`}
@@ -8404,10 +8643,12 @@ export function OrcamentoPageView({
                                   left = Math.min(left, window.innerWidth - mw - 8);
                                   top = Math.min(top, window.innerHeight - mh - 8);
                                   setMenuCtxAnalitico({
-                                    kind: 'composicao',
+                                    kind: 'insumo',
                                     left,
                                     top,
-                                    composicaoKey: l.parentKey
+                                    parentKey: l.parentKey,
+                                    insumoKey: l.key,
+                                    descricao: l.descricao
                                   });
                                 }}
                               >
@@ -8606,6 +8847,34 @@ export function OrcamentoPageView({
                                   Excluir composição do orçamento
                                 </button>
                               </>
+                            ) : menuCtxAnalitico.kind === 'insumo' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/80"
+                                  onClick={() => {
+                                    addInsumoManualAnalitico(menuCtxAnalitico.parentKey);
+                                    setMenuCtxAnalitico(null);
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                                  Adicionar insumo manual
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                                  onClick={() => {
+                                    ocultarInsumoAnalitico(menuCtxAnalitico.insumoKey);
+                                    setMenuCtxAnalitico(null);
+                                    toast.success('Insumo removido do orçamento analítico.');
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
+                                  Excluir insumo
+                                </button>
+                              </>
                             ) : (
                               <>
                                 <button
@@ -8790,7 +9059,7 @@ export function OrcamentoPageView({
                                   const listaAggTit =
                                     resumoSecoesFicha.aggPorTituloParaTooltip.get(String(l.main)) ?? [];
                                   return (
-                                    <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
+                                    <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
                                         className={`${itemW} cursor-help font-bold text-white`}
@@ -8846,7 +9115,7 @@ export function OrcamentoPageView({
                                   return (
                                     <tr
                                       key={l.key}
-                                      className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls}`}
+                                      className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
                                     >
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
@@ -8989,8 +9258,12 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.tipoCompLinha}
-                                        className="cursor-help px-3 py-2.5 text-sm text-center text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
-                                      />
+                                        className={`${tdPlanilhaTipoCls} cursor-help`}
+                                      >
+                                        <span className={planilhaTipoVazioCls} aria-hidden>
+                                          —
+                                        </span>
+                                      </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.un}
                                         className="cursor-help px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
@@ -9191,7 +9464,7 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.tipo}
-                                      className="cursor-help p-0 text-sm text-center font-medium text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className={`${tdPlanilhaTipoCls} cursor-help`}
                                     >
                                       <select
                                         value={
@@ -9890,11 +10163,21 @@ export function OrcamentoPageView({
 
                 {subtitulosAdicionados.length > 0 && (
                   <>
-                    <div className="flex justify-end">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {itensSelecionadosMontagem.size > 0 && (
+                        <button
+                          type="button"
+                          onClick={apagarItensSelecionadosMontagem}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Apagar ({itensSelecionadosMontagem.size})
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowDetalhesFinanceiros(v => !v)}
-                        className="text-xs px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                        className="ml-auto text-xs px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                       >
                         {showDetalhesFinanceiros ? 'Ocultar detalhes financeiros' : 'Ver detalhes financeiros'}
                       </button>
@@ -9903,10 +10186,27 @@ export function OrcamentoPageView({
                       ref={montagemOrcamentoTableRef}
                       className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
                     >
-                      <table className={`min-w-[1210px] w-full border-collapse text-sm ${gradeTableCls}`}>
+                      <table className={`min-w-[1254px] w-full border-collapse text-sm ${gradeTableCls}`}>
                         <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
                           <tr className={gradeTableRowTrCls}>
-                            <th className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
+                            <th className="w-12 min-w-[3rem] px-2 py-2.5 text-center">
+                              <div className="flex justify-center">
+                                <TableCheckbox
+                                  checked={todosItensMontagemSelecionados}
+                                  indeterminate={algumItemMontagemSelecionado && !todosItensMontagemSelecionados}
+                                  onChange={checked => {
+                                    if (checked) {
+                                      setItensSelecionadosMontagem(new Set(chavesSelecionaveisMontagem));
+                                    } else {
+                                      setItensSelecionadosMontagem(new Set());
+                                    }
+                                  }}
+                                  onClick={e => e.stopPropagation()}
+                                  ariaLabel="Selecionar todas as composições do orçamento"
+                                />
+                              </div>
+                            </th>
+                            <th className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">
                               Item
                             </th>
                             <th className="w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Código</th>
@@ -9929,7 +10229,7 @@ export function OrcamentoPageView({
                         </thead>
                         <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
                           {(() => {
-                            const colunasTotais = 11 + (showDetalhesFinanceiros ? 2 : 0);
+                            const colunasTotais = 12 + (showDetalhesFinanceiros ? 2 : 0);
                             const servicoNumero = new Map<string, number>();
                             let nextMain = 0;
                             for (const b of subtitulosAdicionados) {
@@ -9950,19 +10250,34 @@ export function OrcamentoPageView({
                           !blocoAnt ||
                           normalizarNomeServicoOrcamento(blocoAnt.servicoNome) !==
                             normalizarNomeServicoOrcamento(bloco.servicoNome);
+                        const chavesGrupoTitulo = montagemChavesGrupoTitulo(bloco.servicoNome);
+                        const chavesGrupoSubtitulo = montagemChavesGrupoSubtitulo(bloco.key);
+                        const checkboxTitulo = estadoCheckboxGrupoMontagem(chavesGrupoTitulo);
+                        const checkboxSubtitulo = estadoCheckboxGrupoMontagem(chavesGrupoSubtitulo);
                         return (
                           <React.Fragment key={bloco.key}>
                             {mostrarTituloServico && (
                             <tr
-                              className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}
+                              className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
                               data-orc-ctx-montagem="tituloServico"
                               data-servico-id={bloco.key.split('|')[0] ?? ''}
                               title="Clique com o botão direito para apagar este serviço do orçamento"
                             >
-                              <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white">
+                              <td className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
+                                <div className="flex justify-center">
+                                  <TableCheckbox
+                                    checked={checkboxTitulo.checked}
+                                    indeterminate={checkboxTitulo.indeterminate}
+                                    onChange={checked => alternarGrupoMontagem(chavesGrupoTitulo, checked)}
+                                    onClick={e => e.stopPropagation()}
+                                    ariaLabel={`Selecionar todas as composições de ${bloco.servicoNome}`}
+                                  />
+                                </div>
+                              </td>
+                              <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white border-l border-red-500/30 dark:border-red-900/40">
                                 {main}
                               </td>
-                              <td colSpan={colunasTotais - 1} className="px-3 py-2.5">
+                              <td colSpan={colunasTotais - 2} className="px-3 py-2.5">
                                 <span className="text-xs font-bold uppercase tracking-wide text-left text-white">
                                   {bloco.servicoNome}
                                 </span>
@@ -9970,14 +10285,25 @@ export function OrcamentoPageView({
                             </tr>
                             )}
                             <tr
-                              className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls}`}
+                              className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
                               data-orc-ctx-montagem="subtitulo"
                               data-bloco-key={bloco.key}
                             >
-                              <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
+                              <td className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
+                                <div className="flex justify-center">
+                                  <TableCheckbox
+                                    checked={checkboxSubtitulo.checked}
+                                    indeterminate={checkboxSubtitulo.indeterminate}
+                                    onChange={checked => alternarGrupoMontagem(chavesGrupoSubtitulo, checked)}
+                                    onClick={e => e.stopPropagation()}
+                                    ariaLabel={`Selecionar composições de ${mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}`}
+                                  />
+                                </div>
+                              </td>
+                              <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">
                                 {`${main}.${subIdx}`}
                               </td>
-                              <td colSpan={colunasTotais - 1} className="px-3 py-2.5">
+                              <td colSpan={colunasTotais - 2} className="px-3 py-2.5">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
                                   {mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}
                                 </span>
@@ -9996,7 +10322,24 @@ export function OrcamentoPageView({
                                       data-orc-ctx-montagem="composicao"
                                       data-item-key={row.key}
                                     >
-                                      <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300">
+                                      <td className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
+                                        <div className="flex justify-center">
+                                          <TableCheckbox
+                                            checked={itensSelecionadosMontagem.has(row.key)}
+                                            onChange={checked => {
+                                              setItensSelecionadosMontagem(prev => {
+                                                const next = new Set(prev);
+                                                if (checked) next.add(row.key);
+                                                else next.delete(row.key);
+                                                return next;
+                                              });
+                                            }}
+                                            onClick={e => e.stopPropagation()}
+                                            ariaLabel={`Selecionar composição ${row.item.descricao}`}
+                                          />
+                                        </div>
+                                      </td>
+                                      <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
                                         {`${main}.${subIdx}.${itemIdx + 1}`}
                                       </td>
                                       <td className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.codigo}</td>

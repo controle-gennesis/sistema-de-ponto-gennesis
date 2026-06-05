@@ -24,6 +24,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import { RowActionMenuCell } from '@/components/ui/RowActionMenu';
+import { listTableRowClasses } from '@/components/ui/listTableUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import api from '@/lib/api';
@@ -724,12 +725,12 @@ export default function ControleEntregasPageClient() {
                           return (
                             <tr
                               key={row.id}
-                              className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
+                              className={`${listTableRowClasses.tr} ${
                                 isOverdue ? 'bg-red-50/60 dark:bg-red-950/20' : ''
                               }`}
                             >
-                              <td className={`${tdLeftClass} font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap`}>
-                                {row.deliveryNumber}
+                              <td className={`${tdLeftClass} whitespace-nowrap`}>
+                                <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{row.deliveryNumber}</span>
                               </td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>
                                 {row.purchaseOrder?.orderNumber || '—'}

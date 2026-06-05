@@ -19,6 +19,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import toast from 'react-hot-toast';
 
 interface Material {
@@ -404,13 +405,14 @@ export default function AjusteEstoquePage() {
                           {paginatedAdjustments.map((mov) => (
                             <tr
                               key={mov.id}
-                              className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                              onClick={() => setHistoryDetail(mov)}
+                              className={getListTableRowClassName(true)}
                             >
                               <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                 {new Date(mov.createdAt).toLocaleString('pt-BR')}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {mov.material.name}
+                              <td className="px-3 sm:px-6 py-3 text-sm">
+                                <ListRowNavigableLabel className="font-medium">{mov.material.name}</ListRowNavigableLabel>
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-center">
                                 <span
@@ -437,11 +439,11 @@ export default function AjusteEstoquePage() {
                               <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
                                 {mov.user.name}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 text-right">
+                              <td className="px-3 sm:px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   type="button"
                                   onClick={() => setHistoryDetail(mov)}
-                                  className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                  className={rowActionMenuButtonClass(false)}
                                   aria-label="Ver detalhes"
                                 >
                                   <MoreVertical className="w-4 h-4" />

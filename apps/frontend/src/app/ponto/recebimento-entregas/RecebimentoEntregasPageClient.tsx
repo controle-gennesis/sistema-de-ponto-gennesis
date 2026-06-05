@@ -12,6 +12,7 @@ import { Modal } from '@/components/ui/Modal';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import api from '@/lib/api';
+import { listTableRowClasses } from '@/components/ui/listTableUi';
 import toast from 'react-hot-toast';
 import {
   CURRENT_STATUS_OPTIONS,
@@ -400,12 +401,12 @@ export default function RecebimentoEntregasPageClient() {
                           return (
                           <tr
                             key={row.id}
-                            className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
+                            className={`${listTableRowClasses.tr} ${
                               isOverdue ? 'bg-red-50/60 dark:bg-red-950/20' : ''
                             }`}
                           >
-                            <td className={`${tdLeftClass} font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap`}>
-                              {row.deliveryNumber}
+                            <td className={`${tdLeftClass} whitespace-nowrap`}>
+                              <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{row.deliveryNumber}</span>
                             </td>
                             <td className={`${tdCenterClass} whitespace-nowrap`}>
                               {row.purchaseOrder?.orderNumber ?? '—'}
