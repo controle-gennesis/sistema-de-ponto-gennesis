@@ -65,6 +65,7 @@ export function FdApprovalsSection() {
       void queryClient.invalidateQueries({ queryKey: ['approvals', 'fd'] });
       void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
       toast.error(err.response?.data?.error || 'Erro ao aprovar ficha');
@@ -83,6 +84,7 @@ export function FdApprovalsSection() {
       void queryClient.invalidateQueries({ queryKey: ['approvals', 'fd'] });
       void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
       toast.error(err.response?.data?.error || 'Erro ao reprovar ficha');

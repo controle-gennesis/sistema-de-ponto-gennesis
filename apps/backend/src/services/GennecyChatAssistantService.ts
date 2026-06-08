@@ -2,6 +2,17 @@ import { ChatType, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { KanbanService } from './KanbanService';
+import { buildFuelOpenRequestsStatusMessage } from '../lib/fuelRefuelChatNotify';
+import {
+  gennecyFuelFlowService,
+  GENNECY_FUEL_MENU_MESSAGE,
+  messageHasFuelIntent,
+  messageStartsFuelMenu,
+} from './GennecyFuelFlowService';
+import {
+  gennecyFuelRefuelReportFlowService,
+  messageHasFuelRefuelReportIntent,
+} from './GennecyFuelRefuelReportFlowService';
 
 const kanbanService = new KanbanService();
 
@@ -144,22 +155,29 @@ export async function resolveGennecyInvokeMode(
   chatId: string,
   senderId: string,
   content: string,
+  options?: { hasAttachments?: boolean },
 ): Promise<GennecyInvokeMode> {
   const fromMention = getGennecyInvokeMode(content);
   if (fromMention) return fromMention;
   if (!(await isDirectChatWithGennecyBot(chatId, senderId))) return null;
   const body = content.trim();
-  if (!body) return null;
-  return hasExplicitCreateTaskIntent(body) ? 'task' : 'chat';
+  const hasAttachments = Boolean(options?.hasAttachments);
+  if (!body && !hasAttachments) return null;
+  if (hasExplicitCreateTaskIntent(body)) return 'task';
+  return 'chat';
 }
 
 export async function shouldProcessGennecyMessage(
   chatId: string,
   senderId: string,
   content: string,
+  options?: { hasAttachments?: boolean },
 ): Promise<boolean> {
   if (messageShouldInvokeGennecy(content)) return true;
-  return (await isDirectChatWithGennecyBot(chatId, senderId)) && content.trim().length > 0;
+  const inDm = await isDirectChatWithGennecyBot(chatId, senderId);
+  if (!inDm) return false;
+  if (content.trim().length > 0 || options?.hasAttachments) return true;
+  return gennecyFuelFlowService.hasActiveFlow(chatId, senderId);
 }
 
 /** @deprecated Use getGennecyInvokeMode — mantido para compatibilidade. */
@@ -575,8 +593,14 @@ export class GennecyChatAssistantService {
     chatId: string;
     senderId: string;
     content: string;
+    messageId?: string;
+    hasAttachments?: boolean;
   }): Promise<void> {
-    if (!(await shouldProcessGennecyMessage(params.chatId, params.senderId, params.content))) {
+    if (
+      !(await shouldProcessGennecyMessage(params.chatId, params.senderId, params.content, {
+        hasAttachments: params.hasAttachments,
+      }))
+    ) {
       return;
     }
 
@@ -592,8 +616,55 @@ export class GennecyChatAssistantService {
       ? stripMention(params.content)
       : params.content.trim();
     const isTask = hasExplicitCreateTaskIntent(body);
+    const inGennecyDm = await isDirectChatWithGennecyBot(params.chatId, params.senderId);
 
     try {
+      const reportActive = await gennecyFuelRefuelReportFlowService.hasActiveFlow(
+        params.chatId,
+        params.senderId,
+      );
+      const fuelActive = await gennecyFuelFlowService.hasActiveFlow(params.chatId, params.senderId);
+
+      if (reportActive || messageHasFuelRefuelReportIntent(body)) {
+        const reportResult = await gennecyFuelRefuelReportFlowService.processMessage({
+          chatId: params.chatId,
+          userId: params.senderId,
+          content: body || '(anexo)',
+          messageId: params.messageId,
+        });
+        if (reportResult.handled) {
+          await this.postGennecyReply(params.chatId, params.senderId, reportResult.reply);
+          return;
+        }
+      }
+
+      if (
+        inGennecyDm ||
+        messageHasFuelIntent(body) ||
+        messageStartsFuelMenu(body) ||
+        fuelActive
+      ) {
+        const fuelResult = await gennecyFuelFlowService.processMessage({
+          chatId: params.chatId,
+          userId: params.senderId,
+          content: body || '(anexo)',
+          messageId: params.messageId,
+        });
+        if (fuelResult.handled) {
+          await this.postGennecyReply(params.chatId, params.senderId, fuelResult.reply);
+          return;
+        }
+
+        if (inGennecyDm && !body && !params.hasAttachments && !fuelActive && !reportActive) {
+          const statusLine = await buildFuelOpenRequestsStatusMessage(params.senderId);
+          const menu = statusLine
+            ? `${statusLine}\n\n${GENNECY_FUEL_MENU_MESSAGE}`
+            : GENNECY_FUEL_MENU_MESSAGE;
+          await this.postGennecyReply(params.chatId, params.senderId, menu);
+          return;
+        }
+      }
+
       if (isTask) {
         await this.handleCreateTask(
           params.chatId,

@@ -908,6 +908,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setSelectedOrder(null);
       if (variables.currentStatus === 'PENDING_DIRETORIA') {
         toast.success('OC aprovada pela diretoria.');
@@ -931,6 +932,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setRejectTarget(null);
       setRejectReason('');
       setSelectedOrder(null);
@@ -947,6 +949,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setCorrectionTarget(null);
       setSelectedOrder(null);
       toast.success('OC enviada para CORREÇÃO OC.');
@@ -962,6 +965,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setSelectedOrder(null);
       toast.success('OC reenviada para aprovação.');
     },
@@ -976,6 +980,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: any) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updatedOrder = resp?.data;
       if (updatedOrder) setSelectedOrder(updatedOrder);
       setShowEditOcModal(false);
@@ -1001,6 +1006,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       toast.success('Boleto de pagamento anexado.');
@@ -1025,6 +1031,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) {
         setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
@@ -1043,6 +1050,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setSelectedOrder(null);
       toast.success('A OC voltou para a fase Anexar Boleto.');
     },
@@ -1057,6 +1065,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       toast.success('OC enviada para a fase Pagamento.');
@@ -1090,6 +1099,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }, vars) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       if (vars?.installmentIndex != null) {
@@ -1113,6 +1123,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       toast.success('Próxima parcela liberada para o comprador anexar o boleto.');
@@ -1130,6 +1141,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       toast.success('OC enviada para Validação Comprovante.');
@@ -1148,6 +1160,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       toast.success('OC enviada para correção do comprovante.');
@@ -1163,6 +1176,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       toast.success('Comprovante validado. O comprador pode anexar a(s) nota(s) fiscal(is).');
@@ -1187,6 +1201,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       setNfFileDraft(null);
@@ -1203,6 +1218,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
       if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
       toast.success('Nota fiscal removida.');
@@ -1218,6 +1234,7 @@ export function OcPurchaseOrdersPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setSelectedOrder(null);
       toast.success('OC finalizada. Ela aparece na aba Finalizadas.');
     },

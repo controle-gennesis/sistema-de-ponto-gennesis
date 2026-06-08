@@ -206,6 +206,12 @@ export function usePermissions() {
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-gestor'));
   const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
 
+  /** Bloco «Solicitações de Combustível» na tela de Aprovações (somente permissão Controle). */
+  const canApproveFuel =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/aprovar-combustivel'));
+
   /** Lista e visualização dos quadros Tasks de todos os setores (somente leitura fora do próprio setor). */
   const canViewAllKanbanBoards =
     isAdministrator ||
@@ -302,6 +308,7 @@ export function usePermissions() {
     canApproveOcCompras,
     canApproveOcDiretoria,
     canApproveOcGestor,
+    canApproveFuel,
     canViewAllKanbanBoards,
     canAccessContract,
     contractModuleFlags,
@@ -372,6 +379,7 @@ export function useRoutePermission(route: string) {
       dpApprovalContractIds.length > 0 ||
       can(pk('/ponto/controle/aprovar-solicitacoes-dp')) ||
       canApproveEspelhoNf ||
+      can(pk('/ponto/controle/aprovar-combustivel')) ||
       can(pk('/ponto/controle/aprovar-oc-compras')) ||
       can(pk('/ponto/controle/aprovar-oc-gestor')) ||
       can(pk('/ponto/controle/aprovar-oc-diretoria')),
@@ -437,6 +445,8 @@ export function useRoutePermission(route: string) {
     '/ponto/furo-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque')),
     '/ponto/fds-aprovadas':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/fds-aprovadas')),
+    '/ponto/solicitacoes-combustivel':
+      isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-combustivel')),
     '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
     '/ponto/condicoes-pagamento':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),

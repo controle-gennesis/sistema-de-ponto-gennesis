@@ -8,6 +8,7 @@ import {
   resolveGennecyInvokeMode,
   shouldProcessGennecyMessage,
 } from '../services/GennecyChatAssistantService';
+import { GENNECY_FUEL_MENU_MESSAGE } from '../services/GennecyFuelFlowService';
 import multer from 'multer';
 import { prisma } from '../lib/prisma';
 import { getActiveGroupCallForChat } from '../realtime/wsCallSignaling';
@@ -433,6 +434,16 @@ export class ChatController {
 
       const botId = await getGennecyBotUserId();
       const chat = await chatService.getOrCreateDirectChat(initiatorId, botId);
+
+      const botMessageCount = await prisma.message.count({
+        where: { chatId: chat.id, senderId: botId },
+      });
+      if (botMessageCount === 0) {
+        void gennecyChatAssistant
+          .postGennecyReply(chat.id, initiatorId, GENNECY_FUEL_MENU_MESSAGE)
+          .catch((err) => console.error('[Gennecy] welcome', err));
+      }
+
       res.json({ success: true, data: chat });
     } catch (error: any) {
       next(error);
@@ -632,8 +643,9 @@ export class ChatController {
       const userId = req.user?.id;
       if (!userId) throw createError('Usuário não autenticado', 401);
 
-      const { chatId, content } = req.body;
-      if (!chatId || !content) throw createError('ID do chat e conteúdo são obrigatórios', 400);
+      const { chatId } = req.body;
+      const rawContent = typeof req.body.content === 'string' ? req.body.content : '';
+      if (!chatId) throw createError('ID do chat é obrigatório', 400);
 
       const rawReply = req.body.replyToId != null ? String(req.body.replyToId).trim() : '';
       const replyToId = rawReply.length > 0 ? rawReply : undefined;
@@ -652,6 +664,12 @@ export class ChatController {
         }
       }
 
+      if (!rawContent.trim() && attachments.length === 0) {
+        throw createError('Informe uma mensagem ou anexo', 400);
+      }
+
+      const content = rawContent.trim() || '(anexo)';
+
       const message = await chatService.sendDirectMessage({
         chatId,
         senderId: userId,
@@ -660,14 +678,25 @@ export class ChatController {
         replyToId
       });
 
-      const gennecyMode = await resolveGennecyInvokeMode(chatId, userId, content);
+      const hasAttachments = attachments.length > 0;
+      const gennecyMode = await resolveGennecyInvokeMode(chatId, userId, content, {
+        hasAttachments,
+      });
       if (gennecyMode) {
         void gennecyChatAssistant
-          .processOutgoingMessage({ chatId, senderId: userId, content })
+          .processOutgoingMessage({
+            chatId,
+            senderId: userId,
+            content,
+            messageId: message.id,
+            hasAttachments,
+          })
           .catch((err) => console.error('[Gennecy] async', err));
       }
 
-      const gennecyProcessing = await shouldProcessGennecyMessage(chatId, userId, content);
+      const gennecyProcessing = await shouldProcessGennecyMessage(chatId, userId, content, {
+        hasAttachments,
+      });
 
       res.json({
         success: true,

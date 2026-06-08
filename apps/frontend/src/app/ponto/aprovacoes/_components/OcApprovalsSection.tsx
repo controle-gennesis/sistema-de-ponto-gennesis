@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   OcPurchaseOrdersPanel,
-  type OcTab
+  type OcTab,
 } from '@/components/oc/OcPurchaseOrdersPanel';
 
 export function OcApprovalsSection() {

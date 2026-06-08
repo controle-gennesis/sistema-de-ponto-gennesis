@@ -77,6 +77,8 @@ import orcafascioRoutes from './routes/orcafascio';
 import callHistoryRoutes from './routes/callHistory';
 import kanbanRoutes from './routes/kanban';
 import materialDeliveryRoutes from './routes/materialDeliveries';
+import fuelRefuelRequestRoutes from './routes/fuelRefuelRequests';
+import approvalsRoutes from './routes/approvals';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 import { prisma } from './lib/prisma';
 import { ensureProductionSchema } from './lib/ensureProductionSchema';
@@ -287,6 +289,8 @@ app.use('/api/orcafascio', orcafascioRoutes);
 app.use('/api/call-history', callHistoryRoutes);
 app.use('/api/kanban', kanbanRoutes);
 app.use('/api/material-deliveries', materialDeliveryRoutes);
+app.use('/api/fuel-refuel-requests', fuelRefuelRequestRoutes);
+app.use('/api/approvals', approvalsRoutes);
 
 // Middleware de erro 404
 app.use(notFound);

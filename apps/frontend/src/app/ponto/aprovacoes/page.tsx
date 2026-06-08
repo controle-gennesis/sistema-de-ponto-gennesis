@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -29,6 +29,12 @@ import {
 } from '@/lib/espelhoNfApproval';
 import { OcApprovalsSection } from './_components/OcApprovalsSection';
 import { FdApprovalsSection } from './_components/FdApprovalsSection';
+import { FuelApprovalsSection } from './_components/FuelApprovalsSection';
+import {
+  AprovacoesTabsNav,
+  type AprovacaoTabId,
+} from './_components/AprovacoesTabsNav';
+import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -306,8 +312,11 @@ export default function AprovacoesPage() {
     }
   };
 
-  const { canAccessDpApproverPages, canApproveEspelhoNf, canApproveOc } = usePermissions();
+  const { canAccessDpApproverPages, canApproveEspelhoNf, canApproveOc, canApproveFuel } =
+    usePermissions();
   const canApproveDp = canAccessDpApproverPages;
+  const [activeTab, setActiveTab] = useState<AprovacaoTabId>('dp');
+  const { counts: approvalCounts } = useApprovalNotificationCounts();
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -327,11 +336,11 @@ export default function AprovacoesPage() {
       const res = await api.get(`/solicitacoes-dp/aprovacoes?phase=${dpPhase}`);
       return (res.data?.data ?? []) as DpRequest[];
     },
-    enabled: !loadingUser && canApproveDp,
+    enabled: !loadingUser && canApproveDp && activeTab === 'dp',
   });
   const { data: espelhoResp, isLoading: loadingEspelhoApprovals } = useQuery({
     queryKey: ['approvals', 'espelho-nf'],
-    enabled: !loadingUser && canApproveEspelhoNf,
+    enabled: !loadingUser && canApproveEspelhoNf && activeTab === 'espelho',
     queryFn: async () => {
       const res = await api.get('/espelho-nf/bootstrap');
       const data = res.data?.data || {};
@@ -507,6 +516,53 @@ export default function AprovacoesPage() {
     });
   }, [espelhoApprovals, espelhoPhase, searchEspelho]);
 
+  const approvalTabs = useMemo(() => {
+    const tabs: { id: AprovacaoTabId; label: string; count: number }[] = [];
+    if (canApproveDp) {
+      tabs.push({
+        id: 'dp',
+        label: 'Solicitações',
+        count: approvalCounts.dp,
+      });
+    }
+    if (canApproveEspelhoNf) {
+      tabs.push({
+        id: 'espelho',
+        label: 'Espelhos da NF',
+        count: approvalCounts.espelho,
+      });
+    }
+    if (canApproveDp) {
+      tabs.push({
+        id: 'fd',
+        label: 'Fichas de Demanda',
+        count: approvalCounts.fd,
+      });
+    }
+    if (canApproveFuel) {
+      tabs.push({
+        id: 'fuel',
+        label: 'Combustível',
+        count: approvalCounts.fuel,
+      });
+    }
+    if (canApproveOc) {
+      tabs.push({
+        id: 'oc',
+        label: 'Ordens de Compra',
+        count: approvalCounts.oc,
+      });
+    }
+    return tabs;
+  }, [canApproveDp, canApproveEspelhoNf, canApproveFuel, canApproveOc, approvalCounts]);
+
+  useEffect(() => {
+    if (approvalTabs.length === 0) return;
+    if (!approvalTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(approvalTabs[0].id);
+    }
+  }, [approvalTabs, activeTab]);
+
   const approveMutation = useMutation({
     mutationFn: async ({ id }: { id: string }) => {
       const comment = managerComment[id] || '';
@@ -517,6 +573,7 @@ export default function AprovacoesPage() {
       toast.success('Solicitação aprovada');
       setDetailRequest((cur) => (cur?.id === variables.id ? null : cur));
       await queryClient.invalidateQueries({ queryKey: ['approvals', 'dp', 'WAITING_MANAGER'] });
+      await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
   });
@@ -531,6 +588,7 @@ export default function AprovacoesPage() {
       toast.success('Solicitação rejeitada');
       setDetailRequest((cur) => (cur?.id === variables.id ? null : cur));
       await queryClient.invalidateQueries({ queryKey: ['approvals', 'dp', 'WAITING_MANAGER'] });
+      await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
   });
@@ -542,6 +600,7 @@ export default function AprovacoesPage() {
     updateEspelhoApprovalStatus(mirrorId, status);
     toast.success(successMessage);
     await queryClient.invalidateQueries({ queryKey: ['approvals', 'espelho-nf'] });
+    await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
   };
   const handleDownloadEspelhoPdf = (item: EspelhoApprovalItem) => {
     const fallbackFederal: EspelhoFederalRates = {
@@ -589,11 +648,23 @@ export default function AprovacoesPage() {
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Aprovações</h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Solicitações, espelhos fiscais, fichas de demanda e ordens de compra pendentes de decisão
+              Analise e decida sobre as solicitações pendentes da sua área
             </p>
           </div>
 
-          {canApproveDp && (
+          {approvalTabs.length > 0 ? (
+            <AprovacoesTabsNav
+              tabs={approvalTabs}
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+            />
+          ) : (
+            <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+              Você não tem permissão para aprovar itens nesta tela.
+            </div>
+          )}
+
+          {canApproveDp && activeTab === 'dp' && (
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -755,7 +826,7 @@ export default function AprovacoesPage() {
           </Card>
           )}
 
-          {canApproveEspelhoNf && (
+          {canApproveEspelhoNf && activeTab === 'espelho' && (
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -927,9 +998,11 @@ export default function AprovacoesPage() {
           </Card>
           )}
 
-          {canApproveDp && <FdApprovalsSection />}
+          {canApproveDp && activeTab === 'fd' && <FdApprovalsSection />}
 
-          {canApproveOc && <OcApprovalsSection />}
+          {canApproveFuel && activeTab === 'fuel' && <FuelApprovalsSection />}
+
+          {canApproveOc && activeTab === 'oc' && <OcApprovalsSection />}
 
           <Modal
             isOpen={!!detailRequest}

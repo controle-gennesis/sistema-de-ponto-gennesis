@@ -12,8 +12,8 @@ function isBackendUploadPath(path: string): boolean {
 }
 
 /** URLs relativas `/uploads/...` → API; arquivos do /public do Next → frontend. */
-export function resolveApiMediaUrl(url: string | null | undefined): string | null {
-  if (url == null || String(url).trim() === '') return null;
+export function resolveApiMediaUrl(url: string | null | undefined): string | undefined {
+  if (url == null || String(url).trim() === '') return undefined;
   const u = String(url).trim();
   if (/^https?:\/\//i.test(u)) return u;
   if (u.startsWith('/')) {

@@ -84,6 +84,9 @@ model User {
   demandSheetApprovalsPurchaseStatusUpdated DemandSheetApproval[] @relation("DemandSheetApprovalPurchaseStatusUpdater")
   materialDeliveriesCreated               MaterialDelivery[] @relation("MaterialDeliveryCreator")
   materialDeliveriesReceived              MaterialDelivery[] @relation("MaterialDeliveryReceiver")
+  fuelRefuelRequestsRequested             FuelRefuelRequest[] @relation("FuelRefuelRequester")
+  fuelRefuelRequestsManagerApproved       FuelRefuelRequest[] @relation("FuelRefuelManager")
+  fuelRefuelRequestsSuppliesApproved      FuelRefuelRequest[] @relation("FuelRefuelSupplies")
 
   @@map("users")
 }
@@ -1138,6 +1141,7 @@ model Contract {
   dpApprovalUsers   UserDpApprovalContract[]
   demandSheetApprovals DemandSheetApproval[]
   materialDeliveries   MaterialDelivery[]
+  fuelRefuelRequests   FuelRefuelRequest[]
 
   @@index([costCenterId])
   @@index([number])
@@ -2583,4 +2587,106 @@ model MaterialDeliveryGeralLookup {
 
   @@index([lookupKey])
   @@map("material_delivery_geral_lookups")
+}
+
+enum FuelVehicleType {
+  PRIVATE
+  COMPANY
+}
+
+enum FuelTankLevelAfter {
+  RESERVE
+  QUARTER
+  HALF
+  THREE_QUARTERS
+  FULL
+}
+
+enum FuelRefuelRequestStatus {
+  PENDING_MANAGER
+  PENDING_SUPPLIES
+  AWAITING_REFUEL
+  COMPLETED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// Sessão de fluxo conversacional da Gennecy (ex.: solicitação de abastecimento).
+model GennecyChatFlowSession {
+  id        String   @id @default(cuid())
+  chatId    String
+  userId    String
+  flowType  String
+  step      String
+  payload   Json     @default("{}")
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([chatId, userId, flowType])
+  @@index([chatId])
+  @@index([userId])
+  @@map("gennecy_chat_flow_sessions")
+}
+
+/// Solicitação de abastecimento de combustível (espelho do AppSheet tb solicitAbast).
+model FuelRefuelRequest {
+  id            String @id @default(cuid())
+  displayNumber Int    @unique
+
+  requesterId String
+  requester   User   @relation("FuelRefuelRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+
+  requestedAt DateTime @default(now())
+  refuelDate  DateTime
+  route       String
+  contractId  String
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  driverName         String
+  vehiclePlate       String
+  vehicleDescription String?
+  /// Particular → aprovação do gestor; frota/empresa → fila direta do Suprimentos.
+  vehicleType        FuelVehicleType?
+
+  dashboardPhotoUrl  String?
+  dashboardPhotoKey  String?
+  dashboardPhotoName String?
+
+  observations String?
+  status       FuelRefuelRequestStatus @default(PENDING_MANAGER)
+  sourceChatId String?
+
+  managerApprovedBy      String?
+  managerApprovedAt      DateTime?
+  managerApprovalComment String?
+  managerRejectionReason String?
+
+  suppliesApprovedBy      String?
+  suppliesApprovedAt      DateTime?
+  suppliesApprovalComment String?
+  suppliesRejectionReason String?
+
+  refuelReportedAt        DateTime?
+  odometerKm              Int?
+  tankLevelAfter          FuelTankLevelAfter?
+  refuelReportObservations String?
+  receiptPhotoUrl         String?
+  receiptPhotoKey         String?
+  receiptPhotoName        String?
+  litersRefueled          Decimal? @db.Decimal(10, 3)
+  pricePerLiter           Decimal? @db.Decimal(10, 2)
+
+  managerApprover User? @relation("FuelRefuelManager", fields: [managerApprovedBy], references: [id], onDelete: SetNull)
+  suppliesApprover User? @relation("FuelRefuelSupplies", fields: [suppliesApprovedBy], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([requesterId])
+  @@index([contractId])
+  @@index([status])
+  @@index([refuelDate])
+  @@map("fuel_refuel_requests")
 }

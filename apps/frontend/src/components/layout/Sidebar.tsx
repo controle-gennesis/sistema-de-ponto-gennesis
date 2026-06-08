@@ -61,11 +61,13 @@ import {
   Scale,
   ScrollText,
   Camera,
-  Loader2
+  Loader2,
+  Fuel
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
+import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import {
   readSelectedModuleId,
@@ -134,6 +136,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     canAccessDpApproverPages,
     canApproveEspelhoNf,
     canApproveOc,
+    canApproveFuel,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
   } = usePermissions();
@@ -196,9 +199,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   });
 
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
+  const { counts: approvalCounts } = useApprovalNotificationCounts();
 
   const navBadgeCountForHref = (href: string): number => {
-    if (href === '/ponto/aprovacoes') return fdNotificationCounts.pendingManager;
+    if (href === '/ponto/aprovacoes') return approvalCounts.total;
     if (href === '/ponto/fds-aprovadas') return fdNotificationCounts.pendingPurchase;
     if (href === '/ponto/furo-estoque') return pendingFuroCount;
     if (href === '/ponto/recebimento-entregas') return recebimentoPendingCount;
@@ -206,7 +210,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   };
 
   const moduleBadgeCountForId = (categoryId: string): number => {
-    if (categoryId === 'main') return fdNotificationCounts.pendingManager;
+    if (categoryId === 'main') return approvalCounts.total;
     if (categoryId === 'suprimentos') {
       return fdNotificationCounts.pendingPurchase + pendingFuroCount;
     }
@@ -336,7 +340,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: 'Caixa de entrada de aprovações',
             // Aparece automaticamente para quem é gestor (decide Solicitações Gerais)
             // ou tem a permissão «Aprovar Espelho da Nota Fiscal» (Controle).
-            permission: canAccessDpApproverPages || canApproveEspelhoNf || canApproveOc,
+            permission:
+              canAccessDpApproverPages || canApproveEspelhoNf || canApproveOc || canApproveFuel,
           },
           {
             name: 'Solicitações Gerais',
@@ -640,6 +645,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
             description: "FD's aprovadas — status de compras",
             permission:
               isAdministrator || isDepartmentCompras || can(pk('/ponto/fds-aprovadas'))
+          },
+          {
+            name: 'Solicitações de Combustível',
+            href: '/ponto/solicitacoes-combustivel',
+            icon: Fuel,
+            description: 'Pedidos de abastecimento feitos pela Gennecy',
+            permission:
+              isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-combustivel'))
           },
         ]
       },

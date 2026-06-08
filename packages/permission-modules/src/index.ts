@@ -112,6 +112,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/furo-estoque'), name: 'Furo de Estoque', href: '/ponto/furo-estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/ajuste-estoque'), name: 'Ajuste de Estoque', href: '/ponto/ajuste-estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/fds-aprovadas'), name: "FD's Aprovadas", href: '/ponto/fds-aprovadas', category: 'Suprimentos' },
+  {
+    key: pathToModuleKey('/ponto/solicitacoes-combustivel'),
+    name: 'Solicitações de Combustível',
+    href: '/ponto/solicitacoes-combustivel',
+    category: 'Suprimentos',
+  },
   // Cadastros
   { key: pathToModuleKey('/ponto/centros-custo'), name: 'Centros de Custo', href: '/ponto/centros-custo', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/materiais-construcao'), name: 'Materiais e Serviços', href: '/ponto/materiais-construcao', category: 'Cadastros' },
@@ -171,6 +177,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
     name: 'Aprovar Espelho da Nota Fiscal',
     href: '/ponto/controle/aprovar-espelho-nf',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-combustivel'),
+    name: 'Aprovar Solicitações de Combustível',
+    href: '/ponto/controle/aprovar-combustivel',
     category: 'Controle',
   },
   {
