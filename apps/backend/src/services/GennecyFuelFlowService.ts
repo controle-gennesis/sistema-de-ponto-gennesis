@@ -4,7 +4,7 @@ import {
   findEmployeeByCpf,
   isValidCpf,
   onlyDigits,
-  resolveContractForEmployee,
+  resolveFuelRequestContextFromEmployee,
 } from '../lib/employeeCpfLookup';
 import {
   notifyFuelRequesterWaitingManager,
@@ -19,7 +19,6 @@ type FuelFlowStep =
   | 'ASK_REFUEL_DATE'
   | 'ASK_ROUTE'
   | 'ASK_DRIVER_CPF'
-  | 'ASK_CONTRACT'
   | 'ASK_VEHICLE'
   | 'ASK_VEHICLE_TYPE'
   | 'ASK_DASHBOARD_PHOTO'
@@ -30,7 +29,8 @@ type FuelFlowPayload = {
   refuelDate?: string;
   route?: string;
   contractId?: string;
-  contractLabel?: string;
+  costCenter?: string | null;
+  costCenterLabel?: string;
   driverName?: string;
   driverCpfMasked?: string;
   driverEmployeeId?: string;
@@ -41,7 +41,6 @@ type FuelFlowPayload = {
   dashboardPhotoKey?: string;
   dashboardPhotoName?: string;
   observations?: string;
-  contractOptions?: Array<{ id: string; label: string }>;
 };
 
 const FUEL_INTENT =
@@ -117,44 +116,6 @@ async function cancelSession(chatId: string, userId: string) {
   });
 }
 
-async function loadContractOptions(): Promise<Array<{ id: string; label: string }>> {
-  const rows = await prisma.contract.findMany({
-    select: { id: true, name: true, number: true },
-    orderBy: [{ name: 'asc' }],
-    take: 30,
-  });
-  return rows.map((c) => ({
-    id: c.id,
-    label: `${c.number} — ${c.name}`,
-  }));
-}
-
-function formatContractList(options: Array<{ id: string; label: string }>): string {
-  if (options.length === 0) {
-    return 'Nenhum contrato cadastrado no sistema. Informe o número do contrato:';
-  }
-  const lines = options.map((o, i) => `${i + 1}. ${o.label}`);
-  return `Escolha o contrato (digite o número da opção):\n${lines.join('\n')}`;
-}
-
-function resolveContractChoice(
-  input: string,
-  options: Array<{ id: string; label: string }>,
-): { id: string; label: string } | null {
-  const trimmed = input.trim();
-  const asIndex = parseInt(trimmed, 10);
-  if (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= options.length) {
-    return options[asIndex - 1];
-  }
-  const lower = trimmed.toLowerCase();
-  const byNumber = options.find((o) => o.label.toLowerCase().startsWith(lower));
-  if (byNumber) return byNumber;
-  const byContains = options.find(
-    (o) => o.label.toLowerCase().includes(lower) || o.id === trimmed,
-  );
-  return byContains ?? null;
-}
-
 function vehicleTypeLabel(type?: FuelVehicleType): string {
   if (type === FuelVehicleType.PRIVATE) return 'Particular (passa pelo gestor)';
   if (type === FuelVehicleType.COMPANY) return 'Frota / empresa (direto ao Suprimentos)';
@@ -171,7 +132,7 @@ function buildSummary(payload: FuelFlowPayload): string {
     '📋 Resumo da solicitação de abastecimento:',
     `• Data para abastecer: ${payload.refuelDate ? formatBrDate(payload.refuelDate) : '—'}`,
     `• Rota: ${payload.route || '—'}`,
-    `• Contrato: ${payload.contractLabel || '—'}`,
+    `• Centro de custo: ${payload.costCenterLabel || payload.costCenter || '—'}`,
     `• Condutor: ${payload.driverName || '—'}${payload.driverCpfMasked ? ` (CPF ${payload.driverCpfMasked})` : ''}`,
     `• Veículo: ${payload.vehiclePlate || '—'}`,
     `• Tipo: ${vehicleTypeLabel(payload.vehicleType)}`,
@@ -326,7 +287,6 @@ export class GennecyFuelFlowService {
         if (body.length < 2) {
           return { handled: true, reply: 'Informe a rota (mínimo 2 caracteres).' };
         }
-        const contractOptions = await loadContractOptions();
         await upsertSession(params.chatId, params.userId, 'ASK_DRIVER_CPF', {
           ...payload,
           route: body,
@@ -362,70 +322,28 @@ export class GennecyFuelFlowService {
           };
         }
 
-        const contract = await resolveContractForEmployee(employee.costCenter);
-        if (contract) {
-          await upsertSession(params.chatId, params.userId, 'ASK_VEHICLE', {
-            ...payload,
-            driverName: employee.name,
-            driverCpfMasked: employee.cpfMasked,
-            driverEmployeeId: employee.employeeId,
-            contractId: contract.id,
-            contractLabel: contract.label,
-          });
-          return {
-            handled: true,
-            reply: [
-              `✅ Identifiquei **${employee.name}** (CPF ${employee.cpfMasked}).`,
-              `Contrato vinculado: **${contract.label}**`,
-              employee.costCenter
-                ? `(centro de custo: ${employee.costCenter})`
-                : '',
-              '',
-              'Qual o veículo? Informe a placa ou identificação (ex.: ABC1D23 — Strada).',
-            ]
-              .filter(Boolean)
-              .join('\n'),
-          };
+        const ctx = await resolveFuelRequestContextFromEmployee(employee);
+        if (!ctx.ok) {
+          return { handled: true, reply: ctx.message };
         }
 
-        const contractOptions = await loadContractOptions();
-        await upsertSession(params.chatId, params.userId, 'ASK_CONTRACT', {
+        await upsertSession(params.chatId, params.userId, 'ASK_VEHICLE', {
           ...payload,
           driverName: employee.name,
           driverCpfMasked: employee.cpfMasked,
           driverEmployeeId: employee.employeeId,
-          contractOptions,
+          costCenter: employee.costCenter,
+          costCenterLabel: ctx.costCenterLabel,
+          contractId: ctx.contractId,
         });
         return {
           handled: true,
           reply: [
             `✅ Identifiquei **${employee.name}** (CPF ${employee.cpfMasked}).`,
-            employee.costCenter
-              ? `Não encontrei contrato vinculado ao centro de custo **${employee.costCenter}**.`
-              : 'Este colaborador não tem centro de custo cadastrado.',
+            `Centro de custo: **${ctx.costCenterLabel}**`,
             '',
-            formatContractList(contractOptions),
+            'Qual o veículo? Informe a placa ou identificação (ex.: ABC1D23 — Strada).',
           ].join('\n'),
-        };
-      }
-
-      case 'ASK_CONTRACT': {
-        const options = payload.contractOptions ?? (await loadContractOptions());
-        const chosen = resolveContractChoice(body, options);
-        if (!chosen) {
-          return {
-            handled: true,
-            reply: `Opção inválida. ${formatContractList(options)}`,
-          };
-        }
-        await upsertSession(params.chatId, params.userId, 'ASK_VEHICLE', {
-          ...payload,
-          contractId: chosen.id,
-          contractLabel: chosen.label,
-        });
-        return {
-          handled: true,
-          reply: `Contrato **${chosen.label}** selecionado.\n\nQual o veículo? Informe a placa ou identificação (ex.: ABC1D23 — Strada).`,
         };
       }
 

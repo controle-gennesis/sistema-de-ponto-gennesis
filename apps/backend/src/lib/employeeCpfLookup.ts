@@ -114,3 +114,40 @@ export async function resolveContractForEmployee(
     costCenterName: costCenter.name,
   };
 }
+
+export type FuelRequestEmployeeContext =
+  | {
+      ok: true;
+      contractId: string;
+      costCenterLabel: string;
+    }
+  | { ok: false; message: string };
+
+/** Usa o centro de custo do colaborador (como atestado) e resolve o contrato só no backend. */
+export async function resolveFuelRequestContextFromEmployee(
+  employee: EmployeeCpfLookupResult,
+): Promise<FuelRequestEmployeeContext> {
+  const costCenterRaw = employee.costCenter?.trim();
+  if (!costCenterRaw) {
+    return {
+      ok: false,
+      message:
+        'Este colaborador não tem centro de custo cadastrado. Verifique com o RH ou fale com o Suprimentos.',
+    };
+  }
+
+  const contract = await resolveContractForEmployee(costCenterRaw);
+  if (!contract) {
+    return {
+      ok: false,
+      message: `Não encontrei contrato vinculado ao centro de custo ${costCenterRaw}. Fale com o Suprimentos.`,
+    };
+  }
+
+  const costCenterLabel =
+    contract.costCenterCode && contract.costCenterName
+      ? `${contract.costCenterCode} — ${contract.costCenterName}`
+      : costCenterRaw;
+
+  return { ok: true, contractId: contract.id, costCenterLabel };
+}

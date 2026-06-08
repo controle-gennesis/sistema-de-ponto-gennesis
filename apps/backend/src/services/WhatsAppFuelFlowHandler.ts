@@ -1,10 +1,9 @@
 import { FuelRefuelRequestStatus, FuelVehicleType } from '@prisma/client';
-import { prisma } from '../lib/prisma';
 import {
   findEmployeeByCpf,
   isValidCpf,
   onlyDigits,
-  resolveContractForEmployee,
+  resolveFuelRequestContextFromEmployee,
 } from '../lib/employeeCpfLookup';
 import {
   notifyFuelRequesterWaitingManager,
@@ -17,7 +16,6 @@ export type WhatsAppFuelFlowStatus =
   | 'FUEL_ASK_REFUEL_DATE'
   | 'FUEL_ASK_ROUTE'
   | 'FUEL_ASK_DRIVER_CPF'
-  | 'FUEL_ASK_CONTRACT'
   | 'FUEL_ASK_VEHICLE'
   | 'FUEL_ASK_VEHICLE_TYPE'
   | 'FUEL_ASK_DASHBOARD_PHOTO'
@@ -65,37 +63,6 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function loadContractOptions(): Promise<Array<{ id: string; label: string }>> {
-  const rows = await prisma.contract.findMany({
-    select: { id: true, name: true, number: true },
-    orderBy: [{ name: 'asc' }],
-    take: 30,
-  });
-  return rows.map((c) => ({ id: c.id, label: `${c.number} — ${c.name}` }));
-}
-
-function formatContractList(options: Array<{ id: string; label: string }>): string {
-  if (options.length === 0) return 'Nenhum contrato cadastrado. Informe o número do contrato:';
-  return options.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
-}
-
-function resolveContractChoice(
-  input: string,
-  options: Array<{ id: string; label: string }>,
-): { id: string; label: string } | null {
-  const trimmed = input.trim();
-  const asIndex = parseInt(trimmed, 10);
-  if (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= options.length) {
-    return options[asIndex - 1];
-  }
-  const lower = trimmed.toLowerCase();
-  return (
-    options.find((o) => o.label.toLowerCase().startsWith(lower)) ??
-    options.find((o) => o.label.toLowerCase().includes(lower) || o.id === trimmed) ??
-    null
-  );
-}
-
 function vehicleTypeLabel(type?: FuelVehicleType): string {
   if (type === FuelVehicleType.PRIVATE) return 'Particular (passa pelo gestor)';
   if (type === FuelVehicleType.COMPANY) return 'Frota / empresa (direto ao Suprimentos)';
@@ -107,7 +74,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     'Resumo da solicitação de abastecimento:',
     `• Data: ${payload.refuelDate ? formatBrDate(String(payload.refuelDate)) : '—'}`,
     `• Rota: ${payload.route || '—'}`,
-    `• Contrato: ${payload.contractLabel || '—'}`,
+    `• Centro de custo: ${payload.costCenterLabel || payload.costCenter || '—'}`,
     `• Condutor: ${payload.driverName || '—'}${payload.driverCpfMasked ? ` (CPF ${payload.driverCpfMasked})` : ''}`,
     `• Veículo: ${payload.vehiclePlate || '—'}`,
     `• Tipo: ${vehicleTypeLabel(payload.vehicleType as FuelVehicleType | undefined)}`,
@@ -260,61 +227,27 @@ export async function processWhatsAppFuelFlow(params: {
       newPayload.driverCpfMasked = employee.cpfMasked;
       newPayload.driverEmployeeId = employee.employeeId;
       newPayload.requesterUserId = employee.userId;
+      newPayload.costCenter = employee.costCenter;
 
-      const contract = await resolveContractForEmployee(employee.costCenter);
-      if (contract) {
-        newPayload.contractId = contract.id;
-        newPayload.contractLabel = contract.label;
+      const ctx = await resolveFuelRequestContextFromEmployee(employee);
+      if (!ctx.ok) {
         return {
-          sendAction: waButtons(
-            [
-              `Identifiquei ${employee.name} (CPF ${employee.cpfMasked}).`,
-              `Contrato: ${contract.label}`,
-              '',
-              'Qual o veículo? Informe placa ou identificação (ex.: ABC1D23 — Strada).',
-            ].join('\n'),
-          ),
-          newStatus: 'FUEL_ASK_VEHICLE',
+          sendAction: waButtons(ctx.message),
+          newStatus,
           newPayload,
         };
       }
 
-      const contractOptions = await loadContractOptions();
-      newPayload.contractOptions = contractOptions;
+      newPayload.contractId = ctx.contractId;
+      newPayload.costCenterLabel = ctx.costCenterLabel;
       return {
         sendAction: waButtons(
           [
             `Identifiquei ${employee.name} (CPF ${employee.cpfMasked}).`,
-            employee.costCenter
-              ? `Não encontrei contrato para o centro de custo ${employee.costCenter}.`
-              : 'Colaborador sem centro de custo cadastrado.',
+            `Centro de custo: ${ctx.costCenterLabel}`,
             '',
-            formatContractList(contractOptions),
-            '',
-            'Digite o número da opção do contrato.',
+            'Qual o veículo? Informe placa ou identificação (ex.: ABC1D23 — Strada).',
           ].join('\n'),
-        ),
-        newStatus: 'FUEL_ASK_CONTRACT',
-        newPayload,
-      };
-    }
-
-    case 'FUEL_ASK_CONTRACT': {
-      const options = (newPayload.contractOptions as Array<{ id: string; label: string }>) ??
-        (await loadContractOptions());
-      const chosen = resolveContractChoice(textRaw, options);
-      if (!chosen) {
-        return {
-          sendAction: waButtons(`Opção inválida.\n${formatContractList(options)}`),
-          newStatus,
-          newPayload: { ...newPayload, contractOptions: options },
-        };
-      }
-      newPayload.contractId = chosen.id;
-      newPayload.contractLabel = chosen.label;
-      return {
-        sendAction: waButtons(
-          `Contrato ${chosen.label} selecionado.\n\nQual o veículo? (ex.: ABC1D23 — Strada)`,
         ),
         newStatus: 'FUEL_ASK_VEHICLE',
         newPayload,
