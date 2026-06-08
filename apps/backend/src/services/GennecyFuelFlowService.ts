@@ -193,7 +193,48 @@ export function messageHasFuelIntent(body: string): boolean {
 
 export function messageStartsFuelMenu(body: string): boolean {
   const text = body.trim().toLowerCase();
-  return text === 'menu' || text === 'opções' || text === 'opcoes' || text === 'ajuda';
+  return (
+    text === 'menu' ||
+    text === 'opções' ||
+    text === 'opcoes' ||
+    text === 'ajuda' ||
+    text === 'help' ||
+    text === 'início' ||
+    text === 'inicio' ||
+    text === 'começar' ||
+    text === 'comecar' ||
+    text === 'oi' ||
+    text === 'olá' ||
+    text === 'ola' ||
+    text === 'hey' ||
+    text === 'e aí' ||
+    text === 'eai' ||
+    text === 'bom dia' ||
+    text === 'boa tarde' ||
+    text === 'boa noite'
+  );
+}
+
+export function isGennecyFuelMenuMessage(content: string): boolean {
+  return content.includes('Solicitar abastecimento de combustível');
+}
+
+/** No DM com a Gennecy, exibe o menu numerado em vez de cair no chat genérico com IA. */
+export function shouldShowGennecyFuelMenu(body: string): boolean {
+  const text = body.trim();
+  if (!text) return true;
+  if (messageStartsFuelMenu(text)) return true;
+  if (messageHasFuelIntent(text)) return false;
+  if (/^4$|\b(informar|registrar|lançar|lancar)\s+(o\s+)?abastecimento\b/i.test(text)) {
+    return false;
+  }
+  if (/^2$/.test(text)) return false;
+  if (/^3$/.test(text)) return false;
+  if (/\b(criar|crie|cria|gerar|nova|adicionar|abrir|registrar)\b[\s\S]{0,80}?\b(task|tarefa|card|cart[aã]o)\b/i.test(text)) {
+    return false;
+  }
+  if (text.length <= 24 && !text.includes('?')) return true;
+  return false;
 }
 
 export const GENNECY_FUEL_MENU_MESSAGE = [

@@ -27,6 +27,7 @@ export type CreateFuelRefuelRequestInput = {
   dashboardPhotoName?: string | null;
   observations?: string | null;
   sourceChatId?: string | null;
+  sourceWhatsAppPhone?: string | null;
 };
 
 const fuelRefuelInclude = {
@@ -90,6 +91,7 @@ export class FuelRefuelRequestService {
           dashboardPhotoName: input.dashboardPhotoName || null,
           observations: input.observations?.trim() || null,
           sourceChatId: input.sourceChatId || null,
+          sourceWhatsAppPhone: input.sourceWhatsAppPhone || null,
           status: initialStatusForVehicleType(input.vehicleType),
         },
         include: fuelRefuelInclude,
@@ -163,7 +165,11 @@ export class FuelRefuelRequestService {
       include: fuelRefuelInclude,
     });
 
-    await notifyFuelRequesterWaitingSupplies(updated.sourceChatId, updated.displayNumber);
+    await notifyFuelRequesterWaitingSupplies(
+      updated.sourceChatId,
+      updated.displayNumber,
+      updated.sourceWhatsAppPhone,
+    );
     return updated;
   }
 
@@ -240,6 +246,7 @@ export class FuelRefuelRequestService {
       updated.sourceChatId,
       updated.displayNumber,
       updated.suppliesApprovalComment,
+      updated.sourceWhatsAppPhone,
     );
     return updated;
   }
@@ -265,6 +272,7 @@ export class FuelRefuelRequestService {
       updated.sourceChatId,
       updated.displayNumber,
       reason,
+      updated.sourceWhatsAppPhone,
     );
     return updated;
   }
@@ -282,6 +290,25 @@ export class FuelRefuelRequestService {
         vehiclePlate: true,
         driverName: true,
         refuelDate: true,
+        requesterId: true,
+      },
+    });
+  }
+
+  async listAwaitingRefuelForWhatsAppPhone(phone: string) {
+    return prisma.fuelRefuelRequest.findMany({
+      where: {
+        sourceWhatsAppPhone: phone,
+        status: FuelRefuelRequestStatus.AWAITING_REFUEL,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        displayNumber: true,
+        vehiclePlate: true,
+        driverName: true,
+        refuelDate: true,
+        requesterId: true,
       },
     });
   }
@@ -312,7 +339,11 @@ export class FuelRefuelRequestService {
       include: fuelRefuelInclude,
     });
 
-    await notifyFuelRequesterReportCompleted(updated.sourceChatId, updated.displayNumber);
+    await notifyFuelRequesterReportCompleted(
+      updated.sourceChatId,
+      updated.displayNumber,
+      updated.sourceWhatsAppPhone,
+    );
     return updated;
   }
 

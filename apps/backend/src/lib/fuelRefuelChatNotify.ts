@@ -1,6 +1,11 @@
 import { FuelRefuelRequestStatus } from '@prisma/client';
 import { prisma } from './prisma';
 import { getGennecyBotUserId } from '../services/GennecyChatAssistantService';
+import { metaWhatsApp } from '../services/MetaWhatsAppService';
+
+function stripMarkdown(text: string): string {
+  return text.replace(/\*\*/g, '');
+}
 
 export async function postFuelChatMessage(chatId: string | null | undefined, text: string) {
   if (!chatId?.trim()) return;
@@ -20,10 +25,28 @@ export async function postFuelChatMessage(chatId: string | null | undefined, tex
   });
 }
 
+export async function postFuelWhatsAppMessage(phone: string | null | undefined, text: string) {
+  if (!phone?.trim()) return;
+  try {
+    await metaWhatsApp.sendText(phone.trim(), stripMarkdown(text));
+  } catch (err) {
+    console.error('[FuelRefuel] Falha ao enviar WhatsApp:', err);
+  }
+}
+
+async function notifyFuelRequester(
+  sourceChatId: string | null | undefined,
+  sourceWhatsAppPhone: string | null | undefined,
+  text: string,
+) {
+  await postFuelChatMessage(sourceChatId, text);
+  await postFuelWhatsAppMessage(sourceWhatsAppPhone, text);
+}
+
 const STATUS_WAITING_LABEL: Partial<Record<FuelRefuelRequestStatus, string>> = {
   PENDING_MANAGER: 'aguardando aprovação do gestor',
   PENDING_SUPPLIES: 'aguardando aprovação do Suprimentos',
-  AWAITING_REFUEL: 'aprovada — pode abastecer e depois informar os dados (opção 4)',
+  AWAITING_REFUEL: 'aprovada — pode abastecer',
 };
 
 export function formatFuelWaitingLine(displayNumber: number, status: FuelRefuelRequestStatus): string {
@@ -34,14 +57,16 @@ export function formatFuelWaitingLine(displayNumber: number, status: FuelRefuelR
 export async function notifyFuelRequesterWaitingManager(
   sourceChatId: string | null | undefined,
   displayNumber: number,
+  sourceWhatsAppPhone?: string | null,
 ) {
-  await postFuelChatMessage(
+  await notifyFuelRequester(
     sourceChatId,
+    sourceWhatsAppPhone,
     [
       `⏳ Solicitação #${displayNumber} registrada.`,
-      'Aguardando aprovação do **gestor**.',
+      'Aguardando aprovação do gestor.',
       '',
-      'Você receberá uma mensagem aqui quando for encaminhada ao Suprimentos.',
+      'Você receberá uma mensagem quando for encaminhada ao Suprimentos.',
     ].join('\n'),
   );
 }
@@ -49,12 +74,14 @@ export async function notifyFuelRequesterWaitingManager(
 export async function notifyFuelRequesterWaitingSupplies(
   sourceChatId: string | null | undefined,
   displayNumber: number,
+  sourceWhatsAppPhone?: string | null,
 ) {
-  await postFuelChatMessage(
+  await notifyFuelRequester(
     sourceChatId,
+    sourceWhatsAppPhone,
     [
       `⏳ Solicitação #${displayNumber} registrada.`,
-      'Aguardando aprovação do **Suprimentos**.',
+      'Aguardando aprovação do Suprimentos.',
       '',
       'Você receberá uma mensagem aqui quando for aprovada.',
     ].join('\n'),
@@ -65,29 +92,31 @@ export async function notifyFuelRequesterApprovedBySupplies(
   sourceChatId: string | null | undefined,
   displayNumber: number,
   comment?: string | null,
+  sourceWhatsAppPhone?: string | null,
 ) {
   const lines = [
-    `✅ Solicitação #${displayNumber} **aprovada pelo Suprimentos**!`,
+    `✅ Solicitação #${displayNumber} aprovada pelo Suprimentos!`,
     'Você já pode abastecer.',
     '',
-    'Depois do abastecimento, digite **4** ou «informar abastecimento» para enviar:',
-    'hodômetro, nível do tanque, litros, valor por litro e foto do cupom fiscal.',
+    'Depois do abastecimento, abra o menu aqui no WhatsApp e escolha «Informar abastecimento» para enviar hodômetro, litros, valor e cupom fiscal.',
   ];
   if (comment?.trim()) {
     lines.push('', `Observação do Suprimentos: ${comment.trim()}`);
   }
-  await postFuelChatMessage(sourceChatId, lines.join('\n'));
+  await notifyFuelRequester(sourceChatId, sourceWhatsAppPhone, lines.join('\n'));
 }
 
 export async function notifyFuelRequesterRejectedBySupplies(
   sourceChatId: string | null | undefined,
   displayNumber: number,
   reason: string,
+  sourceWhatsAppPhone?: string | null,
 ) {
-  await postFuelChatMessage(
+  await notifyFuelRequester(
     sourceChatId,
+    sourceWhatsAppPhone,
     [
-      `❌ Solicitação #${displayNumber} **não aprovada** pelo Suprimentos.`,
+      `❌ Solicitação #${displayNumber} não aprovada pelo Suprimentos.`,
       reason.trim() ? `Motivo: ${reason.trim()}` : '',
     ]
       .filter(Boolean)
@@ -98,9 +127,11 @@ export async function notifyFuelRequesterRejectedBySupplies(
 export async function notifyFuelRequesterReportCompleted(
   sourceChatId: string | null | undefined,
   displayNumber: number,
+  sourceWhatsAppPhone?: string | null,
 ) {
-  await postFuelChatMessage(
+  await notifyFuelRequester(
     sourceChatId,
+    sourceWhatsAppPhone,
     `✅ Dados do abastecimento da solicitação #${displayNumber} recebidos. Obrigado!`,
   );
 }

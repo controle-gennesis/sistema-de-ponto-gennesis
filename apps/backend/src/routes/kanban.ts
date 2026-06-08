@@ -8,6 +8,15 @@ const controller = new KanbanController();
 router.use(authenticate);
 
 router.get('/boards', (req, res, next) => controller.listBoards(req, res, next));
+router.post('/boards', (req, res, next) => controller.createBoard(req, res, next));
+router.get('/boards/:boardId/shares', (req, res, next) => controller.listBoardShares(req, res, next));
+router.post('/boards/:boardId/shares', (req, res, next) => controller.addBoardShare(req, res, next));
+router.patch('/boards/:boardId/shares/:userId', (req, res, next) =>
+  controller.updateBoardShare(req, res, next),
+);
+router.delete('/boards/:boardId/shares/:userId', (req, res, next) =>
+  controller.removeBoardShare(req, res, next),
+);
 router.get('/picker-users', (req, res, next) => controller.listPickerUsers(req, res, next));
 router.get('/board', (req, res, next) => controller.getBoard(req, res, next));
 router.patch('/board/label-presets', (req, res, next) =>

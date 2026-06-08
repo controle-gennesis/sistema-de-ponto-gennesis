@@ -1,6 +1,11 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { metaWhatsApp } from './MetaWhatsAppService';
+import {
+  isWhatsAppFuelFlowStatus,
+  processWhatsAppFuelFlow,
+} from './WhatsAppFuelFlowHandler';
+import { processWhatsAppFuelRefuelReportFlow } from './WhatsAppFuelRefuelReportFlowHandler';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -14,7 +19,26 @@ type FlowStatus =
   | 'ATESTADO_ASK_DAYS'
   | 'ATESTADO_ASK_FILE'
   | 'ATESTADO_COMPLETE'
-  | 'ATENDANT_ASK_NAME';
+  | 'ATENDANT_ASK_NAME'
+  | 'FUEL_ASK_REFUEL_DATE'
+  | 'FUEL_ASK_ROUTE'
+  | 'FUEL_ASK_DRIVER_CPF'
+  | 'FUEL_ASK_CONTRACT'
+  | 'FUEL_ASK_VEHICLE'
+  | 'FUEL_ASK_VEHICLE_TYPE'
+  | 'FUEL_ASK_DASHBOARD_PHOTO'
+  | 'FUEL_ASK_OBSERVATIONS'
+  | 'FUEL_CONFIRM'
+  | 'FUEL_COMPLETE'
+  | 'FUEL_REPORT_SELECT_REQUEST'
+  | 'FUEL_REPORT_ASK_ODOMETER'
+  | 'FUEL_REPORT_ASK_TANK'
+  | 'FUEL_REPORT_ASK_LITERS'
+  | 'FUEL_REPORT_ASK_PRICE'
+  | 'FUEL_REPORT_ASK_RECEIPT'
+  | 'FUEL_REPORT_ASK_OBSERVATIONS'
+  | 'FUEL_REPORT_CONFIRM'
+  | 'FUEL_REPORT_COMPLETE';
 
 type FaqItem = { id: string; question: string; answer: string; label?: string };
 type FaqTopic = { id: string; title: string; items: FaqItem[]; label?: string };
@@ -254,6 +278,8 @@ type SendAction =
       buttonText: string;
       sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }>;
     };
+
+export type { SendAction };
 
 export type MediaInfo = { mediaId: string; mimeType?: string; filename?: string };
 
@@ -655,7 +681,7 @@ export class WhatsAppBotService {
     let newStatus = flowStatus;
     type ConversationStatus = 'PENDING' | 'COMPLETED' | 'CANCELLED';
     let newConversationStatus: ConversationStatus = ((conversation as any).status as ConversationStatus) || 'PENDING';
-    const newPayload = { ...payload };
+    let newPayload: Record<string, unknown> = { ...payload };
 
     if (opts?.whatsappProfileName?.trim()) {
       (newPayload as any).waProfileName = opts.whatsappProfileName.trim().slice(0, 120);
@@ -735,6 +761,8 @@ export class WhatsAppBotService {
           title: 'Atendimento',
           rows: [
             { id: 'ATESTADO', title: 'Enviar atestado' },
+            { id: 'COMBUSTIVEL', title: 'Solicitar combustível' },
+            { id: 'INFORMAR_ABASTECIMENTO', title: 'Informar abastecimento' },
             { id: 'ATENDENTE', title: 'Falar com atendente' },
             { id: 'DUVIDAS', title: 'Dúvidas' },
             { id: 'END', title: 'Encerrar' }
@@ -953,7 +981,62 @@ export class WhatsAppBotService {
       };
     };
 
-    switch (normalizedFlowStatus) {
+    const fuelReportResult = await processWhatsAppFuelRefuelReportFlow({
+      phone,
+      textRaw,
+      content,
+      flowStatus: normalizedFlowStatus,
+      payload: newPayload,
+      hasMedia,
+      savedMedia,
+      isMenuRequest,
+      isEndRequest,
+      resetToMenu,
+      endConversation,
+    });
+
+    let skipDefaultSwitch = false;
+    if (fuelReportResult) {
+      sendAction = fuelReportResult.sendAction;
+      newStatus = fuelReportResult.newStatus as FlowStatus;
+      newPayload = fuelReportResult.newPayload;
+      if (fuelReportResult.newConversationStatus) {
+        newConversationStatus = fuelReportResult.newConversationStatus;
+      }
+      if (fuelReportResult.clearPayload) {
+        Object.keys(newPayload).forEach((k) => delete newPayload[k]);
+      }
+      skipDefaultSwitch = true;
+    } else {
+      const fuelResult = await processWhatsAppFuelFlow({
+        phone,
+        textRaw,
+        content,
+        flowStatus: normalizedFlowStatus,
+        payload: newPayload,
+        hasMedia,
+        savedMedia,
+        isMenuRequest,
+        isEndRequest,
+        resetToMenu,
+        endConversation,
+      });
+
+      if (fuelResult) {
+        sendAction = fuelResult.sendAction;
+        newStatus = fuelResult.newStatus as FlowStatus;
+        newPayload = fuelResult.newPayload;
+        if (fuelResult.newConversationStatus) {
+          newConversationStatus = fuelResult.newConversationStatus;
+        }
+        if (fuelResult.clearPayload) {
+          Object.keys(newPayload).forEach((k) => delete newPayload[k]);
+        }
+        skipDefaultSwitch = true;
+      }
+    }
+
+    if (!skipDefaultSwitch) switch (normalizedFlowStatus) {
       case 'MENU': {
         if (isEndRequest()) {
           sendAction = endConversation();

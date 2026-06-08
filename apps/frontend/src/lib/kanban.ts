@@ -77,6 +77,9 @@ export interface KanbanBoard {
   slug: string;
   department: string;
   departmentKey: string;
+  isCustom?: boolean;
+  isOwner?: boolean;
+  canManageShares?: boolean;
   canWrite?: boolean;
   labelPresets?: KanbanLabelPreset[];
   columns: KanbanColumn[];
@@ -91,11 +94,59 @@ export interface KanbanBoardSummary {
   columnCount: number;
   updatedAt: string;
   isOwnDepartment: boolean;
+  isCustom: boolean;
+  isOwner: boolean;
+  canManageShares: boolean;
+  sharedWithMe: boolean;
+}
+
+export interface KanbanBoardShare {
+  id: string;
+  userId: string;
+  permission: 'READ' | 'WRITE';
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    profilePhotoUrl: string | null;
+  };
 }
 
 export async function fetchKanbanBoards(): Promise<KanbanBoardSummary[]> {
   const res = await api.get('/kanban/boards');
   return res.data.data;
+}
+
+export async function createKanbanBoard(name: string): Promise<KanbanBoardSummary> {
+  const res = await api.post('/kanban/boards', { name });
+  return res.data.data;
+}
+
+export async function fetchKanbanBoardShares(boardId: string): Promise<KanbanBoardShare[]> {
+  const res = await api.get(`/kanban/boards/${boardId}/shares`);
+  return res.data.data;
+}
+
+export async function addKanbanBoardShare(
+  boardId: string,
+  userId: string,
+  permission: 'READ' | 'WRITE' = 'WRITE',
+): Promise<KanbanBoardShare> {
+  const res = await api.post(`/kanban/boards/${boardId}/shares`, { userId, permission });
+  return res.data.data;
+}
+
+export async function updateKanbanBoardShare(
+  boardId: string,
+  userId: string,
+  permission: 'READ' | 'WRITE',
+): Promise<KanbanBoardShare> {
+  const res = await api.patch(`/kanban/boards/${boardId}/shares/${userId}`, { permission });
+  return res.data.data;
+}
+
+export async function removeKanbanBoardShare(boardId: string, userId: string): Promise<void> {
+  await api.delete(`/kanban/boards/${boardId}/shares/${userId}`);
 }
 
 export async function fetchKanbanBoard(departmentKey?: string): Promise<KanbanBoard> {

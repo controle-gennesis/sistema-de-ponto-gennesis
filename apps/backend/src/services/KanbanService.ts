@@ -1,8 +1,12 @@
-import { Prisma, TaskPriority } from '@prisma/client';
+import { Prisma, TaskPriority, KanbanBoardSharePermission } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import {
   isKanbanHiddenPickerUser,
+  isCustomKanbanBoardKey,
+  KANBAN_CUSTOM_KEY_PREFIX,
   KANBAN_LEGACY_DEPARTMENT_KEY,
-  userCanViewAllKanbanBoards,
+  resolveKanbanBoardKeyParam,
+  userIsAdministrator,
 } from '../lib/kanbanAccess';
 import {
   DEFAULT_KANBAN_LABEL_PRESETS,
@@ -384,6 +388,7 @@ function formatBoardResponse(
     slug: string;
     departmentKey: string;
     departmentLabel: string;
+    isCustom?: boolean;
     labelPresets?: unknown;
     columns: Array<{
       id: string;
@@ -394,14 +399,18 @@ function formatBoardResponse(
       cards: Parameters<typeof formatCard>[0][];
     }>;
   },
-  meta?: { canWrite?: boolean },
+  meta?: { canWrite?: boolean; isOwner?: boolean; canManageShares?: boolean },
 ) {
+  const isCustom = board.isCustom ?? isCustomKanbanBoardKey(board.departmentKey);
   return {
     id: board.id,
     name: board.name,
     slug: board.slug,
     department: board.departmentLabel,
     departmentKey: board.departmentKey,
+    isCustom,
+    isOwner: meta?.isOwner ?? false,
+    canManageShares: meta?.canManageShares ?? false,
     labelPresets: resolveKanbanLabelPresets(board.labelPresets),
     canWrite: meta?.canWrite ?? true,
     columns: board.columns.map((col) => ({
@@ -548,6 +557,13 @@ async function moveKanbanCardToColumn(
 }
 
 export class KanbanService {
+  private boardAccessSelect = {
+    id: true,
+    departmentKey: true,
+    isCustom: true,
+    createdById: true,
+  } as const;
+
   private async getUserDepartment(userId: string) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -574,15 +590,82 @@ export class KanbanService {
     return board;
   }
 
+  private async resolveBoardAccessForUser(
+    userId: string,
+    board: {
+      id: string;
+      departmentKey: string;
+      isCustom: boolean;
+      createdById: string | null;
+    },
+  ): Promise<{ canRead: boolean; canWrite: boolean; isOwner: boolean }> {
+    const { key: ownKey } = await this.getUserDepartment(userId);
+
+    if (board.isCustom) {
+      const isOwner = board.createdById === userId;
+      if (isOwner) return { canRead: true, canWrite: true, isOwner: true };
+
+      const share = await prisma.kanbanBoardShare.findUnique({
+        where: { boardId_userId: { boardId: board.id, userId } },
+      });
+      if (share) {
+        return {
+          canRead: true,
+          canWrite: true,
+          isOwner: false,
+        };
+      }
+      if (await userIsAdministrator(userId)) {
+        return { canRead: true, canWrite: true, isOwner: false };
+      }
+      return { canRead: false, canWrite: false, isOwner: false };
+    }
+
+    if (board.departmentKey === ownKey) {
+      return { canRead: true, canWrite: true, isOwner: false };
+    }
+    if (await userIsAdministrator(userId)) {
+      return { canRead: true, canWrite: true, isOwner: false };
+    }
+    return { canRead: false, canWrite: false, isOwner: false };
+  }
+
   private async assertBoardAccess(
+    userId: string,
+    board: {
+      id: string;
+      departmentKey: string;
+      isCustom: boolean;
+      createdById: string | null;
+    },
+    mode: 'read' | 'write',
+  ) {
+    const access = await this.resolveBoardAccessForUser(userId, board);
+    if (mode === 'read' && access.canRead) return;
+    if (mode === 'write' && access.canWrite) return;
+    throw new Error(KANBAN_FORBIDDEN);
+  }
+
+  private async assertBoardAccessByKey(
     userId: string,
     departmentKey: string,
     mode: 'read' | 'write',
   ) {
-    const { key } = await this.getUserDepartment(userId);
-    if (departmentKey === key) return;
-    if (mode === 'read' && (await userCanViewAllKanbanBoards(userId))) return;
-    throw new Error(KANBAN_FORBIDDEN);
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { departmentKey },
+      select: this.boardAccessSelect,
+    });
+    if (!board) throw new Error(KANBAN_FORBIDDEN);
+    await this.assertBoardAccess(userId, board, mode);
+  }
+
+  private async assertBoardWriteById(userId: string, boardId: string) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: this.boardAccessSelect,
+    });
+    if (!board) throw new Error(KANBAN_FORBIDDEN);
+    await this.assertBoardAccess(userId, board, 'write');
   }
 
   private async assertColumnAccess(
@@ -592,10 +675,10 @@ export class KanbanService {
   ) {
     const column = await prisma.kanbanColumn.findUnique({
       where: { id: columnId },
-      include: { board: { select: { departmentKey: true } } },
+      include: { board: { select: this.boardAccessSelect } },
     });
     if (!column) throw new Error(KANBAN_FORBIDDEN);
-    await this.assertBoardAccess(userId, column.board.departmentKey, mode);
+    await this.assertBoardAccess(userId, column.board, mode);
   }
 
   private async assertCardAccess(
@@ -605,63 +688,328 @@ export class KanbanService {
   ) {
     const card = await prisma.kanbanCard.findUnique({
       where: { id: cardId },
-      include: { column: { include: { board: { select: { departmentKey: true } } } } },
+      include: {
+        column: { include: { board: { select: this.boardAccessSelect } } },
+      },
     });
     if (!card) throw new Error(KANBAN_FORBIDDEN);
-    await this.assertBoardAccess(userId, card.column.board.departmentKey, mode);
+    await this.assertBoardAccess(userId, card.column.board, mode);
   }
 
   async listBoardsForUser(userId: string) {
-    const { key: ownKey } = await this.getUserDepartment(userId);
-    const canViewAll = await userCanViewAllKanbanBoards(userId);
+    const { key: ownKey, label: ownLabel } = await this.getUserDepartment(userId);
+    const isAdmin = await userIsAdministrator(userId);
 
-    const boards = await prisma.kanbanBoard.findMany({
-      where: canViewAll
-        ? { departmentKey: { not: KANBAN_LEGACY_DEPARTMENT_KEY } }
-        : { departmentKey: ownKey },
-      orderBy: { departmentLabel: 'asc' },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        departmentKey: true,
-        departmentLabel: true,
-        updatedAt: true,
-        _count: {
+    const boardSelect = {
+      id: true,
+      name: true,
+      slug: true,
+      departmentKey: true,
+      departmentLabel: true,
+      isCustom: true,
+      createdById: true,
+      updatedAt: true,
+      _count: { select: { columns: true } },
+    } as const;
+
+    const seen = new Set<string>();
+    const results: Array<{
+      id: string;
+      name: string;
+      slug: string;
+      departmentKey: string;
+      department: string;
+      columnCount: number;
+      updatedAt: string;
+      isOwnDepartment: boolean;
+      isCustom: boolean;
+      isOwner: boolean;
+      canManageShares: boolean;
+      sharedWithMe: boolean;
+    }> = [];
+
+    const pushBoard = (b: {
+      id: string;
+      name: string;
+      slug: string;
+      departmentKey: string;
+      departmentLabel: string;
+      isCustom: boolean;
+      createdById: string | null;
+      updatedAt: Date;
+      _count: { columns: number };
+    }) => {
+      if (seen.has(b.id)) return;
+      seen.add(b.id);
+      results.push({
+        id: b.id,
+        name: b.name,
+        slug: b.slug,
+        departmentKey: b.departmentKey,
+        department: b.departmentLabel,
+        columnCount: b._count.columns,
+        updatedAt: b.updatedAt.toISOString(),
+        isOwnDepartment: !b.isCustom && b.departmentKey === ownKey,
+        isCustom: b.isCustom,
+        isOwner: b.isCustom && b.createdById === userId,
+        canManageShares: b.isCustom && b.createdById === userId,
+        sharedWithMe: b.isCustom && b.createdById !== userId,
+      });
+    };
+
+    if (isAdmin) {
+      const deptBoards = await prisma.kanbanBoard.findMany({
+        where: {
+          isCustom: false,
+          departmentKey: { not: KANBAN_LEGACY_DEPARTMENT_KEY },
+        },
+        orderBy: { departmentLabel: 'asc' },
+        select: boardSelect,
+      });
+      deptBoards.forEach(pushBoard);
+
+      const allCustomBoards = await prisma.kanbanBoard.findMany({
+        where: { isCustom: true },
+        orderBy: { departmentLabel: 'asc' },
+        select: boardSelect,
+      });
+      allCustomBoards.forEach(pushBoard);
+    } else {
+      const ownBoard = await prisma.kanbanBoard.findUnique({
+        where: { departmentKey: ownKey },
+        select: boardSelect,
+      });
+      if (ownBoard) {
+        pushBoard(ownBoard);
+      } else {
+        results.push({
+          id: '',
+          name: 'Tasks',
+          slug: slugFromDepartmentKey(ownKey),
+          departmentKey: ownKey,
+          department: ownLabel,
+          columnCount: 0,
+          updatedAt: new Date().toISOString(),
+          isOwnDepartment: true,
+          isCustom: false,
+          isOwner: false,
+          canManageShares: false,
+          sharedWithMe: false,
+        });
+      }
+
+      const customBoards = await prisma.kanbanBoard.findMany({
+        where: {
+          isCustom: true,
+          OR: [{ createdById: userId }, { shares: { some: { userId } } }],
+        },
+        orderBy: { departmentLabel: 'asc' },
+        select: boardSelect,
+      });
+      customBoards.forEach(pushBoard);
+    }
+
+    return results.sort((a, b) => a.department.localeCompare(b.department, 'pt-BR'));
+  }
+
+  async createCustomBoard(userId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Nome do quadro é obrigatório');
+    if (trimmed.length > 80) throw new Error('Nome do quadro deve ter no máximo 80 caracteres');
+
+    const departmentKey = `${KANBAN_CUSTOM_KEY_PREFIX}${randomUUID().replace(/-/g, '')}`;
+    const slugBase = slugFromDepartmentKey(trimmed.slice(0, 40));
+    const slug = `${slugBase}-${Date.now()}`;
+
+    const board = await prisma.kanbanBoard.create({
+      data: {
+        name: trimmed,
+        slug,
+        departmentKey,
+        departmentLabel: trimmed,
+        isCustom: true,
+        createdById: userId,
+        labelPresets: DEFAULT_KANBAN_LABEL_PRESETS as Prisma.InputJsonValue,
+        columns: {
+          create: [
+            { title: 'Planned', color: '#111827', position: 0 },
+            { title: 'Active', color: '#14B8A6', position: 1 },
+            { title: 'Completed', color: '#3B82F6', position: 2 },
+          ],
+        },
+      },
+      include: boardListInclude,
+    });
+
+    return {
+      id: board.id,
+      name: board.name,
+      slug: board.slug,
+      departmentKey: board.departmentKey,
+      department: board.departmentLabel,
+      columnCount: board.columns.length,
+      updatedAt: board.updatedAt.toISOString(),
+      isOwnDepartment: false,
+      isCustom: true,
+      isOwner: true,
+      canManageShares: true,
+      sharedWithMe: false,
+    };
+  }
+
+  async listBoardShares(boardId: string, requesterId: string) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: { ...this.boardAccessSelect, isCustom: true },
+    });
+    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
+    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
+
+    const shares = await prisma.kanbanBoardShare.findMany({
+      where: { boardId },
+      include: {
+        user: {
           select: {
-            columns: true,
+            id: true,
+            name: true,
+            email: true,
+            profilePhotoUrl: true,
+            employee: { select: { position: true } },
           },
         },
       },
+      orderBy: { createdAt: 'asc' },
     });
 
-    return boards.map((b) => ({
-      id: b.id,
-      name: b.name,
-      slug: b.slug,
-      departmentKey: b.departmentKey,
-      department: b.departmentLabel,
-      columnCount: b._count.columns,
-      updatedAt: b.updatedAt.toISOString(),
-      isOwnDepartment: b.departmentKey === ownKey,
-    }));
+    return shares
+      .filter((s) => !isKanbanHiddenPickerUser(s.user))
+      .map((s) => ({
+        id: s.id,
+        userId: s.userId,
+        permission: s.permission,
+        user: {
+          id: s.user.id,
+          name: s.user.name,
+          email: s.user.email,
+          profilePhotoUrl: s.user.profilePhotoUrl,
+        },
+      }));
+  }
+
+  async addBoardShare(
+    boardId: string,
+    targetUserId: string,
+    permission: 'READ' | 'WRITE',
+    requesterId: string,
+  ) {
+    if (targetUserId === requesterId) {
+      throw new Error('Não é possível compartilhar consigo mesmo');
+    }
+
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: { ...this.boardAccessSelect, isCustom: true },
+    });
+    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
+    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
+
+    const target = await prisma.user.findFirst({
+      where: { id: targetUserId, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        employee: { select: { position: true } },
+      },
+    });
+    if (!target || isKanbanHiddenPickerUser(target)) {
+      throw new Error('Usuário não encontrado');
+    }
+
+    const perm = KanbanBoardSharePermission.WRITE;
+
+    const share = await prisma.kanbanBoardShare.upsert({
+      where: { boardId_userId: { boardId, userId: targetUserId } },
+      create: {
+        boardId,
+        userId: targetUserId,
+        permission: perm,
+        createdBy: requesterId,
+      },
+      update: { permission: perm },
+      include: {
+        user: { select: { id: true, name: true, email: true, profilePhotoUrl: true } },
+      },
+    });
+
+    return {
+      id: share.id,
+      userId: share.userId,
+      permission: share.permission,
+      user: share.user,
+    };
+  }
+
+  async updateBoardShare(
+    boardId: string,
+    targetUserId: string,
+    permission: 'READ' | 'WRITE',
+    requesterId: string,
+  ) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: { ...this.boardAccessSelect, isCustom: true },
+    });
+    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
+    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
+
+    const perm =
+      permission === 'WRITE'
+        ? KanbanBoardSharePermission.WRITE
+        : KanbanBoardSharePermission.READ;
+
+    const share = await prisma.kanbanBoardShare.update({
+      where: { boardId_userId: { boardId, userId: targetUserId } },
+      data: { permission: perm },
+      include: {
+        user: { select: { id: true, name: true, email: true, profilePhotoUrl: true } },
+      },
+    });
+
+    return {
+      id: share.id,
+      userId: share.userId,
+      permission: share.permission,
+      user: share.user,
+    };
+  }
+
+  async removeBoardShare(boardId: string, targetUserId: string, requesterId: string) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: { ...this.boardAccessSelect, isCustom: true },
+    });
+    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
+    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
+
+    await prisma.kanbanBoardShare.delete({
+      where: { boardId_userId: { boardId, userId: targetUserId } },
+    });
   }
 
   async getBoardForUser(userId: string, departmentKeyParam?: string) {
     await migrateLegacyCardMembers();
     const { key: ownKey } = await this.getUserDepartment(userId);
     const targetKey = departmentKeyParam
-      ? normalizeDepartmentKey(departmentKeyParam)
+      ? resolveKanbanBoardKeyParam(departmentKeyParam)
       : ownKey;
 
     if (targetKey === KANBAN_LEGACY_DEPARTMENT_KEY) {
       throw new Error('Quadro não encontrado para este setor');
     }
 
-    await this.assertBoardAccess(userId, targetKey, 'read');
-
     let board =
-      targetKey === ownKey
+      !isCustomKanbanBoardKey(targetKey) && targetKey === ownKey
         ? await this.getOrCreateBoardForDepartment(userId)
         : await prisma.kanbanBoard.findUnique({
             where: { departmentKey: targetKey },
@@ -672,8 +1020,14 @@ export class KanbanService {
       throw new Error('Quadro não encontrado para este setor');
     }
 
-    const canWrite = targetKey === ownKey;
-    return formatBoardResponse(board, { canWrite });
+    const access = await this.resolveBoardAccessForUser(userId, board);
+    if (!access.canRead) throw new Error(KANBAN_FORBIDDEN);
+
+    return formatBoardResponse(board, {
+      canWrite: access.canWrite,
+      isOwner: access.isOwner,
+      canManageShares: board.isCustom && access.isOwner,
+    });
   }
 
   async updateBoardLabelPresets(
@@ -683,20 +1037,19 @@ export class KanbanService {
   ): Promise<KanbanLabelPresetDto[]> {
     const { key: ownKey } = await this.getUserDepartment(userId);
     const targetKey = departmentKeyParam
-      ? normalizeDepartmentKey(departmentKeyParam)
+      ? resolveKanbanBoardKeyParam(departmentKeyParam)
       : ownKey;
 
-    if (targetKey !== ownKey) {
-      throw new Error(KANBAN_FORBIDDEN);
-    }
-
-    const presets = validateKanbanLabelPresetsInput(presetsInput);
     const board = await prisma.kanbanBoard.findUnique({
       where: { departmentKey: targetKey },
+      select: this.boardAccessSelect,
     });
     if (!board) {
       throw new Error('Quadro não encontrado para este setor');
     }
+    await this.assertBoardAccess(userId, board, 'write');
+
+    const presets = validateKanbanLabelPresetsInput(presetsInput);
 
     await prisma.kanbanBoard.update({
       where: { id: board.id },
@@ -730,8 +1083,7 @@ export class KanbanService {
 
     if (!board) throw new Error('Quadro não encontrado');
 
-    const { key } = await this.getUserDepartment(userId);
-    if (board.departmentKey !== key) throw new Error(KANBAN_FORBIDDEN);
+    await this.assertBoardWriteById(userId, board.id);
 
     const maxPos = await prisma.kanbanColumn.aggregate({
       where: { boardId: board.id },
@@ -1084,7 +1436,7 @@ export class KanbanService {
   }
 
   async getCardCost(userId: string, cardId: string) {
-    if (!(await userCanViewAllKanbanBoards(userId))) {
+    if (!(await userIsAdministrator(userId))) {
       throw new Error(KANBAN_FORBIDDEN);
     }
 

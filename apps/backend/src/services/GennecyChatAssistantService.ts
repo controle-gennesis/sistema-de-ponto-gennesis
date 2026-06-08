@@ -6,8 +6,10 @@ import { buildFuelOpenRequestsStatusMessage } from '../lib/fuelRefuelChatNotify'
 import {
   gennecyFuelFlowService,
   GENNECY_FUEL_MENU_MESSAGE,
+  isGennecyFuelMenuMessage,
   messageHasFuelIntent,
   messageStartsFuelMenu,
+  shouldShowGennecyFuelMenu,
 } from './GennecyFuelFlowService';
 import {
   gennecyFuelRefuelReportFlowService,
@@ -177,7 +179,9 @@ export async function shouldProcessGennecyMessage(
   const inDm = await isDirectChatWithGennecyBot(chatId, senderId);
   if (!inDm) return false;
   if (content.trim().length > 0 || options?.hasAttachments) return true;
-  return gennecyFuelFlowService.hasActiveFlow(chatId, senderId);
+  if (await gennecyFuelFlowService.hasActiveFlow(chatId, senderId)) return true;
+  if (await gennecyFuelRefuelReportFlowService.hasActiveFlow(chatId, senderId)) return true;
+  return false;
 }
 
 /** @deprecated Use getGennecyInvokeMode — mantido para compatibilidade. */
@@ -663,6 +667,15 @@ export class GennecyChatAssistantService {
           await this.postGennecyReply(params.chatId, params.senderId, menu);
           return;
         }
+      }
+
+      if (inGennecyDm && !isTask && shouldShowGennecyFuelMenu(body)) {
+        const statusLine = await buildFuelOpenRequestsStatusMessage(params.senderId);
+        const menu = statusLine
+          ? `${statusLine}\n\n${GENNECY_FUEL_MENU_MESSAGE}`
+          : GENNECY_FUEL_MENU_MESSAGE;
+        await this.postGennecyReply(params.chatId, params.senderId, menu);
+        return;
       }
 
       if (isTask) {

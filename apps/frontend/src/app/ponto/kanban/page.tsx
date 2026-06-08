@@ -2,13 +2,15 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { useState, useRef, useCallback, useEffect, Suspense } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
 import { KanbanBoardLabelSettings } from '@/components/kanban/KanbanBoardLabelSettings';
+import { KanbanCreateBoardModal } from '@/components/kanban/KanbanCreateBoardModal';
+import { KanbanBoardShareModal } from '@/components/kanban/KanbanBoardShareModal';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
@@ -26,6 +28,7 @@ import {
   type KanbanBoardSummary,
   fetchKanbanBoard,
   fetchKanbanBoards,
+  createKanbanBoard,
   updateKanbanBoardLabelPresets,
   createKanbanColumn,
   updateKanbanColumn,
@@ -37,6 +40,11 @@ import {
   fetchKanbanCard,
   kanbanCardQueryKey,
 } from '@/lib/kanban';
+import {
+  resolveKanbanDefaultBoard,
+  saveKanbanDefaultBoard,
+  clearKanbanDefaultBoard,
+} from '@/lib/kanbanDefaultBoard';
 import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG, KANBAN_PRIORITY_ORDER } from '@/components/kanban/kanbanPriority';
 import { KanbanPriorityBars } from '@/components/kanban/KanbanPriorityBars';
@@ -73,9 +81,9 @@ import {
   Loader,
   LayoutGrid,
   ChevronUp,
-  Building2,
-  ChevronRight,
   Eye,
+  Users,
+  Star,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
@@ -1143,14 +1151,22 @@ function StatsBar({ columns }: { columns: KanbanColumn[] }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-function KanbanBoardSwitcher({
+function KanbanBoardPicker({
   boards,
   currentDepartmentKey,
+  defaultDepartmentKey,
   onSelect,
+  onSetDefault,
+  onCreateBoard,
+  onShare,
 }: {
   boards: KanbanBoardSummary[];
   currentDepartmentKey?: string;
+  defaultDepartmentKey?: string | null;
   onSelect: (departmentKey: string) => void;
+  onSetDefault: (departmentKey: string) => void;
+  onCreateBoard: () => void;
+  onShare: (board: KanbanBoardSummary) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1166,8 +1182,6 @@ function KanbanBoardSwitcher({
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, [open]);
 
-  if (boards.length === 0) return null;
-
   return (
     <div className="relative" ref={rootRef}>
       <button
@@ -1175,91 +1189,112 @@ function KanbanBoardSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label="Trocar setor"
-        title="Trocar setor"
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+        aria-label="Quadros"
+        title="Quadros"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
       >
         <LayoutGrid className="h-4 w-4 shrink-0" />
       </button>
       {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 top-full z-50 mt-1 max-h-64 min-w-[12rem] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-800"
-        >
-          {boards.map((b) => {
-            const active = b.departmentKey === currentDepartmentKey;
-            return (
-              <button
-                key={b.id}
-                type="button"
-                role="option"
-                aria-selected={active}
-                onClick={() => {
-                  setOpen(false);
-                  if (!active) onSelect(b.departmentKey);
-                }}
-                className={clsx(
-                  'flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors',
-                  active
-                    ? 'bg-red-50 font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300'
-                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60',
-                )}
-              >
-                <span className="truncate">{b.department}</span>
-                {b.isOwnDepartment && (
-                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                    seu
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        <div className="absolute right-0 top-full z-50 mt-1 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
+          <div className="max-h-72 overflow-y-auto p-1.5">
+            {boards.length === 0 ? (
+              <p className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400">
+                Nenhum quadro disponível.
+              </p>
+            ) : (
+              <div className="space-y-1">
+              {boards.map((b) => {
+                const active = b.departmentKey === currentDepartmentKey;
+                const isDefault = defaultDepartmentKey === b.departmentKey;
+                const showShare = Boolean(b.canManageShares && b.id);
+                return (
+                  <div
+                    key={b.id || b.departmentKey}
+                    className={clsx(
+                      'flex h-10 items-center rounded-lg px-2 transition-colors',
+                      active
+                        ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => {
+                        setOpen(false);
+                        if (!active) onSelect(b.departmentKey);
+                      }}
+                      className={clsx(
+                        'min-w-0 flex-1 truncate py-2 pr-2 text-left text-sm',
+                        active && 'font-medium',
+                      )}
+                    >
+                      {b.department}
+                    </button>
+                    <div className="flex shrink-0 items-center">
+                      {showShare ? (
+                        <button
+                          type="button"
+                          title="Compartilhar quadro"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpen(false);
+                            onShare(b);
+                          }}
+                          className={clsx(
+                            'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+                            active
+                              ? 'text-red-500/80 hover:bg-red-100/70 hover:text-red-600 dark:text-red-300/80 dark:hover:bg-red-900/40 dark:hover:text-red-200'
+                              : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200',
+                          )}
+                        >
+                          <Users className="h-4 w-4" />
+                        </button>
+                      ) : (
+                        <span className="inline-block h-8 w-8 shrink-0" aria-hidden />
+                      )}
+                      <button
+                        type="button"
+                        title={isDefault ? 'Quadro padrão' : 'Definir como padrão'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!isDefault) onSetDefault(b.departmentKey);
+                        }}
+                        className={clsx(
+                          'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+                          isDefault
+                            ? 'text-amber-500 dark:text-amber-400'
+                            : active
+                              ? 'text-red-400/70 hover:bg-red-100/70 hover:text-amber-500 dark:text-red-300/70 dark:hover:bg-red-900/40 dark:hover:text-amber-400'
+                              : 'text-gray-400 hover:bg-gray-100 hover:text-amber-500 dark:hover:bg-gray-700 dark:hover:text-amber-400',
+                        )}
+                      >
+                        <Star className={clsx('h-4 w-4', isDefault && 'fill-current')} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              </div>
+            )}
+          </div>
+          <div className="border-t border-gray-100 p-2 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onCreateBoard();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              Novo Quadro
+            </button>
+          </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function KanbanBoardList({
-  boards,
-  onOpen,
-}: {
-  boards: KanbanBoardSummary[];
-  onOpen: (departmentKey: string) => void;
-}) {
-  if (boards.length === 0) {
-    return (
-      <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-white/60 dark:bg-gray-800/40 px-6 py-16 text-center">
-        <LayoutGrid className="mx-auto mb-3 h-10 w-10 text-gray-300 dark:text-gray-600" />
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Nenhum quadro de Tasks foi criado ainda. O quadro de cada setor aparece quando alguém do setor acessa Tasks pela primeira vez.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {boards.map((b) => (
-        <button
-          key={b.id}
-          type="button"
-          onClick={() => onOpen(b.departmentKey)}
-          className="group flex flex-col rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition-all hover:border-red-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800/50"
-        >
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400">
-              <Building2 className="h-5 w-5" />
-            </div>
-            <ChevronRight className="h-5 w-5 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-red-500 dark:text-gray-600" />
-          </div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{b.department}</h2>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {b.columnCount} coluna{b.columnCount !== 1 ? 's' : ''}
-            {b.isOwnDepartment ? ' · seu setor' : ''}
-          </p>
-        </button>
-      ))}
     </div>
   );
 }
@@ -1269,13 +1304,15 @@ function KanbanPage() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const departmentKeyParam = searchParams?.get('departmentKey') ?? null;
+  const legacyListParam =
+    searchParams?.get('list') === '1' || searchParams?.get('list') === 'true';
 
   const {
-    canViewAllKanbanBoards,
+    isAdministrator,
     isLoading: loadingPerms,
     user: meUser,
   } = usePermissions();
-  const showBoardList = canViewAllKanbanBoards && !departmentKeyParam;
+  const isResolvingEntry = !departmentKeyParam && !!meUser && !loadingPerms;
   const loadingUser = loadingPerms;
 
   const userDepartment = meUser?.employee?.department ?? '';
@@ -1285,14 +1322,67 @@ function KanbanPage() {
   const { data: boardsList, isLoading: loadingBoardsList } = useQuery({
     queryKey: ['kanban-boards'],
     queryFn: fetchKanbanBoards,
-    enabled: !!meUser && canViewAllKanbanBoards,
+    enabled: !!meUser,
     staleTime: 30 * 1000,
   });
+
+  const [defaultBoardRev, setDefaultBoardRev] = useState(0);
+
+  const defaultDepartmentKey = useMemo(() => {
+    if (!meUser?.id || !boardsList?.length) return null;
+    void defaultBoardRev;
+    return resolveKanbanDefaultBoard(meUser.id, boardsList);
+  }, [meUser?.id, boardsList, defaultBoardRev]);
+
+  const setAsDefaultBoard = useCallback(
+    (departmentKey: string) => {
+      if (!meUser?.id || !boardsList?.length) return;
+      const ownDeptKey = boardsList.find((b) => b.isOwnDepartment)?.departmentKey;
+      if (departmentKey === ownDeptKey) {
+        clearKanbanDefaultBoard(meUser.id);
+      } else {
+        saveKanbanDefaultBoard(meUser.id, departmentKey);
+      }
+      setDefaultBoardRev((n) => n + 1);
+      toast.success('Este quadro abrirá por padrão ao entrar em Tasks');
+    },
+    [meUser?.id, boardsList],
+  );
+
+  useEffect(() => {
+    if (legacyListParam) {
+      router.replace('/ponto/kanban');
+    }
+  }, [legacyListParam, router]);
+
+  useEffect(() => {
+    if (!meUser || loadingBoardsList || boardsList === undefined) return;
+    if (departmentKeyParam || legacyListParam) return;
+
+    const targetKey = resolveKanbanDefaultBoard(meUser.id, boardsList);
+    if (targetKey) {
+      router.replace(`/ponto/kanban?departmentKey=${encodeURIComponent(targetKey)}`);
+    }
+  }, [
+    meUser,
+    loadingBoardsList,
+    boardsList,
+    departmentKeyParam,
+    legacyListParam,
+    router,
+  ]);
+
+  const [createBoardOpen, setCreateBoardOpen] = useState(false);
+  const [creatingBoard, setCreatingBoard] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{
+    boardId: string;
+    boardName: string;
+  } | null>(null);
 
   const { data: board, isLoading: loadingBoard, isError: boardError } = useQuery({
     queryKey: kanbanBoardQueryKey,
     queryFn: () => fetchKanbanBoard(departmentKeyParam ?? undefined),
-    enabled: !!meUser && !showBoardList,
+    enabled: !!meUser && !!departmentKeyParam,
     staleTime: 30 * 1000,
   });
 
@@ -1303,6 +1393,27 @@ function KanbanPage() {
       router.push(`/ponto/kanban?departmentKey=${encodeURIComponent(departmentKey)}`);
     },
     [router],
+  );
+
+  const handleCreateBoard = useCallback(
+    async (name: string) => {
+      setCreatingBoard(true);
+      try {
+        const created = await createKanbanBoard(name);
+        await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+        setCreateBoardOpen(false);
+        toast.success('Quadro criado');
+        openBoard(created.departmentKey);
+      } catch (err: unknown) {
+        const msg =
+          (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+          'Erro ao criar quadro';
+        toast.error(msg);
+      } finally {
+        setCreatingBoard(false);
+      }
+    },
+    [openBoard, queryClient],
   );
 
   const handleLogout = () => {
@@ -1666,7 +1777,19 @@ function KanbanPage() {
     })
   }));
 
-  if (loadingUser || loadingPerms || (showBoardList ? loadingBoardsList : loadingBoard)) {
+  if (loadingUser || loadingPerms) {
+    return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
+  }
+
+  const waitingForBoards = loadingBoardsList || boardsList === undefined;
+  const waitingForEntryRoute = isResolvingEntry && waitingForBoards;
+  const waitingForBoard = !!departmentKeyParam && loadingBoard;
+
+  if (waitingForEntryRoute || waitingForBoard) {
+    return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
+  }
+
+  if (isResolvingEntry && !departmentKeyParam) {
     return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
   }
 
@@ -1676,27 +1799,11 @@ function KanbanPage() {
 
   const user = meUser;
 
-  if (!showBoardList && boardError) {
+  if (boardError) {
     return (
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="px-4 py-12 text-center text-gray-600 dark:text-gray-400">
           Não foi possível carregar o quadro. Tente atualizar a página.
-        </div>
-      </MainLayout>
-    );
-  }
-
-  if (showBoardList) {
-    return (
-      <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="px-4 space-y-6">
-          <div className="text-center sm:text-left">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Tasks</h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Selecione o setor para visualizar o quadro de Tasks.
-            </p>
-          </div>
-          <KanbanBoardList boards={boardsList ?? []} onOpen={openBoard} />
         </div>
       </MainLayout>
     );
@@ -1707,7 +1814,7 @@ function KanbanPage() {
       <div className="flex flex-col -mx-2 sm:-mx-4">
         {/* ── Page Header ── */}
         <div className="mb-4 flex-shrink-0 space-y-4 px-4">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
               <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Tasks</h1>
               {board?.department && (
@@ -1723,18 +1830,22 @@ function KanbanPage() {
                       </span>
                     )}
                   </p>
-                  {canViewAllKanbanBoards && (
-                    <KanbanBoardSwitcher
-                      boards={boardsList ?? []}
-                      currentDepartmentKey={board.departmentKey}
-                      onSelect={openBoard}
-                    />
-                  )}
                 </div>
               )}
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <KanbanBoardPicker
+                boards={boardsList ?? []}
+                currentDepartmentKey={board?.departmentKey}
+                defaultDepartmentKey={defaultDepartmentKey}
+                onSelect={openBoard}
+                onSetDefault={setAsDefaultBoard}
+                onCreateBoard={() => setCreateBoardOpen(true)}
+                onShare={(b) =>
+                  setShareTarget({ boardId: b.id, boardName: b.department })
+                }
+              />
               {/* Search */}
               <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -2023,7 +2134,7 @@ function KanbanPage() {
                 }
               : null
           }
-          canViewAllKanbanBoards={canViewAllKanbanBoards}
+          isAdministrator={isAdministrator}
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
           onBoardCardPatch={patchBoardCard}
@@ -2065,6 +2176,33 @@ function KanbanPage() {
             </Button>
           </div>
         </Modal>
+      )}
+
+      <KanbanCreateBoardModal
+        isOpen={createBoardOpen}
+        onClose={() => setCreateBoardOpen(false)}
+        onCreate={handleCreateBoard}
+        saving={creatingBoard}
+      />
+
+      {shareTarget && (
+        <KanbanBoardShareModal
+          isOpen
+          onClose={() => setShareTarget(null)}
+          boardId={shareTarget.boardId}
+          boardName={shareTarget.boardName}
+          currentUserId={meUser?.id}
+          ownerUser={
+            meUser
+              ? {
+                  id: meUser.id,
+                  name: meUser.name,
+                  email: meUser.email ?? '',
+                  profilePhotoUrl: meUser.profilePhotoUrl ?? null,
+                }
+              : null
+          }
+        />
       )}
     </MainLayout>
   );

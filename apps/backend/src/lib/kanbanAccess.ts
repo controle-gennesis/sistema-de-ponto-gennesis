@@ -1,13 +1,24 @@
-import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { isGennecyBotUser } from './gennecyBotUser';
 import { prisma } from './prisma';
 
-export const KANBAN_VIEW_ALL_BOARDS_KEY = pathToModuleKey(
-  '/ponto/controle/visualizar-todos-kanbans',
-);
-
 /** Quadro demo antigo — não deve aparecer nem ser acessível. */
 export const KANBAN_LEGACY_DEPARTMENT_KEY = 'LEGADO';
+
+/** Prefixo de departmentKey para quadros criados manualmente. */
+export const KANBAN_CUSTOM_KEY_PREFIX = 'CUSTOM_';
+
+export function isCustomKanbanBoardKey(key: string): boolean {
+  return key.toUpperCase().startsWith(KANBAN_CUSTOM_KEY_PREFIX);
+}
+
+export function resolveKanbanBoardKeyParam(param: string): string {
+  if (isCustomKanbanBoardKey(param)) return param;
+  return param
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
 
 export function isKanbanHiddenPickerUser(user: {
   name?: string | null;
@@ -24,18 +35,4 @@ export async function userIsAdministrator(userId: string): Promise<boolean> {
     select: { employee: { select: { position: true } } },
   });
   return (user?.employee?.position || '').toLowerCase() === 'administrador';
-}
-
-export async function userCanViewAllKanbanBoards(userId: string): Promise<boolean> {
-  if (await userIsAdministrator(userId)) return true;
-  const permission = await prisma.userPermission.findUnique({
-    where: {
-      userId_module_action: {
-        userId,
-        module: KANBAN_VIEW_ALL_BOARDS_KEY,
-        action: PERMISSION_ACCESS_ACTION,
-      },
-    },
-  });
-  return !!permission?.allowed;
 }

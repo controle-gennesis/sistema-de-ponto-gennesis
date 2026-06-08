@@ -8,7 +8,7 @@ import {
   resolveGennecyInvokeMode,
   shouldProcessGennecyMessage,
 } from '../services/GennecyChatAssistantService';
-import { GENNECY_FUEL_MENU_MESSAGE } from '../services/GennecyFuelFlowService';
+import { GENNECY_FUEL_MENU_MESSAGE, isGennecyFuelMenuMessage } from '../services/GennecyFuelFlowService';
 import multer from 'multer';
 import { prisma } from '../lib/prisma';
 import { getActiveGroupCallForChat } from '../realtime/wsCallSignaling';
@@ -435,10 +435,14 @@ export class ChatController {
       const botId = await getGennecyBotUserId();
       const chat = await chatService.getOrCreateDirectChat(initiatorId, botId);
 
-      const botMessageCount = await prisma.message.count({
+      const lastBotMessage = await prisma.message.findFirst({
         where: { chatId: chat.id, senderId: botId },
+        orderBy: { createdAt: 'desc' },
+        select: { content: true },
       });
-      if (botMessageCount === 0) {
+      const needsMenu =
+        !lastBotMessage?.content || !isGennecyFuelMenuMessage(lastBotMessage.content);
+      if (needsMenu) {
         void gennecyChatAssistant
           .postGennecyReply(chat.id, initiatorId, GENNECY_FUEL_MENU_MESSAGE)
           .catch((err) => console.error('[Gennecy] welcome', err));
@@ -682,7 +686,10 @@ export class ChatController {
       const gennecyMode = await resolveGennecyInvokeMode(chatId, userId, content, {
         hasAttachments,
       });
-      if (gennecyMode) {
+      const gennecyProcessing = await shouldProcessGennecyMessage(chatId, userId, content, {
+        hasAttachments,
+      });
+      if (gennecyProcessing) {
         void gennecyChatAssistant
           .processOutgoingMessage({
             chatId,
@@ -693,10 +700,6 @@ export class ChatController {
           })
           .catch((err) => console.error('[Gennecy] async', err));
       }
-
-      const gennecyProcessing = await shouldProcessGennecyMessage(chatId, userId, content, {
-        hasAttachments,
-      });
 
       res.json({
         success: true,

@@ -1,5 +1,5 @@
 -- DropForeignKey
-ALTER TABLE "dp_requests" DROP CONSTRAINT "dp_requests_contractId_fkey";
+ALTER TABLE "dp_requests" DROP CONSTRAINT IF EXISTS "dp_requests_contractId_fkey";
 
 -- AlterTable
 ALTER TABLE "espelho_nf_bank_accounts" ALTER COLUMN "updatedAt" DROP DEFAULT;

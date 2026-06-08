@@ -212,11 +212,6 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-combustivel'));
 
-  /** Lista e visualização dos quadros Tasks de todos os setores (somente leitura fora do próprio setor). */
-  const canViewAllKanbanBoards =
-    isAdministrator ||
-    !!permissionData?.isAdmin ||
-    can(pk('/ponto/controle/visualizar-todos-kanbans'));
 
   /** Lista de orçamentos: módulo Contratos + permissão checklist «Orçamento» em pelo menos um contrato. */
   const canAccessOrcamentoRoutePage =
@@ -309,7 +304,6 @@ export function usePermissions() {
     canApproveOcDiretoria,
     canApproveOcGestor,
     canApproveFuel,
-    canViewAllKanbanBoards,
     canAccessContract,
     contractModuleFlags,
     canAccessOrcamentoRoutePage,

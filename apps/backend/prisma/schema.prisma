@@ -73,6 +73,8 @@ model User {
   messageHiddenForUser     MessageHiddenForUser[]
   extratoCaixaFiltrosSalvos ExtratoCaixaFiltroSalvo[]
   kanbanBoardsCreated      KanbanBoard[]          @relation("KanbanBoardCreator")
+  kanbanBoardShares        KanbanBoardShare[]     @relation("KanbanBoardShareUser")
+  kanbanBoardSharesCreated KanbanBoardShare[]     @relation("KanbanBoardShareCreatedBy")
   kanbanCardsAssigned      KanbanCard[]           @relation("KanbanCardAssignee")
   kanbanCardMemberships    KanbanCardMember[]     @relation("KanbanCardMemberUser")
   kanbanCardComments       KanbanCardComment[]    @relation("KanbanCardCommentAuthor")
@@ -2359,12 +2361,19 @@ enum TaskPriority {
   CRITICAL
 }
 
+enum KanbanBoardSharePermission {
+  READ
+  WRITE
+}
+
 model KanbanBoard {
   id              String   @id @default(cuid())
   name            String   @default("Tasks")
   slug            String   @unique
   departmentKey   String   @unique @map("department_key")
   departmentLabel String   @map("department_label")
+  /// Quadro criado manualmente (não vinculado ao setor do funcionário).
+  isCustom        Boolean  @default(false) @map("is_custom")
   /// Paleta de etiquetas do setor: [{ color, name }]
   labelPresets    Json     @default("[]") @map("label_presets")
   createdById     String?
@@ -2372,9 +2381,32 @@ model KanbanBoard {
   updatedAt       DateTime @updatedAt
 
   columns KanbanColumn[]
+  shares  KanbanBoardShare[]
   creator User? @relation("KanbanBoardCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
+  @@index([isCustom])
+  @@index([createdById])
   @@map("kanban_boards")
+}
+
+/// Quem tem acesso a quadros personalizados (além do criador).
+model KanbanBoardShare {
+  id         String                     @id @default(cuid())
+  boardId    String                     @map("board_id")
+  userId     String                     @map("user_id")
+  permission KanbanBoardSharePermission @default(WRITE)
+  createdAt  DateTime                   @default(now())
+  updatedAt  DateTime                   @updatedAt
+  createdBy  String?                    @map("created_by")
+
+  board   KanbanBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user    User        @relation("KanbanBoardShareUser", fields: [userId], references: [id], onDelete: Cascade)
+  creator User?       @relation("KanbanBoardShareCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([boardId, userId])
+  @@index([userId])
+  @@index([boardId])
+  @@map("kanban_board_shares")
 }
 
 model KanbanColumn {
@@ -2657,6 +2689,7 @@ model FuelRefuelRequest {
   observations String?
   status       FuelRefuelRequestStatus @default(PENDING_MANAGER)
   sourceChatId String?
+  sourceWhatsAppPhone String?
 
   managerApprovedBy      String?
   managerApprovedAt      DateTime?

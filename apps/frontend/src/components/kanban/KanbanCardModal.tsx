@@ -135,7 +135,7 @@ export interface KanbanCardModalProps {
   initialColumn?: { title: string; color: string };
   currentUserId?: string;
   currentUser?: KanbanCardModalCurrentUser | null;
-  canViewAllKanbanBoards?: boolean;
+  isAdministrator?: boolean;
   labelPresets?: KanbanLabelPreset[];
   onClose: () => void;
   onBoardRefresh: () => void;
@@ -151,7 +151,7 @@ export function KanbanCardModal({
   initialColumn,
   currentUserId,
   currentUser,
-  canViewAllKanbanBoards = false,
+  isAdministrator = false,
   labelPresets,
   onClose,
   onBoardRefresh,
@@ -586,7 +586,7 @@ export function KanbanCardModal({
   const visibleDraftTasks = hideDone ? draftTasks.filter((t) => !t.isDone) : draftTasks;
   const hasLabels = labels.length > 0;
   const hasDates = !!(startDate || endDate);
-  const showCostButton = isDetail && !!cardId && canViewAllKanbanBoards;
+  const showCostButton = isDetail && !!cardId && isAdministrator;
   const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
     attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
