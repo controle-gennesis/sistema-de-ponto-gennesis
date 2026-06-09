@@ -122,6 +122,16 @@ export async function createKanbanBoard(name: string): Promise<KanbanBoardSummar
   return res.data.data;
 }
 
+export async function updateKanbanBoard(boardId: string, name: string): Promise<KanbanBoardSummary> {
+  const res = await api.patch(`/kanban/boards/${boardId}`, { name });
+  return res.data.data;
+}
+
+export async function deleteKanbanBoard(boardId: string): Promise<{ departmentKey: string }> {
+  const res = await api.delete(`/kanban/boards/${boardId}`);
+  return res.data.data;
+}
+
 export async function fetchKanbanBoardShares(boardId: string): Promise<KanbanBoardShare[]> {
   const res = await api.get(`/kanban/boards/${boardId}/shares`);
   return res.data.data;

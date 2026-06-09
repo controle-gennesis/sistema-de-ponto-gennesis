@@ -132,7 +132,7 @@ function buildSummary(payload: FuelFlowPayload): string {
     '📋 Resumo da solicitação de abastecimento:',
     `• Data para abastecer: ${payload.refuelDate ? formatBrDate(payload.refuelDate) : '—'}`,
     `• Rota: ${payload.route || '—'}`,
-    `• Centro de custo: ${payload.costCenterLabel || payload.costCenter || '—'}`,
+    `• Contrato: ${payload.costCenterLabel || payload.costCenter || '—'}`,
     `• Condutor: ${payload.driverName || '—'}${payload.driverCpfMasked ? ` (CPF ${payload.driverCpfMasked})` : ''}`,
     `• Veículo: ${payload.vehiclePlate || '—'}`,
     `• Tipo: ${vehicleTypeLabel(payload.vehicleType)}`,
@@ -322,7 +322,7 @@ export class GennecyFuelFlowService {
           };
         }
 
-        const ctx = await resolveFuelRequestContextFromEmployee(employee);
+        const ctx = resolveFuelRequestContextFromEmployee(employee);
         if (!ctx.ok) {
           return { handled: true, reply: ctx.message };
         }
@@ -334,13 +334,12 @@ export class GennecyFuelFlowService {
           driverEmployeeId: employee.employeeId,
           costCenter: employee.costCenter,
           costCenterLabel: ctx.costCenterLabel,
-          contractId: ctx.contractId,
         });
         return {
           handled: true,
           reply: [
             `✅ Identifiquei **${employee.name}** (CPF ${employee.cpfMasked}).`,
-            `Centro de custo: **${ctx.costCenterLabel}**`,
+            `Contrato: **${ctx.costCenterLabel}**`,
             '',
             'Qual o veículo? Informe a placa ou identificação (ex.: ABC1D23 — Strada).',
           ].join('\n'),
@@ -461,7 +460,7 @@ export class GennecyFuelFlowService {
         if (
           !payload.refuelDate ||
           !payload.route ||
-          !payload.contractId ||
+          !(payload.costCenterLabel || payload.costCenter) ||
           !payload.driverName ||
           !payload.vehiclePlate ||
           !payload.vehicleType ||
@@ -478,7 +477,7 @@ export class GennecyFuelFlowService {
           requesterId: params.userId,
           refuelDate: new Date(`${payload.refuelDate}T12:00:00`),
           route: payload.route,
-          contractId: payload.contractId,
+          costCenter: payload.costCenterLabel || payload.costCenter || null,
           driverName: payload.driverName,
           vehiclePlate: payload.vehiclePlate,
           vehicleDescription: payload.vehicleDescription,

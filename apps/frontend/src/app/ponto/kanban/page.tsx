@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -29,6 +30,8 @@ import {
   fetchKanbanBoard,
   fetchKanbanBoards,
   createKanbanBoard,
+  updateKanbanBoard,
+  deleteKanbanBoard,
   updateKanbanBoardLabelPresets,
   createKanbanColumn,
   updateKanbanColumn,
@@ -44,6 +47,7 @@ import {
   resolveKanbanDefaultBoard,
   saveKanbanDefaultBoard,
   clearKanbanDefaultBoard,
+  getKanbanDefaultBoard,
 } from '@/lib/kanbanDefaultBoard';
 import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG, KANBAN_PRIORITY_ORDER } from '@/components/kanban/kanbanPriority';
@@ -1149,24 +1153,173 @@ function StatsBar({ columns }: { columns: KanbanColumn[] }) {
   );
 }
 
+// ─── Board picker row actions ─────────────────────────────────────────────────
+
+function KanbanBoardRowActions({
+  board,
+  active,
+  onShare,
+  onEditName,
+  onDeleteBoard,
+  onClosePicker,
+}: {
+  board: KanbanBoardSummary;
+  active: boolean;
+  onShare: (board: KanbanBoardSummary) => void;
+  onEditName: (board: KanbanBoardSummary) => void;
+  onDeleteBoard: (board: KanbanBoardSummary) => void;
+  onClosePicker: () => void;
+}) {
+  const canManage = Boolean(board.isCustom && board.isOwner && board.id);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handlePointerDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-kanban-board-row-menu]')) return;
+      setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [menuOpen]);
+
+  const triggerClass = clsx(
+    'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+    active
+      ? 'text-red-500/80 hover:bg-red-100/70 hover:text-red-600 dark:text-red-300/80 dark:hover:bg-red-900/40 dark:hover:text-red-200'
+      : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200',
+  );
+
+  const openMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canManage) return;
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const menuWidth = 176;
+    const menuHeight = 140;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < menuHeight + 8 && rect.top > menuHeight + 8;
+
+    setMenuStyle({
+      position: 'fixed',
+      left: Math.max(8, rect.right - menuWidth),
+      top: openUp ? rect.top - menuHeight - 4 : rect.bottom + 4,
+      width: menuWidth,
+      zIndex: 9999,
+    });
+    setMenuOpen((v) => !v);
+  };
+
+  if (!canManage) {
+    return <span className="inline-block h-8 w-8 shrink-0" aria-hidden />;
+  }
+
+  const runMenuAction = (action: () => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    action();
+  };
+
+  const menu =
+    menuOpen && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            data-kanban-board-row-menu
+            role="menu"
+            style={menuStyle}
+            className="overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onMouseDown={runMenuAction(() => {
+                onShare(board);
+                onClosePicker();
+              })}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              <Users className="h-4 w-4 shrink-0" />
+              Compartilhar
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onMouseDown={runMenuAction(() => {
+                onEditName(board);
+                onClosePicker();
+              })}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              <Edit3 className="h-4 w-4 shrink-0" />
+              Editar
+            </button>
+            <hr className="my-1 border-gray-200 dark:border-gray-700" />
+            <button
+              type="button"
+              role="menuitem"
+              onMouseDown={runMenuAction(() => {
+                onDeleteBoard(board);
+                onClosePicker();
+              })}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+            >
+              <Trash2 className="h-4 w-4 shrink-0" />
+              Excluir
+            </button>
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        title="Opções do quadro"
+        aria-expanded={menuOpen}
+        aria-haspopup="menu"
+        onClick={openMenu}
+        className={triggerClass}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {menu}
+    </>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function KanbanBoardPicker({
   boards,
   currentDepartmentKey,
   defaultDepartmentKey,
+  canCreateBoard,
   onSelect,
   onSetDefault,
   onCreateBoard,
   onShare,
+  onEditName,
+  onDeleteBoard,
 }: {
   boards: KanbanBoardSummary[];
   currentDepartmentKey?: string;
   defaultDepartmentKey?: string | null;
+  canCreateBoard?: boolean;
   onSelect: (departmentKey: string) => void;
   onSetDefault: (departmentKey: string) => void;
   onCreateBoard: () => void;
   onShare: (board: KanbanBoardSummary) => void;
+  onEditName: (board: KanbanBoardSummary) => void;
+  onDeleteBoard: (board: KanbanBoardSummary) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1174,9 +1327,10 @@ function KanbanBoardPicker({
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-kanban-board-row-menu]')) return;
+      setOpen(false);
     }
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
@@ -1196,8 +1350,8 @@ function KanbanBoardPicker({
         <LayoutGrid className="h-4 w-4 shrink-0" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-          <div className="max-h-72 overflow-y-auto p-1.5">
+        <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
+          <div className="max-h-72 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:thin]">
             {boards.length === 0 ? (
               <p className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400">
                 Nenhum quadro disponível.
@@ -1207,12 +1361,11 @@ function KanbanBoardPicker({
               {boards.map((b) => {
                 const active = b.departmentKey === currentDepartmentKey;
                 const isDefault = defaultDepartmentKey === b.departmentKey;
-                const showShare = Boolean(b.canManageShares && b.id);
                 return (
                   <div
                     key={b.id || b.departmentKey}
                     className={clsx(
-                      'flex h-10 items-center rounded-lg px-2 transition-colors',
+                      'flex min-h-10 items-center rounded-lg px-2 transition-colors',
                       active
                         ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
                         : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60',
@@ -1234,27 +1387,14 @@ function KanbanBoardPicker({
                       {b.department}
                     </button>
                     <div className="flex shrink-0 items-center">
-                      {showShare ? (
-                        <button
-                          type="button"
-                          title="Compartilhar quadro"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpen(false);
-                            onShare(b);
-                          }}
-                          className={clsx(
-                            'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
-                            active
-                              ? 'text-red-500/80 hover:bg-red-100/70 hover:text-red-600 dark:text-red-300/80 dark:hover:bg-red-900/40 dark:hover:text-red-200'
-                              : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200',
-                          )}
-                        >
-                          <Users className="h-4 w-4" />
-                        </button>
-                      ) : (
-                        <span className="inline-block h-8 w-8 shrink-0" aria-hidden />
-                      )}
+                      <KanbanBoardRowActions
+                        board={b}
+                        active={active}
+                        onShare={onShare}
+                        onEditName={onEditName}
+                        onDeleteBoard={onDeleteBoard}
+                        onClosePicker={() => setOpen(false)}
+                      />
                       <button
                         type="button"
                         title={isDefault ? 'Quadro padrão' : 'Definir como padrão'}
@@ -1280,6 +1420,7 @@ function KanbanBoardPicker({
               </div>
             )}
           </div>
+          {canCreateBoard !== false ? (
           <div className="border-t border-gray-100 p-2 dark:border-gray-700">
             <button
               type="button"
@@ -1293,6 +1434,7 @@ function KanbanBoardPicker({
               Novo Quadro
             </button>
           </div>
+          ) : null}
         </div>
       )}
     </div>
@@ -1374,6 +1516,13 @@ function KanbanPage() {
 
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
   const [creatingBoard, setCreatingBoard] = useState(false);
+  const [renameBoardTarget, setRenameBoardTarget] = useState<{
+    boardId: string;
+    name: string;
+  } | null>(null);
+  const [renamingBoard, setRenamingBoard] = useState(false);
+  const [boardDeleteTarget, setBoardDeleteTarget] = useState<KanbanBoardSummary | null>(null);
+  const [deletingBoard, setDeletingBoard] = useState(false);
   const [shareTarget, setShareTarget] = useState<{
     boardId: string;
     boardName: string;
@@ -1415,6 +1564,56 @@ function KanbanPage() {
     },
     [openBoard, queryClient],
   );
+
+  const handleRenameBoard = useCallback(
+    async (name: string) => {
+      if (!renameBoardTarget) return;
+      setRenamingBoard(true);
+      try {
+        await updateKanbanBoard(renameBoardTarget.boardId, name);
+        await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+        await queryClient.invalidateQueries({ queryKey: kanbanBoardQueryKey });
+        setRenameBoardTarget(null);
+        toast.success('Nome do quadro atualizado');
+      } catch (err: unknown) {
+        const msg =
+          (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+          'Erro ao renomear quadro';
+        toast.error(msg);
+      } finally {
+        setRenamingBoard(false);
+      }
+    },
+    [queryClient, kanbanBoardQueryKey, renameBoardTarget],
+  );
+
+  const handleDeleteBoard = useCallback(async () => {
+    if (!boardDeleteTarget?.id || !meUser) return;
+    setDeletingBoard(true);
+    try {
+      await deleteKanbanBoard(boardDeleteTarget.id);
+      if (getKanbanDefaultBoard(meUser.id) === boardDeleteTarget.departmentKey) {
+        clearKanbanDefaultBoard(meUser.id);
+      }
+      const remaining = (boardsList ?? []).filter(
+        (b) => b.departmentKey !== boardDeleteTarget.departmentKey,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+      setBoardDeleteTarget(null);
+      toast.success('Quadro excluído');
+      if (departmentKeyParam === boardDeleteTarget.departmentKey) {
+        const nextKey = resolveKanbanDefaultBoard(meUser.id, remaining);
+        if (nextKey) openBoard(nextKey);
+      }
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Erro ao excluir quadro';
+      toast.error(msg);
+    } finally {
+      setDeletingBoard(false);
+    }
+  }, [boardDeleteTarget, meUser, boardsList, queryClient, departmentKeyParam, openBoard]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -1839,12 +2038,17 @@ function KanbanPage() {
                 boards={boardsList ?? []}
                 currentDepartmentKey={board?.departmentKey}
                 defaultDepartmentKey={defaultDepartmentKey}
+                canCreateBoard={!isAdministrator}
                 onSelect={openBoard}
                 onSetDefault={setAsDefaultBoard}
                 onCreateBoard={() => setCreateBoardOpen(true)}
                 onShare={(b) =>
                   setShareTarget({ boardId: b.id, boardName: b.department })
                 }
+                onEditName={(b) =>
+                  setRenameBoardTarget({ boardId: b.id, name: b.department })
+                }
+                onDeleteBoard={setBoardDeleteTarget}
               />
               {/* Search */}
               <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
@@ -2181,9 +2385,47 @@ function KanbanPage() {
       <KanbanCreateBoardModal
         isOpen={createBoardOpen}
         onClose={() => setCreateBoardOpen(false)}
-        onCreate={handleCreateBoard}
+        onSubmit={handleCreateBoard}
         saving={creatingBoard}
       />
+
+      <KanbanCreateBoardModal
+        isOpen={!!renameBoardTarget}
+        onClose={() => !renamingBoard && setRenameBoardTarget(null)}
+        onSubmit={handleRenameBoard}
+        saving={renamingBoard}
+        title="Renomear quadro"
+        submitLabel="Salvar"
+        initialName={renameBoardTarget?.name ?? ''}
+        hint=""
+      />
+
+      {boardDeleteTarget && (
+        <Modal
+          isOpen
+          onClose={() => !deletingBoard && setBoardDeleteTarget(null)}
+          size="sm"
+          title="Excluir quadro"
+        >
+          <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
+            Excluir o quadro <strong>{boardDeleteTarget.department}</strong> permanentemente?
+            Todas as colunas e cards serão removidos. Esta ação não pode ser desfeita.
+          </p>
+          <div className="flex justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBoardDeleteTarget(null)}
+              disabled={deletingBoard}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" variant="error" onClick={handleDeleteBoard} disabled={deletingBoard}>
+              {deletingBoard ? 'Excluindo…' : 'Excluir quadro'}
+            </Button>
+          </div>
+        </Modal>
+      )}
 
       {shareTarget && (
         <KanbanBoardShareModal

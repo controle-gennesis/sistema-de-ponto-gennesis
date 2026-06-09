@@ -2673,8 +2673,9 @@ model FuelRefuelRequest {
   requestedAt DateTime @default(now())
   refuelDate  DateTime
   route       String
-  contractId  String
-  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  costCenter  String?
+  contractId  String?
+  contract    Contract? @relation(fields: [contractId], references: [id], onDelete: Restrict)
 
   driverName         String
   vehiclePlate       String

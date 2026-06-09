@@ -615,9 +615,6 @@ export class KanbanService {
           isOwner: false,
         };
       }
-      if (await userIsAdministrator(userId)) {
-        return { canRead: true, canWrite: true, isOwner: false };
-      }
       return { canRead: false, canWrite: false, isOwner: false };
     }
 
@@ -767,13 +764,6 @@ export class KanbanService {
         select: boardSelect,
       });
       deptBoards.forEach(pushBoard);
-
-      const allCustomBoards = await prisma.kanbanBoard.findMany({
-        where: { isCustom: true },
-        orderBy: { departmentLabel: 'asc' },
-        select: boardSelect,
-      });
-      allCustomBoards.forEach(pushBoard);
     } else {
       const ownBoard = await prisma.kanbanBoard.findUnique({
         where: { departmentKey: ownKey },
@@ -813,6 +803,10 @@ export class KanbanService {
   }
 
   async createCustomBoard(userId: string, name: string) {
+    if (await userIsAdministrator(userId)) {
+      throw new Error('Administradores acessam apenas quadros de setor');
+    }
+
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Nome do quadro é obrigatório');
     if (trimmed.length > 80) throw new Error('Nome do quadro deve ter no máximo 80 caracteres');
@@ -855,6 +849,72 @@ export class KanbanService {
       canManageShares: true,
       sharedWithMe: false,
     };
+  }
+
+  async updateCustomBoardName(boardId: string, userId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Nome do quadro é obrigatório');
+    if (trimmed.length > 80) throw new Error('Nome do quadro deve ter no máximo 80 caracteres');
+
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        departmentKey: true,
+        departmentLabel: true,
+        isCustom: true,
+        createdById: true,
+        updatedAt: true,
+        _count: { select: { columns: true } },
+      },
+    });
+    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
+    if (board.createdById !== userId) throw new Error(KANBAN_FORBIDDEN);
+
+    const updated = await prisma.kanbanBoard.update({
+      where: { id: boardId },
+      data: { name: trimmed, departmentLabel: trimmed },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        departmentKey: true,
+        departmentLabel: true,
+        isCustom: true,
+        createdById: true,
+        updatedAt: true,
+        _count: { select: { columns: true } },
+      },
+    });
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      departmentKey: updated.departmentKey,
+      department: updated.departmentLabel,
+      columnCount: updated._count.columns,
+      updatedAt: updated.updatedAt.toISOString(),
+      isOwnDepartment: false,
+      isCustom: true,
+      isOwner: true,
+      canManageShares: true,
+      sharedWithMe: false,
+    };
+  }
+
+  async deleteCustomBoard(boardId: string, userId: string) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: { id: true, isCustom: true, createdById: true, departmentKey: true },
+    });
+    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
+    if (board.createdById !== userId) throw new Error(KANBAN_FORBIDDEN);
+
+    await prisma.kanbanBoard.delete({ where: { id: boardId } });
+    return { departmentKey: board.departmentKey };
   }
 
   async listBoardShares(boardId: string, requesterId: string) {

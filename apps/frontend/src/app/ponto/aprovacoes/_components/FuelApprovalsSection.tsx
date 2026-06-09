@@ -39,9 +39,21 @@ type FuelRefuelRequest = {
   status: FuelRefuelStatus;
   dashboardPhotoUrl?: string | null;
   dashboardPhotoName?: string | null;
+  costCenter?: string | null;
   requester: { id: string; name: string; email: string };
-  contract: { id: string; name: string; number: string };
+  contract?: { id: string; name: string; number: string } | null;
 };
+
+function fuelContractLabel(row: {
+  costCenter?: string | null;
+  contract?: { number?: string; name?: string } | null;
+}): string {
+  if (row.costCenter?.trim()) return row.costCenter.trim();
+  if (row.contract?.number && row.contract?.name) {
+    return `${row.contract.number} — ${row.contract.name}`;
+  }
+  return row.contract?.number || row.contract?.name || '—';
+}
 
 const VEHICLE_TYPE_LABELS: Record<FuelVehicleType, string> = {
   PRIVATE: 'Particular',
@@ -97,8 +109,7 @@ export function FuelApprovalsSection() {
         r.driverName.toLowerCase().includes(q) ||
         r.vehiclePlate.toLowerCase().includes(q) ||
         r.requester.name.toLowerCase().includes(q) ||
-        r.contract.name.toLowerCase().includes(q) ||
-        r.contract.number.toLowerCase().includes(q)
+        fuelContractLabel(r).toLowerCase().includes(q)
       );
     });
   }, [fuelList, searchFuel]);
@@ -260,9 +271,9 @@ export function FuelApprovalsSection() {
                         </td>
                         <td
                           className="max-w-[200px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
-                          title={r.contract.name}
+                          title={fuelContractLabel(r)}
                         >
-                          {r.contract.number}
+                          {fuelContractLabel(r)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                           {format(new Date(r.refuelDate), 'dd/MM/yyyy', { locale: ptBR })}
@@ -326,7 +337,7 @@ export function FuelApprovalsSection() {
               <div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Contrato</p>
                 <p className="font-medium text-gray-900 dark:text-gray-100">
-                  {detailFuel.contract.number} — {detailFuel.contract.name}
+                  {fuelContractLabel(detailFuel)}
                 </p>
               </div>
               <div>

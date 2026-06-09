@@ -17,7 +17,8 @@ export type CreateFuelRefuelRequestInput = {
   requesterId: string;
   refuelDate: Date;
   route: string;
-  contractId: string;
+  contractId?: string | null;
+  costCenter?: string | null;
   driverName: string;
   vehiclePlate: string;
   vehicleDescription?: string | null;
@@ -65,11 +66,20 @@ function initialStatusForVehicleType(vehicleType: FuelVehicleType): FuelRefuelRe
 
 export class FuelRefuelRequestService {
   async create(input: CreateFuelRefuelRequestInput) {
-    const contract = await prisma.contract.findUnique({
-      where: { id: input.contractId },
-      select: { id: true },
-    });
-    if (!contract) throw createError('Contrato não encontrado', 404);
+    const costCenter = input.costCenter?.trim() || null;
+    const contractId = input.contractId?.trim() || null;
+
+    if (!costCenter && !contractId) {
+      throw createError('Centro de custo é obrigatório', 400);
+    }
+
+    if (contractId) {
+      const contract = await prisma.contract.findUnique({
+        where: { id: contractId },
+        select: { id: true },
+      });
+      if (!contract) throw createError('Contrato não encontrado', 404);
+    }
 
     return prisma.$transaction(async (tx) => {
       const agg = await tx.fuelRefuelRequest.aggregate({ _max: { displayNumber: true } });
@@ -81,7 +91,8 @@ export class FuelRefuelRequestService {
           requesterId: input.requesterId,
           refuelDate: input.refuelDate,
           route: input.route.trim(),
-          contractId: input.contractId,
+          costCenter,
+          contractId,
           driverName: input.driverName.trim(),
           vehiclePlate: input.vehiclePlate.trim(),
           vehicleDescription: input.vehicleDescription?.trim() || null,
@@ -125,6 +136,7 @@ export class FuelRefuelRequestService {
         { requester: { name: { contains: search, mode: 'insensitive' } } },
         { contract: { name: { contains: search, mode: 'insensitive' } } },
         { contract: { number: { contains: search, mode: 'insensitive' } } },
+        { costCenter: { contains: search, mode: 'insensitive' } },
         ...(Number.isFinite(asNumber) ? [{ displayNumber: asNumber }] : []),
       ];
     }

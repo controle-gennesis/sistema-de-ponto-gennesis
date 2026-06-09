@@ -99,7 +99,7 @@ export class FuelRefuelRequestController {
     }
   }
 
-  private async assertCanDecide(req: AuthRequest, contractId: string) {
+  private async assertCanDecide(req: AuthRequest, contractId: string | null) {
     if (!req.user) throw createError('Usuário não autenticado', 401);
     await assertManagerCanActOnFuelContract(req.user.id, req.user.isAdmin, contractId);
   }

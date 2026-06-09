@@ -60,13 +60,14 @@ type FuelRefuelRequest = {
   receiptPhotoUrl?: string | null;
   receiptPhotoName?: string | null;
   refuelReportedAt?: string | null;
+  costCenter?: string | null;
   requester: { id: string; name: string; email: string };
-  contract: {
+  contract?: {
     id: string;
     name: string;
     number: string;
     costCenter?: { code?: string | null; name?: string | null } | null;
-  };
+  } | null;
   managerApprover?: { id: string; name: string } | null;
   suppliesApprover?: { id: string; name: string } | null;
 };
@@ -109,6 +110,17 @@ const STATUS_BADGE: Record<FuelRefuelStatus, string> = {
 };
 
 const ITEMS_PER_PAGE = 20;
+
+function fuelContractLabel(row: {
+  costCenter?: string | null;
+  contract?: { number?: string; name?: string } | null;
+}): string {
+  if (row.costCenter?.trim()) return row.costCenter.trim();
+  if (row.contract?.number && row.contract?.name) {
+    return `${row.contract.number} — ${row.contract.name}`;
+  }
+  return row.contract?.number || row.contract?.name || '—';
+}
 
 export default function SolicitacoesCombustivelPage() {
   const router = useRouter();
@@ -361,9 +373,9 @@ export default function SolicitacoesCombustivelPage() {
                             </td>
                             <td
                               className="max-w-[220px] truncate px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6"
-                              title={row.contract.name}
+                              title={fuelContractLabel(row)}
                             >
-                              {row.contract.number}
+                              {fuelContractLabel(row)}
                             </td>
                             <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
                               <div>{row.vehiclePlate}</div>
@@ -471,7 +483,7 @@ export default function SolicitacoesCombustivelPage() {
                 <div className="sm:col-span-2">
                   <span className="font-medium text-gray-500 dark:text-gray-400">Contrato</span>
                   <p className="text-gray-900 dark:text-gray-100">
-                    {selected.contract.number} — {selected.contract.name}
+                    {fuelContractLabel(selected)}
                   </p>
                 </div>
                 <div>

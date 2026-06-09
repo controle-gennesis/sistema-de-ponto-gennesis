@@ -68,6 +68,39 @@ export class KanbanController {
     }
   }
 
+  async updateBoard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { boardId } = req.params;
+      const { name } = req.body;
+      if (!name?.trim()) return next(createError('Nome do quadro é obrigatório', 400));
+      const board = await kanbanService.updateCustomBoardName(boardId, userId, name.trim());
+      res.json({ success: true, data: board });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado') return next(createError(msg, 404));
+      if (msg && msg !== KANBAN_FORBIDDEN) {
+        return next(createError(msg, 400));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async deleteBoard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { boardId } = req.params;
+      const result = await kanbanService.deleteCustomBoard(boardId, userId);
+      res.json({ success: true, data: result });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
   async listBoardShares(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

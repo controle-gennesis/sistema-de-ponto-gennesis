@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { kanbanInput } from './kanbanFormStyles';
@@ -8,17 +8,29 @@ import { kanbanInput } from './kanbanFormStyles';
 export interface KanbanCreateBoardModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (name: string) => Promise<void>;
+  onSubmit: (name: string) => Promise<void>;
   saving?: boolean;
+  title?: string;
+  submitLabel?: string;
+  initialName?: string;
+  hint?: string;
 }
 
 export function KanbanCreateBoardModal({
   isOpen,
   onClose,
-  onCreate,
+  onSubmit,
   saving = false,
+  title = 'Novo quadro',
+  submitLabel = 'Criar quadro',
+  initialName = '',
+  hint = 'Quadros personalizados podem ser compartilhados com outras pessoas.',
 }: KanbanCreateBoardModalProps) {
-  const [name, setName] = useState('');
+  const [name, setName] = useState(initialName);
+
+  useEffect(() => {
+    if (isOpen) setName(initialName);
+  }, [isOpen, initialName]);
 
   const handleClose = () => {
     if (saving) return;
@@ -30,12 +42,12 @@ export function KanbanCreateBoardModal({
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return;
-    await onCreate(trimmed);
+    await onSubmit(trimmed);
     setName('');
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="Novo quadro" size="sm">
+    <Modal isOpen={isOpen} onClose={handleClose} title={title} size="sm">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -50,16 +62,16 @@ export function KanbanCreateBoardModal({
             autoFocus
             className={kanbanInput}
           />
-          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-            Quadros personalizados podem ser compartilhados com outras pessoas.
-          </p>
+          {hint ? (
+            <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{hint}</p>
+          ) : null}
         </div>
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={handleClose} disabled={saving}>
+          <Button type="button" variant="outline" onClick={handleClose} disabled={saving}>
             Cancelar
           </Button>
-          <Button type="submit" disabled={saving || !name.trim()}>
-            {saving ? 'Criando…' : 'Criar quadro'}
+          <Button type="submit" variant="error" disabled={saving || !name.trim()}>
+            {saving ? 'Salvando…' : submitLabel}
           </Button>
         </div>
       </form>
