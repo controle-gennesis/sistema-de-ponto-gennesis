@@ -204,6 +204,19 @@ export class FuelRefuelRequestController {
       return next(error);
     }
   }
+
+  async suppliesPendingCount(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const count = await fuelRefuelRequestService.countPendingSupplies();
+      return res.json({ success: true, data: { count } });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }
 
 export const fuelRefuelRequestController = new FuelRefuelRequestController();

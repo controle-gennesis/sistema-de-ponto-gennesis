@@ -129,6 +129,7 @@ export function FuelApprovalsSection() {
       void queryClient.invalidateQueries({ queryKey: ['approvals', 'fuel'] });
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
       void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['fuel-supplies-pending-count'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
       toast.error(err.response?.data?.error || 'Erro ao aprovar solicitação');

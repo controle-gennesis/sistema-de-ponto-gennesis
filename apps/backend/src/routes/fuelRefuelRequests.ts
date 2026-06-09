@@ -10,6 +10,9 @@ router.use(authenticate);
 router.get('/pending-count', (req, res, next) =>
   fuelRefuelRequestController.pendingCount(req, res, next),
 );
+router.get('/supplies-pending-count', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.suppliesPendingCount(req, res, next),
+);
 router.get(
   '/aprovacoes',
   requireFuelApproverAccess,

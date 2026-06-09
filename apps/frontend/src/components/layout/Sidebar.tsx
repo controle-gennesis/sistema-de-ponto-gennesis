@@ -169,6 +169,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
   const canSeeFuroEstoque =
     isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque'));
+  const canSeeFuelSupplies =
+    isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-combustivel'));
 
   const { data: pendingFuroCount = 0 } = useQuery({
     queryKey: ['stock-shortfalls-pending-count'],
@@ -198,6 +200,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     staleTime: 20_000,
   });
 
+  const { data: fuelSuppliesPendingCount = 0 } = useQuery({
+    queryKey: ['fuel-supplies-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests/supplies-pending-count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeFuelSupplies && !isLoading,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
   const { counts: approvalCounts } = useApprovalNotificationCounts();
 
@@ -206,13 +221,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     if (href === '/ponto/fds-aprovadas') return fdNotificationCounts.pendingPurchase;
     if (href === '/ponto/furo-estoque') return pendingFuroCount;
     if (href === '/ponto/recebimento-entregas') return recebimentoPendingCount;
+    if (href === '/ponto/solicitacoes-combustivel') return fuelSuppliesPendingCount;
     return 0;
   };
 
   const moduleBadgeCountForId = (categoryId: string): number => {
     if (categoryId === 'main') return approvalCounts.total;
     if (categoryId === 'suprimentos') {
-      return fdNotificationCounts.pendingPurchase + pendingFuroCount;
+      return fdNotificationCounts.pendingPurchase + pendingFuroCount + fuelSuppliesPendingCount;
     }
     if (categoryId === 'engenharia') return recebimentoPendingCount;
     return 0;
