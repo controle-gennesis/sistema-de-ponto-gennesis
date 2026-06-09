@@ -4,6 +4,7 @@ import {
   FuelVehicleType,
   Prisma,
 } from '@prisma/client';
+import { resolveFuelPhotoViewUrl } from '../lib/fuelPhotoStorage';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import {
@@ -62,6 +63,29 @@ function initialStatusForVehicleType(vehicleType: FuelVehicleType): FuelRefuelRe
   return vehicleType === FuelVehicleType.PRIVATE
     ? FuelRefuelRequestStatus.PENDING_MANAGER
     : FuelRefuelRequestStatus.PENDING_SUPPLIES;
+}
+
+type FuelPhotoFields = {
+  dashboardPhotoUrl?: string | null;
+  dashboardPhotoKey?: string | null;
+  receiptPhotoUrl?: string | null;
+  receiptPhotoKey?: string | null;
+};
+
+async function presentFuelRowPhotos<T extends FuelPhotoFields>(row: T) {
+  const [dashboardPhotoViewUrl, receiptPhotoViewUrl] = await Promise.all([
+    resolveFuelPhotoViewUrl(row.dashboardPhotoUrl, row.dashboardPhotoKey),
+    resolveFuelPhotoViewUrl(row.receiptPhotoUrl, row.receiptPhotoKey),
+  ]);
+  return {
+    ...row,
+    dashboardPhotoViewUrl,
+    receiptPhotoViewUrl,
+  };
+}
+
+async function presentFuelRowsPhotos<T extends FuelPhotoFields>(rows: T[]) {
+  return Promise.all(rows.map((row) => presentFuelRowPhotos(row)));
 }
 
 export class FuelRefuelRequestService {
@@ -141,11 +165,12 @@ export class FuelRefuelRequestService {
       ];
     }
 
-    return prisma.fuelRefuelRequest.findMany({
+    const rows = await prisma.fuelRefuelRequest.findMany({
       where,
       include: fuelRefuelInclude,
       orderBy: [{ createdAt: 'desc' }],
     });
+    return presentFuelRowsPhotos(rows);
   }
 
   async getById(id: string) {
@@ -155,6 +180,10 @@ export class FuelRefuelRequestService {
     });
     if (!row) throw createError('Solicitação não encontrada', 404);
     return row;
+  }
+
+  async getByIdForApi(id: string) {
+    return presentFuelRowPhotos(await this.getById(id));
   }
 
   async managerApprove(id: string, managerId: string, comment?: string) {
@@ -394,11 +423,12 @@ export class FuelRefuelRequestService {
                 ],
               };
 
-    return prisma.fuelRefuelRequest.findMany({
+    const rows = await prisma.fuelRefuelRequest.findMany({
       where: { ...phaseFilter, ...params.contractScope },
       include: fuelRefuelInclude,
       orderBy: [{ createdAt: 'desc' }],
     });
+    return presentFuelRowsPhotos(rows);
   }
 }
 

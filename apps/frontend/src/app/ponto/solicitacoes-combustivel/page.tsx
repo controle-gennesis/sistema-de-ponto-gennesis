@@ -15,7 +15,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
-import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { hasFuelStoredPhoto, resolveFuelPhotoSrc } from '@/lib/resolveMediaUrl';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
@@ -47,6 +47,8 @@ type FuelRefuelRequest = {
   observations?: string | null;
   status: FuelRefuelStatus;
   dashboardPhotoUrl?: string | null;
+  dashboardPhotoKey?: string | null;
+  dashboardPhotoViewUrl?: string | null;
   dashboardPhotoName?: string | null;
   managerApprovalComment?: string | null;
   managerRejectionReason?: string | null;
@@ -58,6 +60,8 @@ type FuelRefuelRequest = {
   pricePerLiter?: string | number | null;
   refuelReportObservations?: string | null;
   receiptPhotoUrl?: string | null;
+  receiptPhotoKey?: string | null;
+  receiptPhotoViewUrl?: string | null;
   receiptPhotoName?: string | null;
   refuelReportedAt?: string | null;
   costCenter?: string | null;
@@ -513,8 +517,11 @@ export default function SolicitacoesCombustivelPage() {
                 ) : null}
               </div>
 
-              {selected.dashboardPhotoUrl ? (() => {
-                const panelPhotoUrl = resolveApiMediaUrl(selected.dashboardPhotoUrl);
+              {hasFuelStoredPhoto(selected.dashboardPhotoUrl, selected.dashboardPhotoKey) ? (() => {
+                const panelPhotoUrl = resolveFuelPhotoSrc(
+                  selected.dashboardPhotoViewUrl,
+                  selected.dashboardPhotoUrl,
+                );
                 if (!panelPhotoUrl) return null;
                 return (
                   <div>
@@ -610,8 +617,11 @@ export default function SolicitacoesCombustivelPage() {
                   {selected.refuelReportObservations ? (
                     <p className="mt-2 text-sm">{selected.refuelReportObservations}</p>
                   ) : null}
-                  {selected.receiptPhotoUrl ? (() => {
-                    const receiptPhotoUrl = resolveApiMediaUrl(selected.receiptPhotoUrl);
+                  {hasFuelStoredPhoto(selected.receiptPhotoUrl, selected.receiptPhotoKey) ? (() => {
+                    const receiptPhotoUrl = resolveFuelPhotoSrc(
+                      selected.receiptPhotoViewUrl,
+                      selected.receiptPhotoUrl,
+                    );
                     if (!receiptPhotoUrl) return null;
                     return (
                       <a

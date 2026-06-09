@@ -7,7 +7,7 @@ import { ptBR } from 'date-fns/locale';
 import { FileText, Filter, Fuel, Image as ImageIcon, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
-import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { hasFuelStoredPhoto, resolveFuelPhotoSrc } from '@/lib/resolveMediaUrl';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -38,6 +38,8 @@ type FuelRefuelRequest = {
   observations?: string | null;
   status: FuelRefuelStatus;
   dashboardPhotoUrl?: string | null;
+  dashboardPhotoKey?: string | null;
+  dashboardPhotoViewUrl?: string | null;
   dashboardPhotoName?: string | null;
   costCenter?: string | null;
   requester: { id: string; name: string; email: string };
@@ -370,8 +372,11 @@ export function FuelApprovalsSection() {
                 <p className="text-gray-900 dark:text-gray-100">{detailFuel.observations}</p>
               </div>
             ) : null}
-            {detailFuel.dashboardPhotoUrl ? (() => {
-              const panelPhotoUrl = resolveApiMediaUrl(detailFuel.dashboardPhotoUrl);
+            {hasFuelStoredPhoto(detailFuel.dashboardPhotoUrl, detailFuel.dashboardPhotoKey) ? (() => {
+              const panelPhotoUrl = resolveFuelPhotoSrc(
+                detailFuel.dashboardPhotoViewUrl,
+                detailFuel.dashboardPhotoUrl,
+              );
               if (!panelPhotoUrl) return null;
               return (
                 <div>

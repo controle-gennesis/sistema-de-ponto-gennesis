@@ -29,3 +29,19 @@ export function resolveApiMediaUrl(url: string | null | undefined): string | und
   }
   return u;
 }
+
+export function hasFuelStoredPhoto(
+  url?: string | null,
+  key?: string | null,
+): boolean {
+  return Boolean(String(url || '').trim() || String(key || '').trim());
+}
+
+/** Prioriza URL resolvida pela API (ex.: S3 assinada); senão tenta URL legada. */
+export function resolveFuelPhotoSrc(
+  viewUrl?: string | null,
+  fallbackUrl?: string | null,
+): string | undefined {
+  const resolved = viewUrl?.trim() || resolveApiMediaUrl(fallbackUrl);
+  return resolved || undefined;
+}

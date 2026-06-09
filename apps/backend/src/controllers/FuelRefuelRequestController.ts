@@ -92,7 +92,7 @@ export class FuelRefuelRequestController {
       const userId = req.user?.id;
       if (!userId) throw createError('Usuário não autenticado', 401);
 
-      const row = await fuelRefuelRequestService.getById(req.params.id);
+      const row = await fuelRefuelRequestService.getByIdForApi(req.params.id);
       res.json({ success: true, data: row });
     } catch (error) {
       next(error);
