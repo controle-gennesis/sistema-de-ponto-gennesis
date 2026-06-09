@@ -336,7 +336,7 @@ export class GennecyFuelRefuelReportFlowService {
 
         await upsertSession(params.chatId, params.userId, 'ASK_OBSERVATIONS', {
           ...payload,
-          receiptPhotoUrl: photoUrl,
+          receiptPhotoUrl: photoUrl ?? undefined,
           receiptPhotoKey: photoKey ?? undefined,
           receiptPhotoName: photoName ?? undefined,
         });

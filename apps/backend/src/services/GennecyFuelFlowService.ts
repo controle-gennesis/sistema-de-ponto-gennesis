@@ -412,7 +412,7 @@ export class GennecyFuelFlowService {
 
         await upsertSession(params.chatId, params.userId, 'ASK_OBSERVATIONS', {
           ...payload,
-          dashboardPhotoUrl: photoUrl,
+          dashboardPhotoUrl: photoUrl ?? undefined,
           dashboardPhotoKey: photoKey ?? undefined,
           dashboardPhotoName: photoName ?? undefined,
         });

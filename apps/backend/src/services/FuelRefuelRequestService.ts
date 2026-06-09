@@ -52,7 +52,7 @@ export type SubmitFuelRefuelReportInput = {
   tankLevelAfter: FuelTankLevelAfter;
   litersRefueled: number;
   pricePerLiter: number;
-  receiptPhotoUrl: string;
+  receiptPhotoUrl?: string | null;
   receiptPhotoKey?: string | null;
   receiptPhotoName?: string | null;
   observations?: string | null;
@@ -334,6 +334,10 @@ export class FuelRefuelRequestService {
       throw createError('Esta solicitação não está aguardando dados do abastecimento', 400);
     }
 
+    if (!String(input.receiptPhotoUrl || '').trim() && !String(input.receiptPhotoKey || '').trim()) {
+      throw createError('Foto do cupom fiscal é obrigatória', 400);
+    }
+
     const updated = await prisma.fuelRefuelRequest.update({
       where: { id: input.requestId },
       data: {
@@ -343,7 +347,7 @@ export class FuelRefuelRequestService {
         tankLevelAfter: input.tankLevelAfter,
         litersRefueled: input.litersRefueled,
         pricePerLiter: input.pricePerLiter,
-        receiptPhotoUrl: input.receiptPhotoUrl,
+        receiptPhotoUrl: input.receiptPhotoUrl?.trim() || null,
         receiptPhotoKey: input.receiptPhotoKey || null,
         receiptPhotoName: input.receiptPhotoName || null,
         refuelReportObservations: input.observations?.trim() || null,
