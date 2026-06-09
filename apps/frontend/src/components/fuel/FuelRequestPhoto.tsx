@@ -24,11 +24,16 @@ export function FuelRequestPhoto({ src, alt, label, fileName, compact = false }:
 
   useEffect(() => {
     if (!open) return;
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [open]);
 
   const downloadName = sanitizeDownloadName(fileName?.trim() || alt || 'foto');
@@ -56,6 +61,10 @@ export function FuelRequestPhoto({ src, alt, label, fileName, compact = false }:
     }
   }, [src, downloadName, downloading]);
 
+  const thumbClass = compact
+    ? 'group relative flex h-36 w-full max-w-[200px] items-center justify-center overflow-hidden rounded-xl border border-green-200/80 bg-gray-900/40 dark:border-green-800/60'
+    : 'group relative flex h-40 w-full max-w-[280px] items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm dark:border-gray-600 dark:bg-gray-800';
+
   return (
     <>
       <div className={compact ? 'mt-3' : undefined}>
@@ -66,25 +75,17 @@ export function FuelRequestPhoto({ src, alt, label, fileName, compact = false }:
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className={
-            compact
-              ? 'group relative block w-full max-w-[220px] overflow-hidden rounded-xl border border-green-200/80 bg-black/5 dark:border-green-800/60 dark:bg-black/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500'
-              : 'group relative block w-full max-w-sm overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm dark:border-gray-600 dark:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500'
-          }
+          className={`${thumbClass} focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500`}
           title="Ampliar imagem"
         >
           <img
             src={src}
             alt={alt}
-            className={
-              compact
-                ? 'aspect-[3/4] w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]'
-                : 'aspect-[4/3] w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]'
-            }
+            className="max-h-full max-w-full object-contain p-1 transition-transform duration-200 group-hover:scale-[1.02]"
             referrerPolicy="no-referrer"
           />
-          <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/35 group-hover:opacity-100">
-            <span className="flex items-center gap-1.5 rounded-full bg-black/65 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
+            <span className="flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm">
               <ZoomIn className="h-4 w-4" />
               Ampliar
             </span>
@@ -96,48 +97,57 @@ export function FuelRequestPhoto({ src, alt, label, fileName, compact = false }:
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 z-[10050] flex flex-col bg-black/92"
-            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-[20000] isolate bg-black"
             role="dialog"
             aria-modal="true"
             aria-label={label}
           >
-            <div
-              className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-6"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="truncate text-sm font-medium text-white">{label}</p>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  disabled={downloading}
-                  className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20 disabled:opacity-50"
-                >
-                  <Download className="h-4 w-4" />
-                  {downloading ? 'Baixando…' : 'Baixar'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="rounded-lg bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
-                  aria-label="Fechar"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+            <button
+              type="button"
+              className="absolute inset-0 cursor-default"
+              aria-label="Fechar visualizador"
+              onClick={() => setOpen(false)}
+            />
+
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/90 via-black/50 to-transparent px-4 pb-10 pt-4 sm:px-6">
+              <div className="pointer-events-auto mx-auto flex max-w-5xl items-center justify-between gap-4">
+                <p className="truncate text-base font-semibold text-white">{label}</p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    disabled={downloading}
+                    className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/25 disabled:opacity-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    {downloading ? 'Baixando…' : 'Baixar'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+                    aria-label="Fechar"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
             </div>
-            <div
-              className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-8"
-              onClick={(e) => e.stopPropagation()}
-            >
+
+            <div className="relative z-10 flex h-full w-full items-center justify-center px-4 pb-8 pt-20 sm:px-8">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={src}
                 alt={alt}
-                className="max-h-[calc(100vh-5rem)] max-w-full rounded-lg object-contain shadow-2xl"
+                className="max-h-[calc(100vh-7rem)] max-w-full object-contain"
                 referrerPolicy="no-referrer"
+                onClick={(e) => e.stopPropagation()}
               />
             </div>
+
+            <p className="pointer-events-none absolute inset-x-0 bottom-4 z-20 text-center text-xs text-white/45">
+              Esc ou clique fora da imagem para fechar
+            </p>
           </div>,
           document.body,
         )}
