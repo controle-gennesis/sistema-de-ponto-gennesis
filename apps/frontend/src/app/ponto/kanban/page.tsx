@@ -21,6 +21,7 @@ import {
   kanbanInputNumber,
 } from '@/components/kanban/kanbanFormStyles';
 import api from '@/lib/api';
+import { useKanbanDragScrollAssist } from '@/hooks/useKanbanDragScrollAssist';
 import {
   type Priority,
   type KanbanCard,
@@ -1667,6 +1668,9 @@ function KanbanPage() {
   const columnDragOverIndexRef = useRef<number | null>(null);
   const columnDragGhostRef = useRef<HTMLElement | null>(null);
   const boardCardsRef = useRef<HTMLDivElement>(null);
+  const boardScrollRef = useRef<HTMLDivElement>(null);
+  const isKanbanDragging = Boolean(dragState.draggingCardId || columnDrag.draggingColumnId);
+  useKanbanDragScrollAssist(isKanbanDragging, boardScrollRef);
   useEffect(() => {
     dragRef.current = dragState;
   }, [dragState]);
@@ -2114,7 +2118,10 @@ function KanbanPage() {
         </div>
 
         {/* ── Board ── */}
-        <div className="scrollbar-hide overflow-x-auto pb-4 rounded-2xl bg-[#F3F4F6] dark:bg-gray-900/40 px-4 py-5">
+        <div
+          ref={boardScrollRef}
+          className="scrollbar-hide overflow-x-auto pb-4 rounded-2xl bg-[#F3F4F6] dark:bg-gray-900/40 px-4 py-5"
+        >
           <div
             ref={boardCardsRef}
             className="flex gap-5 items-start"
