@@ -1,4 +1,5 @@
 import { FuelTankLevelAfter } from '@prisma/client';
+import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import type { SendAction } from './WhatsAppBotService';
 
@@ -110,7 +111,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     `• Valor por litro: ${
       payload.pricePerLiter != null ? formatMoney(Number(payload.pricePerLiter)) : '—'
     }`,
-    `• Cupom fiscal: ${payload.receiptPhotoUrl ? 'enviado' : '—'}`,
+    `• Cupom fiscal: ${hasStoredPhoto(payload.receiptPhotoUrl, payload.receiptPhotoKey) ? 'enviado' : '—'}`,
     `• Observações: ${String(payload.observations || '').trim() || '—'}`,
     '',
     'Confirma o envio? (sim / não)',
@@ -326,16 +327,16 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
     }
 
     case 'FUEL_REPORT_ASK_RECEIPT': {
-      if (!hasMedia || !savedMedia?.fileUrl) {
+      if (!isWhatsAppSavedMediaReady(hasMedia, savedMedia)) {
         return {
           sendAction: waButtons('Preciso da foto do cupom fiscal. Envie uma imagem (pode mandar só a foto).'),
           newStatus,
           newPayload,
         };
       }
-      newPayload.receiptPhotoUrl = savedMedia.fileUrl;
-      newPayload.receiptPhotoKey = savedMedia.fileKey;
-      newPayload.receiptPhotoName = savedMedia.fileName;
+      newPayload.receiptPhotoUrl = savedMedia!.fileUrl || null;
+      newPayload.receiptPhotoKey = savedMedia!.fileKey;
+      newPayload.receiptPhotoName = savedMedia!.fileName;
       return {
         sendAction: waButtons(
           'Alguma observação sobre o abastecimento? (opcional — digite «não» para pular)',
@@ -390,7 +391,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
         !newPayload.tankLevelAfter ||
         newPayload.litersRefueled == null ||
         newPayload.pricePerLiter == null ||
-        !newPayload.receiptPhotoUrl
+        !hasStoredPhoto(newPayload.receiptPhotoUrl, newPayload.receiptPhotoKey)
       ) {
         return {
           sendAction: waButtons('Faltam dados. Volte ao menu e tente novamente.'),
@@ -407,7 +408,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
         tankLevelAfter: newPayload.tankLevelAfter as FuelTankLevelAfter,
         litersRefueled: Number(newPayload.litersRefueled),
         pricePerLiter: Number(newPayload.pricePerLiter),
-        receiptPhotoUrl: String(newPayload.receiptPhotoUrl),
+        receiptPhotoUrl: String(newPayload.receiptPhotoUrl || '').trim() || null,
         receiptPhotoKey: (newPayload.receiptPhotoKey as string | undefined) || null,
         receiptPhotoName: (newPayload.receiptPhotoName as string | undefined) || null,
         observations: (newPayload.observations as string | undefined) || null,

@@ -9,6 +9,7 @@ import {
   notifyFuelRequesterWaitingManager,
   notifyFuelRequesterWaitingSupplies,
 } from '../lib/fuelRefuelChatNotify';
+import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import type { SendAction } from './WhatsAppBotService';
 
@@ -78,7 +79,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     `• Condutor: ${payload.driverName || '—'}${payload.driverCpfMasked ? ` (CPF ${payload.driverCpfMasked})` : ''}`,
     `• Veículo: ${payload.vehiclePlate || '—'}`,
     `• Tipo: ${vehicleTypeLabel(payload.vehicleType as FuelVehicleType | undefined)}`,
-    `• Foto do painel: ${payload.dashboardPhotoUrl ? 'enviada' : '—'}`,
+    `• Foto do painel: ${hasStoredPhoto(payload.dashboardPhotoUrl, payload.dashboardPhotoKey) ? 'enviada' : '—'}`,
     `• Observações: ${String(payload.observations || '').trim() || '—'}`,
     '',
     'Confirma o envio? (sim / não)',
@@ -308,16 +309,16 @@ export async function processWhatsAppFuelFlow(params: {
     }
 
     case 'FUEL_ASK_DASHBOARD_PHOTO': {
-      if (!hasMedia || !savedMedia?.fileUrl) {
+      if (!isWhatsAppSavedMediaReady(hasMedia, savedMedia)) {
         return {
           sendAction: waButtons('Preciso da foto do painel. Envie uma imagem (pode mandar só a foto).'),
           newStatus,
           newPayload,
         };
       }
-      newPayload.dashboardPhotoUrl = savedMedia.fileUrl;
-      newPayload.dashboardPhotoKey = savedMedia.fileKey;
-      newPayload.dashboardPhotoName = savedMedia.fileName;
+      newPayload.dashboardPhotoUrl = savedMedia!.fileUrl || null;
+      newPayload.dashboardPhotoKey = savedMedia!.fileKey;
+      newPayload.dashboardPhotoName = savedMedia!.fileName;
       return {
         sendAction: waButtons(
           'Alguma observação sobre a solicitação? (opcional — digite «não» para pular)',
@@ -370,7 +371,7 @@ export async function processWhatsAppFuelFlow(params: {
         !newPayload.driverName ||
         !newPayload.vehiclePlate ||
         !newPayload.vehicleType ||
-        !newPayload.dashboardPhotoUrl
+        !hasStoredPhoto(newPayload.dashboardPhotoUrl, newPayload.dashboardPhotoKey)
       ) {
         return {
           sendAction: waButtons('Faltam dados. Volte ao menu e tente novamente.'),
@@ -389,7 +390,7 @@ export async function processWhatsAppFuelFlow(params: {
         vehiclePlate: String(newPayload.vehiclePlate),
         vehicleDescription: (newPayload.vehicleDescription as string | undefined) || null,
         vehicleType: newPayload.vehicleType as FuelVehicleType,
-        dashboardPhotoUrl: String(newPayload.dashboardPhotoUrl),
+        dashboardPhotoUrl: String(newPayload.dashboardPhotoUrl || '').trim() || null,
         dashboardPhotoKey: (newPayload.dashboardPhotoKey as string | undefined) || null,
         dashboardPhotoName: (newPayload.dashboardPhotoName as string | undefined) || null,
         observations: (newPayload.observations as string | undefined) || null,

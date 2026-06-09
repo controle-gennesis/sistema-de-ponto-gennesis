@@ -1,4 +1,5 @@
 import { FuelTankLevelAfter } from '@prisma/client';
+import { getPhotoAttachmentFromMessage, hasStoredPhoto } from '../lib/flowMedia';
 import { prisma } from '../lib/prisma';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 
@@ -151,7 +152,7 @@ function buildSummary(payload: ReportFlowPayload): string {
     `• Tanque após abastecimento: ${tankLabel(payload.tankLevelAfter)}`,
     `• Litros: ${payload.litersRefueled?.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) ?? '—'}`,
     `• Valor por litro: ${payload.pricePerLiter != null ? formatMoney(payload.pricePerLiter) : '—'}`,
-    `• Cupom fiscal: ${payload.receiptPhotoUrl ? '✅ enviado' : '—'}`,
+    `• Cupom fiscal: ${hasStoredPhoto(payload.receiptPhotoUrl, payload.receiptPhotoKey) ? '✅ enviado' : '—'}`,
     `• Observações: ${payload.observations?.trim() || '—'}`,
     '',
     'Confirma o envio? (sim / não)',
@@ -318,24 +319,7 @@ export class GennecyFuelRefuelReportFlowService {
         let photoName: string | null = null;
 
         if (params.messageId) {
-          const msg = await prisma.message.findUnique({
-            where: { id: params.messageId },
-            include: {
-              attachments: {
-                where: {
-                  OR: [
-                    { mimeType: { startsWith: 'image/' } },
-                    { fileName: { endsWith: '.jpg' } },
-                    { fileName: { endsWith: '.jpeg' } },
-                    { fileName: { endsWith: '.png' } },
-                    { fileName: { endsWith: '.webp' } },
-                  ],
-                },
-                take: 1,
-              },
-            },
-          });
-          const att = msg?.attachments?.[0];
+          const att = await getPhotoAttachmentFromMessage(params.messageId);
           if (att) {
             photoUrl = att.fileUrl;
             photoKey = att.fileKey;
@@ -343,7 +327,7 @@ export class GennecyFuelRefuelReportFlowService {
           }
         }
 
-        if (!photoUrl) {
+        if (!hasStoredPhoto(photoUrl, photoKey)) {
           return {
             handled: true,
             reply: 'Preciso da foto do cupom fiscal. Envie uma imagem como anexo.',
@@ -387,7 +371,7 @@ export class GennecyFuelRefuelReportFlowService {
           !payload.tankLevelAfter ||
           payload.litersRefueled == null ||
           payload.pricePerLiter == null ||
-          !payload.receiptPhotoUrl
+          !hasStoredPhoto(payload.receiptPhotoUrl, payload.receiptPhotoKey)
         ) {
           await cancelSession(params.chatId, params.userId);
           return {

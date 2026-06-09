@@ -10,6 +10,7 @@ import {
   notifyFuelRequesterWaitingManager,
   notifyFuelRequesterWaitingSupplies,
 } from '../lib/fuelRefuelChatNotify';
+import { getPhotoAttachmentFromMessage, hasStoredPhoto } from '../lib/flowMedia';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 
 const FLOW_TYPE = 'FUEL_REFUEL';
@@ -136,7 +137,7 @@ function buildSummary(payload: FuelFlowPayload): string {
     `• Condutor: ${payload.driverName || '—'}${payload.driverCpfMasked ? ` (CPF ${payload.driverCpfMasked})` : ''}`,
     `• Veículo: ${payload.vehiclePlate || '—'}`,
     `• Tipo: ${vehicleTypeLabel(payload.vehicleType)}`,
-    `• Foto do painel: ${payload.dashboardPhotoUrl ? '✅ enviada' : '—'}`,
+    `• Foto do painel: ${hasStoredPhoto(payload.dashboardPhotoUrl, payload.dashboardPhotoKey) ? '✅ enviada' : '—'}`,
     `• Observações: ${payload.observations?.trim() || '—'}`,
     '',
     routing,
@@ -394,24 +395,7 @@ export class GennecyFuelFlowService {
         let photoName: string | null = null;
 
         if (params.messageId) {
-          const msg = await prisma.message.findUnique({
-            where: { id: params.messageId },
-            include: {
-              attachments: {
-                where: {
-                  OR: [
-                    { mimeType: { startsWith: 'image/' } },
-                    { fileName: { endsWith: '.jpg' } },
-                    { fileName: { endsWith: '.jpeg' } },
-                    { fileName: { endsWith: '.png' } },
-                    { fileName: { endsWith: '.webp' } },
-                  ],
-                },
-                take: 1,
-              },
-            },
-          });
-          const att = msg?.attachments?.[0];
+          const att = await getPhotoAttachmentFromMessage(params.messageId);
           if (att) {
             photoUrl = att.fileUrl;
             photoKey = att.fileKey;
@@ -419,7 +403,7 @@ export class GennecyFuelFlowService {
           }
         }
 
-        if (!photoUrl) {
+        if (!hasStoredPhoto(photoUrl, photoKey)) {
           return {
             handled: true,
             reply: 'Preciso da foto do painel. Envie uma imagem como anexo (pode enviar só a foto, sem texto).',
@@ -464,7 +448,7 @@ export class GennecyFuelFlowService {
           !payload.driverName ||
           !payload.vehiclePlate ||
           !payload.vehicleType ||
-          !payload.dashboardPhotoUrl
+          !hasStoredPhoto(payload.dashboardPhotoUrl, payload.dashboardPhotoKey)
         ) {
           await cancelSession(params.chatId, params.userId);
           return {
