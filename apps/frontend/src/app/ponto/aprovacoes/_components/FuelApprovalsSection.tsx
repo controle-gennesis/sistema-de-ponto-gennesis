@@ -4,9 +4,10 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { FileText, Filter, Fuel, Image as ImageIcon, Search, X } from 'lucide-react';
+import { FileText, Filter, Fuel, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { FuelRequestPhoto } from '@/components/fuel/FuelRequestPhoto';
 import { hasFuelStoredPhoto, resolveFuelPhotoSrc } from '@/lib/resolveMediaUrl';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -243,7 +244,7 @@ export function FuelApprovalsSection() {
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                        Nº
+                        ID
                       </th>
                       <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         Contrato
@@ -269,7 +270,7 @@ export function FuelApprovalsSection() {
                     {fuelFiltered.map((r) => (
                       <tr key={r.id} className={listTableRowClasses.tr}>
                         <td className="px-3 py-3 align-middle text-sm font-medium text-gray-900 dark:text-gray-100 sm:px-6">
-                          #{r.displayNumber}
+                          {r.displayNumber}
                         </td>
                         <td
                           className="max-w-[200px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
@@ -320,7 +321,7 @@ export function FuelApprovalsSection() {
       <Modal
         isOpen={!!detailFuel}
         onClose={() => setDetailFuel(null)}
-        title={`Solicitação de combustível #${detailFuel?.displayNumber ?? ''}`}
+        title={`Solicitação de combustível ${detailFuel?.displayNumber ?? ''}`}
         size="lg"
       >
         {detailFuel ? (
@@ -379,24 +380,12 @@ export function FuelApprovalsSection() {
               );
               if (!panelPhotoUrl) return null;
               return (
-                <div>
-                  <p className="mb-2 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                    <ImageIcon className="h-4 w-4" />
-                    Foto do painel
-                  </p>
-                  <a
-                    href={panelPhotoUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block overflow-hidden rounded-lg border dark:border-gray-600"
-                  >
-                    <img
-                      src={panelPhotoUrl}
-                      alt={detailFuel.dashboardPhotoName || 'Painel'}
-                      className="max-h-48 object-contain"
-                    />
-                  </a>
-                </div>
+                <FuelRequestPhoto
+                  src={panelPhotoUrl}
+                  alt={detailFuel.dashboardPhotoName || 'Painel'}
+                  label="Foto do painel"
+                  fileName={detailFuel.dashboardPhotoName}
+                />
               );
             })() : null}
 

@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Fuel, Search, Filter, X, FileText, Image as ImageIcon } from 'lucide-react';
+import { Fuel, Search, Filter, X, FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -16,6 +16,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { hasFuelStoredPhoto, resolveFuelPhotoSrc } from '@/lib/resolveMediaUrl';
+import { FuelRequestPhoto } from '@/components/fuel/FuelRequestPhoto';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
@@ -263,7 +264,7 @@ export default function SolicitacoesCombustivelPage() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="search"
-                      placeholder="Buscar por nº, rota, condutor, placa, contrato..."
+                      placeholder="Buscar por ID, rota, condutor, placa, contrato..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
@@ -335,7 +336,7 @@ export default function SolicitacoesCombustivelPage() {
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Nº
+                            ID
                           </th>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Solicitante
@@ -366,7 +367,7 @@ export default function SolicitacoesCombustivelPage() {
                           >
                             <td className="px-3 py-4 sm:px-6">
                               <ListRowNavigableLabel className="font-medium">
-                                #{row.displayNumber}
+                                {row.displayNumber}
                               </ListRowNavigableLabel>
                             </td>
                             <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
@@ -446,7 +447,7 @@ export default function SolicitacoesCombustivelPage() {
             setRejectReason('');
             setShowRejectForm(false);
           }}
-          title={`Solicitação #${selected?.displayNumber ?? ''}`}
+          title={`Solicitação ${selected?.displayNumber ?? ''}`}
           size="lg"
         >
           {selected && (
@@ -524,24 +525,12 @@ export default function SolicitacoesCombustivelPage() {
                 );
                 if (!panelPhotoUrl) return null;
                 return (
-                  <div>
-                    <span className="mb-2 flex items-center gap-1 font-medium text-gray-500 dark:text-gray-400">
-                      <ImageIcon className="h-4 w-4" />
-                      Foto do painel
-                    </span>
-                    <a
-                      href={panelPhotoUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-block overflow-hidden rounded-lg border dark:border-gray-600"
-                    >
-                      <img
-                        src={panelPhotoUrl}
-                        alt={selected.dashboardPhotoName || 'Painel'}
-                        className="max-h-48 object-contain"
-                      />
-                    </a>
-                  </div>
+                  <FuelRequestPhoto
+                    src={panelPhotoUrl}
+                    alt={selected.dashboardPhotoName || 'Painel'}
+                    label="Foto do painel"
+                    fileName={selected.dashboardPhotoName}
+                  />
                 );
               })() : null}
 
@@ -624,18 +613,13 @@ export default function SolicitacoesCombustivelPage() {
                     );
                     if (!receiptPhotoUrl) return null;
                     return (
-                      <a
-                        href={receiptPhotoUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-3 inline-block overflow-hidden rounded-lg border dark:border-gray-600"
-                      >
-                        <img
-                          src={receiptPhotoUrl}
-                          alt={selected.receiptPhotoName || 'Cupom fiscal'}
-                          className="max-h-48 object-contain"
-                        />
-                      </a>
+                      <FuelRequestPhoto
+                        src={receiptPhotoUrl}
+                        alt={selected.receiptPhotoName || 'Cupom fiscal'}
+                        label="Cupom fiscal"
+                        fileName={selected.receiptPhotoName}
+                        compact
+                      />
                     );
                   })() : null}
                 </div>
