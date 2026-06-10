@@ -1124,19 +1124,24 @@ export default function MateriaisConstrucaoPage() {
                 />
               <div className="overflow-x-auto">
                 <table className={cadastroListClasses.table}>
+                  <colgroup>
+                    <col className="w-[4.5rem]" />
+                    <col />
+                    <col className="w-[6.5rem]" />
+                    <col className="w-[4rem]" />
+                    <col className="w-[6rem]" />
+                    <col className="w-[4.5rem]" />
+                  </colgroup>
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th scope="col" className={cadastroListClasses.th}>
                         ID
                       </th>
-                      <th scope="col" className={cadastroListClasses.th}>
+                      <th scope="col" className={`${cadastroListClasses.th} min-w-[12rem]`}>
                         Nome
                       </th>
                       <th scope="col" className={cadastroListClasses.th}>
                         Tipo
-                      </th>
-                      <th scope="col" className={cadastroListClasses.th}>
-                        Descrição
                       </th>
                       <th scope="col" className={cadastroListClasses.th}>
                         UN
@@ -1158,8 +1163,8 @@ export default function MateriaisConstrucaoPage() {
                           <td className={cadastroListClasses.tdMono}>
                             {formatCadastroListId(material.code, listRange.startItem + index)}
                           </td>
-                          <td className={cadastroListClasses.tdTruncate}>
-                            <span className="text-sm text-gray-900 dark:text-gray-100 block truncate font-medium">
+                          <td className={`${cadastroListClasses.tdTruncate} min-w-[12rem]`}>
+                            <span className="block text-sm font-medium text-gray-900 whitespace-normal break-words dark:text-gray-100">
                               {material.name || '-'}
                             </span>
                           </td>
@@ -1168,11 +1173,6 @@ export default function MateriaisConstrucaoPage() {
                               material.productType ||
                               material.category ||
                               '-'}
-                          </td>
-                          <td className={`${cadastroListClasses.tdTruncate} max-w-xs`}>
-                            <span className="block truncate text-sm text-gray-600 dark:text-gray-400">
-                              {material.description || '-'}
-                            </span>
                           </td>
                           <td className={cadastroListClasses.td}>
                             {material.unit}
