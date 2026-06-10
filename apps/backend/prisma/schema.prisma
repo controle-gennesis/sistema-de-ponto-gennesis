@@ -1383,6 +1383,9 @@ model MaterialRequest {
   serviceOrder    String? // Ordem de serviço (texto livre)
   obra            String? // Obra (texto livre)
   description     String? // Descrição/observações da requisição
+  demandSheet     String? // Número ou referência da ficha de demanda
+  demandSheetAttachmentUrl  String? // URL do anexo da FD
+  demandSheetAttachmentName String? // Nome original do anexo da FD
   status          MaterialRequestStatus   @default(PENDING) // Status da requisição
   priority        MaterialRequestPriority @default(MEDIUM) // Prioridade
   requestedAt     DateTime                @default(now()) // Data da requisição

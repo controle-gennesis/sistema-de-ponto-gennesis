@@ -21,6 +21,9 @@ export interface CreateMaterialRequestData {
   obra?: string;
   description?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  demandSheet?: string;
+  demandSheetAttachmentUrl?: string;
+  demandSheetAttachmentName?: string;
   items: {
     materialId: string;
     quantity: number;
@@ -57,6 +60,18 @@ export interface UpdateMaterialRequestCorrectionData {
 }
 
 export class MaterialRequestService {
+  private assertCreateMaterialRequestFields(data: CreateMaterialRequestData) {
+    if (!(data.obra || '').trim()) {
+      throw new Error('Obra é obrigatória');
+    }
+    if (!(data.demandSheet || '').trim()) {
+      throw new Error('Ficha de demanda é obrigatória');
+    }
+    if (!(data.demandSheetAttachmentUrl || '').trim()) {
+      throw new Error('Anexo da ficha de demanda é obrigatório');
+    }
+  }
+
   /**
    * Materiais do combo da RM: só cadastro de Construção, com espelho em EngineeringMaterial (sinapiCode CM-*).
    * Uma consulta em lote aos eng. existentes e criação apenas dos faltantes.
@@ -219,7 +234,12 @@ export class MaterialRequestService {
       throw new Error('Ordem de serviço é obrigatória. Selecione uma OS cadastrada no centro de custo.');
     }
 
-    const obra = (data.obra || '').trim() || undefined;
+    this.assertCreateMaterialRequestFields(data);
+
+    const obra = (data.obra || '').trim();
+    const demandSheet = (data.demandSheet || '').trim();
+    const demandSheetAttachmentUrl = (data.demandSheetAttachmentUrl || '').trim();
+    const demandSheetAttachmentName = (data.demandSheetAttachmentName || '').trim();
 
     // Criar requisição com itens
     const request = await prisma.materialRequest.create({
@@ -231,7 +251,10 @@ export class MaterialRequestService {
         serviceOrderId,
         serviceOrder,
         obra,
-        description: data.description,
+        description: data.description?.trim() || null,
+        demandSheet,
+        demandSheetAttachmentUrl,
+        demandSheetAttachmentName,
         priority: data.priority || 'MEDIUM',
         status: 'PENDING',
         items: {
@@ -250,7 +273,7 @@ export class MaterialRequestService {
               unit: material?.unit || 'UN',
               unitPrice: safeUnit,
               totalPrice: safeTotal,
-              notes: item.notes,
+              notes: (item.notes || '').trim(),
               attachmentUrl: item.attachmentUrl ?? null,
               attachmentName: item.attachmentName ?? null,
               status: 'PENDING'

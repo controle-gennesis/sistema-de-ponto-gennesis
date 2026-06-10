@@ -99,6 +99,16 @@ async function ensureMaterialRequestColumns(prisma: PrismaClient): Promise<void>
       END $$;
     `);
   }
+
+  if (!(await columnExists(prisma, 'material_requests', 'demandSheet'))) {
+    console.warn('[Schema] Colunas de ficha de demanda em material_requests ausentes — adicionando.');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "material_requests"
+        ADD COLUMN IF NOT EXISTS "demandSheet" TEXT,
+        ADD COLUMN IF NOT EXISTS "demandSheetAttachmentUrl" TEXT,
+        ADD COLUMN IF NOT EXISTS "demandSheetAttachmentName" TEXT;
+    `);
+  }
 }
 
 async function ensureMaterialRequestItemColumns(prisma: PrismaClient): Promise<void> {

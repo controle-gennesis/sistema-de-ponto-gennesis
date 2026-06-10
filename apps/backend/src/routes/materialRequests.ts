@@ -140,7 +140,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       throw createError('Usuário não autenticado', 401);
     }
 
-    const { costCenterId, projectId, serviceOrderId, serviceOrder, obra, description, priority, items } =
+    const { costCenterId, projectId, serviceOrderId, serviceOrder, obra, description, priority, demandSheet, demandSheetAttachmentUrl, demandSheetAttachmentName, items } =
       req.body;
 
     if (!costCenterId || !items || !Array.isArray(items) || items.length === 0) {
@@ -156,6 +156,9 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       obra,
       description,
       priority: priority || 'MEDIUM',
+      demandSheet,
+      demandSheetAttachmentUrl,
+      demandSheetAttachmentName,
       items: items.map((item: any) => ({
         materialId: item.materialId,
         quantity: item.quantity,
@@ -171,6 +174,15 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       message: 'Requisição de material criada com sucesso'
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      /obrigat|necessário|material|Quantidade|centro de custo|ordem de serviço|projeto|anexo|ficha de demanda|observação/i.test(
+        error.message
+      )
+    ) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 });

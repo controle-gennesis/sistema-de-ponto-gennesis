@@ -270,6 +270,28 @@ const rmMaterialInputClass =
 const rmMaterialInputClassSm =
   'w-full min-w-0 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
 
+type NewMaterialRequestFormData = ReturnType<typeof emptyNewFormData>;
+
+function validateNewMaterialRequestForm(formData: NewMaterialRequestFormData): string | null {
+  if (!formData.costCenterId.trim()) return 'Selecione o centro de custo.';
+  if (!formData.serviceOrderId.trim()) return 'Selecione a ordem de serviço.';
+  if (!formData.obra.trim()) return 'Informe a obra.';
+  if (!formData.demandSheet.trim()) return 'Informe a ficha de demanda.';
+  if (!formData.demandSheetAttachmentUrl.trim()) return 'Anexe o arquivo da ficha de demanda.';
+
+  const validItems = formData.items.filter((item) => item.materialId);
+  if (validItems.length === 0) return 'Inclua ao menos um material.';
+
+  for (let index = 0; index < formData.items.length; index += 1) {
+    const item = formData.items[index];
+    if (!item.materialId.trim()) {
+      return `Selecione o material do item ${index + 1}.`;
+    }
+  }
+
+  return null;
+}
+
 const rmNumberInputClass =
   'min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]';
 
@@ -355,10 +377,13 @@ type RmMaterialOption = {
 
 type RmCostCenterOption = {
   id?: string;
-  code?: string;
+  code: string;
   name?: string;
   description?: string;
-  label?: string;
+  label: string;
+  value: string;
+  polo?: string;
+  isActive?: boolean;
 };
 
 function getCostCenterLabel(costCenter?: RmCostCenterOption | null) {
@@ -909,6 +934,11 @@ function SolicitarMateriaisPage() {
       });
       closeNewRequestModal();
       toast.success('Solicitação criada com sucesso!');
+    },
+    onError: (error: { response?: { data?: { message?: string; error?: string } } }) => {
+      toast.error(
+        error.response?.data?.message || error.response?.data?.error || 'Erro ao criar solicitação'
+      );
     }
   });
 
@@ -1205,35 +1235,27 @@ function SolicitarMateriaisPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.costCenterId) {
-      toast.error('Selecione o centro de custo.');
-      return;
-    }
-    if (!formData.serviceOrderId) {
-      toast.error('Selecione a ordem de serviço.');
-      return;
-    }
-    const validItems = formData.items.filter((item) => item.materialId);
-    if (validItems.length === 0) {
-      toast.error('Inclua ao menos um material.');
+    const validationError = validateNewMaterialRequestForm(formData);
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
     createMutation.mutate({
       costCenterId: formData.costCenterId,
       serviceOrderId: formData.serviceOrderId,
       serviceOrder: formData.serviceOrder || undefined,
-      obra: formData.obra || undefined,
+      obra: formData.obra.trim(),
       description: formData.description,
       priority: formData.priority,
-      demandSheet: formData.demandSheet || undefined,
-      demandSheetAttachmentUrl: formData.demandSheetAttachmentUrl || undefined,
-      demandSheetAttachmentName: formData.demandSheetAttachmentName || undefined,
+      demandSheet: formData.demandSheet.trim(),
+      demandSheetAttachmentUrl: formData.demandSheetAttachmentUrl.trim(),
+      demandSheetAttachmentName: formData.demandSheetAttachmentName.trim() || undefined,
       items: formData.items
         .filter((item) => item.materialId)
         .map((item) => ({
         materialId: item.materialId,
         quantity: Number(item.quantity),
-        observation: item.observation,
+        observation: item.observation.trim() || undefined,
         attachmentUrl: item.attachmentUrl?.trim() || undefined,
         attachmentName: item.attachmentName?.trim() || undefined
       }))
@@ -1903,14 +1925,15 @@ function SolicitarMateriaisPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Obra
+                      Obra *
                     </label>
                     <input
                       type="text"
+                      required
                       value={formData.obra}
                       onChange={(e) => setFormData({ ...formData, obra: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Identificação da obra (opcional)"
+                      placeholder="Identificação da obra"
                     />
                   </div>
 
@@ -1931,19 +1954,20 @@ function SolicitarMateriaisPage() {
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Ficha de Demanda
+                          Ficha de Demanda *
                         </label>
                         <input
                           type="text"
+                          required
                           value={formData.demandSheet}
                           onChange={(e) => setFormData({ ...formData, demandSheet: e.target.value })}
                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                          placeholder="Número ou referência da FD (opcional)"
+                          placeholder="Número ou referência da FD"
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Anexar FD
+                          Anexar FD *
                         </label>
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50">
@@ -1987,13 +2011,15 @@ function SolicitarMateriaisPage() {
                         </>
                       )}
                     </div>
+                    <input type="hidden" required value={formData.demandSheetAttachmentUrl} readOnly />
                       </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Prioridade
+                        Prioridade *
                       </label>
                       <select
+                        required
                         value={formData.priority}
                         onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
