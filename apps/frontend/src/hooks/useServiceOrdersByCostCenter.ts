@@ -51,7 +51,7 @@ function normalizeServiceOrdersResponse(payload: unknown): ServiceOrderOption[] 
 }
 
 export function serviceOrderOptionFullLabel(os: ServiceOrderOption): string {
-  return os.contractNumber ? `${os.label} — Contrato ${os.contractNumber}` : os.label;
+  return os.label;
 }
 
 export function filterServiceOrdersByQuery(
@@ -61,10 +61,9 @@ export function filterServiceOrdersByQuery(
   const q = query.trim().toLowerCase();
   if (!q) return orders;
   return orders.filter((os) => {
-    const full = serviceOrderOptionFullLabel(os).toLowerCase();
+    const label = os.label.toLowerCase();
     return (
-      full.includes(q) ||
-      os.label.toLowerCase().includes(q) ||
+      label.includes(q) ||
       (os.divSe || '').toLowerCase().includes(q) ||
       (os.folderNumber || '').toLowerCase().includes(q) ||
       (os.contractNumber || '').toLowerCase().includes(q) ||

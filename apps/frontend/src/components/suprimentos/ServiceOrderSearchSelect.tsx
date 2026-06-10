@@ -17,6 +17,7 @@ type ServiceOrderSearchSelectProps = {
   onClear: () => void;
   inputSize?: 'sm' | 'md';
   emptyCostCenterHint?: string;
+  required?: boolean;
 };
 
 export function ServiceOrderSearchSelect({
@@ -28,7 +29,8 @@ export function ServiceOrderSearchSelect({
   onSelect,
   onClear,
   inputSize = 'md',
-  emptyCostCenterHint = 'Selecione o centro de custo para listar as ordens de serviço'
+  emptyCostCenterHint = 'Selecione o centro de custo para listar as ordens de serviço',
+  required = false
 }: ServiceOrderSearchSelectProps) {
   const [search, setSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -51,20 +53,37 @@ export function ServiceOrderSearchSelect({
 
   const inputClass =
     inputSize === 'sm'
-      ? 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-      : 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+      ? 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-100'
+      : 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-100';
 
-  const boxClass =
-    inputSize === 'sm'
-      ? 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm'
-      : 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm';
+  const placeholderClass =
+    'placeholder:text-gray-500 dark:placeholder:text-gray-400 disabled:text-gray-500 dark:disabled:text-gray-400';
 
   if (!costCenterId) {
-    return <div className={boxClass}>{emptyCostCenterHint}</div>;
+    return (
+      <input
+        type="text"
+        disabled
+        readOnly
+        value=""
+        placeholder={emptyCostCenterHint}
+        className={`${inputClass} ${placeholderClass}`}
+        aria-disabled
+      />
+    );
   }
 
   if (loading) {
-    return <div className={boxClass}>Carregando ordens de serviço...</div>;
+    return (
+      <input
+        type="text"
+        disabled
+        readOnly
+        value="Carregando ordens de serviço..."
+        className={`${inputClass} ${placeholderClass}`}
+        aria-busy
+      />
+    );
   }
 
   const handleSearchChange = (value: string) => {
@@ -108,11 +127,13 @@ export function ServiceOrderSearchSelect({
         onFocus={() => setDropdownOpen(true)}
         onBlur={handleBlur}
         onChange={(e) => handleSearchChange(e.target.value)}
-        placeholder="Digite para buscar ordem de serviço (opcional)"
+        placeholder="Digite para buscar ordem de serviço..."
         className={inputClass}
         role="combobox"
         aria-expanded={dropdownOpen}
         aria-autocomplete="list"
+        aria-required={required}
+        required={required}
       />
       {dropdownOpen && filtered.length > 0 && (
         <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg">

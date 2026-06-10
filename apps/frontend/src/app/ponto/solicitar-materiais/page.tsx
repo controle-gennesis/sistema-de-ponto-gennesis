@@ -17,7 +17,9 @@ import {
   Search,
   Filter,
   Eye,
-  RotateCcw
+  RotateCcw,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -262,6 +264,87 @@ const emptyNewFormData = () => ({
   items: [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
 });
 
+const rmMaterialInputClass =
+  'w-full min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm';
+
+const rmMaterialInputClassSm =
+  'w-full min-w-0 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
+
+const rmNumberInputClass =
+  'min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]';
+
+const rmNumberInputClassSm =
+  'min-w-0 flex-1 bg-transparent px-2 py-1.5 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]';
+
+function RmQuantityInput({
+  value,
+  onChange,
+  unit,
+  min = 1,
+  required = false,
+  size = 'md'
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  unit?: string;
+  min?: number;
+  required?: boolean;
+  size?: 'md' | 'sm';
+}) {
+  const normalized = Number.isFinite(Number(value)) ? Math.max(min, Math.floor(Number(value))) : min;
+  const shellClass =
+    size === 'sm'
+      ? 'flex overflow-hidden rounded border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'
+      : 'flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700';
+  const stepBtnClass =
+    'flex flex-1 items-center justify-center text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200';
+  const unitClass =
+    size === 'sm'
+      ? 'flex shrink-0 items-center border-l border-gray-300 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-600 dark:text-gray-400'
+      : 'flex shrink-0 items-center border-l border-gray-300 px-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-600 dark:text-gray-400';
+
+  const bump = (delta: number) => {
+    onChange(Math.max(min, normalized + delta));
+  };
+
+  return (
+    <div className={shellClass}>
+      <input
+        type="number"
+        required={required}
+        min={min}
+        value={normalized}
+        onChange={(e) => {
+          const parsed = parseInt(e.target.value, 10);
+          onChange(Number.isFinite(parsed) && parsed >= min ? parsed : min);
+        }}
+        className={size === 'sm' ? rmNumberInputClassSm : rmNumberInputClass}
+      />
+      <span className={unitClass}>{unit?.trim() || '—'}</span>
+      <div className="flex w-8 shrink-0 flex-col border-l border-gray-300 dark:border-gray-600">
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Aumentar quantidade"
+          onClick={() => bump(1)}
+          className={`${stepBtnClass} border-b border-gray-300 dark:border-gray-600`}
+        >
+          <ChevronUp className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Diminuir quantidade"
+          onClick={() => bump(-1)}
+          className={stepBtnClass}
+        >
+          <ChevronDown className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 type RmMaterialOption = {
   id: string;
   code?: string;
@@ -269,6 +352,152 @@ type RmMaterialOption = {
   name?: string;
   unit?: string;
 };
+
+type RmCostCenterOption = {
+  id?: string;
+  code?: string;
+  name?: string;
+  description?: string;
+  label?: string;
+};
+
+function getCostCenterLabel(costCenter?: RmCostCenterOption | null) {
+  if (!costCenter) return '';
+  return String(costCenter.name ?? costCenter.label ?? '').trim();
+}
+
+function costCenterMatchesSearch(costCenter: RmCostCenterOption, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    costCenter.name,
+    costCenter.label,
+    costCenter.code,
+    costCenter.description
+  ]
+    .map((part) => String(part ?? '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+  return haystack.includes(q);
+}
+
+function RmCostCenterAutocomplete({
+  searchValue,
+  isOpen,
+  onOpen,
+  onClose,
+  onSearchChange,
+  onSelect,
+  costCenters,
+  loading,
+  getCostCenterLabel: getLabel,
+  inputClassName,
+  placeholder = 'Digite para buscar centro de custo...'
+}: {
+  searchValue: string;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onSearchChange: (value: string) => void;
+  onSelect: (costCenter: RmCostCenterOption & { id: string }) => void;
+  costCenters: RmCostCenterOption[];
+  loading: boolean;
+  getCostCenterLabel: (costCenter?: RmCostCenterOption | null) => string;
+  inputClassName: string;
+  placeholder?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const syncMenuPosition = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setMenuStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setMenuStyle(null);
+      return;
+    }
+    syncMenuPosition();
+    const onReposition = () => syncMenuPosition();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [isOpen, syncMenuPosition, searchValue]);
+
+  const filteredCostCenters = useMemo(() => {
+    return costCenters
+      .filter((costCenter): costCenter is RmCostCenterOption & { id: string } => Boolean(costCenter.id))
+      .filter((costCenter) => costCenterMatchesSearch(costCenter, searchValue))
+      .slice(0, 50);
+  }, [costCenters, searchValue]);
+
+  const dropdown =
+    isOpen &&
+    menuStyle &&
+    typeof document !== 'undefined' &&
+    createPortal(
+      <div
+        role="listbox"
+        className="max-h-56 overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
+        style={{
+          position: 'fixed',
+          top: menuStyle.top,
+          left: menuStyle.left,
+          width: menuStyle.width,
+          zIndex: 1200
+        }}
+      >
+        {loading ? (
+          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Carregando centros de custo…</p>
+        ) : filteredCostCenters.length === 0 ? (
+          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+            {costCenters.length === 0
+              ? 'Nenhum centro de custo disponível.'
+              : 'Nenhum centro de custo encontrado para esta busca.'}
+          </p>
+        ) : (
+          filteredCostCenters.map((costCenter) => (
+            <button
+              key={costCenter.id}
+              type="button"
+              role="option"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSelect(costCenter)}
+              className="w-full px-3 py-2 text-left text-sm text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700"
+            >
+              {getLabel(costCenter)}
+            </button>
+          ))
+        )}
+      </div>,
+      document.body
+    );
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        value={searchValue}
+        onFocus={onOpen}
+        onClick={onOpen}
+        onBlur={() => setTimeout(onClose, 120)}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder={placeholder}
+        className={inputClassName}
+        autoComplete="off"
+      />
+      {dropdown}
+    </>
+  );
+}
 
 function RmMaterialAutocomplete({
   searchValue,
@@ -366,7 +595,7 @@ function RmMaterialAutocomplete({
               role="option"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onSelect(material)}
-              className="w-full px-3 py-2 text-left text-sm text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700"
+              className="w-full px-3 py-2 text-left text-sm text-gray-900 whitespace-normal break-words hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700"
             >
               {getMaterialLabel(material)}
             </button>
@@ -388,6 +617,7 @@ function RmMaterialAutocomplete({
         onChange={(e) => onSearchChange(e.target.value)}
         placeholder={placeholder}
         className={inputClassName}
+        title={searchValue || undefined}
         autoComplete="off"
       />
       {dropdown}
@@ -426,6 +656,10 @@ function SolicitarMateriaisPage() {
   const [editItemMaterialSearch, setEditItemMaterialSearch] = useState<string[]>(['']);
   const [activeNewMaterialDropdownIndex, setActiveNewMaterialDropdownIndex] = useState<number | null>(null);
   const [activeEditMaterialDropdownIndex, setActiveEditMaterialDropdownIndex] = useState<number | null>(null);
+  const [newCostCenterSearch, setNewCostCenterSearch] = useState('');
+  const [editCostCenterSearch, setEditCostCenterSearch] = useState('');
+  const [isNewCostCenterDropdownOpen, setIsNewCostCenterDropdownOpen] = useState(false);
+  const [isEditCostCenterDropdownOpen, setIsEditCostCenterDropdownOpen] = useState(false);
 
   const [rmListSearch, setRmListSearch] = useState('');
   /** '' | `rm:PENDING` | `oc:APPROVED` … — fase da SC ou de alguma OC */
@@ -459,20 +693,56 @@ function SolicitarMateriaisPage() {
     useServiceOrdersByCostCenter(editFormData.costCenterId);
 
   const handleNewCostCenterChange = (costCenterId: string) => {
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       costCenterId,
       serviceOrderId: '',
       serviceOrder: ''
-    });
+    }));
   };
 
   const handleEditCostCenterChange = (costCenterId: string) => {
-    setEditFormData({
-      ...editFormData,
+    setEditFormData((prev) => ({
+      ...prev,
       costCenterId,
       serviceOrderId: '',
       serviceOrder: ''
+    }));
+  };
+
+  const handleNewCostCenterSearchChange = (value: string) => {
+    setNewCostCenterSearch(value);
+    const normalized = value.trim().toLowerCase();
+    const exactMatch = costCenters.find(
+      (cc): cc is RmCostCenterOption & { id: string } =>
+        Boolean(cc.id) && getCostCenterLabel(cc).trim().toLowerCase() === normalized
+    );
+
+    setFormData((prev) => {
+      if (!normalized || !exactMatch) {
+        if (!prev.costCenterId && !prev.serviceOrderId && !prev.serviceOrder) return prev;
+        return { ...prev, costCenterId: '', serviceOrderId: '', serviceOrder: '' };
+      }
+      if (prev.costCenterId === exactMatch.id) return prev;
+      return { ...prev, costCenterId: exactMatch.id, serviceOrderId: '', serviceOrder: '' };
+    });
+  };
+
+  const handleEditCostCenterSearchChange = (value: string) => {
+    setEditCostCenterSearch(value);
+    const normalized = value.trim().toLowerCase();
+    const exactMatch = costCenters.find(
+      (cc): cc is RmCostCenterOption & { id: string } =>
+        Boolean(cc.id) && getCostCenterLabel(cc).trim().toLowerCase() === normalized
+    );
+
+    setEditFormData((prev) => {
+      if (!normalized || !exactMatch) {
+        if (!prev.costCenterId && !prev.serviceOrderId && !prev.serviceOrder) return prev;
+        return { ...prev, costCenterId: '', serviceOrderId: '', serviceOrder: '' };
+      }
+      if (prev.costCenterId === exactMatch.id) return prev;
+      return { ...prev, costCenterId: exactMatch.id, serviceOrderId: '', serviceOrder: '' };
     });
   };
 
@@ -610,6 +880,8 @@ function SolicitarMateriaisPage() {
     setFormData(emptyNewFormData());
     setNewItemMaterialSearch(['']);
     setActiveNewMaterialDropdownIndex(null);
+    setNewCostCenterSearch('');
+    setIsNewCostCenterDropdownOpen(false);
     setUploadingAttachment(null);
     setUploadingDemandSheetAttachment(null);
   };
@@ -822,6 +1094,26 @@ function SolicitarMateriaisPage() {
   }, [detailViewId]);
 
   useEffect(() => {
+    if (!formData.costCenterId) return;
+    const selected = costCenters.find((cc) => cc.id === formData.costCenterId);
+    if (selected) {
+      setNewCostCenterSearch(getCostCenterLabel(selected));
+    }
+  }, [formData.costCenterId, costCenters]);
+
+  useEffect(() => {
+    if (!correctionEditId) {
+      setEditCostCenterSearch('');
+      return;
+    }
+    if (!editFormData.costCenterId) return;
+    const selected = costCenters.find((cc) => cc.id === editFormData.costCenterId);
+    if (selected) {
+      setEditCostCenterSearch(getCostCenterLabel(selected));
+    }
+  }, [correctionEditId, editFormData.costCenterId, costCenters]);
+
+  useEffect(() => {
     setNewItemMaterialSearch((prev) =>
       formData.items.map((item, index) => {
         if (item.materialId) {
@@ -913,9 +1205,22 @@ function SolicitarMateriaisPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.costCenterId) {
+      toast.error('Selecione o centro de custo.');
+      return;
+    }
+    if (!formData.serviceOrderId) {
+      toast.error('Selecione a ordem de serviço.');
+      return;
+    }
+    const validItems = formData.items.filter((item) => item.materialId);
+    if (validItems.length === 0) {
+      toast.error('Inclua ao menos um material.');
+      return;
+    }
     createMutation.mutate({
       costCenterId: formData.costCenterId,
-      serviceOrderId: formData.serviceOrderId || undefined,
+      serviceOrderId: formData.serviceOrderId,
       serviceOrder: formData.serviceOrder || undefined,
       obra: formData.obra || undefined,
       description: formData.description,
@@ -923,7 +1228,9 @@ function SolicitarMateriaisPage() {
       demandSheet: formData.demandSheet || undefined,
       demandSheetAttachmentUrl: formData.demandSheetAttachmentUrl || undefined,
       demandSheetAttachmentName: formData.demandSheetAttachmentName || undefined,
-      items: formData.items.map((item) => ({
+      items: formData.items
+        .filter((item) => item.materialId)
+        .map((item) => ({
         materialId: item.materialId,
         quantity: Number(item.quantity),
         observation: item.observation,
@@ -1090,6 +1397,10 @@ function SolicitarMateriaisPage() {
     if (!correctionEditId) return;
     if (!editFormData.costCenterId) {
       toast.error('Selecione o centro de custo.');
+      return;
+    }
+    if (!editFormData.serviceOrderId) {
+      toast.error('Selecione a ordem de serviço.');
       return;
     }
     const validItems = editFormData.items.filter((i) => i.materialId);
@@ -1538,23 +1849,33 @@ function SolicitarMateriaisPage() {
                       Centro de Custo *
                     </label>
                     {loadingCostCenters ? (
-                      <div className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
-                        Carregando centros de custo...
-                      </div>
+                      <input
+                        type="text"
+                        disabled
+                        readOnly
+                        value="Carregando centros de custo..."
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-100"
+                      />
                     ) : (
-                      <select
-                        required
-                        value={formData.costCenterId}
-                        onChange={(e) => handleNewCostCenterChange(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      >
-                        <option value="">Selecione um centro de custo</option>
-                        {costCenters.map((cc: any) => (
-                          <option key={cc.id} value={cc.id}>
-                            {cc.code} - {cc.name} {cc.description ? `(${cc.description})` : ''}
-                          </option>
-                        ))}
-                      </select>
+                      <>
+                        <RmCostCenterAutocomplete
+                          searchValue={newCostCenterSearch}
+                          isOpen={isNewCostCenterDropdownOpen}
+                          onOpen={() => setIsNewCostCenterDropdownOpen(true)}
+                          onClose={() => setIsNewCostCenterDropdownOpen(false)}
+                          onSearchChange={handleNewCostCenterSearchChange}
+                          onSelect={(costCenter) => {
+                            handleNewCostCenterChange(costCenter.id);
+                            setNewCostCenterSearch(getCostCenterLabel(costCenter));
+                            setIsNewCostCenterDropdownOpen(false);
+                          }}
+                          costCenters={costCenters}
+                          loading={loadingCostCenters}
+                          getCostCenterLabel={getCostCenterLabel}
+                          inputClassName="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        <input type="hidden" required value={formData.costCenterId} readOnly />
+                      </>
                     )}
                     {!loadingCostCenters && costCenters.length === 0 && (
                       <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-400">
@@ -1565,7 +1886,7 @@ function SolicitarMateriaisPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Ordem de Serviço
+                      Ordem de Serviço *
                     </label>
                     <ServiceOrderSearchSelect
                       costCenterId={formData.costCenterId}
@@ -1575,7 +1896,9 @@ function SolicitarMateriaisPage() {
                       serviceOrderLabel={formData.serviceOrder}
                       onSelect={handleNewServiceOrderSelect}
                       onClear={handleNewServiceOrderClear}
+                      required
                     />
+                    <input type="hidden" required value={formData.serviceOrderId} readOnly />
                   </div>
 
                   <div>
@@ -1712,7 +2035,7 @@ function SolicitarMateriaisPage() {
                               </button>
                             )}
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-3">
                             <div>
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Material *
@@ -1735,37 +2058,24 @@ function SolicitarMateriaisPage() {
                                   loading={loadingMaterials}
                                   loadError={materialsLoadError}
                                   getMaterialLabel={getMaterialLabel}
-                                  inputClassName="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                  inputClassName={rmMaterialInputClass}
                                 />
                                 <input type="hidden" required value={item.materialId} readOnly />
                               </div>
                             </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <div>
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Quantidade *
                               </label>
-                              <input
-                                type="number"
+                              <RmQuantityInput
                                 required
-                                min="1"
                                 value={item.quantity}
-                                onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value))}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                unit={item.unit}
+                                onChange={(quantity) => handleItemChange(index, 'quantity', quantity)}
                               />
                             </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                                Unidade
-                              </label>
-                              <input
-                                type="text"
-                                value={item.unit}
-                                readOnly
-                                placeholder="Ex: kg, m, un"
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm cursor-not-allowed"
-                              />
-                            </div>
-                            <div>
+                            <div className="sm:col-span-2">
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Observação
                               </label>
@@ -1776,7 +2086,8 @@ function SolicitarMateriaisPage() {
                                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
                               />
                             </div>
-                            <div className="md:col-span-2">
+                            </div>
+                            <div>
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Anexo (opcional)
                               </label>
@@ -2117,23 +2428,28 @@ function SolicitarMateriaisPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Centro de Custo *
                   </label>
-                  <select
-                    value={editFormData.costCenterId}
-                    onChange={(e) => handleEditCostCenterChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
-                  >
-                    <option value="">Selecione</option>
-                    {costCenters.map((cc: any) => (
-                      <option key={String(cc.id ?? cc.value)} value={String(cc.id ?? cc.value)}>
-                        {cc.code} - {cc.name || cc.label}
-                      </option>
-                    ))}
-                  </select>
+                  <RmCostCenterAutocomplete
+                    searchValue={editCostCenterSearch}
+                    isOpen={isEditCostCenterDropdownOpen}
+                    onOpen={() => setIsEditCostCenterDropdownOpen(true)}
+                    onClose={() => setIsEditCostCenterDropdownOpen(false)}
+                    onSearchChange={handleEditCostCenterSearchChange}
+                    onSelect={(costCenter) => {
+                      handleEditCostCenterChange(costCenter.id);
+                      setEditCostCenterSearch(getCostCenterLabel(costCenter));
+                      setIsEditCostCenterDropdownOpen(false);
+                    }}
+                    costCenters={costCenters}
+                    loading={loadingCostCenters}
+                    getCostCenterLabel={getCostCenterLabel}
+                    inputClassName="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                  />
+                  <input type="hidden" value={editFormData.costCenterId} readOnly />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Ordem de Serviço
+                    Ordem de Serviço *
                   </label>
                   <ServiceOrderSearchSelect
                     costCenterId={editFormData.costCenterId}
@@ -2145,7 +2461,9 @@ function SolicitarMateriaisPage() {
                     onClear={handleEditServiceOrderClear}
                     inputSize="sm"
                     emptyCostCenterHint="Selecione o centro de custo"
+                    required
                   />
+                  <input type="hidden" required value={editFormData.serviceOrderId} readOnly />
                   {editFormData.serviceOrder &&
                     !editFormData.serviceOrderId &&
                     editFormServiceOrders.length > 0 && (
@@ -2287,7 +2605,7 @@ function SolicitarMateriaisPage() {
                             </button>
                           )}
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="space-y-2">
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Material *</label>
                             <RmMaterialAutocomplete
@@ -2307,31 +2625,22 @@ function SolicitarMateriaisPage() {
                               loading={loadingMaterials}
                               loadError={materialsLoadError}
                               getMaterialLabel={getMaterialLabel}
-                              inputClassName="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
+                              inputClassName={rmMaterialInputClassSm}
                             />
                           </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Quantidade *</label>
-                            <input
-                              type="number"
-                              min={1}
+                            <RmQuantityInput
+                              size="sm"
                               value={item.quantity}
-                              onChange={(e) =>
-                                handleEditItemChange(index, 'quantity', parseInt(e.target.value, 10) || 1)
+                              unit={item.unit}
+                              onChange={(quantity) =>
+                                handleEditItemChange(index, 'quantity', quantity)
                               }
-                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
                             />
                           </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-0.5">Unidade</label>
-                            <input
-                              type="text"
-                              readOnly
-                              value={item.unit}
-                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-gray-100 dark:bg-gray-800 cursor-not-allowed"
-                            />
-                          </div>
-                          <div>
+                          <div className="sm:col-span-2">
                             <label className="block text-xs text-gray-500 mb-0.5">Observação</label>
                             <input
                               type="text"
@@ -2340,7 +2649,8 @@ function SolicitarMateriaisPage() {
                               className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800"
                             />
                           </div>
-                          <div className="sm:col-span-2">
+                          </div>
+                          <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Anexo (opcional)</label>
                             <div className="flex flex-wrap items-center gap-2">
                               <label className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">

@@ -215,6 +215,10 @@ export class MaterialRequestService {
       projectId: data.projectId
     });
 
+    if (!serviceOrderId) {
+      throw new Error('Ordem de serviço é obrigatória. Selecione uma OS cadastrada no centro de custo.');
+    }
+
     const obra = (data.obra || '').trim() || undefined;
 
     // Criar requisição com itens
@@ -586,6 +590,10 @@ export class MaterialRequestService {
       serviceOrder: data.serviceOrder,
       projectId: data.projectId
     });
+
+    if (!serviceOrderId) {
+      throw new Error('Ordem de serviço é obrigatória. Selecione uma OS cadastrada no centro de custo.');
+    }
 
     const obra = (data.obra || '').trim() || null;
 
