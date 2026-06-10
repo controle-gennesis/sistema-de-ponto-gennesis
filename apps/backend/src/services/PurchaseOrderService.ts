@@ -248,6 +248,8 @@ export interface CreatePurchaseOrderData {
   paymentType?: string;
   paymentCondition?: string;
   paymentDetails?: string;
+  pixKeyType?: string;
+  pixKey?: string;
   boletoAttachmentUrl?: string;
   boletoAttachmentName?: string;
   /** Frete (R$). Total a pagar gravado = soma dos itens + frete. */
@@ -272,6 +274,8 @@ export interface UpdatePurchaseOrderDetailsData {
   paymentType?: string | null;
   paymentCondition?: string | null;
   paymentDetails?: string | null;
+  pixKeyType?: string | null;
+  pixKey?: string | null;
   freightAmount?: number | string | null;
   notes?: string | null;
   items?: {
@@ -346,6 +350,18 @@ export class PurchaseOrderService {
       throw new Error('Fornecedor e itens são obrigatórios');
     }
 
+    if (data.paymentType === 'AVISTA') {
+      if (!data.paymentDetails?.trim()) {
+        throw new Error('Dados do pagamento são obrigatórios para pagamento à vista');
+      }
+      if (!data.pixKeyType?.trim()) {
+        throw new Error('Tipo de chave PIX é obrigatório para pagamento à vista');
+      }
+      if (!data.pixKey?.trim()) {
+        throw new Error('Chave PIX é obrigatória para pagamento à vista');
+      }
+    }
+
     let maxQtyByRmItem: Map<string, Decimal> | null = null;
     if (data.materialRequestId) {
       const rm = await prisma.materialRequest.findUnique({
@@ -398,6 +414,8 @@ export class PurchaseOrderService {
       paymentType: data.paymentType || null,
       paymentCondition: data.paymentCondition || null,
       paymentDetails: data.paymentDetails || null,
+      pixKeyType: data.pixKeyType?.trim() || null,
+      pixKey: data.pixKey?.trim() || null,
       boletoAttachmentUrl: data.boletoAttachmentUrl || null,
       boletoAttachmentName: data.boletoAttachmentName || null,
       freightAmount: freight,
@@ -866,6 +884,11 @@ export class PurchaseOrderService {
       data.notes = order.notes ? `${order.notes}\n\n${note}` : note;
     }
 
+    if (status === 'IN_REVIEW' && options?.rejectionReason?.trim()) {
+      const note = `[Correção OC ${new Date().toLocaleString('pt-BR')}] ${options.rejectionReason.trim()}`;
+      data.notes = order.notes ? `${order.notes}\n\n${note}` : note;
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.update({
         where: { id },
@@ -915,6 +938,21 @@ export class PurchaseOrderService {
 
     if (order.status !== 'IN_REVIEW') {
       throw new Error('A OC só pode ser editada durante a CORREÇÃO OC');
+    }
+
+    const nextPaymentType =
+      data.paymentType !== undefined && data.paymentType !== null ? data.paymentType : undefined;
+
+    if (nextPaymentType === 'AVISTA') {
+      if (!data.paymentDetails?.trim()) {
+        throw new Error('Dados do pagamento são obrigatórios para pagamento à vista');
+      }
+      if (!data.pixKeyType?.trim()) {
+        throw new Error('Tipo de chave PIX é obrigatório para pagamento à vista');
+      }
+      if (!data.pixKey?.trim()) {
+        throw new Error('Chave PIX é obrigatória para pagamento à vista');
+      }
     }
 
     const expectedDelivery =
@@ -976,6 +1014,18 @@ export class PurchaseOrderService {
           paymentType: data.paymentType !== undefined ? data.paymentType : undefined,
           paymentCondition: data.paymentCondition !== undefined ? data.paymentCondition : undefined,
           paymentDetails: data.paymentDetails !== undefined ? data.paymentDetails : undefined,
+          pixKeyType:
+            nextPaymentType === 'BOLETO'
+              ? null
+              : data.pixKeyType !== undefined
+                ? data.pixKeyType?.trim() || null
+                : undefined,
+          pixKey:
+            nextPaymentType === 'BOLETO'
+              ? null
+              : data.pixKey !== undefined
+                ? data.pixKey?.trim() || null
+                : undefined,
           freightAmount: freightToStore,
           amountToPay,
           notes: data.notes !== undefined ? data.notes : undefined,

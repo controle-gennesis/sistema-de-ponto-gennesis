@@ -28,7 +28,12 @@ import { FinancialControlEntryModal } from '@/components/financeiro/FinancialCon
 import { buildFormFromPurchaseOrder } from '@/components/financeiro/financialControlEntry';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import {
+  getListTableRowClassName,
+  listTableRowClasses,
+  ListRowNavigableLabel,
+  rowActionMenuButtonClass
+} from '@/components/ui/listTableUi';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -36,6 +41,13 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { exportPurchaseOrderPdf } from '@/lib/exportPurchaseOrderPdf';
 import { PaymentConditionSelect, buildPaymentConditionLabelMap } from '@/components/oc/PaymentConditionSelect';
+import {
+  OcPurchaseOrderFormFields,
+  buildOcFormValuesFromOrder,
+  getOcSupplierLabel,
+  type OcPurchaseOrderFormValues,
+  type OcSupplierOption
+} from '@/components/oc/OcPurchaseOrderFormFields';
 import { BoletoParcelasModal } from '@/components/oc/BoletoParcelasModal';
 import { BoletoParcelasList } from '@/components/oc/BoletoParcelasList';
 import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
@@ -103,6 +115,8 @@ export interface PurchaseOrder {
   paymentType?: string | null;
   paymentCondition?: string | null;
   paymentDetails?: string | null;
+  pixKeyType?: string | null;
+  pixKey?: string | null;
   boletoAttachmentUrl?: string | null;
   boletoAttachmentName?: string | null;
   paymentBoletoUrl?: string | null;
@@ -171,7 +185,9 @@ export interface PurchaseOrder {
   gestorApprovedBy?: string | null;
   approvedBy?: string | null;
   items: Array<{
+    materialId?: string;
     materialRequestItemId?: string | null;
+    materialRequestItem?: { quantity?: number | string | null } | null;
     quantity: number;
     unitPrice: number;
     totalPrice: number;
@@ -240,6 +256,36 @@ const OC_PAYMENT_TYPE_LABELS: Record<string, string> = {
   BOLETO: 'Boleto'
 };
 
+function extractOcCorrectionBlocks(notes?: string | null): string {
+  if (!notes?.trim()) return '';
+  return notes
+    .split(/\n\n+/)
+    .filter((block) => /^\[Correção OC[^\]]*\]/.test(block.trim()))
+    .join('\n\n')
+    .trim();
+}
+
+function stripOcCorrectionBlocksFromNotes(notes?: string | null): string {
+  if (!notes?.trim()) return '';
+  return notes
+    .split(/\n\n+/)
+    .filter((block) => !/^\[Correção OC[^\]]*\]/.test(block.trim()))
+    .join('\n\n')
+    .trim();
+}
+
+function isEditOcAvistaPaymentIncomplete(
+  paymentType: string,
+  paymentDetails: string,
+  pixKeyType: string,
+  pixKey: string
+): boolean {
+  return (
+    paymentType === 'AVISTA' &&
+    (!paymentDetails.trim() || !pixKeyType.trim() || !pixKey.trim())
+  );
+}
+
 const OC_PAYMENT_CONDITION_LABELS: Record<string, string> = {
   AVISTA: 'À vista',
   BOLETO_30: 'Boleto 30 dias',
@@ -299,6 +345,16 @@ function orderFreightValue(o: Pick<PurchaseOrder, 'freightAmount' | 'amountToPay
   const paid = o.amountToPay != null && o.amountToPay !== '' ? Number(o.amountToPay) : NaN;
   if (Number.isFinite(paid)) return Math.max(0, paid - items);
   return 0;
+}
+
+function parseLastOcCorrectionReason(notes?: string | null): string | null {
+  if (!notes?.trim()) return null;
+  const blocks = notes.split(/\n\n+/);
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const match = blocks[i].match(/^\[Correção OC[^\]]*\]\s*([\s\S]+)$/);
+    if (match) return match[1].trim();
+  }
+  return null;
 }
 
 function movementNotesText(notes: unknown): string | null {
@@ -755,6 +811,7 @@ export function OcPurchaseOrdersPanel({
   const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [correctionTarget, setCorrectionTarget] = useState<PurchaseOrder | null>(null);
+  const [correctionReason, setCorrectionReason] = useState('');
   const [pdfExportingId, setPdfExportingId] = useState<string | null>(null);
   const [showEditOcModal, setShowEditOcModal] = useState(false);
   const [orderDetailLoadingId, setOrderDetailLoadingId] = useState<string | null>(null);
@@ -820,21 +877,32 @@ export function OcPurchaseOrdersPanel({
     setInstallmentProofDraftByIdx({});
   }, [selectedOrder?.id]);
 
-  const [editOcForm, setEditOcForm] = useState<{
-    expectedDelivery: string; // input date: YYYY-MM-DD
-    deliveryAddress: string;
-    paymentType: string;
-    paymentCondition: string;
-    paymentDetails: string;
-    freightAmount: string;
-    notes: string;
-    items: Array<{
-      materialId: string;
-      quantity: number;
-      unit: string;
-      unitPrice: number;
-    }>;
-  } | null>(null);
+  const [editOcForm, setEditOcForm] = useState<OcPurchaseOrderFormValues | null>(null);
+  const [editSupplierSearch, setEditSupplierSearch] = useState('');
+  const [editSupplierSearchDebounced, setEditSupplierSearchDebounced] = useState('');
+  const [editSupplierDropdownOpen, setEditSupplierDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setEditSupplierSearchDebounced(editSupplierSearch), 300);
+    return () => clearTimeout(timer);
+  }, [editSupplierSearch]);
+
+  const { data: editSuppliersData, isLoading: editSuppliersLoading, isError: editSuppliersError } = useQuery({
+    queryKey: ['suppliers-oc-edit', editSupplierSearchDebounced],
+    queryFn: async () => {
+      const res = await api.get('/suppliers', {
+        params: {
+          search: editSupplierSearchDebounced.trim() || undefined,
+          isActive: true,
+          limit: 50,
+          page: 1
+        }
+      });
+      return res.data;
+    },
+    enabled: showEditOcModal
+  });
+  const editSuppliers: OcSupplierOption[] = editSuppliersData?.data || [];
 
   const handleExportPdf = async (id: string) => {
     setPdfExportingId(id);
@@ -942,15 +1010,24 @@ export function OcPurchaseOrdersPanel({
       toast.error(error.response?.data?.message || 'Erro ao cancelar')
   });
 
+  const openOcCorrectionModal = (order: PurchaseOrder) => {
+    setCorrectionReason('');
+    setCorrectionTarget(order);
+  };
+
   const correctionOcMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.patch(`/purchase-orders/${id}/status`, { status: 'IN_REVIEW' });
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      const res = await api.patch(`/purchase-orders/${id}/status`, {
+        status: 'IN_REVIEW',
+        rejectionReason: reason
+      });
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setCorrectionTarget(null);
+      setCorrectionReason('');
       setSelectedOrder(null);
       toast.success('OC enviada para CORREÇÃO OC.');
     },
@@ -967,7 +1044,7 @@ export function OcPurchaseOrdersPanel({
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       setSelectedOrder(null);
-      toast.success('OC reenviada para aprovação.');
+      toast.success('OC enviada para aprovação.');
     },
     onError: (error: { response?: { data?: { message?: string } } }) =>
       toast.error(error.response?.data?.message || 'Erro ao reenviar')
@@ -1637,57 +1714,95 @@ export function OcPurchaseOrdersPanel({
     }
   };
 
-  const handleOpenEditOc = () => {
-    if (!selectedOrder) return;
-    if (selectedOrder.status !== 'IN_REVIEW') return;
-    if (!selectedOrder.creator?.id || selectedOrder.creator.id !== currentUserId) return;
+  const resolveOcFreightAmountStr = (order: PurchaseOrder) => {
+    const itemsSub = totalOrder(order.items);
+    const freightStored =
+      order.freightAmount != null && order.freightAmount !== ''
+        ? Number(order.freightAmount)
+        : Math.max(0, Number(order.amountToPay ?? 0) - itemsSub);
+    return Number.isFinite(freightStored) ? String(freightStored) : '0';
+  };
 
-    const items = (selectedOrder.items || []).map((it) => ({
-      materialId: it.material?.id || '',
-      quantity: Number(it.quantity),
-      unit: it.unit || 'UN',
-      unitPrice: Number(it.unitPrice)
-    }));
+  const openEditOcWithOrder = (order: PurchaseOrder) => {
+    if (order.status !== 'IN_REVIEW') return;
+    if (!order.creator?.id || order.creator.id !== currentUserId) return;
 
-    // Segurança: o backend precisa de materialId e unit
-    const invalid = items.some((it) => !it.materialId || !it.unit);
+    const formValues = buildOcFormValuesFromOrder(order, {
+      stripCorrectionNotes: stripOcCorrectionBlocksFromNotes,
+      materialLineLabel,
+      parseFreight: resolveOcFreightAmountStr
+    });
+
+    const invalid = formValues.items.some((it) => !it.materialId || !it.unit);
     if (invalid) {
       toast.error('Não foi possível carregar os itens da OC para edição.');
       return;
     }
 
-    const itemsSub = totalOrder(selectedOrder.items);
-    const freightStored =
-      selectedOrder.freightAmount != null && selectedOrder.freightAmount !== ''
-        ? Number(selectedOrder.freightAmount)
-        : Math.max(0, Number(selectedOrder.amountToPay ?? 0) - itemsSub);
-
-    setEditOcForm({
-      expectedDelivery: toDateInputValue(selectedOrder.expectedDelivery),
-      deliveryAddress: selectedOrder.deliveryAddress || '',
-      paymentType: selectedOrder.paymentType || 'AVISTA',
-      paymentCondition: selectedOrder.paymentCondition || 'AVISTA',
-      paymentDetails: selectedOrder.paymentDetails || '',
-      freightAmount: Number.isFinite(freightStored) ? String(freightStored) : '0',
-      notes: selectedOrder.notes || '',
-      items
-    });
+    setSelectedOrder(order);
+    setEditOcForm(formValues);
+    setEditSupplierSearch(
+      getOcSupplierLabel(order.supplier as OcSupplierOption) || order.supplier?.name || ''
+    );
+    setEditSupplierDropdownOpen(false);
     setShowEditOcModal(true);
+  };
+
+  const handleOpenEditOc = () => {
+    if (!selectedOrder) return;
+    openEditOcWithOrder(selectedOrder);
+  };
+
+  const handleOpenEditOcForOrder = async (o: PurchaseOrder) => {
+    setOrderDetailLoadingId(o.id);
+    try {
+      const res = await api.get(`/purchase-orders/${o.id}`);
+      const order = res.data?.data as PurchaseOrder | undefined;
+      if (!order) {
+        toast.error('Não foi possível carregar a OC.');
+        return;
+      }
+      openEditOcWithOrder(order);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast.error(err.response?.data?.message || 'Erro ao carregar a OC.');
+    } finally {
+      setOrderDetailLoadingId(null);
+    }
   };
 
   const handleSaveEditOc = () => {
     if (!selectedOrder || !editOcForm) return;
+    if (!editOcForm.supplierId) {
+      toast.error('Selecione o fornecedor.');
+      return;
+    }
+    if (
+      isEditOcAvistaPaymentIncomplete(
+        editOcForm.paymentType,
+        editOcForm.paymentDetails,
+        editOcForm.pixKeyType,
+        editOcForm.pixKey
+      )
+    ) {
+      toast.error('Preencha dados do pagamento, tipo e chave Pix para pagamento à vista.');
+      return;
+    }
     const freightParsed = parseMoneyInput(editOcForm.freightAmount);
     const freightAmount = freightParsed != null && freightParsed >= 0 ? freightParsed : 0;
+    const correctionBlocks = extractOcCorrectionBlocks(selectedOrder.notes);
+    const userNotes = editOcForm.notes.trim();
+    const mergedNotes = [userNotes, correctionBlocks].filter(Boolean).join('\n\n') || null;
 
     const payload = {
-      expectedDelivery: editOcForm.expectedDelivery ? new Date(editOcForm.expectedDelivery).toISOString() : null,
-      deliveryAddress: editOcForm.deliveryAddress.trim() || null,
+      supplierId: editOcForm.supplierId,
       paymentType: editOcForm.paymentType,
-      paymentCondition: editOcForm.paymentCondition,
+      paymentCondition: editOcForm.paymentType === 'AVISTA' ? 'AVISTA' : editOcForm.paymentCondition,
       paymentDetails: editOcForm.paymentDetails.trim() || null,
+      pixKeyType: editOcForm.paymentType === 'AVISTA' ? editOcForm.pixKeyType.trim() : null,
+      pixKey: editOcForm.paymentType === 'AVISTA' ? editOcForm.pixKey.trim() : null,
       freightAmount,
-      notes: editOcForm.notes.trim() || null,
+      notes: mergedNotes,
       items: editOcForm.items.map((it) => ({
         materialId: it.materialId,
         quantity: Number(it.quantity),
@@ -1994,9 +2109,25 @@ export function OcPurchaseOrdersPanel({
                       const ocMovementTag = latestMovement ? buildOcTagFromMovement(latestMovement) : null;
                       const ocAttachmentTags = parseOcAttachmentTagsFromNotes(latestMovement?.notes);
                       return (
-                      <tr key={o.id} className={listTableRowClasses.tr}>
+                      <tr
+                        key={o.id}
+                        className={getListTableRowClassName(true)}
+                        onClick={() => openOrderDetail(o)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openOrderDetail(o);
+                          }
+                        }}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`Ver detalhes da ${o.orderNumber}`}
+                      >
                         {activeTab === 'APPROVED' && (
-                          <td className="w-12 min-w-[3rem] max-w-[3rem] px-2 sm:px-3 py-4 align-middle">
+                          <td
+                            className="w-12 min-w-[3rem] max-w-[3rem] px-2 sm:px-3 py-4 align-middle"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div className="flex items-center justify-center">
                               <OcStyledCheckbox
                                 checked={cnabSelectedIds.has(o.id)}
@@ -2014,7 +2145,9 @@ export function OcPurchaseOrdersPanel({
                           </td>
                         )}
                         <td className="px-3 sm:px-6 py-4 text-sm">
-                          <span className="text-sm text-gray-900 dark:text-gray-100 font-mono font-medium">{o.orderNumber}</span>
+                          <ListRowNavigableLabel className="font-mono font-medium">
+                            {o.orderNumber}
+                          </ListRowNavigableLabel>
                         </td>
                         <td className="px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                           {o.supplier?.name || '-'}
@@ -2050,6 +2183,7 @@ export function OcPurchaseOrdersPanel({
                                   href={absoluteUploadUrl(attachmentTag.url)}
                                   target="_blank"
                                   rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
                                   className={`inline-flex max-w-[9rem] px-2 py-1 rounded-full text-[10px] font-semibold hover:opacity-90 whitespace-nowrap ${attachmentTag.colorClass}`}
                                   title={attachmentTag.titleHint ?? attachmentTag.label}
                                 >
@@ -2068,7 +2202,10 @@ export function OcPurchaseOrdersPanel({
                           </div>
                         </td>
                         {activeTab === 'ATTACH_BOLETO' && (
-                          <td className="px-3 sm:px-6 py-4 align-middle">
+                          <td
+                            className="px-3 sm:px-6 py-4 align-middle"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div className="flex flex-col gap-2 max-w-[260px]">
                               {(o.paymentParcelCount ?? 1) > 1 ? (
                                 <>
@@ -2142,7 +2279,10 @@ export function OcPurchaseOrdersPanel({
                           activeTab === 'PROOF_CORRECTION' ||
                           activeTab === 'ATTACH_NF' ||
                           activeTab === 'FINALIZADAS') && (
-                          <td className="px-3 sm:px-6 py-4 align-top">
+                          <td
+                            className="px-3 sm:px-6 py-4 align-top"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div className="flex flex-col gap-2 text-xs max-w-[200px]">
                               <div>
                                 <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-0.5">
@@ -2282,7 +2422,10 @@ export function OcPurchaseOrdersPanel({
                             </div>
                           </td>
                         )}
-                        <td className="px-3 sm:px-6 py-4 text-right whitespace-nowrap">
+                        <td
+                          className="px-3 sm:px-6 py-4 text-right whitespace-nowrap"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <div className="inline-flex items-center justify-end gap-1 flex-wrap">
                             {!isIntegratedFlux && (
                               <>
@@ -2323,7 +2466,7 @@ export function OcPurchaseOrdersPanel({
                                 {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
-                                    onClick={() => setCorrectionTarget(o)}
+                                    onClick={() => openOcCorrectionModal(o)}
                                     className="p-2 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors inline-flex"
                                     title="Enviar para CORREÇÃO OC"
                                   >
@@ -2346,22 +2489,37 @@ export function OcPurchaseOrdersPanel({
                                 {o.status === 'IN_REVIEW' &&
                                   o.creator?.id &&
                                   currentUserId === o.creator.id && (
-                                    <button
-                                      type="button"
-                                      onClick={() => resubmitOcMutation.mutate(o.id)}
-                                      disabled={resubmitOcMutation.isPending}
-                                      className="p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
-                                      title="Reenviar para aprovação"
-                                    >
-                                      <Send className="w-4 h-4" />
-                                    </button>
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditOcForOrder(o)}
+                                        disabled={orderDetailLoadingId === o.id}
+                                        className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-colors inline-flex disabled:opacity-50"
+                                        title="Editar"
+                                      >
+                                        {orderDetailLoadingId === o.id ? (
+                                          <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                          <Pencil className="w-4 h-4" />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => resubmitOcMutation.mutate(o.id)}
+                                        disabled={resubmitOcMutation.isPending}
+                                        className="p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
+                                        title="Enviar para Aprovação"
+                                      >
+                                        <Send className="w-4 h-4" />
+                                      </button>
+                                    </>
                                   )}
                                 <button
                                   type="button"
                                   onClick={() => handleExportPdf(o.id)}
                                   disabled={pdfExportingId === o.id}
                                   className="inline-flex rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-700/50"
-                                  title="Baixar OC (PDF)"
+                                  title="Baixar OC"
                                 >
                                   <Download className="h-4 w-4" />
                                 </button>
@@ -2515,21 +2673,47 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {correctionTarget && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setCorrectionTarget(null)} />
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              setCorrectionTarget(null);
+              setCorrectionReason('');
+            }}
+          />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Enviar para CORREÇÃO OC</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
               Quem criou a OC poderá ajustar e reenviá-la para aprovação. {correctionTarget.orderNumber}
             </p>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Motivo da correção *</label>
+            <textarea
+              value={correctionReason}
+              onChange={(e) => setCorrectionReason(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 mb-4"
+              placeholder="Descreva o que precisa ser ajustado na OC..."
+            />
             <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setCorrectionTarget(null)} className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <button
+                type="button"
+                onClick={() => {
+                  setCorrectionTarget(null);
+                  setCorrectionReason('');
+                }}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg"
+              >
                 Cancelar
               </button>
               <button
                 type="button"
-                disabled={correctionOcMutation.isPending}
-                onClick={() => correctionOcMutation.mutate(correctionTarget.id)}
+                disabled={!correctionReason.trim() || correctionOcMutation.isPending}
+                onClick={() =>
+                  correctionOcMutation.mutate({
+                    id: correctionTarget.id,
+                    reason: correctionReason.trim()
+                  })
+                }
                 className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
               >
                 {correctionOcMutation.isPending ? 'Enviando...' : 'Enviar para correção'}
@@ -2540,14 +2724,17 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {showEditOcModal && selectedOrder && editOcForm && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowEditOcModal(false)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
+          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Editar OC (CORREÇÃO OC)</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Editar Ordem de Compra</h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  {selectedOrder.orderNumber} — somente o criador pode editar antes de reenviar.
+                  {selectedOrder.orderNumber}
+                  {selectedOrder.materialRequest?.requestNumber
+                    ? ` · SC: ${selectedOrder.materialRequest.requestNumber}`
+                    : ''}
                 </p>
               </div>
               <button
@@ -2560,194 +2747,48 @@ export function OcPurchaseOrdersPanel({
               </button>
             </div>
 
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de entrega prevista</label>
-                  <input
-                    type="date"
-                    value={editOcForm.expectedDelivery}
-                    onChange={(e) =>
-                      setEditOcForm((prev) => (prev ? { ...prev, expectedDelivery: e.target.value } : prev))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Endereço de entrega</label>
-                  <input
-                    type="text"
-                    value={editOcForm.deliveryAddress}
-                    onChange={(e) =>
-                      setEditOcForm((prev) => (prev ? { ...prev, deliveryAddress: e.target.value } : prev))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    placeholder="Ex: Rua..., Cidade/UF"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo de pagamento</label>
-                  <select
-                    value={editOcForm.paymentType}
-                    onChange={(e) => {
-                      const nextPaymentType = e.target.value;
-                      const defaultCond =
-                        nextPaymentType === 'AVISTA' ? 'AVISTA' : 'BOLETO_30';
-                      setEditOcForm((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              paymentType: nextPaymentType,
-                              paymentCondition: defaultCond
-                            }
-                          : prev
-                      );
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="AVISTA">{OC_PAYMENT_TYPE_LABELS.AVISTA}</option>
-                    <option value="BOLETO">{OC_PAYMENT_TYPE_LABELS.BOLETO}</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Condição</label>
-                  <PaymentConditionSelect
-                    paymentType={editOcForm.paymentType === 'AVISTA' ? 'AVISTA' : 'BOLETO'}
-                    value={editOcForm.paymentCondition}
-                    onChange={(code) =>
-                      setEditOcForm((prev) => (prev ? { ...prev, paymentCondition: code } : prev))
-                    }
-                    disabled={editOcForm.paymentType === 'AVISTA'}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Valor frete</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={editOcForm.freightAmount}
-                    onChange={(e) =>
-                      setEditOcForm((prev) => (prev ? { ...prev, freightAmount: e.target.value } : prev))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    placeholder="Ex: 150,00"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 px-3 py-2">
-                <p className="text-gray-700 dark:text-gray-300">
-                  <span className="font-medium">Valor itens (calculado):</span>{' '}
-                  {formatBrlCompact(
-                    editOcForm.items.reduce((s, it) => s + Number(it.quantity) * Number(it.unitPrice), 0)
-                  )}
-                </p>
-                <p className="text-gray-700 dark:text-gray-300">
-                  <span className="font-medium">Total a pagar (calculado):</span>{' '}
-                  {formatBrlCompact(
-                    editOcForm.items.reduce((s, it) => s + Number(it.quantity) * Number(it.unitPrice), 0) +
-                      (parseMoneyInput(editOcForm.freightAmount) ?? 0)
-                  )}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Dados do pagamento</label>
-                <input
-                  type="text"
-                  value={editOcForm.paymentDetails}
-                  onChange={(e) =>
-                    setEditOcForm((prev) => (prev ? { ...prev, paymentDetails: e.target.value } : prev))
+            <OcPurchaseOrderFormFields
+              mode="edit"
+              values={editOcForm}
+              correctionReason={parseLastOcCorrectionReason(selectedOrder.notes)}
+              parseMoneyInput={parseMoneyInput}
+              onChange={(patch) => setEditOcForm((prev) => (prev ? { ...prev, ...patch } : prev))}
+              onItemChange={(index, patch) =>
+                setEditOcForm((prev) => {
+                  if (!prev) return prev;
+                  const nextItems = prev.items.map((item, i) =>
+                    i === index ? { ...item, ...patch } : item
+                  );
+                  return { ...prev, items: nextItems };
+                })
+              }
+              supplierAutocomplete={{
+                supplierSearch: editSupplierSearch,
+                supplierDropdownOpen: editSupplierDropdownOpen,
+                onSupplierSearchChange: (value) => {
+                  setEditSupplierSearch(value);
+                  const normalized = value.trim().toLowerCase();
+                  const exactMatch = editSuppliers.find(
+                    (supplier) => getOcSupplierLabel(supplier).trim().toLowerCase() === normalized
+                  );
+                  if (!normalized || !exactMatch) {
+                    setEditOcForm((prev) => (prev ? { ...prev, supplierId: '' } : prev));
+                    return;
                   }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  placeholder="Dados bancários / referência"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Observações</label>
-                <textarea
-                  value={editOcForm.notes}
-                  onChange={(e) =>
-                    setEditOcForm((prev) => (prev ? { ...prev, notes: e.target.value } : prev))
-                  }
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  placeholder="Informações adicionais"
-                />
-              </div>
-
-              <div className="pt-2">
-                <p className="font-medium text-gray-700 dark:text-gray-300 mb-2">Materiais (OC)</p>
-                <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600">
-                  <table className="w-full text-xs sm:text-sm">
-                    <thead className="bg-gray-50 dark:bg-gray-700/50">
-                      <tr className="text-left">
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300">Material</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Qtd</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap">Un.</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Unitário</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-                      {editOcForm.items.map((it, idx) => {
-                        const material = selectedOrder.items?.[idx]?.material;
-                        const label = materialLineLabel(material);
-                        const lineTotal = Number(it.quantity) * Number(it.unitPrice);
-                        return (
-                          <tr key={`${it.materialId}-${idx}`} className="text-gray-600 dark:text-gray-400">
-                            <td className="p-2 align-top max-w-[240px] sm:max-w-none">{label}</td>
-                            <td className="p-2 text-right whitespace-nowrap align-top">
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={it.quantity}
-                                onChange={(e) => {
-                                  const nextQty = Number(e.target.value);
-                                  setEditOcForm((prev) => {
-                                    if (!prev) return prev;
-                                    const nextItems = prev.items.map((x, i) =>
-                                      i === idx ? { ...x, quantity: Number.isFinite(nextQty) ? nextQty : 0 } : x
-                                    );
-                                    return { ...prev, items: nextItems };
-                                  });
-                                }}
-                                className="w-24 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                              />
-                            </td>
-                            <td className="p-2 text-center whitespace-nowrap align-top">{it.unit}</td>
-                            <td className="p-2 text-right whitespace-nowrap align-top">
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={it.unitPrice}
-                                onChange={(e) => {
-                                  const nextPrice = Number(e.target.value);
-                                  setEditOcForm((prev) => {
-                                    if (!prev) return prev;
-                                    const nextItems = prev.items.map((x, i) =>
-                                      i === idx ? { ...x, unitPrice: Number.isFinite(nextPrice) ? nextPrice : 0 } : x
-                                    );
-                                    return { ...prev, items: nextItems };
-                                  });
-                                }}
-                                className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                              />
-                            </td>
-                            <td className="p-2 text-right whitespace-nowrap align-top font-medium text-gray-900 dark:text-gray-100">
-                              {formatCurrency(Number.isFinite(lineTotal) ? lineTotal : 0)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+                  setEditOcForm((prev) => (prev ? { ...prev, supplierId: exactMatch.id } : prev));
+                },
+                onSupplierDropdownOpen: () => setEditSupplierDropdownOpen(true),
+                onSupplierDropdownClose: () => setEditSupplierDropdownOpen(false),
+                onSupplierSelect: (supplier) => {
+                  setEditOcForm((prev) => (prev ? { ...prev, supplierId: supplier.id } : prev));
+                  setEditSupplierSearch(getOcSupplierLabel(supplier));
+                  setEditSupplierDropdownOpen(false);
+                },
+                suppliers: editSuppliers,
+                suppliersLoading: editSuppliersLoading,
+                suppliersError: editSuppliersError
+              }}
+            />
 
             <div className="mt-5 flex gap-2 justify-end">
               <button
@@ -2759,7 +2800,16 @@ export function OcPurchaseOrdersPanel({
               </button>
               <button
                 type="button"
-                disabled={updateOcDetailsMutation.isPending}
+                disabled={
+                  updateOcDetailsMutation.isPending ||
+                  !editOcForm.supplierId ||
+                  isEditOcAvistaPaymentIncomplete(
+                    editOcForm.paymentType,
+                    editOcForm.paymentDetails,
+                    editOcForm.pixKeyType,
+                    editOcForm.pixKey
+                  )
+                }
                 onClick={handleSaveEditOc}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
@@ -2770,12 +2820,23 @@ export function OcPurchaseOrdersPanel({
         </div>
       )}
 
-      {selectedOrder && (
+      {selectedOrder && !showEditOcModal && !correctionTarget && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedOrder(null)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
+          <div
+            className={`relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6 ${
+              selectedOrder.status === 'IN_REVIEW' ? 'max-w-2xl' : 'max-w-3xl'
+            }`}
+          >
             <div className="flex justify-between items-start gap-2 mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{selectedOrder.orderNumber}</h2>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {selectedOrder.status === 'IN_REVIEW' ? 'Ordem de Compra' : selectedOrder.orderNumber}
+                </h2>
+                {selectedOrder.status === 'IN_REVIEW' ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{selectedOrder.orderNumber}</p>
+                ) : null}
+              </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
@@ -2784,13 +2845,53 @@ export function OcPurchaseOrdersPanel({
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
                 >
                   <Download className="w-4 h-4" />
-                  {pdfExportingId === selectedOrder.id ? 'Gerando…' : 'PDF'}
+                  {pdfExportingId === selectedOrder.id ? 'Gerando…' : 'Baixar'}
                 </button>
                 <button type="button" onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400">
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
+            {selectedOrder.status === 'IN_REVIEW' ? (
+              <>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                  SC: {selectedOrder.materialRequest?.requestNumber || '—'}
+                  <span className="mx-2">·</span>
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[selectedOrder.status] || ''}`}
+                  >
+                    {purchaseOrderPhaseLabel(selectedOrder.status)}
+                  </span>
+                </p>
+                <OcPurchaseOrderFormFields
+                  mode="view"
+                  values={buildOcFormValuesFromOrder(selectedOrder, {
+                    stripCorrectionNotes: stripOcCorrectionBlocksFromNotes,
+                    materialLineLabel,
+                    parseFreight: resolveOcFreightAmountStr
+                  })}
+                  paymentConditionLabel={
+                    selectedOrder.paymentCondition
+                      ? paymentConditionLabelMap[selectedOrder.paymentCondition] ||
+                        selectedOrder.paymentCondition
+                      : undefined
+                  }
+                  correctionReason={parseLastOcCorrectionReason(selectedOrder.notes)}
+                  supplierAutocomplete={{
+                    supplierSearch:
+                      getOcSupplierLabel(selectedOrder.supplier as OcSupplierOption) ||
+                      selectedOrder.supplier?.name ||
+                      '—',
+                    supplierDropdownOpen: false,
+                    onSupplierSearchChange: () => undefined,
+                    onSupplierDropdownOpen: () => undefined,
+                    onSupplierDropdownClose: () => undefined,
+                    onSupplierSelect: () => undefined,
+                    suppliers: []
+                  }}
+                />
+              </>
+            ) : (
             <div className="space-y-3 text-sm">
               <p>
                 <span className="font-medium text-gray-700 dark:text-gray-300">Fornecedor:</span>{' '}
@@ -2833,6 +2934,16 @@ export function OcPurchaseOrdersPanel({
                   {purchaseOrderPhaseLabel(selectedOrder.status)}
                 </span>
               </p>
+              {selectedOrder.status === 'IN_REVIEW' && parseLastOcCorrectionReason(selectedOrder.notes) && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-900/20 px-3 py-2">
+                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide mb-1">
+                    Motivo da correção
+                  </p>
+                  <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">
+                    {parseLastOcCorrectionReason(selectedOrder.notes)}
+                  </p>
+                </div>
+              )}
               {selectedOrder.paymentType && (
                 <p>
                   <span className="font-medium text-gray-700 dark:text-gray-300">Tipo de pagamento:</span>{' '}
@@ -2898,12 +3009,30 @@ export function OcPurchaseOrdersPanel({
                   </p>
                 </div>
               ) : (
-                selectedOrder.paymentDetails?.trim() && (
-                  <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                    <span className="font-medium text-gray-700 dark:text-gray-300">Dados de pagamento:</span>{' '}
-                    {selectedOrder.paymentDetails}
-                  </p>
-                )
+                <>
+                  {selectedOrder.paymentDetails?.trim() && (
+                    <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Dados de pagamento:</span>{' '}
+                      {selectedOrder.paymentDetails}
+                    </p>
+                  )}
+                  {selectedOrder.paymentType === 'AVISTA' && (selectedOrder.pixKeyType || selectedOrder.pixKey) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {selectedOrder.pixKeyType && (
+                        <p className="text-gray-600 dark:text-gray-400">
+                          <span className="font-medium text-gray-700 dark:text-gray-300">Tipo de Chave Pix:</span>{' '}
+                          {selectedOrder.pixKeyType}
+                        </p>
+                      )}
+                      {selectedOrder.pixKey && (
+                        <p className="text-gray-600 dark:text-gray-400 break-all">
+                          <span className="font-medium text-gray-700 dark:text-gray-300">Chave Pix:</span>{' '}
+                          {selectedOrder.pixKey}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
               {selectedOrder.status === 'PENDING_PROOF_VALIDATION' && (
                 <div className="rounded-lg border border-violet-200 dark:border-violet-900/50 bg-violet-50/60 dark:bg-violet-950/25 px-3 py-3 space-y-2">
@@ -3831,9 +3960,10 @@ export function OcPurchaseOrdersPanel({
                   )}
                 </div>
               )}
-              {selectedOrder.notes && (
+              {stripOcCorrectionBlocksFromNotes(selectedOrder.notes) && (
                 <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Observações:</span> {selectedOrder.notes}
+                  <span className="font-medium text-gray-700 dark:text-gray-300">Observações:</span>{' '}
+                  {stripOcCorrectionBlocksFromNotes(selectedOrder.notes)}
                 </p>
               )}
 
@@ -3935,6 +4065,7 @@ export function OcPurchaseOrdersPanel({
                 })()}
               </div>
             </div>
+            )}
             <div className="mt-4 flex flex-wrap gap-2">
               {selectedOrder.quoteMap && (
                 <button
@@ -3983,7 +4114,7 @@ export function OcPurchaseOrdersPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCorrectionTarget(selectedOrder)}
+                    onClick={() => openOcCorrectionModal(selectedOrder)}
                     className="flex-1 min-w-[120px] px-3 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700"
                   >
                     Correção OC
@@ -3997,7 +4128,7 @@ export function OcPurchaseOrdersPanel({
                     onClick={handleOpenEditOc}
                     className="flex-1 min-w-[120px] px-3 py-2 text-sm bg-slate-600 text-white rounded-lg hover:bg-slate-700"
                   >
-                    Editar OC
+                    Editar
                   </button>
                   <button
                     type="button"
@@ -4005,7 +4136,7 @@ export function OcPurchaseOrdersPanel({
                     disabled={resubmitOcMutation.isPending}
                     className="flex-1 min-w-[120px] px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
                   >
-                    Reenviar para aprovação
+                    {resubmitOcMutation.isPending ? 'Enviando…' : 'Enviar para Aprovação'}
                   </button>
                 </>
               )}
@@ -4297,7 +4428,7 @@ export function OcPurchaseOrdersPanel({
                 ) : (
                   <Download className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300" />
                 )}
-                <span>Baixar OC (PDF)</span>
+                <span>Baixar OC</span>
               </button>
               {orderForActionMenu.status === 'PENDING_PROOF_VALIDATION' && (
                 <button
@@ -4355,7 +4486,7 @@ export function OcPurchaseOrdersPanel({
                     onClick={(e) => {
                       e.stopPropagation();
                       setOcActionMenu(null);
-                      setCorrectionTarget(orderForActionMenu);
+                      openOcCorrectionModal(orderForActionMenu);
                     }}
                     className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
                   >
@@ -4381,24 +4512,44 @@ export function OcPurchaseOrdersPanel({
               {orderForActionMenu.status === 'IN_REVIEW' &&
                 orderForActionMenu.creator?.id &&
                 currentUserId === orderForActionMenu.creator.id && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOcActionMenu(null);
-                      resubmitOcMutation.mutate(orderForActionMenu.id);
-                    }}
-                    disabled={resubmitOcMutation.isPending}
-                    className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
-                  >
-                    {resubmitOcMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
-                    ) : (
-                      <Send className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                    )}
-                    <span>Reenviar para aprovação</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOcActionMenu(null);
+                        handleOpenEditOcForOrder(orderForActionMenu);
+                      }}
+                      disabled={orderDetailLoadingId === orderForActionMenu.id}
+                      className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                    >
+                      {orderDetailLoadingId === orderForActionMenu.id ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-600 dark:text-slate-300" />
+                      ) : (
+                        <Pencil className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300" />
+                      )}
+                      <span>Editar</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOcActionMenu(null);
+                        resubmitOcMutation.mutate(orderForActionMenu.id);
+                      }}
+                      disabled={resubmitOcMutation.isPending}
+                      className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                    >
+                      {resubmitOcMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+                      ) : (
+                        <Send className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                      )}
+                      <span>Enviar para Aprovação</span>
+                    </button>
+                  </>
                 )}
             </div>
           </>,

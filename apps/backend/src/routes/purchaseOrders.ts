@@ -294,7 +294,12 @@ router.patch('/:id/details', async (req: AuthRequest, res: Response, next: NextF
     const order = await service.updateDetails(req.params.id, req.body, req.user?.id);
     res.json({ success: true, data: order, message: 'Ordem de compra atualizada com sucesso' });
   } catch (error) {
-    if (error instanceof Error && /Apenas |Ordem de compra não encontrada|OC só pode/.test(error.message)) {
+    if (
+      error instanceof Error &&
+      /Apenas |Ordem de compra não encontrada|OC só pode|obrigatórios para pagamento|chave PIX|Frete não pode/.test(
+        error.message
+      )
+    ) {
       res.status(400).json({ success: false, message: error.message });
       return;
     }

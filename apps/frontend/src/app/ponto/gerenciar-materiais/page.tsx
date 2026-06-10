@@ -27,6 +27,7 @@ import {
 import { FluxGlobalSearch } from './_components/FluxGlobalSearch';
 import { FluxTabsNav } from './_components/FluxTabsNav';
 import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
+import { SearchableEntityAutocomplete } from '@/components/ui/SearchableEntityAutocomplete';
 import {
   getFluxTabForPurchaseOrder,
   getMaterialRequestCancellationReason,
@@ -39,6 +40,33 @@ import {
 
 const ocFieldCls =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
+
+type OcSupplierOption = {
+  id: string;
+  code: string;
+  name: string;
+  tradeName?: string | null;
+  isActive?: boolean;
+};
+
+const OC_PIX_KEY_TYPES = ['ALEATÓRIA', 'CELULAR', 'CNPJ', 'CPF', 'E-MAIL'] as const;
+
+function isOcAvistaPaymentIncomplete(
+  paymentType: string,
+  paymentDetails: string,
+  pixKeyType: string,
+  pixKey: string
+): boolean {
+  return (
+    paymentType === OC_TYPE_AVISTA &&
+    (!paymentDetails.trim() || !pixKeyType.trim() || !pixKey.trim())
+  );
+}
+function getOcSupplierLabel(supplier?: OcSupplierOption | null): string {
+  if (!supplier) return '';
+  const displayName = supplier.tradeName?.trim() || supplier.name?.trim() || '';
+  return supplier.code ? `${supplier.code} - ${displayName}` : displayName;
+}
 
 const ocPaymentSegmentCls = (active: boolean) =>
   `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
@@ -61,9 +89,14 @@ export default function GerenciarMateriaisPage() {
   const [showCreateOCModal, setShowCreateOCModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [ocSupplierId, setOcSupplierId] = useState('');
+  const [ocSupplierSearch, setOcSupplierSearch] = useState('');
+  const [ocSupplierSearchDebounced, setOcSupplierSearchDebounced] = useState('');
+  const [ocSupplierDropdownOpen, setOcSupplierDropdownOpen] = useState(false);
   const [ocPaymentType, setOcPaymentType] = useState<string>(OC_TYPE_AVISTA);
   const [ocPaymentCondition, setOcPaymentCondition] = useState<string>('AVISTA');
   const [ocPaymentDetails, setOcPaymentDetails] = useState('');
+  const [ocPixKeyType, setOcPixKeyType] = useState('');
+  const [ocPixKey, setOcPixKey] = useState('');
   const [ocObservations, setOcObservations] = useState('');
   const [ocFreteStr, setOcFreteStr] = useState('');
   const [ocSelectedItemIds, setOcSelectedItemIds] = useState<Set<string>>(new Set());
@@ -77,14 +110,21 @@ export default function GerenciarMateriaisPage() {
       setOcPaymentCondition('AVISTA');
     } else {
       setOcPaymentCondition((prev) => (prev === 'AVISTA' ? 'BOLETO_30' : prev));
+      setOcPixKeyType('');
+      setOcPixKey('');
     }
   }, [ocPaymentType]);
 
   const resetOcForm = () => {
     setOcSupplierId('');
+    setOcSupplierSearch('');
+    setOcSupplierSearchDebounced('');
+    setOcSupplierDropdownOpen(false);
     setOcPaymentType(OC_TYPE_AVISTA);
     setOcPaymentCondition('AVISTA');
     setOcPaymentDetails('');
+    setOcPixKeyType('');
+    setOcPixKey('');
     setOcObservations('');
     setOcFreteStr('');
     setOcSelectedItemIds(new Set());
@@ -104,6 +144,13 @@ export default function GerenciarMateriaisPage() {
       );
     }
   }, [showCreateOCModal, selectedRequest]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setOcSupplierSearchDebounced(ocSupplierSearch);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [ocSupplierSearch]);
 
   const ocSelectedItems =
     selectedRequest?.items.filter((i) => ocSelectedItemIds.has(i.id)) ?? [];
@@ -221,15 +268,38 @@ export default function GerenciarMateriaisPage() {
     }
   });
 
-  // Buscar fornecedores para criar OC
-  const { data: suppliersData } = useQuery({
-    queryKey: ['suppliers'],
+  const { data: suppliersData, isLoading: loadingSuppliers, isError: suppliersLoadError } = useQuery({
+    queryKey: ['suppliers-oc-search', ocSupplierSearchDebounced],
     queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { limit: 500 } });
+      const res = await api.get('/suppliers', {
+        params: {
+          search: ocSupplierSearchDebounced.trim() || undefined,
+          isActive: true,
+          limit: 50,
+          page: 1
+        }
+      });
       return res.data;
     },
     enabled: showCreateOCModal
   });
+
+  const ocSuppliers: OcSupplierOption[] = suppliersData?.data || [];
+
+  const handleOcSupplierSearchChange = (value: string) => {
+    setOcSupplierSearch(value);
+    const normalized = value.trim().toLowerCase();
+    const exactMatch = ocSuppliers.find(
+      (supplier) => getOcSupplierLabel(supplier).trim().toLowerCase() === normalized
+    );
+
+    if (!normalized || !exactMatch) {
+      setOcSupplierId('');
+      return;
+    }
+
+    setOcSupplierId(exactMatch.id);
+  };
 
   // Criar Ordem de Compra
   const createOCMutation = useMutation({
@@ -239,6 +309,8 @@ export default function GerenciarMateriaisPage() {
       paymentType,
       paymentCondition,
       paymentDetails,
+      pixKeyType,
+      pixKey,
       observations,
       freightAmount,
       selectedItemIds,
@@ -250,6 +322,8 @@ export default function GerenciarMateriaisPage() {
       paymentType: string;
       paymentCondition: string;
       paymentDetails: string;
+      pixKeyType: string;
+      pixKey: string;
       observations: string;
       freightAmount: number;
       selectedItemIds: string[];
@@ -286,6 +360,8 @@ export default function GerenciarMateriaisPage() {
         paymentType,
         paymentCondition,
         paymentDetails: paymentDetails.trim() || undefined,
+        pixKeyType: paymentType === OC_TYPE_AVISTA ? pixKeyType.trim() || undefined : undefined,
+        pixKey: paymentType === OC_TYPE_AVISTA ? pixKey.trim() || undefined : undefined,
         notes: observations.trim() || undefined,
         freightAmount
       });
@@ -837,7 +913,7 @@ export default function GerenciarMateriaisPage() {
                     id="create-oc-modal-title"
                     className="text-lg font-semibold text-gray-900 dark:text-gray-100"
                   >
-                    Criar Ordem de Compra (OC)
+                    Criar Ordem de Compra
                   </h3>
                   <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
                     SC: {selectedRequest.requestNumber || selectedRequest.id.slice(0, 8)}
@@ -995,21 +1071,30 @@ export default function GerenciarMateriaisPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Fornecedor *
                 </label>
-                <select
-                  value={ocSupplierId}
-                  onChange={(e) => setOcSupplierId(e.target.value)}
-                  className={ocFieldCls}
-                >
-                  <option value="">Selecione o fornecedor</option>
-                  {(suppliersData?.data || []).filter((s: { isActive?: boolean }) => s.isActive).map((s: { id: string; code: string; name: string }) => (
-                    <option key={s.id} value={s.id}>{s.code} - {s.name}</option>
-                  ))}
-                </select>
-                {(suppliersData?.data || []).length === 0 && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                    Cadastre fornecedores em Suprimentos → Fornecedores
-                  </p>
-                )}
+                <SearchableEntityAutocomplete
+                  searchValue={ocSupplierSearch}
+                  isOpen={ocSupplierDropdownOpen}
+                  onOpen={() => setOcSupplierDropdownOpen(true)}
+                  onClose={() => setOcSupplierDropdownOpen(false)}
+                  onSearchChange={handleOcSupplierSearchChange}
+                  onSelect={(supplier) => {
+                    setOcSupplierId(supplier.id);
+                    setOcSupplierSearch(getOcSupplierLabel(supplier));
+                    setOcSupplierDropdownOpen(false);
+                  }}
+                  items={ocSuppliers}
+                  getItemKey={(supplier) => supplier.id}
+                  getItemLabel={getOcSupplierLabel}
+                  loading={loadingSuppliers}
+                  loadError={suppliersLoadError}
+                  inputClassName={ocFieldCls}
+                  placeholder="Digite para buscar fornecedor..."
+                  emptyListMessage="Nenhum fornecedor ativo cadastrado."
+                  notFoundMessage="Nenhum fornecedor encontrado para esta busca."
+                  loadingMessage="Carregando fornecedores…"
+                  errorMessage="Erro ao carregar fornecedores."
+                />
+                <input type="hidden" value={ocSupplierId} readOnly />
               </div>
 
               <div>
@@ -1042,19 +1127,87 @@ export default function GerenciarMateriaisPage() {
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="ocPaymentCondition" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Condição de pagamento *
-                </label>
-                <PaymentConditionSelect
-                  id="ocPaymentCondition"
-                  paymentType={ocPaymentType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
-                  value={ocPaymentCondition}
-                  onChange={setOcPaymentCondition}
-                  disabled={ocPaymentType === OC_TYPE_AVISTA}
-                  className={ocFieldCls}
-                />
-              </div>
+              {ocPaymentType !== OC_TYPE_AVISTA ? (
+                <div>
+                  <label htmlFor="ocPaymentCondition" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Condição de pagamento *
+                  </label>
+                  <PaymentConditionSelect
+                    id="ocPaymentCondition"
+                    paymentType="BOLETO"
+                    value={ocPaymentCondition}
+                    onChange={setOcPaymentCondition}
+                    className={ocFieldCls}
+                  />
+                </div>
+              ) : null}
+
+              {ocPaymentType === OC_TYPE_AVISTA ? (
+                <>
+                  <div>
+                    <label htmlFor="ocPaymentDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Dados do pagamento *
+                    </label>
+                    <textarea
+                      id="ocPaymentDetails"
+                      value={ocPaymentDetails}
+                      onChange={(e) => setOcPaymentDetails(e.target.value)}
+                      rows={3}
+                      className={`${ocFieldCls} resize-y`}
+                      placeholder="Conta, agência, favorecido, etc."
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2.2fr)]">
+                    <div>
+                      <label htmlFor="ocPixKeyType" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Tipo de Chave Pix *
+                      </label>
+                      <select
+                        id="ocPixKeyType"
+                        value={ocPixKeyType}
+                        onChange={(e) => setOcPixKeyType(e.target.value)}
+                        className={ocFieldCls}
+                      >
+                        <option value="">Selecione...</option>
+                        {OC_PIX_KEY_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="ocPixKey" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Chave Pix *
+                      </label>
+                      <input
+                        id="ocPixKey"
+                        type="text"
+                        value={ocPixKey}
+                        onChange={(e) => setOcPixKey(e.target.value)}
+                        className={ocFieldCls}
+                        placeholder="Informe a chave PIX"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label htmlFor="ocPaymentDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Dados do pagamento
+                  </label>
+                  <textarea
+                    id="ocPaymentDetails"
+                    value={ocPaymentDetails}
+                    onChange={(e) => setOcPaymentDetails(e.target.value)}
+                    rows={3}
+                    className={`${ocFieldCls} resize-y`}
+                    placeholder="Conta, agência, favorecido, etc."
+                  />
+                </div>
+              )}
 
               <div>
                 <label htmlFor="ocFrete" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1089,20 +1242,6 @@ export default function GerenciarMateriaisPage() {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Soma dos itens (quantidade × valor unitário) + frete.
                 </p>
-              </div>
-
-              <div>
-                <label htmlFor="ocPaymentDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Dados do pagamento
-                </label>
-                <textarea
-                  id="ocPaymentDetails"
-                  value={ocPaymentDetails}
-                  onChange={(e) => setOcPaymentDetails(e.target.value)}
-                  rows={3}
-                  className={`${ocFieldCls} resize-y`}
-                  placeholder="Conta, PIX, agência, favorecido, etc."
-                />
               </div>
 
               <div>
@@ -1143,6 +1282,18 @@ export default function GerenciarMateriaisPage() {
                       toast.error('Corrija o frete ou os valores unitários para obter um total válido.');
                       return;
                     }
+                    if (ocPaymentType === OC_TYPE_AVISTA && !ocPaymentDetails.trim()) {
+                      toast.error('Informe os dados do pagamento para pagamento à vista.');
+                      return;
+                    }
+                    if (ocPaymentType === OC_TYPE_AVISTA && !ocPixKeyType.trim()) {
+                      toast.error('Selecione o tipo de chave PIX.');
+                      return;
+                    }
+                    if (ocPaymentType === OC_TYPE_AVISTA && !ocPixKey.trim()) {
+                      toast.error('Informe a chave PIX.');
+                      return;
+                    }
                     const unitPriceByItemId = Object.fromEntries(
                       Array.from(ocSelectedItemIds).map((id) => [
                         id,
@@ -1169,6 +1320,8 @@ export default function GerenciarMateriaisPage() {
                       paymentType: ocPaymentType,
                       paymentCondition: ocPaymentCondition,
                       paymentDetails: ocPaymentDetails,
+                      pixKeyType: ocPixKeyType,
+                      pixKey: ocPixKey,
                       observations: ocObservations,
                       freightAmount: ocFreteParsed ?? 0,
                       selectedItemIds: Array.from(ocSelectedItemIds),
@@ -1181,7 +1334,14 @@ export default function GerenciarMateriaisPage() {
                     createOCMutation.isPending ||
                     ocSelectedItems.length === 0 ||
                     ocAmountToPayComputed === null ||
-                    ocAmountToPayComputed < 0
+                    ocAmountToPayComputed < 0 ||
+                    (ocPaymentType === OC_TYPE_AVISTA &&
+                      isOcAvistaPaymentIncomplete(
+                        ocPaymentType,
+                        ocPaymentDetails,
+                        ocPixKeyType,
+                        ocPixKey
+                      ))
                   }
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                 >

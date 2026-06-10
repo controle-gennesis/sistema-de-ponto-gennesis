@@ -1550,24 +1550,36 @@ enum MaterialRequestItemStatus {
 
 // Modelo de Fornecedor (estilo TOTVS RM)
 model Supplier {
-  id           String   @id @default(cuid())
-  code         String   @unique // Código do fornecedor
-  name         String // Razão social / Nome
-  cnpj         String?  @unique // CNPJ
-  email        String?
-  phone        String?
-  address      String?
-  city         String?
-  state        String? // UF
-  zipCode      String?
-  contactName  String? // Nome do contato
+  id                    String   @id @default(cuid())
+  code                  String   @unique // Código do fornecedor
+  partyType             String? // Cliente / Fornecedor
+  tradeName             String? // Nome fantasia
+  name                  String // Razão social / Nome
+  cnpj                  String?  @unique // CPF ou CNPJ
+  stateRegistration     String? // Inscrição estadual
+  municipalRegistration String? // Inscrição municipal
+  category              String?
+  street                String?
+  streetNumber          String?
+  neighborhood          String?
+  complement            String?
+  poBox                 String? // Caixa postal
+  email                 String?
+  phone                 String?
+  fax                   String?
+  mobile                String?
+  address               String? // Endereço legado / composto
+  city                  String?
+  state                 String? // UF
+  zipCode               String?
+  contactName           String? // Nome do contato
   /// Dados para remessa CNAB400 (pagamento a fornecedores) — opcionais
-  bank         String? // Nome ou identificação do banco (ex.: ITAÚ, 341)
-  agency       String? // Agência do favorecido
-  account      String? // Conta (sem dígito)
-  accountDigit String? // Dígito da conta
-  notes        String?
-  isActive     Boolean  @default(true)
+  bank                  String? // Nome ou identificação do banco (ex.: ITAÚ, 341)
+  agency                String? // Agência do favorecido
+  account               String? // Conta (sem dígito)
+  accountDigit          String? // Dígito da conta
+  notes                 String?
+  isActive              Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -1618,6 +1630,8 @@ model PurchaseOrder {
   /// AVISTA | BOLETO_30 | BOLETO_28 (rótulos: à vista, boleto 30 dias, boleto 28 dias)
   paymentCondition           String?
   paymentDetails             String?             @db.Text // Dados do pagamento (texto livre)
+  pixKeyType                 String? // Tipo de chave PIX (à vista)
+  pixKey                     String? // Chave PIX (à vista)
   boletoAttachmentUrl        String? // Caminho público ex.: /uploads/purchase-orders/...
   boletoAttachmentName       String? // Nome original do arquivo
   /// Boleto para pagamento (financeiro), após OC aprovada — distinto do anexo na criação da OC

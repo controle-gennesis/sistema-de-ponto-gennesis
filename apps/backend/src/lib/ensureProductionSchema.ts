@@ -272,6 +272,19 @@ async function ensurePurchaseOrderStageApprovals(prisma: PrismaClient): Promise<
   }
 }
 
+async function ensurePurchaseOrderPixFields(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'purchase_orders'))) return;
+
+  if (!(await columnExists(prisma, 'purchase_orders', 'pixKeyType'))) {
+    console.warn('[Schema] Colunas PIX em purchase_orders ausentes — adicionando.');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "purchase_orders"
+        ADD COLUMN IF NOT EXISTS "pixKeyType" TEXT,
+        ADD COLUMN IF NOT EXISTS "pixKey" TEXT;
+    `);
+  }
+}
+
 /**
  * Corrige drift conhecido entre Prisma schema e bancos de produção onde migrate deploy não aplicou tudo.
  * DDL idempotente (IF NOT EXISTS / duplicate_object).
