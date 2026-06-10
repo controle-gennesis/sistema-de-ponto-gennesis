@@ -27,6 +27,53 @@ export const FLUX_TAB_LABELS: Record<FluxTab, string> = {
   oc_FINALIZADAS: 'OC - Finalizadas'
 };
 
+const OC_CLOSED_STATUSES = new Set(['REJECTED', 'CANCELLED']);
+
+/** SC cancelada/rejeitada ou aprovada só com OC(s) reprovada(s)/cancelada(s). */
+export function isMaterialRequestEffectivelyCancelled(
+  request: MaterialRequest,
+  orders: PurchaseOrder[] = []
+): boolean {
+  if (request.status === 'CANCELLED' || request.status === 'REJECTED') return true;
+  if (request.status !== 'APPROVED' || orders.length === 0) return false;
+  return orders.every((o) => OC_CLOSED_STATUSES.has(o.status));
+}
+
+function parseOcRejectionReasonFromNotes(notes?: string | null): string | null {
+  if (!notes?.trim()) return null;
+  const lines = notes.split('\n').reverse();
+  for (const line of lines) {
+    const match = line.match(/^\[(?:Reprovação|Cancelamento)[^\]]*\]\s*(.+)$/i);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  return null;
+}
+
+export function getMaterialRequestDisplayStatus(
+  request: MaterialRequest,
+  orders: PurchaseOrder[] = []
+): MaterialRequest['status'] {
+  if (isMaterialRequestEffectivelyCancelled(request, orders)) return 'CANCELLED';
+  if (request.status === 'REJECTED') return 'CANCELLED';
+  return request.status;
+}
+
+export function getMaterialRequestCancellationReason(
+  request: MaterialRequest,
+  orders: PurchaseOrder[] = []
+): string | null {
+  const rmReason = (request.rejectionReason || '').trim();
+  if (rmReason) return rmReason;
+
+  for (const order of orders) {
+    if (!OC_CLOSED_STATUSES.has(order.status)) continue;
+    const fromNotes = parseOcRejectionReasonFromNotes(order.notes);
+    if (fromNotes) return fromNotes;
+  }
+
+  return null;
+}
+
 export function matchesMaterialRequestSearch(
   request: MaterialRequest,
   normalizedSearchTerm: string
@@ -72,11 +119,12 @@ export function matchesPurchaseOrderSearch(
 
 export function getFluxTabForMaterialRequest(
   request: MaterialRequest,
-  materialRequestIdsWithOc: Set<string>
+  materialRequestIdsWithOc: Set<string>,
+  ordersForRequest: PurchaseOrder[] = []
 ): FluxTab | null {
+  if (isMaterialRequestEffectivelyCancelled(request, ordersForRequest)) return 'rm_CANCELLED';
   if (request.status === 'PENDING') return 'rm_PENDING';
   if (request.status === 'IN_REVIEW') return 'rm_IN_REVIEW';
-  if (request.status === 'CANCELLED' || request.status === 'REJECTED') return 'rm_CANCELLED';
   if (request.status === 'APPROVED') {
     if (materialRequestIdsWithOc.has(request.id)) return null;
     return 'rm_APPROVED';
@@ -84,7 +132,8 @@ export function getFluxTabForMaterialRequest(
   return null;
 }
 
-export function getFluxTabForPurchaseOrder(order: PurchaseOrder): FluxTab {
+export function getFluxTabForPurchaseOrder(order: PurchaseOrder): FluxTab | null {
+  if (order.status === 'REJECTED' || order.status === 'CANCELLED') return null;
   if (order.status === 'PENDING_COMPRAS' || order.status === 'DRAFT') return 'oc_compras';
   if (order.status === 'PENDING') return 'oc_gestor';
   if (order.status === 'PENDING_DIRETORIA') return 'oc_diretoria';
@@ -129,11 +178,10 @@ export function buildFluxSearchHits(input: {
   for (const request of input.requests) {
     if (!matchesMaterialRequestSearch(request, normalizedSearchTerm)) continue;
 
-    if (request.status === 'APPROVED' && input.materialRequestIdsWithOc.has(request.id)) {
-      continue;
-    }
-
-    const tab = getFluxTabForMaterialRequest(request, input.materialRequestIdsWithOc);
+    const orders = input.orders.filter(
+      (o) => (o.materialRequestId ?? o.materialRequest?.id) === request.id
+    );
+    const tab = getFluxTabForMaterialRequest(request, input.materialRequestIdsWithOc, orders);
     if (!tab) continue;
 
     hits.push({
@@ -151,6 +199,7 @@ export function buildFluxSearchHits(input: {
     seenOcIds.add(order.id);
 
     const tab = getFluxTabForPurchaseOrder(order);
+    if (!tab) continue;
     hits.push({
       kind: 'oc',
       id: order.id,

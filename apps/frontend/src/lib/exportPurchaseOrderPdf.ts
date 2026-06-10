@@ -127,12 +127,15 @@ function formatDate(d?: string | Date | null): string {
   return x.toLocaleDateString('pt-BR');
 }
 
-function materialLabel(m: { name?: string | null; description?: string | null; sinapiCode?: string | null }) {
+function singleLineCenterY(contentTop: number, contentHeight: number, lineGap: number): number {
+  return contentTop + contentHeight / 2 + lineGap * 0.35;
+}
+
+function materialLabel(m: { name?: string | null; description?: string | null }) {
   const desc = m.description?.trim();
   const name = m.name?.trim();
   if (desc) return desc;
   if (name) return name;
-  if (m.sinapiCode) return m.sinapiCode;
   return '—';
 }
 
@@ -359,7 +362,8 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   const rowH = 6;
   const lineGap = 3.5;
   /** Espaço extra após o conteúdo da linha, antes de qualquer separador (evita linha “cortando” o texto) */
-  const rowPaddingBottom = 2.5;
+  const rowPaddingBottom = 2;
+  const rowTopPad = 0.5;
 
   pdf.setFillColor(240, 240, 240);
   pdf.rect(margin, y - 4, cw, rowH, 'F');
@@ -371,7 +375,7 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   pdf.text('UND', col.und, y);
   pdf.text('V. UNIT.', col.vu, y);
   pdf.text('TOTAL', margin + cw - 1, y, { align: 'right' });
-  y += rowH + 2;
+  y += rowH - 1;
 
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(7);
@@ -384,31 +388,29 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
     total += lineT;
     const label = materialLabel(it.material || {});
     const descLines = pdf.splitTextToSize(label, 90);
-    const sinapi = it.material?.sinapiCode ? String(it.material.sinapiCode).substring(0, 14) : '';
-    const itemLeft = sinapi ? `${idx + 1}\n${sinapi}` : String(idx + 1);
-    const itemLeftLines = itemLeft.split('\n');
-    const colDescH = descLines.length * lineGap;
-    const colItemH = itemLeftLines.length * lineGap;
-    const rowHeight = Math.max(colDescH, colItemH, lineGap * 2) + 1;
+    const descBlockHeight = descLines.length * lineGap;
+    const rowHeight = rowTopPad + descBlockHeight + rowPaddingBottom;
 
-    if (y + rowHeight + rowPaddingBottom > pageH - 40) {
+    if (y + rowHeight > pageH - 40) {
       pdf.addPage();
       y = margin;
     }
 
     const rowTop = y;
-    itemLeftLines.forEach((ln: string, i: number) => {
-      pdf.text(ln, col.item, rowTop + i * lineGap);
-    });
-    descLines.forEach((ln: string, i: number) => {
-      pdf.text(ln, col.desc, rowTop + i * lineGap);
-    });
-    pdf.text(qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 }), col.qtd, rowTop);
-    pdf.text((it.unit || '—').substring(0, 8), col.und, rowTop);
-    pdf.text(formatCurrency(unitP), col.vu, rowTop);
-    pdf.text(formatCurrency(lineT), margin + cw - 1, rowTop, { align: 'right' });
+    const contentTop = rowTop + rowTopPad;
+    const descStartY = contentTop + lineGap * 0.85;
+    const centerY = singleLineCenterY(contentTop, descBlockHeight, lineGap);
 
-    const contentBottom = rowTop + rowHeight + rowPaddingBottom;
+    pdf.text(String(idx + 1), col.item, centerY);
+    descLines.forEach((ln: string, i: number) => {
+      pdf.text(ln, col.desc, descStartY + i * lineGap);
+    });
+    pdf.text(qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 }), col.qtd, centerY);
+    pdf.text((it.unit || '—').substring(0, 8), col.und, centerY);
+    pdf.text(formatCurrency(unitP), col.vu, centerY);
+    pdf.text(formatCurrency(lineT), margin + cw - 1, centerY, { align: 'right' });
+
+    const contentBottom = rowTop + rowHeight;
     y = contentBottom;
 
     if (idx < items.length - 1) {

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import api from '@/lib/api';
 import { normalizeCostCentersResponse } from '@/lib/costCenters';
 
@@ -28,27 +29,28 @@ export function useCostCenters() {
     staleTime: 5 * 60 * 1000, // Cache por 5 minutos
   });
 
-  const costCenters = normalizeCostCentersResponse(data) as unknown as CostCenter[];
+  const costCenters = useMemo(() => {
+    const list = normalizeCostCentersResponse(data) as unknown as CostCenter[];
+    const formattedCostCenters = list.map((cc) => ({
+      ...cc,
+      label: cc.name || String(cc.code || ''),
+      value: cc.name || String(cc.code || '')
+    }));
 
-  const formattedCostCenters = costCenters.map(cc => ({
-    ...cc,
-    label: cc.name || String(cc.code || ''),
-    value: cc.name || String(cc.code || '')
-  }));
-
-  const seenLabels = new Set<string>();
-  const uniqueCostCenters = formattedCostCenters.filter((cc) => {
-    const label = cc.label || cc.name || String(cc.code || '');
-    if (seenLabels.has(label)) return false;
-    seenLabels.add(label);
-    return true;
-  });
+    const seenLabels = new Set<string>();
+    return formattedCostCenters.filter((cc) => {
+      const label = cc.label || cc.name || String(cc.code || '');
+      if (seenLabels.has(label)) return false;
+      seenLabels.add(label);
+      return true;
+    });
+  }, [data]);
 
   return {
-    costCenters: uniqueCostCenters,
+    costCenters,
     isLoading,
     error,
-    costCentersList: uniqueCostCenters.map((cc) => cc.label || cc.name || '')
+    costCentersList: costCenters.map((cc) => cc.label || cc.name || '')
   };
 }
 

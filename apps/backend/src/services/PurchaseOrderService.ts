@@ -857,7 +857,7 @@ export class PurchaseOrderService {
     }
 
     if (status === 'REJECTED' && options?.rejectionReason) {
-      const note = `[Reprovação ${new Date().toLocaleString('pt-BR')}] ${options.rejectionReason}`;
+      const note = `[Cancelamento ${new Date().toLocaleString('pt-BR')}] ${options.rejectionReason}`;
       data.notes = order.notes ? `${order.notes}\n\n${note}` : note;
     }
 
@@ -866,10 +866,34 @@ export class PurchaseOrderService {
       data.notes = order.notes ? `${order.notes}\n\n${note}` : note;
     }
 
-    const updated = await prisma.purchaseOrder.update({
-      where: { id },
-      data,
-      include: purchaseOrderIncludeDetail
+    const updated = await prisma.$transaction(async (tx) => {
+      const po = await tx.purchaseOrder.update({
+        where: { id },
+        data,
+        include: purchaseOrderIncludeDetail
+      });
+
+      if (status === 'REJECTED' && order.materialRequestId) {
+        const rm = await tx.materialRequest.findUnique({
+          where: { id: order.materialRequestId },
+          select: { id: true, status: true }
+        });
+        if (rm && rm.status === 'APPROVED') {
+          await tx.materialRequest.update({
+            where: { id: rm.id },
+            data: {
+              status: 'CANCELLED',
+              rejectedBy: userId ?? null,
+              rejectedAt: new Date(),
+              rejectionReason:
+                options?.rejectionReason?.trim() || 'Reprovada no fluxo de aprovação da ordem de compra',
+              updatedAt: new Date()
+            }
+          });
+        }
+      }
+
+      return po;
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;

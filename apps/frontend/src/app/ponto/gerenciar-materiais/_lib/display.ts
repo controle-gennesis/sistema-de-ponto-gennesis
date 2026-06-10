@@ -30,13 +30,13 @@ export function getStatusInfo(status: string): {
     case 'CANCELLED':
       return {
         label: 'Cancelada',
-        color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+        color: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
         icon: XCircle
       };
     default:
       return {
         label: 'Desconhecido',
-        color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+        color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
         icon: AlertCircle
       };
   }

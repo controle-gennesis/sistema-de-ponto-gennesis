@@ -251,6 +251,8 @@ function toYmdLocal(iso: string | undefined | null): string | null {
   return `${y}-${m}-${day}`;
 }
 
+const EMPTY_REQUEST_LIST: unknown[] = [];
+
 const emptyNewFormData = () => ({
   costCenterId: '',
   serviceOrderId: '',
@@ -374,6 +376,8 @@ type RmMaterialOption = {
   name?: string;
   unit?: string;
 };
+
+const EMPTY_MATERIAL_LIST: RmMaterialOption[] = [];
 
 type RmCostCenterOption = {
   id?: string;
@@ -647,6 +651,106 @@ function RmMaterialAutocomplete({
       />
       {dropdown}
     </>
+  );
+}
+
+const RM_ATTACHMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx';
+
+function RmAttachmentField({
+  fileUrl,
+  fileName,
+  uploading,
+  disabled = false,
+  onFileSelect,
+  onRemove,
+  chooseLabel = 'Escolher arquivo',
+  size = 'md'
+}: {
+  fileUrl?: string;
+  fileName?: string;
+  uploading?: boolean;
+  disabled?: boolean;
+  onFileSelect: (file: File) => void;
+  onRemove: () => void;
+  chooseLabel?: string;
+  size?: 'sm' | 'md';
+}) {
+  const isSm = size === 'sm';
+  const shellClass = isSm
+    ? 'rounded border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'
+    : 'rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700';
+  const chooseBtnClass = isSm
+    ? 'inline-flex w-full items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50'
+    : 'inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50';
+
+  if (!fileUrl) {
+    return (
+      <label className={`${chooseBtnClass} ${disabled || uploading ? 'pointer-events-none' : ''}`}>
+        {uploading ? <Loader2 className={isSm ? 'h-3.5 w-3.5 animate-spin' : 'h-4 w-4 animate-spin'} /> : <Paperclip className={isSm ? 'h-3.5 w-3.5' : 'h-4 w-4'} />}
+        <span>{uploading ? 'Enviando...' : chooseLabel}</span>
+        <input
+          type="file"
+          className="hidden"
+          disabled={disabled || uploading}
+          accept={RM_ATTACHMENT_ACCEPT}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onFileSelect(file);
+            e.currentTarget.value = '';
+          }}
+        />
+      </label>
+    );
+  }
+
+  const displayName = fileName?.trim() || 'Arquivo anexado';
+
+  return (
+    <div className={`${shellClass} overflow-hidden`}>
+      <div className={`flex items-center gap-2 ${isSm ? 'px-2 py-2' : 'px-3 py-2.5'}`}>
+        <Paperclip className={`shrink-0 text-gray-500 dark:text-gray-400 ${isSm ? 'h-3.5 w-3.5' : 'h-4 w-4'}`} />
+        <span
+          className={`min-w-0 flex-1 truncate font-medium text-gray-900 dark:text-gray-100 ${isSm ? 'text-xs' : 'text-sm'}`}
+          title={displayName}
+        >
+          {displayName}
+        </span>
+        <a
+          href={absoluteUploadUrl(fileUrl)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`inline-flex shrink-0 items-center gap-1 font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 ${isSm ? 'text-xs' : 'text-sm'}`}
+        >
+          <ExternalLink className={isSm ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
+          Abrir
+        </a>
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={disabled || uploading}
+          aria-label="Remover anexo"
+          className={`shrink-0 rounded-md p-1 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-red-950/40 dark:hover:text-red-400 ${isSm ? '' : ''}`}
+        >
+          <X className={isSm ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
+        </button>
+      </div>
+      <label
+        className={`block cursor-pointer border-t border-gray-200 text-center font-medium text-blue-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-blue-400 dark:hover:bg-gray-800/80 ${isSm ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'} ${disabled || uploading ? 'pointer-events-none opacity-50' : ''}`}
+      >
+        {uploading ? 'Enviando...' : 'Trocar arquivo'}
+        <input
+          type="file"
+          className="hidden"
+          disabled={disabled || uploading}
+          accept={RM_ATTACHMENT_ACCEPT}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onFileSelect(file);
+            e.currentTarget.value = '';
+          }}
+        />
+      </label>
+    </div>
   );
 }
 
@@ -942,8 +1046,14 @@ function SolicitarMateriaisPage() {
     }
   });
 
-  const requests = requestsData?.data?.requests || requestsData?.data || [];
-  const materials = (materialsData?.data || []) as RmMaterialOption[];
+  const requests = useMemo(
+    () => requestsData?.data?.requests ?? requestsData?.data ?? EMPTY_REQUEST_LIST,
+    [requestsData]
+  );
+  const materials = useMemo(
+    () => (materialsData?.data ?? EMPTY_MATERIAL_LIST) as RmMaterialOption[],
+    [materialsData]
+  );
 
   const getMaterialLabel = (material?: RmMaterialOption | null) =>
     material?.name?.trim() || material?.code?.trim() || material?.description?.trim() || 'Material sem nome';
@@ -1126,45 +1236,53 @@ function SolicitarMateriaisPage() {
   useEffect(() => {
     if (!formData.costCenterId) return;
     const selected = costCenters.find((cc) => cc.id === formData.costCenterId);
-    if (selected) {
-      setNewCostCenterSearch(getCostCenterLabel(selected));
-    }
+    if (!selected) return;
+    const label = getCostCenterLabel(selected);
+    setNewCostCenterSearch((prev) => (prev === label ? prev : label));
   }, [formData.costCenterId, costCenters]);
 
   useEffect(() => {
     if (!correctionEditId) {
-      setEditCostCenterSearch('');
+      setEditCostCenterSearch((prev) => (prev === '' ? prev : ''));
       return;
     }
     if (!editFormData.costCenterId) return;
     const selected = costCenters.find((cc) => cc.id === editFormData.costCenterId);
-    if (selected) {
-      setEditCostCenterSearch(getCostCenterLabel(selected));
-    }
+    if (!selected) return;
+    const label = getCostCenterLabel(selected);
+    setEditCostCenterSearch((prev) => (prev === label ? prev : label));
   }, [correctionEditId, editFormData.costCenterId, costCenters]);
 
   useEffect(() => {
-    setNewItemMaterialSearch((prev) =>
-      formData.items.map((item, index) => {
+    setNewItemMaterialSearch((prev) => {
+      const next = formData.items.map((item, index) => {
         if (item.materialId) {
           const selected = materials.find((m) => m.id === item.materialId);
           return selected ? getMaterialLabel(selected) : prev[index] || '';
         }
         return prev[index] || '';
-      })
-    );
+      });
+      if (prev.length === next.length && prev.every((value, index) => value === next[index])) {
+        return prev;
+      }
+      return next;
+    });
   }, [formData.items, materials]);
 
   useEffect(() => {
-    setEditItemMaterialSearch((prev) =>
-      editFormData.items.map((item, index) => {
+    setEditItemMaterialSearch((prev) => {
+      const next = editFormData.items.map((item, index) => {
         if (item.materialId) {
           const selected = materials.find((m) => m.id === item.materialId);
           return selected ? getMaterialLabel(selected) : prev[index] || '';
         }
         return prev[index] || '';
-      })
-    );
+      });
+      if (prev.length === next.length && prev.every((value, index) => value === next[index])) {
+        return prev;
+      }
+      return next;
+    });
   }, [editFormData.items, materials]);
 
   const user = userData?.data || {
@@ -1969,49 +2087,15 @@ function SolicitarMateriaisPage() {
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Anexar FD *
                         </label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50">
-                        {uploadingDemandSheetAttachment === 'new' ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Paperclip className="w-4 h-4" />
-                        )}
-                        <span>{uploadingDemandSheetAttachment === 'new' ? 'Enviando...' : 'Escolher arquivo'}</span>
-                        <input
-                          type="file"
-                          className="hidden"
+                        <RmAttachmentField
+                          fileUrl={formData.demandSheetAttachmentUrl}
+                          fileName={formData.demandSheetAttachmentName}
+                          uploading={uploadingDemandSheetAttachment === 'new'}
                           disabled={!!uploadingDemandSheetAttachment}
-                          accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] || null;
-                            if (f) void handleDemandSheetAttachmentFile('new', f);
-                            e.currentTarget.value = '';
-                          }}
+                          onFileSelect={(file) => void handleDemandSheetAttachmentFile('new', file)}
+                          onRemove={() => clearDemandSheetAttachment('new')}
                         />
-                      </label>
-                      {formData.demandSheetAttachmentUrl && (
-                        <>
-                          <a
-                            href={absoluteUploadUrl(formData.demandSheetAttachmentUrl)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            {formData.demandSheetAttachmentName || 'Anexo FD'}
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() => clearDemandSheetAttachment('new')}
-                            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-red-300 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-                          >
-                            <X className="w-3 h-3" />
-                            Remover
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <input type="hidden" required value={formData.demandSheetAttachmentUrl} readOnly />
+                        <input type="hidden" required value={formData.demandSheetAttachmentUrl} readOnly />
                       </div>
                     </div>
                     <div>
@@ -2117,54 +2201,17 @@ function SolicitarMateriaisPage() {
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                 Anexo (opcional)
                               </label>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <label className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50">
-                                  {uploadingAttachment?.form === 'new' && uploadingAttachment.index === index ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Paperclip className="w-4 h-4" />
-                                  )}
-                                  <span>
-                                    {uploadingAttachment?.form === 'new' && uploadingAttachment.index === index
-                                      ? 'Enviando...'
-                                      : 'Escolher arquivo'}
-                                  </span>
-                                  <input
-                                    key={`new-att-${index}-${item.attachmentUrl || 'empty'}`}
-                                    type="file"
-                                    className="hidden"
-                                    disabled={!!uploadingAttachment}
-                                    onChange={(e) => {
-                                      const f = e.target.files?.[0];
-                                      if (f) void handleItemAttachmentFile('new', index, f);
-                                      e.target.value = '';
-                                    }}
-                                  />
-                                </label>
-                                {item.attachmentUrl ? (
-                                  <>
-                                    <span className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[200px]">
-                                      {item.attachmentName || 'Anexo'}
-                                    </span>
-                                    <a
-                                      href={absoluteUploadUrl(item.attachmentUrl)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                                    >
-                                      <ExternalLink className="w-3.5 h-3.5" />
-                                      Abrir
-                                    </a>
-                                    <button
-                                      type="button"
-                                      onClick={() => clearItemAttachment('new', index)}
-                                      className="text-xs text-red-600 dark:text-red-400 hover:underline"
-                                    >
-                                      Remover
-                                    </button>
-                                  </>
-                                ) : null}
-                              </div>
+                              <RmAttachmentField
+                                size="sm"
+                                fileUrl={item.attachmentUrl}
+                                fileName={item.attachmentName}
+                                uploading={
+                                  uploadingAttachment?.form === 'new' && uploadingAttachment.index === index
+                                }
+                                disabled={!!uploadingAttachment}
+                                onFileSelect={(file) => void handleItemAttachmentFile('new', index, file)}
+                                onRemove={() => clearItemAttachment('new', index)}
+                              />
                             </div>
                           </div>
                         </div>
@@ -2557,48 +2604,16 @@ function SolicitarMateriaisPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Anexar FD
                   </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">
-                      {uploadingDemandSheetAttachment === 'edit' ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Paperclip className="w-3.5 h-3.5" />
-                      )}
-                      <span>{uploadingDemandSheetAttachment === 'edit' ? 'Enviando...' : 'Arquivo'}</span>
-                      <input
-                        type="file"
-                        className="hidden"
-                        disabled={!!uploadingDemandSheetAttachment}
-                        accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0] || null;
-                          if (f) void handleDemandSheetAttachmentFile('edit', f);
-                          e.currentTarget.value = '';
-                        }}
-                      />
-                    </label>
-                    {editFormData.demandSheetAttachmentUrl && (
-                      <>
-                        <a
-                          href={absoluteUploadUrl(editFormData.demandSheetAttachmentUrl)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          {editFormData.demandSheetAttachmentName || 'Anexo FD'}
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => clearDemandSheetAttachment('edit')}
-                          className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-red-300 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-                        >
-                          <X className="w-3 h-3" />
-                          Remover
-                        </button>
-                      </>
-                    )}
-                  </div>
+                  <RmAttachmentField
+                    size="sm"
+                    fileUrl={editFormData.demandSheetAttachmentUrl}
+                    fileName={editFormData.demandSheetAttachmentName}
+                    uploading={uploadingDemandSheetAttachment === 'edit'}
+                    disabled={!!uploadingDemandSheetAttachment}
+                    onFileSelect={(file) => void handleDemandSheetAttachmentFile('edit', file)}
+                    onRemove={() => clearDemandSheetAttachment('edit')}
+                    chooseLabel="Arquivo"
+                  />
                 </div>
 
                 <div>
@@ -2678,54 +2693,18 @@ function SolicitarMateriaisPage() {
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Anexo (opcional)</label>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <label className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">
-                                {uploadingAttachment?.form === 'edit' && uploadingAttachment.index === index ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <Paperclip className="w-3.5 h-3.5" />
-                                )}
-                                <span>
-                                  {uploadingAttachment?.form === 'edit' && uploadingAttachment.index === index
-                                    ? 'Enviando...'
-                                    : 'Arquivo'}
-                                </span>
-                                <input
-                                  key={`edit-att-${index}-${item.attachmentUrl || 'empty'}`}
-                                  type="file"
-                                  className="hidden"
-                                  disabled={!!uploadingAttachment}
-                                  onChange={(e) => {
-                                    const f = e.target.files?.[0];
-                                    if (f) void handleItemAttachmentFile('edit', index, f);
-                                    e.target.value = '';
-                                  }}
-                                />
-                              </label>
-                              {item.attachmentUrl ? (
-                                <>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px]">
-                                    {item.attachmentName || 'Anexo'}
-                                  </span>
-                                  <a
-                                    href={absoluteUploadUrl(item.attachmentUrl)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-0.5 text-xs text-blue-600 dark:text-blue-400"
-                                  >
-                                    <ExternalLink className="w-3 h-3" />
-                                    Abrir
-                                  </a>
-                                  <button
-                                    type="button"
-                                    onClick={() => clearItemAttachment('edit', index)}
-                                    className="text-xs text-red-600 dark:text-red-400"
-                                  >
-                                    Remover
-                                  </button>
-                                </>
-                              ) : null}
-                            </div>
+                            <RmAttachmentField
+                              size="sm"
+                              fileUrl={item.attachmentUrl}
+                              fileName={item.attachmentName}
+                              uploading={
+                                uploadingAttachment?.form === 'edit' && uploadingAttachment.index === index
+                              }
+                              disabled={!!uploadingAttachment}
+                              onFileSelect={(file) => void handleItemAttachmentFile('edit', index, file)}
+                              onRemove={() => clearItemAttachment('edit', index)}
+                              chooseLabel="Arquivo"
+                            />
                           </div>
                         </div>
                       </div>

@@ -51,8 +51,8 @@ const FLUX_TAB_META: Partial<
     subtitle: 'SC aprovadas sem OC — crie a ordem de compra quando necessário'
   },
   rm_CANCELLED: {
-    title: 'Solicitações canceladas',
-    subtitle: 'Histórico de requisições canceladas'
+    title: 'Solicitações Canceladas',
+    subtitle: 'Histórico de requisições Canceladas'
   }
 };
 
@@ -375,7 +375,7 @@ export function MaterialRequestsRmList({
                 <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                 <span>Ver detalhes</span>
               </button>
-              {requestForMenu.status === 'APPROVED' && (
+              {requestForMenu.status === 'APPROVED' && fluxTab === 'rm_APPROVED' && (
                 <button
                   type="button"
                   role="menuitem"

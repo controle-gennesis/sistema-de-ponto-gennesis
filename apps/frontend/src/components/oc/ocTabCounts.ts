@@ -14,6 +14,8 @@ export function computeOcTabCounts(allOrders: PurchaseOrder[]): OcTabCounts {
   const attachNf = allOrders.filter((o) => o.status === 'PENDING_NF_ATTACHMENT').length;
   const outras = allOrders.filter(
     (o) =>
+      o.status !== 'REJECTED' &&
+      o.status !== 'CANCELLED' &&
       ![
         'PENDING_COMPRAS',
         'PENDING',

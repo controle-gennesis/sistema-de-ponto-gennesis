@@ -69,6 +69,10 @@ export interface MaterialRequest {
     id: string;
     name: string;
   };
+  rejecter?: {
+    id: string;
+    name: string;
+  };
   rejectionReason?: string;
 }
 

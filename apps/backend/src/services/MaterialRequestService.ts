@@ -364,6 +364,12 @@ export class MaterialRequestService {
               email: true
             }
           },
+          rejecter: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
           costCenter: true,
           project: true,
           items: {

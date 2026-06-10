@@ -15,7 +15,7 @@ import { OcPurchaseOrdersPanel, OcStyledCheckbox, type PurchaseOrder } from '@/c
 import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
 import type { FluxTab, MaterialRequest } from './_lib/types';
 import { fluxTabToOcTab, orderNeedsFinanceBoleto } from './_lib/flux';
-import { getStatusInfo, materialItemLabel, materialItemSubtitle, rmSolicitante } from './_lib/display';
+import { getStatusInfo, materialItemLabel, rmSolicitante } from './_lib/display';
 import {
   formatCurrencyBR,
   numericQuantityFromInput,
@@ -29,6 +29,9 @@ import { FluxTabsNav } from './_components/FluxTabsNav';
 import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
 import {
   getFluxTabForPurchaseOrder,
+  getMaterialRequestCancellationReason,
+  getMaterialRequestDisplayStatus,
+  isMaterialRequestEffectivelyCancelled,
   matchesMaterialRequestSearch,
   matchesPurchaseOrderSearch,
   normalizeFluxSearch
@@ -378,9 +381,14 @@ export default function GerenciarMateriaisPage() {
     total: normalizedRequests.length,
     pending: normalizedRequests.filter((r: MaterialRequest) => r.status === 'PENDING').length,
     approved: normalizedRequests.filter(
-      (r: MaterialRequest) => r.status === 'APPROVED' && !materialRequestIdsWithOc.has(r.id)
+      (r: MaterialRequest) =>
+        r.status === 'APPROVED' &&
+        !materialRequestIdsWithOc.has(r.id) &&
+        !isMaterialRequestEffectivelyCancelled(r, ordersByMaterialRequestId.get(r.id) ?? [])
     ).length,
-    cancelled: normalizedRequests.filter((r: MaterialRequest) => r.status === 'CANCELLED').length,
+    cancelled: normalizedRequests.filter((r: MaterialRequest) =>
+      isMaterialRequestEffectivelyCancelled(r, ordersByMaterialRequestId.get(r.id) ?? [])
+    ).length,
     inReview: normalizedRequests.filter((r: MaterialRequest) => r.status === 'IN_REVIEW').length
   };
 
@@ -417,22 +425,24 @@ export default function GerenciarMateriaisPage() {
   // Filtrar requisições (somente quando uma fase SC/RM está ativa)
   const filteredRequests = useMemo(() => {
     if (!fluxTab.startsWith('rm_')) return [];
-    const rmKey = fluxTab.replace(/^rm_/, '') as MaterialRequest['status'];
 
     return normalizedRequests.filter((request: MaterialRequest) => {
-      if (request.status !== rmKey) return false;
+      const orders = ordersByMaterialRequestId.get(request.id) ?? [];
 
-      if (
-        rmKey === 'APPROVED' &&
-        request.status === 'APPROVED' &&
-        materialRequestIdsWithOc.has(request.id)
-      ) {
-        return false;
+      if (fluxTab === 'rm_CANCELLED') {
+        if (!isMaterialRequestEffectivelyCancelled(request, orders)) return false;
+      } else if (fluxTab === 'rm_APPROVED') {
+        if (request.status !== 'APPROVED') return false;
+        if (materialRequestIdsWithOc.has(request.id)) return false;
+        if (isMaterialRequestEffectivelyCancelled(request, orders)) return false;
+      } else {
+        const rmKey = fluxTab.replace(/^rm_/, '') as MaterialRequest['status'];
+        if (request.status !== rmKey) return false;
       }
 
       return matchesMaterialRequestSearch(request, normalizedSearchTerm);
     });
-  }, [normalizedRequests, fluxTab, normalizedSearchTerm, materialRequestIdsWithOc]);
+  }, [normalizedRequests, fluxTab, normalizedSearchTerm, materialRequestIdsWithOc, ordersByMaterialRequestId]);
 
   const rmMatchCountsByFluxTab = useMemo(() => {
     const base = {
@@ -443,17 +453,26 @@ export default function GerenciarMateriaisPage() {
     };
 
     normalizedRequests.forEach((request: MaterialRequest) => {
-      if (request.status === 'APPROVED' && materialRequestIdsWithOc.has(request.id)) return;
+      const orders = ordersByMaterialRequestId.get(request.id) ?? [];
+      if (request.status === 'APPROVED' && materialRequestIdsWithOc.has(request.id)) {
+        if (!isMaterialRequestEffectivelyCancelled(request, orders)) return;
+      }
       if (!matchesMaterialRequestSearch(request, normalizedSearchTerm)) return;
 
       if (request.status === 'PENDING') base.pending += 1;
       if (request.status === 'IN_REVIEW') base.inReview += 1;
-      if (request.status === 'APPROVED') base.approved += 1;
-      if (request.status === 'CANCELLED') base.cancelled += 1;
+      if (
+        request.status === 'APPROVED' &&
+        !materialRequestIdsWithOc.has(request.id) &&
+        !isMaterialRequestEffectivelyCancelled(request, orders)
+      ) {
+        base.approved += 1;
+      }
+      if (isMaterialRequestEffectivelyCancelled(request, orders)) base.cancelled += 1;
     });
 
     return base;
-  }, [normalizedRequests, normalizedSearchTerm, materialRequestIdsWithOc]);
+  }, [normalizedRequests, normalizedSearchTerm, materialRequestIdsWithOc, ordersByMaterialRequestId]);
 
   const ocMatchCountsByFluxTab = useMemo(() => {
     const base = {
@@ -472,6 +491,7 @@ export default function GerenciarMateriaisPage() {
     allOrders.forEach((order) => {
       if (!matchesPurchaseOrderSearch(order, normalizedSearchTerm)) return;
       const tab = getFluxTabForPurchaseOrder(order);
+      if (!tab) return;
       if (tab === 'oc_compras') base.compras += 1;
       if (tab === 'oc_gestor') base.gestor += 1;
       if (tab === 'oc_diretoria') base.diretoria += 1;
@@ -612,7 +632,13 @@ export default function GerenciarMateriaisPage() {
         </div>
 
         {/* Modal Detalhes */}
-        {showDetailsModal && selectedRequest && (
+        {showDetailsModal && selectedRequest && (() => {
+          const detailOrders = ordersByMaterialRequestId.get(selectedRequest.id) ?? [];
+          const displayStatus = getMaterialRequestDisplayStatus(selectedRequest, detailOrders);
+          const statusInfo = getStatusInfo(displayStatus);
+          const cancellationReason = getMaterialRequestCancellationReason(selectedRequest, detailOrders);
+
+          return (
           <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/50"
@@ -655,10 +681,18 @@ export default function GerenciarMateriaisPage() {
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Status</p>
-                  <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${getStatusInfo(selectedRequest.status).color}`}>
-                    {getStatusInfo(selectedRequest.status).label}
+                  <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${statusInfo.color}`}>
+                    {statusInfo.label}
                   </span>
                 </div>
+                {displayStatus === 'CANCELLED' && (
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Motivo do cancelamento</p>
+                    <p className="text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+                      {cancellationReason || 'Motivo não informado.'}
+                    </p>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Solicitante</p>
                   <p className="text-gray-900 dark:text-gray-100">{rmSolicitante(selectedRequest)?.name || '—'}</p>
@@ -693,12 +727,7 @@ export default function GerenciarMateriaisPage() {
                         {selectedRequest.items?.map((item: any) => (
                           <tr key={item.id} className="border-t border-gray-200 dark:border-gray-600">
                             <td className="p-2 text-gray-900 dark:text-gray-100">
-                              <span className="block">{materialItemLabel(item)}</span>
-                              {materialItemSubtitle(item) ? (
-                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                  {materialItemSubtitle(item)}
-                                </span>
-                              ) : null}
+                              {materialItemLabel(item)}
                             </td>
                             <td className="p-2 text-right">{item.quantity}</td>
                             <td className="p-2 text-right">{item.unit || '-'}</td>
@@ -752,7 +781,8 @@ export default function GerenciarMateriaisPage() {
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* Modal de Aprovação */}
         {showApprovalModal && selectedRequest && (

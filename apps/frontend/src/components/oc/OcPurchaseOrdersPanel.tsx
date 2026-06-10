@@ -936,10 +936,10 @@ export function OcPurchaseOrdersPanel({
       setRejectTarget(null);
       setRejectReason('');
       setSelectedOrder(null);
-      toast.success('Ordem de compra reprovada.');
+      toast.success('Ordem de compra cancelada.');
     },
     onError: (error: { response?: { data?: { message?: string } } }) =>
-      toast.error(error.response?.data?.message || 'Erro ao reprovar')
+      toast.error(error.response?.data?.message || 'Erro ao cancelar')
   });
 
   const correctionOcMutation = useMutation({
@@ -1362,6 +1362,8 @@ export function OcPurchaseOrdersPanel({
     if (activeTab === 'outras') {
       return allOrders.filter(
         (o) =>
+          o.status !== 'REJECTED' &&
+          o.status !== 'CANCELLED' &&
           ![
             'PENDING_COMPRAS',
             'PENDING',
@@ -2336,7 +2338,7 @@ export function OcPurchaseOrdersPanel({
                                       setRejectReason('');
                                     }}
                                     className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors inline-flex"
-                                    title="Reprovar"
+                                    title="Cancelar"
                                   >
                                     <X className="w-4 h-4" />
                                   </button>
@@ -2478,7 +2480,7 @@ export function OcPurchaseOrdersPanel({
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => { setRejectTarget(null); setRejectReason(''); }} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Reprovar OC</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Cancelar OC</h2>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{rejectTarget.orderNumber}</p>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Motivo *</label>
             <textarea
@@ -2486,15 +2488,18 @@ export function OcPurchaseOrdersPanel({
               onChange={(e) => setRejectReason(e.target.value)}
               rows={4}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 mb-4"
-              placeholder="Informe o motivo da reprovação..."
+              placeholder="Informe o motivo do cancelamento..."
             />
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
-                onClick={() => setRejectTarget(null)}
+                onClick={() => {
+                  setRejectTarget(null);
+                  setRejectReason('');
+                }}
                 className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg"
               >
-                Cancelar
+                Voltar
               </button>
               <button
                 type="button"
@@ -2502,7 +2507,7 @@ export function OcPurchaseOrdersPanel({
                 onClick={() => rejectMutation.mutate({ id: rejectTarget.id, reason: rejectReason.trim() })}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
-                {rejectMutation.isPending ? 'Reprovando...' : 'Confirmar reprovação'}
+                {rejectMutation.isPending ? 'Cancelando...' : 'Confirmar cancelamento'}
               </button>
             </div>
           </div>
@@ -3974,7 +3979,7 @@ export function OcPurchaseOrdersPanel({
                     }}
                     className="flex-1 min-w-[120px] px-3 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
                   >
-                    Reprovar
+                    Cancelar
                   </button>
                   <button
                     type="button"
@@ -4369,7 +4374,7 @@ export function OcPurchaseOrdersPanel({
                     className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
                   >
                     <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                    <span>Reprovar</span>
+                    <span>Cancelar</span>
                   </button>
                 </>
               )}
