@@ -435,26 +435,28 @@ export function OcPurchaseOrderFormFields({
   );
 }
 
+export type OcFormOrderSource = {
+  supplier?: { id: string; code?: string; name: string; tradeName?: string | null } | null;
+  paymentType?: string | null;
+  paymentCondition?: string | null;
+  paymentDetails?: string | null;
+  pixKeyType?: string | null;
+  pixKey?: string | null;
+  freightAmount?: number | string | null;
+  amountToPay?: number | string | null;
+  notes?: string | null;
+  items?: Array<{
+    materialId?: string;
+    material?: { id?: string; name?: string | null; description?: string | null; sinapiCode?: string | null };
+    materialRequestItem?: { quantity?: number | string | null } | null;
+    quantity: number | string;
+    unit?: string | null;
+    unitPrice: number | string;
+  }>;
+};
+
 export function buildOcFormValuesFromOrder(
-  order: {
-    supplier?: { id: string; code?: string; name: string; tradeName?: string | null } | null;
-    paymentType?: string | null;
-    paymentCondition?: string | null;
-    paymentDetails?: string | null;
-    pixKeyType?: string | null;
-    pixKey?: string | null;
-    freightAmount?: number | string | null;
-    amountToPay?: number | string | null;
-    notes?: string | null;
-    items?: Array<{
-      materialId?: string;
-      material?: { id?: string; name?: string | null; description?: string | null; sinapiCode?: string | null };
-      materialRequestItem?: { quantity?: number | string | null } | null;
-      quantity: number | string;
-      unit?: string | null;
-      unitPrice: number | string;
-    }>;
-  },
+  order: OcFormOrderSource,
   options?: {
     stripCorrectionNotes?: (notes?: string | null) => string;
     materialLineLabel?: (material?: {
@@ -462,7 +464,7 @@ export function buildOcFormValuesFromOrder(
       description?: string | null;
       sinapiCode?: string | null;
     }) => string;
-    parseFreight?: (order: typeof order) => string;
+    parseFreight?: (order: OcFormOrderSource) => string;
   }
 ): OcPurchaseOrderFormValues {
   const labelFn =
